@@ -72,8 +72,7 @@ Contributions are welcome! If you're interested in helping with development, tes
 
 ## License
 
-This project is licensed under the ??? License. See the [LICENSE](LICENSE) file for details.
-
+This project is licensed under the [MIT License](LICENSE).
 ---
 
 **Disclaimer**: This project is still under active development and is not ready for production use. Use it at your own risk and report any issues or feedback to help improve it.

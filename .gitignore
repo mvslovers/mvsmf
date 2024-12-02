@@ -1,3 +1,6 @@
+# Generated ASM sources
+*.s
+
 # Prerequisites
 *.d
 

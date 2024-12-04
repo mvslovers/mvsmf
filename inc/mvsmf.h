@@ -5,4 +5,6 @@
 #include "dsapi.h"
 #include "jobsapi.h"
 
+#include "authmw.h"
+
 #endif // MVSMF_H

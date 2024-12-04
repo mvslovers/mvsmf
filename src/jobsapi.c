@@ -7,29 +7,21 @@
 
 #include "jobsapi.h"
 #include "httpd.h"
+#include "router.h"
 
-#define INITIAL_BUFFER_SIZE 4096 // Initial size for the data buffer
-#define RECORD_SIZE 80           // Each record is 80 characters long
-#define MAX_LINE_SIZE 1024	     // Maximum size of a line in the HTTP request
-#define CR 0x0D
-#define LF 0x0A
+#define INITIAL_BUFFER_SIZE 4096
+   
 
 /* TODO: refactore sysout stuff*/
 // private functions prototypes
-static int do_print_sysout(HTTPR *httpr, JES *jes, JESJOB *job, unsigned dsid);
-static int submit_file(HTTPR *httpr, VSFILE *intrdr, const char *filename);
-static char* http_get_host(HTTPD *httpd, HTTPC *httpc);
-static int http_send_response(HTTPR *httpr, int status_code, const char *content_type, const char *data);
-static int http_recv(HTTPC *httpc, char *buf, int len);
-static void uint_to_hex_ascii(size_t value, char *output) ;
-
-static const unsigned char ASCII_CRLF[] = {CR, LF};
+static int do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid);
+static int submit_file(Session *session, VSFILE *intrdr, const char *filename);
 
  //
 // public functions
 // 
 
-int jobListHandler(HTTPR *httpr)
+int jobListHandler(Session *session)
 {
 	int 		rc		= 0;
 	
@@ -53,14 +45,14 @@ int jobListHandler(HTTPR *httpr)
 	const char	*jobid		= NULL;
 
 	/* fet query parameters */
-	owner		= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_OWNER"); /* *, user */
-	prefix		= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_PREFIX"); 
-	execdata	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_EXEC-DATA"); /* Y, N */
-	status		= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_STATUS"); /* *, Active, Input, Output */
-	jobid		= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_JOBID");
+	owner		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_OWNER"); /* *, user */
+	prefix		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_PREFIX"); 
+	execdata	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_EXEC-DATA"); /* Y, N */
+	status		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_STATUS"); /* *, Active, Input, Output */
+	jobid		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_JOBID");
 
 	/* get header parameters */
-	const char *targetUser = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_X-IBM-Target-System-User");
+	const char *targetUser = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Target-System-User");
 	
 	if (targetUser) {
 	}
@@ -105,15 +97,15 @@ int jobListHandler(HTTPR *httpr)
 		jesinfo[sizeof(jesinfo)-1]=0;
 	}
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	count = array_count(&joblist);
 
-	if ((rc = http_printf(httpr->httpc, "[\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "[\n")) < 0) goto quit;
 
 	for(i=0; i < count; i++) {
 		JESJOB *job = joblist[i];
@@ -132,16 +124,16 @@ int jobListHandler(HTTPR *httpr)
 		
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
-			if ((rc = http_printf(httpr->httpc, "  {\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "  {\n")) < 0) goto quit;
 			first = 0;
 		} else {
 			/* all other times we need a ',' before the '{' */
-			if ((rc = http_printf(httpr->httpc, " ,{\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, " ,{\n")) < 0) goto quit;
 		}
 
-		if ((rc = http_printf(httpr->httpc, "    \"jobid\": \"%s\",\n", job->jobid)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "    \"jobname\": \"%s\",\n", job->jobname)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "    \"owner\": \"%s\",\n", job->owner)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"jobid\": \"%s\",\n", job->jobid)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"jobname\": \"%s\",\n", job->jobname)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"owner\": \"%s\",\n", job->owner)) < 0) goto quit;
 
         if (job->q_type) {
             const char *stat = "UNKNOWN";
@@ -164,31 +156,31 @@ int jobListHandler(HTTPR *httpr)
                 stat = "OUTPUT";
             }
 			
-			if ((rc = http_printf(httpr->httpc, "    \"status\": \"%s\",\n", stat)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"status\": \"%s\",\n", stat)) < 0) goto quit;
 		}
         
-		if ((rc = http_printf(httpr->httpc, "    \"type\": \"%.3s\",\n", job->jobid)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"type\": \"%.3s\",\n", job->jobid)) < 0) goto quit;
 
 		if (job->eclass == '\\') {
-			if ((rc = http_printf(httpr->httpc, "    \"class\": \"\\\\\",\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"class\": \"\\\\\",\n")) < 0) goto quit;
 		} else {
-			if ((rc = http_printf(httpr->httpc, "    \"class\": \"%c\",\n", job->eclass)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"class\": \"%c\",\n", job->eclass)) < 0) goto quit;
 		}
 		
-		if ((rc = http_printf(httpr->httpc, "    \"phase-name\": \"%s\",\n", "n/a")) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "    \"url\": \"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s\",\n", job->jobname, job->jobid)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "    \"files-url\": \"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s/files\"\n", job->jobname, job->jobid)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"phase-name\": \"%s\",\n", "n/a")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"url\": \"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s\",\n", job->jobname, job->jobid)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    \"files-url\": \"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s/files\"\n", job->jobname, job->jobid)) < 0) goto quit;
 
-		if ((rc = http_printf(httpr->httpc, "  }\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "  }\n")) < 0) goto quit;
 	}
 
-	if ((rc = http_printf(httpr->httpc, "]\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "]\n")) < 0) goto quit;
 
 quit:
 	return rc;
 }
 
-int jobFilesHandler(HTTPR *httpr)
+int jobFilesHandler(Session *session)
 {
 	int 		rc 		= 0;
 	unsigned 	first 	= 1;
@@ -210,10 +202,10 @@ int jobFilesHandler(HTTPR *httpr)
 	
 	char		recfm[12]	= {0};
 
-	jobname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_job-name");
-	jobid = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_jobid");
+	jobname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_job-name");
+	jobid = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_jobid");
 	if (!jobname || !jobid) {
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		return rc;
 	}
 
@@ -243,15 +235,15 @@ int jobFilesHandler(HTTPR *httpr)
 		jesinfo[sizeof(jesinfo)-1]=0;
 	}
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	jcount = array_count(&joblist);
 
-	if ((rc = http_printf(httpr->httpc, "[\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "[\n")) < 0) goto quit;
 
 	for(i=0; i < jcount; i++) {
 		JESJOB *job = joblist[i];
@@ -268,11 +260,11 @@ int jobFilesHandler(HTTPR *httpr)
 		
 			if (first) {
 				/* first time we're printing this '{' so no ',' needed */
-				if ((rc = http_printf(httpr->httpc, "  {\n")) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, "  {\n")) < 0) goto quit;
 				first = 0;
 			} else {
 				/* all other times we need a ',' before the '{' */
-				if ((rc = http_printf(httpr->httpc, " ,{\n")) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, " ,{\n")) < 0) goto quit;
 			}
 	
 			k = 0;
@@ -302,43 +294,43 @@ int jobFilesHandler(HTTPR *httpr)
 			}
 			recfm[k] = 0;
 
-			if ((rc = http_printf(httpr->httpc, "    \"recfm\": \"%s\",\n", recfm)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"records-url\": \"%s\",\n", "http://foo")) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"subsystem\": \"%s\",\n", "JES2")) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"job-correlator\": \"%s\",\n", "")) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"byte-count\": %d,\n", 0)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"lrecl\": %d,\n", dd->lrecl)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"jobid\": \"%s\",\n", job->jobid)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"ddname\": \"%s\",\n", dd->ddname)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"id\": %d,\n", dd->dsid)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"record-count\": %d,\n", dd->records)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"class\": \"%c\",\n", dd->oclass)) < 0) goto quit;
-			if ((rc = http_printf(httpr->httpc, "    \"jobname\": \"%s\",\n", job->jobname)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"recfm\": \"%s\",\n", recfm)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"records-url\": \"%s\",\n", "http://foo")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"subsystem\": \"%s\",\n", "JES2")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"job-correlator\": \"%s\",\n", "")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"byte-count\": %d,\n", 0)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"lrecl\": %d,\n", dd->lrecl)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"jobid\": \"%s\",\n", job->jobid)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"ddname\": \"%s\",\n", dd->ddname)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"id\": %d,\n", dd->dsid)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"record-count\": %d,\n", dd->records)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"class\": \"%c\",\n", dd->oclass)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"jobname\": \"%s\",\n", job->jobname)) < 0) goto quit;
 
 			if (strlen((const char *) dd->stepname) >0) {
-				if ((rc = http_printf(httpr->httpc, "    \"stepname\": \"%s\",\n", dd->stepname)) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, "    \"stepname\": \"%s\",\n", dd->stepname)) < 0) goto quit;
 			} else {
-				if ((rc = http_printf(httpr->httpc, "    \"stepname\": \"JES2\",\n")) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, "    \"stepname\": \"JES2\",\n")) < 0) goto quit;
 			}
 			
 			if (strlen((const char*)dd->procstep) > 0) {
-				if ((rc = http_printf(httpr->httpc, "    \"procstep\": \"%s\"\n", dd->procstep)) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, "    \"procstep\": \"%s\"\n", dd->procstep)) < 0) goto quit;
 			} else {
-				if ((rc = http_printf(httpr->httpc, "    \"procstep\": null\n")) < 0) goto quit;
+				if ((rc = http_printf(session->httpc, "    \"procstep\": null\n")) < 0) goto quit;
 			}
 
-			if ((rc = http_printf(httpr->httpc, "  }\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "  }\n")) < 0) goto quit;
 		}
 	}
 
-	if ((rc = http_printf(httpr->httpc, "]\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "]\n")) < 0) goto quit;
 
 quit:
 	return rc;
 
 }
 
-int jobRecordsHandler(HTTPR *httpr)
+int jobRecordsHandler(Session *session)
 {
 	int 		rc 		= 0;
 	unsigned 	first 	= 1;
@@ -359,11 +351,11 @@ int jobRecordsHandler(HTTPR *httpr)
 	const char 	*ddid		= NULL;
 
 
-	jobname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_job-name");
-	jobid = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_jobid");
-	ddid = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_ddid");
+	jobname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_job-name");
+	jobid = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_jobid");
+	ddid = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_ddid");
 	if (!jobname || !jobid || !ddid) {
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		return rc;
 	}
 	
@@ -409,11 +401,11 @@ int jobRecordsHandler(HTTPR *httpr)
 	}
 */
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "texp/plain")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "texp/plain")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	count = array_count(&joblist);
 
@@ -423,7 +415,7 @@ int jobRecordsHandler(HTTPR *httpr)
 		if (!job) continue;
 		if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *) jobname) != 0) continue;
 
-		do_print_sysout(httpr, jes, job, atoi(ddid));	
+		do_print_sysout(session, jes, job, atoi(ddid));	
 	}
 
 quit:
@@ -439,7 +431,7 @@ quit:
 	*/
 }
 
-int jobSubmitHandler(HTTPR *httpr)
+int jobSubmitHandler(Session *session)
 {
     int     rc      = 0;
 
@@ -471,7 +463,7 @@ int jobSubmitHandler(HTTPR *httpr)
     }
 
 	/* check for valid intrdr_mode */
-	const char *intrdr_mode = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Mode");
+	const char *intrdr_mode = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Mode");
 	if (intrdr_mode != NULL && strcmp(intrdr_mode, "TEXT") != 0) {
 		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined json error object
 		wtof("JOBSAPI: Invalid intrdr_mode - must be TEXT");
@@ -479,7 +471,7 @@ int jobSubmitHandler(HTTPR *httpr)
 	}
 
 	/* check for valid intrdr_lrecl */
-	const char *intrdr_lrecl = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Lrecl");
+	const char *intrdr_lrecl = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Lrecl");
 	if (intrdr_lrecl != NULL && strcmp(intrdr_lrecl, "80") != 0) {
 		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined json error object
 		wtof("JOBSAPI: Invalid intrdr_lrecl - must be 80");
@@ -487,7 +479,7 @@ int jobSubmitHandler(HTTPR *httpr)
 	}
 
 	/* check for valid intrdr_recfm */
-	const char *intrdr_recfm = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Recfm");
+	const char *intrdr_recfm = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Intrdr-Recfm");
 	if (intrdr_recfm != NULL && strcmp(intrdr_recfm, "F") != 0) {
 		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined json error object
 		wtof("JOBSAPI: Invalid intrdr_recfm - must be F");
@@ -495,23 +487,23 @@ int jobSubmitHandler(HTTPR *httpr)
 	}
 	
     // Try to get the Content-Length header
-    const char *content_length_str = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_CONTENT-LENGTH");
+    const char *content_length_str = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_CONTENT-LENGTH");
     if (content_length_str != NULL) {
         has_content_length = 1;
         content_length = strtoul(content_length_str, NULL, 10);
     }
 
     // Check for Transfer-Encoding: chunked
-    const char *transfer_encoding_str = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_TRANSFER-ENCODING");
+    const char *transfer_encoding_str = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_TRANSFER-ENCODING");
     if (transfer_encoding_str != NULL && strstr(transfer_encoding_str, "chunked") != NULL) {
 	    is_chunked = 1;
     }
 	
 	if (!is_chunked && !has_content_length) {
-		rc = http_resp(httpr->httpc, 400);
+		rc = http_resp(session->httpc, 400);
 		if (rc < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "Content-Type: application/json\r\n\r\n")) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "{\"rc\": -1, \"message\": \"Missing Content-Length or Transfer-Encoding header\"}\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n\r\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "{\"rc\": -1, \"message\": \"Missing Content-Length or Transfer-Encoding header\"}\n")) < 0) goto quit;
 		goto quit;
 	}
 	
@@ -532,13 +524,13 @@ int jobSubmitHandler(HTTPR *httpr)
 			int i = 0;
 			// Read chunk size as ASCII hex string
 			while (i < sizeof(chunk_size_str)-1) {
-				if (http_recv(httpr->httpc, chunk_size_str + i, 1) != 1) {
+				if (_recv(session->httpc, chunk_size_str + i, 1) != 1) {
 					rc = -1;
 					goto quit;
 				}
 				if (chunk_size_str[i] == '\r') {
 					chunk_size_str[i] = '\0';
-					http_recv(httpr->httpc, chunk_size_str + i, 1); // Read \n
+					_recv(session->httpc, chunk_size_str + i, 1); // Read \n
 					break;
 				}
 				i++;
@@ -575,7 +567,7 @@ int jobSubmitHandler(HTTPR *httpr)
 			// eread chunked data
 			size_t bytes_read = 0;
 			while (bytes_read < chunk_size) {
-				bytes_received = http_recv(httpr->httpc, data + data_size + bytes_read, 
+				bytes_received = _recv(session->httpc, data + data_size + bytes_read, 
 										chunk_size - bytes_read);
 
 				if (bytes_received <= 0) {
@@ -589,7 +581,7 @@ int jobSubmitHandler(HTTPR *httpr)
 
 			// read trailing CRLF
 			char crlf[2];
-			if (http_recv(httpr->httpc, crlf, 2) != 2) {
+			if (_recv(session->httpc, crlf, 2) != 2) {
 				// TODO: return 500 Internal Server Error and / or a defined json error object
 				rc = -1; 
 				goto quit;
@@ -609,7 +601,7 @@ int jobSubmitHandler(HTTPR *httpr)
 				buffer_size *= 2;
 			}
 			
-			bytes_received = http_recv(httpr->httpc, data + data_size,
+			bytes_received = _recv(session->httpc, data + data_size,
 									 content_length - data_size < sizeof(recv_buffer) ?
 									 content_length - data_size : sizeof(recv_buffer));
 									 
@@ -680,7 +672,7 @@ int jobSubmitHandler(HTTPR *httpr)
 					filename[file_end - file_start] = '\0';
 					
 					// TODO: Submit file contents
-					rc = submit_file(httpr, intrdr, filename);
+					rc = submit_file(session, intrdr, filename);
 					if (rc < 0) goto quit;
 					was_submitted = 1;
 					goto close;						
@@ -712,7 +704,7 @@ close:
 		strncpy(jobid, (const char*) intrdr->rpl.rplrbar, 8);
 		jobid[8] = '\0';
 
-		wtof("JOB %s(%s) SUBMITTED", jobname, jobid);
+		wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
 
 	} else {
 		jobid[0] = '\0';
@@ -740,7 +732,7 @@ close:
 
 	// Send initial HTTP response
     //if ((rc = http_resp(httpc, 201)) < 0) goto quit;
-	if ((rc = http_send_response(httpr, 201, "application/json", response)) < 0) goto quit;
+	if ((rc = _send_response(session, 201, "application/json", response)) < 0) goto quit;
 
 quit:
 	if (data) free(data);
@@ -748,7 +740,7 @@ quit:
 	return rc;
 }
 
-int jobStatusHandler(HTTPR *httpr) 
+int jobStatusHandler(Session *session) 
 {
 	int 		rc 		= 0;
 	unsigned 	first 	= 1;
@@ -768,10 +760,10 @@ int jobStatusHandler(HTTPR *httpr)
 	const char 	*jobid		= NULL;
 	const char 	*ddid		= NULL;
 
-	jobname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_job-name");
-	jobid = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_jobid");
+	jobname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_job-name");
+	jobid = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_jobid");
 	if (!jobname || !jobid) {
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		return rc;
 	}
 
@@ -817,11 +809,11 @@ int jobStatusHandler(HTTPR *httpr)
 	}
 */
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	count = array_count(&joblist);
 
@@ -894,8 +886,8 @@ int jobStatusHandler(HTTPR *httpr)
 				"\"retcode\": \" n/a\" "
 			" }", job->owner, job->jobid, job->jobname, job->jobid, job->jobid, clazz, job->jobname, job->jobid, job->jobname, stat);
 
-		if ((rc = http_printf(httpr->httpc, "%s", data)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "%s", data)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "\n")) < 0) goto quit;
 	}
 
 quit:
@@ -917,7 +909,7 @@ quit:
 
 __asm__("\n&FUNC    SETC 'ifdsid'");
 static int
-ifdsid(HTTPR *httpr, unsigned dsid, unsigned **array)
+ifdsid(Session *session, unsigned dsid, unsigned **array)
 {
     int         rc = 0;
     unsigned    count;
@@ -969,14 +961,14 @@ do_print_sysout_line(const char *line, unsigned linelen)
 
 // switch back to httpr
 #undef httpx
-#define httpx httpr->httpd->httpx
+#define httpx session->httpd->httpx
 
     return rc;
 }
 
 __asm__("\n&FUNC    SETC 'do_print_sysout'");
 static int
-do_print_sysout(HTTPR *httpr, JES *jes, JESJOB *job, unsigned dsid)
+do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid)
 {
     int         rc  = 0;
     unsigned    count;
@@ -997,7 +989,7 @@ do_print_sysout(HTTPR *httpr, JES *jes, JESJOB *job, unsigned dsid)
         rc = jesprint(jes, job, dd->dsid, do_print_sysout_line);
         if (rc < 0) goto quit;
 
-        rc = http_printf(httpr->httpc, "- - - - - - - - - - - - - - - - - - - - "
+        rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
                                 "- - - - - - - - - - - - - - - - - - - - "
                                 "- - - - - - - - - - - - - - - - - - - - "
                                 "- - - - - -\r\n");
@@ -1009,7 +1001,7 @@ quit:
 }
 
 static int
-submit_file(HTTPR *httpr, VSFILE *intrdr, const char *filename)
+submit_file(Session *session, VSFILE *intrdr, const char *filename)
 {
 	int 		rc 			= 0;
 
@@ -1060,190 +1052,4 @@ submit_file(HTTPR *httpr, VSFILE *intrdr, const char *filename)
 
 quit:
 	return rc;
-}
-
-static int
-http_send_response(HTTPR *httpr, int status_code, const char *content_type, const char *data)
-{
-    char buffer[INITIAL_BUFFER_SIZE];
-    int ret;
-
-    // HTTP-Statuszeile erstellen
-    sprintf(buffer, "HTTP/1.0 %d ", status_code);
-
-    // Statusnachricht basierend auf dem Statuscode hinzufügen
-    switch (status_code) {
-        case 200:
-            strcat(buffer, "OK\r\n");
-            break;
-		case 201:
-			strcat(buffer, "Created\r\n");
-			break;
-		case 400:
-			strcat(buffer, "Bad Request\r\n");
-			break;
-		case 403:
-			strcat(buffer, "Forbidden\r\n");
-			break;			
-        case 404:
-            strcat(buffer, "Not Found\r\n");
-            break;
-		case 415:
-			strcat(buffer, "Unsupported Media Type\r\n");
-			break;
-		case 500:
-			strcat(buffer, "Internal Server Error\r\n");
-			break; 
-		default:
-            strcat(buffer, "Unknown\r\n");
-            break;
-    }
-
-    sprintf(buffer + strlen(buffer),
-            "Content-Type: %s\r\n"
-            "Transfer-Encoding: chunked\r\n"
-            "Connection: close\r\n\r\n",
-            content_type);
-    
-    http_etoa((UCHAR *) buffer, strlen(buffer));
-    ret = send(httpr->httpc->socket, buffer, strlen(buffer), 0);
-    if (ret < 0) {
-        wtof("Failed to send HTTP header: %s", strerror(errno));
-        return -1;
-    }
-
-    const char *current = data;
-    size_t remaining = strlen(data);
-
-    while (remaining > 0) {
-        // Chunk-Größe bestimmen (angepasst an Puffergröße)
-        size_t chunk_size = remaining > INITIAL_BUFFER_SIZE ? INITIAL_BUFFER_SIZE : remaining;
-   
-   	 	/* Chunk-Größe als ASCII Hex */
-    	char chunk_size_str[32 + 2];
-    	uint_to_hex_ascii(chunk_size, chunk_size_str);
-
-    	/* Sende Chunk-Größe */
-    	ret = send(httpr->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
-        if (ret < 0) {
-            wtof("Failed to send chunk size: %s", strerror(errno));
-            return -1;
-        }
-
-
-        // Chunk-Daten in temporären Puffer kopieren
-        char chunk_buffer[INITIAL_BUFFER_SIZE];
-        memcpy(chunk_buffer, current, chunk_size);
-
-        // Chunk-Daten kodieren
-        http_etoa((UCHAR *) chunk_buffer, chunk_size);
-
-        // Chunk-Daten senden
-        ret = send(httpr->httpc->socket, chunk_buffer, chunk_size, 0);
-        if (ret < 0) {
-            perror("Failed to send chunk data");
-            return -1;
-        }
-
-        ret = send(httpr->httpc->socket, ASCII_CRLF, 2, 0);
-        if (ret < 0) {
-            perror("Failed to send CRLF");
-            return -1;
-        }
-
-        // Zum nächsten Chunk fortschreiten
-        current += chunk_size;
-        remaining -= chunk_size;
-    }
-
-    // Finalen leeren Chunk senden, um das Ende zu signalisieren
-	size_t chunk_size = 0;
-   
-	char chunk_size_str[32 + 2];
-	uint_to_hex_ascii(chunk_size, chunk_size_str);
-
-    ret = send(httpr->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
-    if (ret < 0) {
-        perror("Failed to send final chunk");
-        return -1;
-    }
-
-    return 0;
-}
-
-static int
-http_recv(HTTPC *httpc, char *buf, int len)
-{
-    int total_bytes_received = 0;
-    int bytes_received;
-    int sockfd;
-
-    sockfd = httpc->socket;
-    while (total_bytes_received < len) {
-        bytes_received = recv(sockfd, buf + total_bytes_received, len - total_bytes_received, 0);
-		if (bytes_received < 0) {
-            if (errno == EINTR) {
-                // Interrupted by a signal, retry
-                continue;
-            } else {
-                // An error occurred
-                return -1;
-            }
-        } else if (bytes_received == 0) {
-            // Connection closed by the client
-            break;
-        }
-        total_bytes_received += bytes_received;
-    }
-
-    return total_bytes_received;
-}
-
-static char*
-http_get_host(HTTPD *httpd, HTTPC *httpc)
-{
-	// TODO: Implement this function
-    return "http://drnbrx3a.neunetz.it:1080";
-}
-
-static void 
-uint_to_hex_ascii(size_t value, char *output) 
-{
-    int pos = 0;
-    int i;
-    char temp;
-    
-    /* Spezialfall für 0 */
-    if (value == 0) {
-        output[0] = 0x30; 
-        output[1] = CR;  
-        output[2] = LF;  
-		output[3] = CR;
-		output[4] = LF;
-        output[5] = '\0';
-        return;
-    }
-    
-    /* Hex-Ziffern von rechts nach links aufbauen */
-    while (value > 0) {
-        int digit = value % 16;
-        if (digit < 10) {
-            output[pos++] = 0x30 + digit;    /* ASCII '0'-'9' (0x30-0x39) */
-        } else {
-            output[pos++] = 0x41 + digit - 10;  /* ASCII 'A'-'F' (0x41-0x46) */
-        }
-        value /= 16;
-    }
-    
-    /* String umdrehen */
-    for (i = 0; i < pos/2; i++) {
-        temp = output[i];
-        output[i] = output[pos-1-i];
-        output[pos-1-i] = temp;
-    }
-    
-    /* CRLF hinzufügen */
-    output[pos++] = CR; 
-    output[pos++] = LF; 
-    output[pos] = '\0';
 }

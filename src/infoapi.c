@@ -16,7 +16,7 @@ static void createInfoResponse(char *buffer,
 // public functions
 //
 
-int infoHandler(HTTPR *httpr) 
+int infoHandler(Session *session) 
 {
 	int rc = 0;
         
@@ -31,11 +31,11 @@ int infoHandler(HTTPR *httpr)
 					   "1.0",
 					   "drnbrx3a.neunetz.it");
 
-	http_printf(httpr->httpc, "HTTP/1.1 200 OK\r\n");
-	http_printf(httpr->httpc, "Content-Type: application/json\r\n");
-	http_printf(httpr->httpc, "Content-Length: %d\r\n", strlen(buffer));
-	http_printf(httpr->httpc, "\r\n");
-	http_printf(httpr->httpc, "%s", buffer);
+	http_printf(session->httpc, "HTTP/1.1 200 OK\r\n");
+	http_printf(session->httpc, "Content-Type: application/json\r\n");
+	http_printf(session->httpc, "Content-Length: %d\r\n", strlen(buffer));
+	http_printf(session->httpc, "\r\n");
+	http_printf(session->httpc, "%s", buffer);
 
 	return rc;
 }

@@ -6,7 +6,7 @@
 #include "dsapi.h"
 #include "httpd.h"
 
-int datasetListHandler(HTTPR *httpr)
+int datasetListHandler(Session *session)
 {
 	unsigned	rc		= 0;
 	unsigned	count		= 0;
@@ -23,26 +23,26 @@ int datasetListHandler(HTTPR *httpr)
 	char		*volser		= NULL;
 	char		*start		= NULL;
 
-	method	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "REQUEST_METHOD");
-	path	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "REQUEST_PATH");
+	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
+	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
 
 	verb	= strrchr(path, '/');
 
-	dslevel = (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_DSLEVEL"); 
-	volser	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_VOLSER"); 
-	start 	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_START"); 
+	dslevel = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_DSLEVEL"); 
+	volser	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_VOLSER"); 
+	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START"); 
 
 	dslist = __listds(dslevel, "NONVSAM VOLUME", NULL);
 	
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
-	if ((rc = http_printf(httpr->httpc, "{\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "  \"items\": [\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
 	if (!dslist) goto end;
 
@@ -55,51 +55,51 @@ int datasetListHandler(HTTPR *httpr)
 		
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
-			if ((rc = http_printf(httpr->httpc, "    {\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
 			first = 0;
 		} else {
 			/* all other times we need a ',' before the '{' */
-			if ((rc = http_printf(httpr->httpc, "   ,{\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
 		}
 
-		if ((rc = http_printf(httpr->httpc, "      \"dsname\": \"%s\",\n", ds->dsn)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%s\",\n", ds->dsn)) < 0) goto quit;
 		
 		// TODO: the following fields should only be generated if X-IBM-Attributes == base
 		// TODO: add vol field only if X-IBM-Attributes has 'vol'
 		if (strcmp(ds->dsorg, "PO") == 0) {
-			if ((rc = http_printf(httpr->httpc, "      \"dsntp\": \"%s\",\n", "PDS")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "PDS")) < 0) goto quit;
 		} else if (strcmp(ds->dsorg, "PS") == 0) {
-			if ((rc = http_printf(httpr->httpc, "      \"dsntp\": \"%s\",\n", "BASIC")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "BASIC")) < 0) goto quit;
 		} else {
-			if ((rc = http_printf(httpr->httpc, "      \"dsntp\": \"%s\",\n", "UNKNOWN")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "UNKNOWN")) < 0) goto quit;
 		}
 
-		if ((rc = http_printf(httpr->httpc, "      \"recfm\": \"%s\",\n", ds->recfm)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"lrecl\": %d,\n", ds->lrecl)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"blksize\": %d,\n", ds->blksize)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"vol\": \"%s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"vols\": \"%s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"dsorg\": \"%s\",\n", ds->dsorg)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"recfm\": \"%s\",\n", ds->recfm)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"lrecl\": %d,\n", ds->lrecl)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"blksize\": %d,\n", ds->blksize)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"vol\": \"%s\",\n", ds->volser)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"vols\": \"%s\",\n", ds->volser)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%s\",\n", ds->dsorg)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
 		
-		if ((rc = http_printf(httpr->httpc, "    }\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
 	}
 
 end:
-	if ((rc = http_printf(httpr->httpc, "  ],\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	if ((rc = http_printf(httpr->httpc, "  \"moreRows\": false,\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"moreRows\": false,\n")) < 0) goto quit;
 
-	if ((rc = http_printf(httpr->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "} \n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 
 quit:
 	return rc;
 }
 
-int datasetGetHandler(HTTPR *httpr)
+int datasetGetHandler(Session *session)
 {
 	unsigned	rc		= 0;
 
@@ -113,11 +113,11 @@ int datasetGetHandler(HTTPR *httpr)
 	FILE		*fp;
 	char		*buffer;
 
-	dsname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_dataset-name");
-	volser = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_volume-serial");
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	volser = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_volume-serial");
 
 	if (!dsname) {
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
 
@@ -130,15 +130,15 @@ int datasetGetHandler(HTTPR *httpr)
 		goto quit;
 	}
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	while (fgets(buffer, sizeof(buffer), fp) > 0) {
-		if ((rc = http_printf(httpr->httpc, "%s", buffer)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "%s", buffer)) < 0) goto quit;
 	}
 
 	free(buffer);
@@ -148,7 +148,7 @@ quit:
 	return rc;
 } 
 
-int datasetPutHandler(HTTPR *httpr)
+int datasetPutHandler(Session *session)
 {
 	unsigned	rc		= 0;
 
@@ -165,20 +165,20 @@ int datasetPutHandler(HTTPR *httpr)
     int  		bytes_received;
 
 	// path variables
-	dsname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_dataset-name");
-	volser = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_volume-serial");
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	volser = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_volume-serial");
 
 	// header variables
-	datatype 	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_X-IBM-Data-Type"); 
+	datatype 	= (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Data-Type"); 
 
 	if (!dsname){
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
 
 	// read PUT request body
     memset(buffer, 0, sizeof(buffer));
-    bytes_received = recv(httpr->httpc->socket, buffer, sizeof(buffer) - 1, 0);
+    bytes_received = recv(session->httpc->socket, buffer, sizeof(buffer) - 1, 0);
     if (bytes_received < 0) {
 		wtof("Fehler beim Lesen vom Socket");
     } else if (bytes_received == 0) {
@@ -193,7 +193,7 @@ quit:
 	return rc;
 } 
 
-int memberListHandler(HTTPR *httpr)
+int memberListHandler(Session *session)
 {
 	unsigned	rc		= 0;
 	unsigned	count		= 0;
@@ -212,33 +212,33 @@ int memberListHandler(HTTPR *httpr)
 	char		*pattern	= NULL;
 
 
-	dsname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_dataset-name");
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname){
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
 
-	method	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "REQUEST_METHOD");
-	path	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "REQUEST_PATH");
+	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
+	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
 
 	verb	= strrchr(path, '/');
 
-	start 	= (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_START"); 
-	pattern = (char *) http_get_env(httpr->httpc, (const UCHAR *) "QUERY_PATTERN"); 
+	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START"); 
+	pattern = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_PATTERN"); 
 
 	pdslist = __listpd(dsname, NULL);
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	count = array_count(&pdslist);
 
-	if ((rc = http_printf(httpr->httpc, "{\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "  \"items\": [\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
 	if (!pdslist) {
 		goto end;
@@ -251,30 +251,30 @@ int memberListHandler(HTTPR *httpr)
 		
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
-			if ((rc = http_printf(httpr->httpc, "    {\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
 			first = 0;
 		} else {
 			/* all other times we need a ',' before the '{' */
-			if ((rc = http_printf(httpr->httpc, "   ,{\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
 		}
 
 		// TODO: extract user data from pds->udata, if X-IBM-Attributes == base 
-		if ((rc = http_printf(httpr->httpc, "      \"member\": \"%s\"\n", pds->name)) < 0) goto quit;
-		if ((rc = http_printf(httpr->httpc, "    }\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"member\": \"%s\"\n", pds->name)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
 	}
 
 end:
-	if ((rc = http_printf(httpr->httpc, "  ],\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	if ((rc = http_printf(httpr->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "} \n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 
 quit:
 	return rc;
 }
 
-int memberGetHandler(HTTPR *httpr)
+int memberGetHandler(Session *session)
 {
 	unsigned	rc			= 0;
 	unsigned	count		= 0;
@@ -291,11 +291,11 @@ int memberGetHandler(HTTPR *httpr)
 	FILE		*fp;
 	char		*buffer;
 
-	dsname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_dataset-name");
-	member = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_member-name");
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
 
 	if (!dsname || !member){
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
 	
@@ -315,15 +315,15 @@ int memberGetHandler(HTTPR *httpr)
 		goto quit;
 	}
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	while (fgets(buffer, sizeof(buffer), fp) > 0) {
-		if ((rc = http_printf(httpr->httpc, "%s", buffer)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "%s", buffer)) < 0) goto quit;
 	}
 
 	free(buffer);
@@ -333,7 +333,7 @@ quit:
 	return rc;
 }
 
-int memberPutHandler(HTTPR *httpr)
+int memberPutHandler(Session *session)
 {
 	unsigned	rc		= 0;
 
@@ -348,11 +348,11 @@ int memberPutHandler(HTTPR *httpr)
 	FILE		*fp;
 	char		*buffer;
 
-	dsname = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_dataset-name");
-	member = (char *) http_get_env(httpr->httpc, (const UCHAR *) "HTTP_member-name");
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
 	
 	if (!dsname || !member){
-		rc = http_resp_internal_error(httpr->httpc);
+		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
 
@@ -372,15 +372,15 @@ int memberPutHandler(HTTPR *httpr)
 		goto quit;
 	}
 
-	if ((rc = http_resp(httpr->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
-	if ((rc = http_printf(httpr->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(httpr->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	while (fgets(buffer, sizeof(buffer), fp) > 0) {
-		if ((rc = http_printf(httpr->httpc, "%s", buffer)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "%s", buffer)) < 0) goto quit;
 	}
 
 	free(buffer);

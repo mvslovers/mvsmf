@@ -177,6 +177,11 @@ int jobListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "]\n")) < 0) goto quit;
 
 quit:
+
+    if (jes) {
+        jesclose(&jes);
+	}
+
 	return rc;
 }
 
@@ -326,6 +331,11 @@ int jobFilesHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "]\n")) < 0) goto quit;
 
 quit:
+
+    if (jes) {
+        jesclose(&jes);
+	}
+
 	return rc;
 
 }
@@ -419,6 +429,11 @@ int jobRecordsHandler(Session *session)
 	}
 
 quit:
+
+    if (jes) {
+        jesclose(&jes);
+	}
+
 	return rc;
 
 	/* TODO: error when ddid does not exist 
@@ -588,7 +603,6 @@ int jobSubmitHandler(Session *session)
 			}
 		}
 	} else {
-		wtof("JOBSAPI: Reading data with Content-Length: %d", content_length);
 		// Read content-length data
 		while (data_size < content_length) {
 			if (data_size + sizeof(recv_buffer) > buffer_size) {
@@ -891,6 +905,11 @@ int jobStatusHandler(Session *session)
 	}
 
 quit:
+
+    if (jes) {
+        jesclose(&jes);
+	}
+	
 	return rc;
 
 	/* TODO: error when ddid does not exist 

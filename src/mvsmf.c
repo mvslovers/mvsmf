@@ -50,7 +50,8 @@ int main(int argc, char **argv)
     
     
     add_middleware(&router, "Authentication", authentication_middleware);
-
+    
+     // logging_middleware(Session *session, RouteHandler handler)
     /* add the URL mappings */
     add_route(&router, GET, "/zosmf/info", infoHandler);
     

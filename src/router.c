@@ -278,7 +278,7 @@ char* _get_host(HTTPD *httpd, HTTPC *httpc)
 static 
 int route_matching_middleware(Session *sessionr) 
 {
-    wtof("MVSMF42D TODO: MATCHING ROUTES");
+    // wtof("MVSMF42D TODO: MATCHING ROUTES");
 
     // Hier kommt die eigentliche RouteMatching-Logik
 
@@ -288,7 +288,7 @@ int route_matching_middleware(Session *sessionr)
 static 
 int path_vars_extracting_middleware(Session *session) 
 {
-    wtof("MVSMF42D TODO: EXTRACTING PATH VARS");
+    // wtof("MVSMF42D TODO: EXTRACTING PATH VARS");
 
     // Hier kommt die eigentliche PathVars-Logik
 

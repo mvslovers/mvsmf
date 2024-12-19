@@ -16,6 +16,7 @@
 // private functions prototypes
 static int do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid);
 static int submit_file(Session *session, VSFILE *intrdr, const char *filename);
+static int getself(char *jobname, char *jobid);
 
  //
 // public functions
@@ -162,7 +163,8 @@ int jobListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "    \"type\": \"%.3s\",\n", job->jobid)) < 0) goto quit;
 
 		if (job->eclass == '\\') {
-			if ((rc = http_printf(session->httpc, "    \"class\": \"\\\\\",\n")) < 0) goto quit;
+			//if ((rc = http_printf(session->httpc, "    \"class\": \"\\\\\",\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    \"class\": \"\",\n")) < 0) goto quit;
 		} else {
 			if ((rc = http_printf(session->httpc, "    \"class\": \"%c\",\n", job->eclass)) < 0) goto quit;
 		}
@@ -876,10 +878,10 @@ int jobStatusHandler(Session *session)
             }
 		}
       
-		const char *clazz = "N/A";
+		char clazz = ' ';
 		if (job->eclass != '\\') {
 			char class_char = (char)job->eclass;
-			clazz = &class_char;
+			clazz = class_char;
 		}
 
 		char data[1024];
@@ -920,6 +922,150 @@ quit:
 		"message": "Job 'mikeg3(T0339234)' does not contain spool file id 1"
 	}
 	*/
+}
+
+int jobPurgeHandler(Session *session)
+{
+    int         rc          = 0;
+    unsigned    count       = 0;
+    unsigned    i          = 0;
+    
+    HASPCP      *cp         = NULL;
+    JES         *jes        = NULL;
+    JESJOB      **joblist   = NULL;
+    JESFILT     jesfilt     = FILTER_NONE;
+    
+    char        *jobname     = NULL;
+    char        *jobid       = NULL;
+    
+	char        thisjobname[8+1] 	= "";
+	char        thisjobid[8+1]		= "";
+
+	const char  *msg        = "";
+
+    // Get jobname and jobid from request
+    jobname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_job-name");
+    jobid   = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_jobid");
+    
+    if (!jobname || !jobid) {
+        wtof("MVSMF60E Missing required parameters: jobname=%s, jobid=%s", 
+             jobname ? jobname : "NULL", 
+             jobid ? jobid : "NULL");
+        return http_resp_internal_error(session->httpc);
+    }
+
+    getself(thisjobname, thisjobid);    
+    
+	// Open JES2
+    jes = jesopen();
+    if (!jes) {
+        wtof("MVSMF61E Failed to open JES2");
+        return http_resp_internal_error(session->httpc);
+    }
+    
+    // Get job list
+    joblist = jesjob(jes, jobid, FILTER_JOBID, 0);
+    if (!joblist) {
+        wtof("MVSMF62E Failed to get job list");
+        jesclose(&jes);
+        return http_resp_internal_error(session->httpc);
+    }
+    
+    count = array_count(&joblist);
+    
+    // Find and purge the job
+    for(i = 0; i < count; i++) {
+        JESJOB *job = joblist[i];
+        
+        if (!job) continue;
+        
+		if (http_cmp((const UCHAR *)job->jobid, (const UCHAR *)thisjobid) == 0) {
+			wtof("MVSMF60W Attemp to purge ourself %s(%s)", jobname, jobid);
+			continue;
+		}
+
+        // Check if this is our job
+        if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) == 0 &&
+            http_cmp((const UCHAR *)job->jobid, (const UCHAR *)jobid) == 0) {
+            
+            // Purge the job
+            rc = jescanj(jobname, jobid, 1);
+
+			switch(rc) {
+				case CANJ_OK:
+					msg = "CANCEL or PURGE COMPLETED";
+					break;
+				case CANJ_NOJB:
+					msg = "JOB NAME NOT FOUND";
+					break;
+				case CANJ_BADI:
+					msg = "INVALID JOBNAME/JOB ID COMBINATION";
+					break;
+				case CANJ_NCAN:
+					msg = "JOB NOT CANCELLED\r\nDUPLICATE JOBNAMES AND NO JOB ID GIVEN";
+					break;
+				case CANJ_SMALL:
+					msg = "STATUS ARRAY TOO SMALL";
+					break;
+				case CANJ_OUTP:
+					msg = "JOB NOT CANCELLED or PURGED\r\nJOB ON OUTPUT QUEUE";
+					break;
+				case CANJ_SYNTX:
+					msg = "JOBID WITH INVALID SYNTAX FOR SUBSYSTEM";
+					break;
+				case CANJ_ICAN:
+					msg = "INVALID CANCEL or PURGE REQUEST\r\n"
+						"CANNOT CANCEL or PURGE AN ACTIVE TSO USER OR STARTED TASK\r\n"
+						"TSO USER MAY NOT CANCEL or PURGE THE ABOVE JOBS UNLESS THEY ARE ON AN OUTPUT QUEUE.";
+					break;
+			}
+                        
+            wtof("MVSMF64I Successfully purged job %s(%s)", jobname, jobid);
+
+            // Send success response
+            if ((rc = http_resp(session->httpc, 204)) < 0) goto error;
+            if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
+            if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
+            if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
+            
+            jesclose(&jes);
+            return rc;
+        }
+    }
+
+	// TODO: so machen wie überall
+	/* Gutfall
+	{ 
+		"owner": "Z07850",
+		"jobid": "JOB07102",
+		"job-correlator": "J0007102SVSCJES2E02B5861.......:",
+		"message": "Request was successful.",
+		"original-jobid": "JOB07102",
+		"jobname": "MIGBR14C",
+		"status": 0
+	}
+	*/
+
+	/* Schlechtfall
+	{
+		"rc": 4,
+		"reason": 10,
+		"category": 6,
+		"message": "No job found for reference: 'MIGBR14C(JOB07102)'"
+	}
+	*/
+	
+	// If we get here, the job wasn't found
+    wtof("MVSMF65E Job not found: %s(%s)", jobname, jobid);
+    jesclose(&jes);
+    return http_resp_internal_error(session->httpc);
+
+error:
+    wtof("MVSMF66E Error sending response: rc=%d", rc);
+    if (jes) {
+        jesclose(&jes);
+    }
+    return rc;
 }
 
 //
@@ -1019,6 +1165,7 @@ quit:
     return rc;
 }
 
+__asm__("\n&FUNC    SETC 'submit_file'");
 static int
 submit_file(Session *session, VSFILE *intrdr, const char *filename)
 {
@@ -1071,4 +1218,32 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename)
 
 quit:
 	return rc;
+}
+
+__asm__("\n&FUNC    SETC 'getself'");
+static int
+getself(char *jobname, char *jobid)
+{
+    unsigned    *psa        = (unsigned*)0;
+    unsigned    *tcb        = (unsigned*)psa[540/4];    /* A(current TCB) */
+    unsigned    *jscb       = (unsigned*)tcb[180/4];    /* A(JSCB) */
+    unsigned    *ssib       = (unsigned*)jscb[316/4];   /* A(SSIB) */
+
+    const char  *name       = (const char*)tcb[12/4];   /* A(TIOT), but the job name is first 8 chars of TIOT so we cheat just a bit */
+    const char  *id         = ((const char*)ssib) + 12; /* jobid is in SSIB at offset 12 */
+    int         i;
+
+    for(i=0; i < 8 && name[i] > ' '; i++) {
+        jobname[i] = name[i];
+    }
+    jobname[i] = 0;
+
+    for(i=0; i < 8 && id[i] >= ' '; i++) {
+        jobid[i] = id[i];
+        /* the job id may have space(s) which should be '0' */
+        if (jobid[i]==' ') jobid[i] = '0';
+    }
+    jobid[i] = 0;
+
+    return 0;
 }

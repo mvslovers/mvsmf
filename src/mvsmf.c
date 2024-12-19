@@ -60,6 +60,7 @@ int main(int argc, char **argv)
     add_route(&router, GET, "/zosmf/restjobs/jobs/{job-name}/{jobid}/files/{ddid}/records", jobRecordsHandler);
     add_route(&router, PUT, "/zosmf/restjobs/jobs", jobSubmitHandler);
     add_route(&router, GET, "/zosmf/restjobs/jobs/{job-name}/{jobid}", jobStatusHandler);
+    add_route(&router, DELETE, "/zosmf/restjobs/jobs/{job-name}/{jobid}", jobPurgeHandler);
         
     add_route(&router, GET, "/zosmf/restfiles/ds", datasetListHandler);
     add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}", datasetGetHandler);

@@ -1,7 +1,22 @@
 #include <stdio.h>
+#include <string.h>
 #include "common.h"
 #include "httpd.h"
 #include "cJSON.h"
+
+extern int snprintf(char *str, size_t size, const char *format, ...);
+
+int
+sendDefaultHeaders(Session *session, int status, const char *content_type)
+{
+    int rc = 0;
+    if ((rc = http_resp(session->httpc, status)) < 0) return rc;
+    if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) return rc;
+    if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) return rc;
+    if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
+    if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
+    return rc;
+}
 
 int 
 sendSuccessResponse(Session *session, int status) 
@@ -77,7 +92,6 @@ sendErrorResponse(Session *session, int status, int category, int rc, int reason
     
     
 quit:
-    wtof("MVSMF42D: sendErrorResponse: rc: %d", irc);
     // Cleanup
     free(json_str);
     cJSON_Delete(response);
@@ -85,14 +99,41 @@ quit:
     return irc;
 } 
 
-char* getPathParam(Session *session, const char *param_name) 
+char* 
+getPathParam(Session *session, const char *name) 
 {
 	char env_name[256];
 	
-	if (!session || !param_name) {
+	if (!session || !name) {
 		return NULL;
 	}
 
-	sprintf(env_name, "HTTP_%s", param_name);
+	snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
 	return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+}
+
+char *
+getQueryParam(Session *session, const char *name)
+{
+    char env_name[256];
+    
+    if (!session || !name) {
+        return NULL;
+    }
+
+    snprintf(env_name, sizeof(env_name), "QUERY_%s", name);
+    return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+}
+
+char *
+getHeaderParam(Session *session, const char *name)
+{
+    char env_name[256];
+    
+    if (!session || !name) {
+        return NULL;
+    }
+
+    snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
+    return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
 }

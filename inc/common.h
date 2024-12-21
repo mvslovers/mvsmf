@@ -19,6 +19,9 @@
 #define HTTP_MSG_BAD_REQUEST				"Bad Request"
 #define HTTP_MSG_INTERNAL_SERVER_ERROR		"Internal Server Error"
 
+// Content Types
+#define HTTP_CONTENT_TYPE_JSON              "application/json"
+
 // Return codes
 #define RC_SUCCESS  0   // Success condition
 #define RC_WARNING  4   // Warning condition
@@ -42,7 +45,7 @@ char *getQueryParam(Session *session, const char *name)			asm("CMN0001");
  * Gets a path parameter from HTTP headers
  * 
  * @param session Current session context
- * @param param_name Name of the path parameter (e.g. "job-name")
+ * @param name Name of the path parameter (e.g. "job-name")
  * @return Value of the parameter or NULL if not found
  */
 char* getPathParam(Session *session, const char *param_name)	asm("CMN0002");
@@ -88,6 +91,16 @@ int sendErrorResponse(Session *session,
 						const char *message, 
 						const char **details, 
 						int details_count)						asm("CMN0011");
+
+/**
+ * Sends default HTTP headers for a response
+ * 
+ * @param session Current session context
+ * @param status HTTP status code
+ * @param content_type Content type of response
+ * @return 0 on success, negative value on error
+ */
+int sendDefaultHeaders(Session *session, int status, const char *content_type)    asm("CMN0012");
 
 
 #endif // COMMON_H 

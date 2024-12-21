@@ -44,24 +44,13 @@ int jobListHandler(Session *session)
 	char		jesinfo[20]	= "unknown";
 
 	const char 	*filter 	= NULL;
-	const char	*owner		= NULL;
-	const char	*prefix 	= NULL;
-	const char	*execdata	= NULL;
-	const char	*status		= NULL;
-	const char	*jobid		= NULL;
 
 	/* fet query parameters */
-	owner		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_OWNER"); /* *, user */
-	prefix		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_PREFIX"); 
-	execdata	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_EXEC-DATA"); /* Y, N */
-	status		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_STATUS"); /* *, Active, Input, Output */
-	jobid		= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_JOBID");
-
-	/* get header parameters */
-	const char *targetUser = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_X-IBM-Target-System-User");
-	
-	if (targetUser) {
-	}
+	const char *owner		= getQueryParam(session, "owner");
+	const char *prefix		= getQueryParam(session, "prefix");	
+	const char *execdata	= getQueryParam(session, "exec-data");
+	const char *status		= getQueryParam(session, "status");
+	const char *jobid		= getQueryParam(session, "jobid");
 
 	if (owner  && owner[0]  == '*') owner  = NULL;
 	if (prefix && prefix[0] == '*') prefix = NULL;
@@ -82,15 +71,16 @@ int jobListHandler(Session *session)
 
 	/* Open the JES2 checkpoint and spool datasets */
 	jes = jesopen();
-	if (!jes) {
-		wtof("*** unable to open JES2 checkpoint and spool datasets ***");
-		/* we don't quit here, instead we'll send back an empty JSON object */
-	}
+    if (!jes) {
+        wtof(MSG_JOB_JES_ERROR);
+        sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM, 
+                                RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE, ERR_MSG_INCORRECT_JES_VSAM_HANDLE,
+								NULL, 0);
+		goto quit;
+    }
 
-	if (jes) {
-		cp = jes->cp;
-		joblist = jesjob(jes, filter, jesfilt, dd);
-	}
+	cp = jes->cp;
+	joblist = jesjob(jes, filter, jesfilt, dd);
 
 	if (cp && cp->buf) {
 		for(i=0; i < sizeof(jesinfo); i++) {
@@ -103,11 +93,7 @@ int jobListHandler(Session *session)
 		jesinfo[sizeof(jesinfo)-1]=0;
 	}
 
-	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
+	if ((rc = sendDefaultHeaders(session, HTTP_STATUS_OK, HTTP_CONTENT_TYPE_JSON)) < 0) goto quit;
 
 	count = array_count(&joblist);
 
@@ -125,8 +111,8 @@ int jobListHandler(Session *session)
 		
 		/* although the QUEINIT flag *should* cover SYSLOG and INIT jobs, 
 		   but it sometimes doesn't */
-		if (strcmp(job->jobname, "SYSLOG") == 0) continue;	/* system log */
-		if (strcmp(job->jobname, "INIT")   == 0) continue;	/* batch initiator */   
+		if (strcmp((const char *)job->jobname, "SYSLOG") == 0) continue;	/* system log */
+		if (strcmp((const char *)job->jobname, "INIT")   == 0) continue;	/* batch initiator */   
 		
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
@@ -968,7 +954,7 @@ int jobPurgeHandler(Session *session)
     // Open JES2
     jes = jesopen();
     if (!jes) {
-        wtof(MSG_JOB_PURGE_JES_ERROR);
+        wtof(MSG_JOB_JES_ERROR);
         sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM, 
                                 RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE, ERR_MSG_INCORRECT_JES_VSAM_HANDLE,
 								NULL, 0);

@@ -8,6 +8,19 @@
 #include "racf.h"
 #include "router.h"
 
+/* errors:
+
+{
+    "rc": 4,
+    "reason": 7,
+    "category": 6,
+    "message": "No match for method DELETE and pathInfo='//'"
+}
+
+
+
+
+*/
 
 int main(int argc, char **argv)
 {

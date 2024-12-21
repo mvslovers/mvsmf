@@ -8,6 +8,9 @@
 #include "jobsapi.h"
 #include "httpd.h"
 #include "router.h"
+#include "common.h"
+#include "jobsapi_msg.h"
+#include "jobsapi_err.h"
 
 #define INITIAL_BUFFER_SIZE 4096
    
@@ -17,6 +20,8 @@
 static int do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid);
 static int submit_file(Session *session, VSFILE *intrdr, const char *filename);
 static int getself(char *jobname, char *jobid);
+
+extern int snprintf(char *str, size_t size, const char *format, ...);
 
  //
 // public functions
@@ -926,146 +931,151 @@ quit:
 
 int jobPurgeHandler(Session *session)
 {
-    int         rc          = 0;
-    unsigned    count       = 0;
-    unsigned    i          = 0;
+    int			rc					= 0;
+    unsigned	count				= 0;
+    unsigned	i					= 0;
     
-    HASPCP      *cp         = NULL;
-    JES         *jes        = NULL;
-    JESJOB      **joblist   = NULL;
-    JESFILT     jesfilt     = FILTER_NONE;
+    HASPCP      *cp					= NULL;
+    JES			*jes				= NULL;
+    JESJOB		**joblist			= NULL;
+    JESFILT		jesfilt				= FILTER_NONE;
     
-    char        *jobname     = NULL;
-    char        *jobid       = NULL;
+    char		*jobname			= NULL;
+    char		*jobid				= NULL;
     
-	char        thisjobname[8+1] 	= "";
-	char        thisjobid[8+1]		= "";
+    char		thisjobname[8 + 1]	= "";
+    char		thisjobid[8 + 1]	= "";
 
-	const char  *msg        = "";
+    const char	*msg				= "";
+    char		response[1024]		= {0};
 
     // Get jobname and jobid from request
-    jobname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_job-name");
-    jobid   = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_jobid");
-    
+    jobname = getPathParam(session, "job-name");
+	jobid   = getPathParam(session, "jobid");
+
     if (!jobname || !jobid) {
-        wtof("MVSMF60E Missing required parameters: jobname=%s, jobid=%s", 
+        wtof(MSG_JOB_PURGE_MISSING_PARAM, 
              jobname ? jobname : "NULL", 
              jobid ? jobid : "NULL");
-        return http_resp_internal_error(session->httpc);
+        sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_CIM, 
+								RC_ERROR, REASON_INVALID_QUERY, ERR_MSG_INVALID_QUERY,
+								NULL, 0);
+		goto quit;
     }
 
     getself(thisjobname, thisjobid);    
     
-	// Open JES2
+    // Open JES2
     jes = jesopen();
     if (!jes) {
-        wtof("MVSMF61E Failed to open JES2");
-        return http_resp_internal_error(session->httpc);
+        wtof(MSG_JOB_PURGE_JES_ERROR);
+        sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM, 
+                                RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE, ERR_MSG_INCORRECT_JES_VSAM_HANDLE,
+								NULL, 0);
+		goto quit;
     }
     
-    // Get job list
+    // Find the job
     joblist = jesjob(jes, jobid, FILTER_JOBID, 0);
     if (!joblist) {
-        wtof("MVSMF62E Failed to get job list");
-        jesclose(&jes);
-        return http_resp_internal_error(session->httpc);
+		char msg[256];
+		snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
+        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE, 
+                                RC_WARNING, REASON_JOB_NOT_FOUND, msg,
+								NULL, 0);
+		goto quit;
     }
     
+	// Check if there is more than one job with the same jobid
     count = array_count(&joblist);
-    
-    // Find and purge the job
-    for(i = 0; i < count; i++) {
-        JESJOB *job = joblist[i];
-        
-        if (!job) continue;
-        
+	
+	// Find and purge the job
+	for(i=0; i < count; i++) {
+		JESJOB *job = joblist[i];
+
+		if (!job) continue;
+
+		// Purge is not allowed for HTTPD (self purge)
 		if (http_cmp((const UCHAR *)job->jobid, (const UCHAR *)thisjobid) == 0) {
-			wtof("MVSMF60W Attemp to purge ourself %s(%s)", jobname, jobid);
-			continue;
+			wtof(MSG_JOB_PURGE_SELF, jobname, jobid);
+			sendErrorResponse(session, HTTP_STATUS_FORBIDDEN, CATEGORY_SERVICE, 
+								RC_WARNING, REASON_SELF_PURGE, ERR_MSG_SELF_PURGE,
+								NULL, 0);
+			goto quit;
 		}
 
-        // Check if this is our job
-        if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) == 0 &&
-            http_cmp((const UCHAR *)job->jobid, (const UCHAR *)jobid) == 0) {
-            
-            // Purge the job
-            rc = jescanj(jobname, jobid, 1);
+		// Check if this is the job we want to purge
+		if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) == 0 &&
+			http_cmp((const UCHAR *)job->jobid, (const UCHAR *)jobid) == 0) {
+			
+			// Purge the job
+			rc = jescanj(jobname, jobid, 1);
 
 			switch(rc) {
 				case CANJ_OK:
-					msg = "CANCEL or PURGE COMPLETED";
+					// Send success response
+					sprintf(response, 
+						"{"
+							"\"owner\": \"%s\","
+							"\"jobid\": \"%s\","
+							"\"job-correlator\": \"\","
+							"\"message\": \"%s\","
+							"\"original-jobid\": \"%s\","
+							"\"jobname\": \"%s\","
+							"\"status\": 0"
+						"}", 
+						job->owner, jobid, "Request was successful.", jobid, jobname);
+
+					if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
+					if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto quit;
+					if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto quit;
+					if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
+					if ((rc = http_printf(session->httpc, "%s\n", response)) < 0) goto quit;
+
+					rc = 0;
 					break;
 				case CANJ_NOJB:
 					msg = "JOB NAME NOT FOUND";
+					wtof("MVSMF42D CANJ_NOJB: %s", msg);
 					break;
 				case CANJ_BADI:
 					msg = "INVALID JOBNAME/JOB ID COMBINATION";
+					wtof("MVSMF42D CANJ_BADI: %s", msg);
 					break;
 				case CANJ_NCAN:
-					msg = "JOB NOT CANCELLED\r\nDUPLICATE JOBNAMES AND NO JOB ID GIVEN";
+					msg = "JOB NOT CANCELLED - DUPLICATE JOBNAMES AND NO JOB ID GIVEN";
+					wtof("MVSMF42D CANJ_NCAN: %s", msg);
 					break;
 				case CANJ_SMALL:
 					msg = "STATUS ARRAY TOO SMALL";
+					wtof("MVSMF42D CANJ_SMALL: %s", msg);
 					break;
 				case CANJ_OUTP:
-					msg = "JOB NOT CANCELLED or PURGED\r\nJOB ON OUTPUT QUEUE";
+					msg = "JOB NOT CANCELLED or PURGED - JOB ON OUTPUT QUEUE";
+					wtof("MVSMF42D CANJ_OUTP: %s", msg);
 					break;
 				case CANJ_SYNTX:
 					msg = "JOBID WITH INVALID SYNTAX FOR SUBSYSTEM";
+					wtof("MVSMF42D CANJ_SYNTX: %s", msg);
 					break;
 				case CANJ_ICAN:
-					msg = "INVALID CANCEL or PURGE REQUEST\r\n"
-						"CANNOT CANCEL or PURGE AN ACTIVE TSO USER OR STARTED TASK\r\n"
-						"TSO USER MAY NOT CANCEL or PURGE THE ABOVE JOBS UNLESS THEY ARE ON AN OUTPUT QUEUE.";
+					sendErrorResponse(session, HTTP_STATUS_FORBIDDEN, CATEGORY_SERVICE, 
+									RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE,
+									NULL, 0);
+					
+					rc = 0;
 					break;
 			}
-                        
-            wtof("MVSMF64I Successfully purged job %s(%s)", jobname, jobid);
-
-            // Send success response
-            if ((rc = http_resp(session->httpc, 204)) < 0) goto error;
-            if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
-            if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
-            if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
-            
-            jesclose(&jes);
-            return rc;
-        }
-    }
-
-	// TODO: so machen wie überall
-	/* Gutfall
-	{ 
-		"owner": "Z07850",
-		"jobid": "JOB07102",
-		"job-correlator": "J0007102SVSCJES2E02B5861.......:",
-		"message": "Request was successful.",
-		"original-jobid": "JOB07102",
-		"jobname": "MIGBR14C",
-		"status": 0
+		}
 	}
-	*/
+        
+quit:
 
-	/* Schlechtfall
-	{
-		"rc": 4,
-		"reason": 10,
-		"category": 6,
-		"message": "No job found for reference: 'MIGBR14C(JOB07102)'"
-	}
-	*/
-	
-	// If we get here, the job wasn't found
-    wtof("MVSMF65E Job not found: %s(%s)", jobname, jobid);
-    jesclose(&jes);
-    return http_resp_internal_error(session->httpc);
-
-error:
-    wtof("MVSMF66E Error sending response: rc=%d", rc);
     if (jes) {
         jesclose(&jes);
     }
-    return rc;
+    
+	return rc;
 }
 
 //

@@ -2,6 +2,9 @@
 #define COMMON_H
 
 #include "router.h"
+#include "json.h"
+
+#define ENV_NAME_SIZE 256
 
 // HTTP Status Codes
 #define HTTP_STATUS_OK						200  // Success
@@ -29,7 +32,6 @@
 #define RC_AUTH    12   // Authorization error
 #define RC_SEVERE  16   // Severe error
 
-
 // Request handling
 
 /**
@@ -39,7 +41,7 @@
  * @param name Name of the query parameter
  * @return Value of the parameter or NULL if not found
  */
-char *getQueryParam(Session *session, const char *name)			asm("CMN0001");
+char *getQueryParam(Session *session, const char *name)							asm("CMN0001");
 
 /**
  * Gets a path parameter from HTTP headers
@@ -48,7 +50,7 @@ char *getQueryParam(Session *session, const char *name)			asm("CMN0001");
  * @param name Name of the path parameter (e.g. "job-name")
  * @return Value of the parameter or NULL if not found
  */
-char* getPathParam(Session *session, const char *param_name)	asm("CMN0002");
+char* getPathParam(Session *session, const char *param_name)					asm("CMN0002");
 
 /**
  * Gets a header parameter from HTTP request
@@ -57,18 +59,29 @@ char* getPathParam(Session *session, const char *param_name)	asm("CMN0002");
  * @param name Name of the header parameter
  * @return Value of the parameter or NULL if not found
  */
-char *getHeaderParam(Session *session, const char *name)		asm("CMN0003");
+char *getHeaderParam(Session *session, const char *name)						asm("CMN0003");
 
 // Response handling
 
 /**
- * Sends a success response with given status code
+ * Sends default HTTP headers for a response
+ * 
+ * @param session Current session context
+ * @param status HTTP status code
+ * @param content_type Content type of response
+ * @return 0 on success, negative value on error
+ */
+int sendDefaultHeaders(Session *session, int status, const char *content_type)	asm("CMN0010");
+
+/**
+ * Sends a JSON response with given status code
  * 
  * @param session Current session context
  * @param status HTTP status code to send
+ * @param builder JsonBuilder containing the response data
  * @return 0 on success, negative value on error
  */
-int sendSuccessResponse(Session *session, int status)			asm("CMN0010");
+int sendJSONResponse(Session *session, int status, JsonBuilder *builder)		asm("CMN0011");
 
 /**
  * Sends an error response with details
@@ -90,17 +103,6 @@ int sendErrorResponse(Session *session,
 						int reason, 
 						const char *message, 
 						const char **details, 
-						int details_count)						asm("CMN0011");
-
-/**
- * Sends default HTTP headers for a response
- * 
- * @param session Current session context
- * @param status HTTP status code
- * @param content_type Content type of response
- * @return 0 on success, negative value on error
- */
-int sendDefaultHeaders(Session *session, int status, const char *content_type)    asm("CMN0012");
-
+						int details_count)										asm("CMN0012");
 
 #endif // COMMON_H 

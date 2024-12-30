@@ -1,30 +1,29 @@
+#include <stddef.h>  // Füge diese Zeile hinzu
 #include <stdio.h>
 
-
-#include "mvsmf.h"
-
-#include "clibwto.h"
 #include "httpd.h"
-#include "racf.h"
 #include "router.h"
+#include "authmw.h"
+#include "infoapi.h"
+#include "dsapi.h"
+#include "jobsapi.h"
 
-/* errors:
+/* Dump ENV
+	if (session->httpc->env) {
+        unsigned count = array_count(&session->httpc->env);
+        unsigned n;
+        for(n=0;n<count;n++) {
+            HTTPV *env = session->httpc->env[n];
 
-{
-    "rc": 4,
-    "reason": 7,
-    "category": 6,
-    "message": "No match for method DELETE and pathInfo='//'"
-}
-
-
-
-
-*/
+            if (!env) continue;
+			wtof("MVSMF67G env[%u] \"%s\"=\"%s\"", n, env->name, env->value);
+        }
+    }
+*/	
 
 int main(int argc, char **argv)
 {
-    int         rc          = 0;
+    int         irc          = 0;
 
     CLIBPPA     *ppa        = __ppaget();
     CLIBGRT     *grt        = __grtget();
@@ -57,14 +56,15 @@ int main(int argc, char **argv)
         crt->crtapp2    = httpc;
     }
 
-    // TODO: move this inti cgxstart.c
+    /* TODO (mig): move this into cgxstart.c */
     init_router(&router);
     init_session(&session, &router, httpd, httpc);
     
     
     add_middleware(&router, "Authentication", authentication_middleware);
     
-     // logging_middleware(Session *session, RouteHandler handler)
+    /* logging_middleware(Session *session, RouteHandler handler) */
+    
     /* add the URL mappings */
     add_route(&router, GET, "/zosmf/info", infoHandler);
     
@@ -86,22 +86,21 @@ int main(int argc, char **argv)
     
     /* dispatch the request */
 
-    rc = handle_request(&router, &session);
+    irc = handle_request(&router, &session);
 
-    if (rc > 4 || rc < 0) {
-        wtof("MVSMF01E REQUEST PROCESSING FAILED - RC(%d)", rc);
+    if (irc > 4 || irc < 0) {
+        wtof("MVSMF01E REQUEST PROCESSING FAILED - RC(%d)", irc);
     }
 
-    // temp
+quit:
+
+    /* TODO (mig): the whole security stuff must be reworked */
     if (session.acee) {
-        rc = racf_logout(&session.acee);
+        irc = racf_logout(&session.acee);
         racf_set_acee(session.old_acee);
         session.acee = NULL;
         session.old_acee = NULL;
     }
-
-    /* we do not wan't to let this CGI module abend */
-    rc = 0;
 
     /* restore crt values */
     if (crt) {
@@ -110,5 +109,5 @@ int main(int argc, char **argv)
         crt->crtapp2    = crtapp2;
     }
 
-    return rc;
+    return 0;
 }

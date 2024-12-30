@@ -1,6 +1,7 @@
 #ifndef HTTPR_H
 #define HTTPR_H
 
+#include <stddef.h>
 #include "acee.h"
 #include "httpd.h"
 

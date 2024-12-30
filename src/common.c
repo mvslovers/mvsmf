@@ -1,45 +1,134 @@
+#include <clibstr.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include "common.h"
-#include "httpd.h"
-#include "cJSON.h"
 
-extern int snprintf(char *str, size_t size, const char *format, ...);
+#include "httpd.h"
+#include "json.h"
+#include "common.h"
+
+static int send_data(Session *session, char *buf);
+
+char* 
+getPathParam(Session *session, const char *name) 
+{
+	char env_name[ENV_NAME_SIZE];
+	
+	if (!session || !name) {
+		return NULL;
+	}
+
+	(void) snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
+	char *env = (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+	if (!env) {
+		return NULL;
+	}
+
+	return env;
+}
+
+char *
+getQueryParam(Session *session, const char *name)
+{
+    char env_name[ENV_NAME_SIZE];
+    
+    if (!session || !name) {
+        return NULL;
+    }
+
+    (void) snprintf(env_name, sizeof(env_name), "QUERY_%s", name);
+    char *env = (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+    if (!env) {
+        return NULL;
+    }
+
+    return env;
+}
+
+char *
+getHeaderParam(Session *session, const char *name)
+{
+    char env_name[ENV_NAME_SIZE];
+    
+    if (!session || !name) {
+        return NULL;
+    }
+
+    (void) snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
+    char *env = (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+    if (!env) {
+        return NULL;
+    }
+
+    return env;
+}
 
 int
 sendDefaultHeaders(Session *session, int status, const char *content_type)
 {
-    int rc = 0;
-    if ((rc = http_resp(session->httpc, status)) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
-    return rc;
+    int irc = 0;
+	
+	irc = http_resp(session->httpc, status);
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type);
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = http_printf(session->httpc, "Cache-Control: no-store\r\n");
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n");
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = http_printf(session->httpc, "\r\n");
+    if (irc < 0) {
+        goto quit;
+    }
+
+quit:    
+    return irc;
 }
 
 int 
-sendSuccessResponse(Session *session, int status) 
+sendJSONResponse(Session *session, int status, JsonBuilder *builder) 
 {
-    cJSON *response = cJSON_CreateObject();
-    char *json_str;
+    int irc = 0;
+
+    char *json_str = NULL;
+
+    if (!builder) {
+        irc = -1;
+        goto quit;
+    }
     
-    // Add standard success fields
-    cJSON_AddNumberToObject(response, "rc", 0);
-    
-    // Convert to string
-    json_str = cJSON_Print(response);
-    
-    // Send response with status code
-    //set_status(session, http_status);
-    //set_content_type(session, "application/json");
-    //write_response(session, json_str);
-    
+    json_str = getJsonString(builder);
+    if (!json_str) {
+        irc = -1;
+        goto quit;
+    }
+
+    irc = sendDefaultHeaders(session, status, HTTP_CONTENT_TYPE_JSON);
+    if (irc < 0) {
+        goto quit;
+    }
+
+	irc = send_data(session, json_str);
+
+quit:
     // Cleanup
-    free(json_str);
-    cJSON_Delete(response);
+    if (json_str) {
+        free(json_str);
+    }
     
-    return 0;
+    return irc;
 }
 
 int 
@@ -48,92 +137,86 @@ sendErrorResponse(Session *session, int status, int category, int rc, int reason
 {
     int irc = 0;
 
-    cJSON *response = cJSON_CreateObject();
-    cJSON *details_array = NULL;
-    char *json_str;
+    JsonBuilder *builder = createJsonBuilder();
     
-    // Add standard error fields
-    cJSON_AddNumberToObject(response, "rc", rc);
-    cJSON_AddNumberToObject(response, "category", category);
-    if (reason > 0) {
-        cJSON_AddNumberToObject(response, "reason", reason);
+	if (!builder) {
+        rc = -1;
+        goto quit;
+    }   
+    
+    irc = startJsonObject(builder);
+    if (irc < 0) {
+        goto quit;
     }
+    
+    irc = addJsonNumber(builder, "rc", rc);
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = addJsonNumber(builder, "category", category);
+    if (irc < 0) {
+        goto quit;
+    }
+    
+    irc = addJsonNumber(builder, "reason", reason);
+    if (irc < 0) {
+        goto quit;
+    }
+    
     if (message) {
-        cJSON_AddStringToObject(response, "message", message);
-    }
-    
-    // Add details array if provided
-    if (details && details_count > 0) {
-        details_array = cJSON_CreateArray();
-        int i = 0;
-        for (i = 0; i < details_count; i++) {
-            if (details[i]) {
-                cJSON_AddItemToArray(details_array, cJSON_CreateString(details[i]));
-            }
+        irc = addJsonString(builder, "message", message);
+        if (irc < 0) {
+            goto quit;
         }
-        cJSON_AddItemToObject(response, "details", details_array);
     }
     
-    // Convert to string
-    json_str = cJSON_Print(response);
-    wtof("MVSMF42D: json_str: %s", json_str);
+    if (details && details_count > 0) {
+        // TODO (MIG): Implement array support in JsonBuilder when needed
+        // For now, we only add the first detail as a string
+        irc = addJsonString(builder, "details", details[0]);
+        if (irc < 0) {
+            goto quit;
+        }
+    }
 
-    // Send response with status code
-    if ((irc = http_resp(session->httpc, status)) < 0) goto quit;
-    if ((irc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit; 
-	if ((irc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((irc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
-	if ((irc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
+    irc = endJsonObject(builder);
+    if (irc < 0) {
+        goto quit;
+    }
 
-    if ((irc = http_printf(session->httpc, "%s\n", json_str)) < 0) goto quit;
-
-    
-    //write_response(session, json_str);
-    
-    
+    sendJSONResponse(session, status, builder);
+        
 quit:
+
     // Cleanup
-    free(json_str);
-    cJSON_Delete(response);
+    if (builder) {
+        freeJsonBuilder(builder);
+    }
 
     return irc;
 } 
 
-char* 
-getPathParam(Session *session, const char *name) 
+__asm__("\n&FUNC    SETC 'send_data'");
+static int 
+send_data(Session *session, char *buf)
 {
-	char env_name[256];
-	
-	if (!session || !name) {
-		return NULL;
-	}
-
-	snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
-	return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
-}
-
-char *
-getQueryParam(Session *session, const char *name)
-{
-    char env_name[256];
+    int		rc      = 0;
     
-    if (!session || !name) {
-        return NULL;
+	size_t  len     = strlen(buf);
+    size_t	pos     = 0;
+
+    http_etoa(buf, len);
+
+    for(pos=0; pos < len; pos+=rc) {
+        rc = http_send(session->httpc, &buf[pos], len-pos);
+        if (rc<0) {
+			goto quit; /* socket error */
+		}
     }
 
-    snprintf(env_name, sizeof(env_name), "QUERY_%s", name);
-    return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
-}
+    rc = 0; /* success */
 
-char *
-getHeaderParam(Session *session, const char *name)
-{
-    char env_name[256];
-    
-    if (!session || !name) {
-        return NULL;
-    }
-
-    snprintf(env_name, sizeof(env_name), "HTTP_%s", name);
-    return (char *) http_get_env(session->httpc, (const UCHAR *) env_name);
+quit:
+    return rc;
 }

@@ -3,7 +3,6 @@
 #include <clibwto.h>
 #include <cliblist.h>
 #include <errno.h>
-#include <limits.h>
 
 #include "dsapi.h"
 #include "httpd.h"
@@ -12,8 +11,6 @@
 #define FIXED     0x0001
 #define VARIABLE  0x0002
 #define UNDEFINED 0x0004
-
-extern int snprintf(char *str, size_t size, const char *format, ...);
 
 // Constants for better readability and maintainability
 #define MAX_BUFFER_SIZE 1024

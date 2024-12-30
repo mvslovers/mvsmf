@@ -2,6 +2,7 @@
 #include <string.h>
 
 #include "router.h"
+#include "common.h"
 #include "httpd.h"
 
 
@@ -116,7 +117,8 @@ int handle_request(Router *router, Session *session)
             (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_METHOD"),
             (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_URI"));
 
-        http_resp(httpc, 404);
+        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);        
+
         return -1;
     }
 

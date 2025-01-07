@@ -1,0 +1,38 @@
+{
+  "CompileFlags": {
+    "Add": [
+      "-xc",
+      "-std=gnu89",
+      "-ferror-limit=0",
+      "-DLUA_32BITS",
+      "-DLUA_USE_C89",
+      "-DLUA_USE_JUMPTABLE=0",
+      "-U__LP64__",
+      "-Wno-comment",
+      "-Wno-pragma-pack",
+      "-Wno-include-hygiene",
+      "-Wno-system-headers",
+      "-nostdinc",
+      "-isystem/home/mike/repos/crent370/include",
+      "-isystem/home/mike/repos/crent370/thdmgr",
+      "-isystem/home/mike/repos/crent370/time64",
+      "-isystem/home/mike/repos/httpd_cgi_sdk/inc",
+      "-I/home/mike/repos/mvsmf/inc"
+    ]
+  },
+  "Diagnostics": {
+    "ClangTidy": {
+      "Add": ["*"],
+      "Remove": [
+        "llvmlibc-restrict-system-libc-headers",
+        "llvm-include-order",
+        "modernize-deprecated-headers",
+        "hicpp-no-assembler",
+        "altera-unroll-loops",
+        "bugprone-easily-swappable-parameters",
+        "readability-identifier-length"
+      ]
+    },
+    "UnusedIncludes": "Strict"
+  }
+}

@@ -113,17 +113,12 @@ int handle_request(Router *router, Session *session)
     Route *route = find_route(router, reqMethod, path);
     
     if (route == NULL) {
-        wtof("Unknown route requested. %s %s",   
-            (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_METHOD"),
-            (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_URI"));
-
         sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);        
-
         return -1;
     }
 
     extract_path_vars(session, route->pattern, path);
-    
+
     // call the handler
     return route->handler(session);
 }

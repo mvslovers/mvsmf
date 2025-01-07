@@ -1,6 +1,5 @@
 #include "authmw.h"
 #include "clibb64.h"
-#include "clibwto.h"
 #include "httpd.h"
 #include "racf.h"
 #include "router.h"
@@ -16,6 +15,7 @@ int authentication_middleware(Session *session)
    
     if (!auth_header) {
         char response[] = "{\"rc\": 16, \"reason\": 1, \"message\": \"No authorization header present\"}";
+        _send_response(session, 401, "application/json", response);
         return -1;
     }
 

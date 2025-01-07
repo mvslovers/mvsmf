@@ -1,5 +1,5 @@
 
-# mvs/MF
+# mvsMF
 
 **mvsMF** is a implementation of the z/OSMF REST API for the classic MVS 3.8j. The project provides essential functionality of z/OSMF, focusing on key endpoints for dataset and job handling. This allows users to use modern clients such as the Zowe Explorer for Visual Studio Code (or JetBrains IDEs) and Zowe CLI to interact with their host datasets, submit jobs, and view job outputs on MVS 3.8j.
 
@@ -23,14 +23,18 @@ This project is implemented as a **CGI module** for Mike Rayborn's HTTPD server 
 
 1. Transfer the provided **XMIT file** to your MVS system.
 2. Restore the XMIT file to create the necessary load module:
+
    ```bash
    RECEIVE INDATASET('your.xmit.dataset') 
    ```
+
 3. Copy the the load module from the received dataset into the `LINKLIB` dataset used by your HTTPD server.
 4. Update your HTTPD configuration file to include the following entry:
+
    ```bash
    cgi.MVSMF="/zosmf/*"
    ```
+
 5. Restart the HTTPD server.
 
 ## Building mvsMF
@@ -38,6 +42,7 @@ This project is implemented as a **CGI module** for Mike Rayborn's HTTPD server 
 If you'd like to build mvsMF from source, follow these steps:
 
 1. Clone the repository:
+
    ```bash
    git clone https://github.com/mvslovers/mvsmf.git
    cd mvsmf
@@ -45,13 +50,16 @@ If you'd like to build mvsMF from source, follow these steps:
    ... 
    ...
    ```
+
 2. Make sure you have a cross-compilation environment for MVS 3.8j. You'll need:
-   - CRENT370 libraries by Mike Rayborn - see https://github.com/mvslovers/crent370
+   - CRENT370 libraries by Mike Rayborn - see <https://github.com/mvslovers/crent370>
    - A suitable C compiler configured for MVS 3.8j
 3. Compile the CGI module using the provided Makefile:
+
    ```bash
    make
    ```
+
 4. Follow the installation steps to transfer the load module to your MVS system.
 
 ## Usage
@@ -72,8 +80,7 @@ Contributions are welcome! If you're interested in helping with development, tes
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [MIT License](LICENSE)
 ---
 
 **Disclaimer**: This project is still under active development and is not ready for production use. Use it at your own risk and report any issues or feedback to help improve it.
-

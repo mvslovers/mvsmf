@@ -1,5 +1,6 @@
 #include "authmw.h"
 #include "clibb64.h"
+#include "common.h"
 #include "httpd.h"
 #include "racf.h"
 #include "router.h"
@@ -14,15 +15,13 @@ int authentication_middleware(Session *session)
     const char *content_type = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_Content-Type");
    
     if (!auth_header) {
-        char response[] = "{\"rc\": 16, \"reason\": 1, \"message\": \"No authorization header present\"}";
-        _send_response(session, 401, "application/json", response);
-        return -1;
+		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
+		return -1;
     }
 
     // Basic Auth Header parsen
     if (strncmp(auth_header, "Basic ", 6) != 0) {
-        char response[] = "{\"rc\": 16, \"reason\": 2, \"message\": \"Invalid authorization type\"}";
-        _send_response(session, 401, "application/json", response);
+        sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
         return -1;
     }
 
@@ -35,16 +34,14 @@ int authentication_middleware(Session *session)
     http_atoe((UCHAR *) decoded, decoded_len);
 
     if (decoded == NULL) {
-        char response[] = "{\"rc\": 16, \"reason\": 3, \"message\": \"Invalid base64 encoding\"}";
-        _send_response(session, 401, "application/json", response);
+        sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
         return -1;
     }
 
     // extract username and password
     char *colon = strchr((char *) decoded, ':');
     if (!colon) {
-        char response[] = "{\"rc\": 16, \"reason\": 4, \"message\": \"Invalid credentials format\"}";
-        _send_response(session, 401, "application/json", response);
+        sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
         free(decoded);
         return -1;
     }
@@ -54,12 +51,13 @@ int authentication_middleware(Session *session)
     char  *password = colon + 1;
 
     if (!validate_user(session, username, password)) {
-        char response[] = "{\"rc\": 16, \"reason\": 5, \"message\": \"Invalid credentials\"}";
-        _send_response(session, 401, "application/json", response);
+        sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
         free(decoded);
         return -1;
     }
     
+    http_set_env(session->httpc, "HTTP_CURRENT_USER", strdup(username));
+
     free(decoded);
 
     return 0;

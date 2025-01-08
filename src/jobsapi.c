@@ -22,297 +22,313 @@
 #define INITIAL_BUFFER_SIZE 4096
 #define MAX_JOBS_LIMIT 1000
 #define MAX_URL_LENGTH 256
-#define TYPE_STR_SIZE 4
-#define CLASS_STR_SIZE 2
-
-/* TODO: refactore sysout stuff*/
+#define MAX_ERR_MSG_LENGTH 256
+#define TYPE_STR_SIZE    3 + 1
+#define CLASS_STR_SIZE   3 + 1
+#define JES_INFO_SIZE   20 + 1
+#define RECFM_SIZE       3 + 1
+//
 // private functions prototypes
-static int do_print_sysout(Session *session, JES *jes, JESJOB *job,
-                           unsigned dsid);
+//
+
+/* TODO (MIG) refactor sysout stuff*/
+static int  do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid);
 static void sanitize_jesinfo(const HASPCP *cp, char *jesinfo, size_t size);
-static void process_job_list_filters(Session *session, const char **filter,
-                                     JESFILT *jesfilt);
-static int process_single_job(JsonBuilder *builder, JESJOB *job,
-                              const char *owner);
-static int submit_file(Session *session, VSFILE *intrdr, const char *filename);
-static int getself(char *jobname, char *jobid);
-static int should_skip_job(const JESJOB *job, const char *owner);
+static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt);
+static int  process_single_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host);
+static int  submit_file(Session *session, VSFILE *intrdr, const char *filename);
+static int  get_self(char *jobname, char *jobid);
+static int  should_skip_job(const JESJOB *job, const char *owner);
+
+// TODO (MIG) remove these
+static int _recv(HTTPC *httpc, char *buf, int len);
+static int _send_response(Session *session, int status_code, const char *content_type, const char *data);
+static const unsigned char ASCII_CRLF[] = {CR, LF};
 
 //
 // public functions
 //
 
-int jobListHandler(Session *session) {
-  int rc = 0;
-  HASPCP *cp = NULL;
-  JES *jes = NULL;
-  JESJOB **joblist = NULL;
-  JESFILT jesfilt = FILTER_NONE;
-  const char *filter = NULL;
-  JsonBuilder *builder = createJsonBuilder();
+int 
+jobListHandler(Session *session) 
+{
+	int rc = 0;
+	
+	HASPCP *cp = NULL;
+	JES *jes = NULL;
+	JESJOB **joblist = NULL;
+	JESFILT jesfilt = FILTER_NONE;
+	const char *filter = NULL;
 
-  unsigned max_jobs = MAX_JOBS_LIMIT;
+	JsonBuilder *builder = createJsonBuilder();
 
-  if (!builder) {
-    sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-                      CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
-                      ERR_MSG_SERVER_ERROR, NULL, 0);
-    goto quit;
-  }
+	unsigned max_jobs = MAX_JOBS_LIMIT;
 
-  const char *owner = getQueryParam(session, "owner");
-  const char *max_jobs_str = getQueryParam(session, "max-jobs");
+	if (!builder) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		goto quit;
+	}
 
-  if (owner && owner[0] == '*') {
-    owner = NULL;
-  }
+	const char *host = getHeaderParam(session, "HOST");
+	const char *owner = getQueryParam(session, "owner");
+	const char *max_jobs_str = getQueryParam(session, "max-jobs");
 
-  process_job_list_filters(session, &filter, &jesfilt);
+	if (owner == NULL) {
+		owner = getHeaderParam(session, "CURRENT_USER");
+	}
 
-  if (max_jobs_str) {
-    char *endptr = NULL;
-    long val = strtol(max_jobs_str, &endptr, 10);
-    if (*endptr == '\0' && val > 0 && val <= UINT_MAX) {
-      max_jobs = (unsigned)val;
-    }
-  }
+	if (owner[0] == '*') {
+		owner = NULL;
+	}
 
-  if (max_jobs <= 0) {
-    max_jobs = 1;
-  } else if (max_jobs > MAX_JOBS_LIMIT) {
-    max_jobs = MAX_JOBS_LIMIT;
-  }
+	process_job_list_filters(session, &filter, &jesfilt);
 
-  jes = jesopen();
-  if (!jes) {
-    wtof(MSG_JOB_JES_ERROR);
-    sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM,
-                      RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
-                      ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
-    goto quit;
-  }
+	// convert max_jobs_str to max_jobs (unsigned int)
+	if (max_jobs_str) {
+		char *endptr = NULL;
+		long val = strtol(max_jobs_str, &endptr, DECIMAL_BASE);
+		if (*endptr == '\0' && val > 0 && val <= UINT_MAX) {
+			max_jobs = (unsigned)val;
+		}
+	}
 
-  // retrieve the job list from JES with the given filter
-  joblist = jesjob(jes, filter, jesfilt, 0);
+	// validate max_jobs boundaries
+	if (max_jobs <= 0) {
+		max_jobs = 1;
+	} else if (max_jobs > MAX_JOBS_LIMIT) {
+		max_jobs = MAX_JOBS_LIMIT;
+	}
 
-  // start a new JSON array
-  startArray(builder);
+	jes = jesopen();
+	if (!jes) {
+		wtof(MSG_JOB_JES_ERROR);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM,
+						RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
+						ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
+		goto quit;
+	}
 
-  int ii = 0;
-  for (ii = 0; ii < MIN(max_jobs, array_count(&joblist)); ii++) {
-    rc = process_single_job(builder, joblist[ii], owner);
-    if (rc < 0) {
-      goto quit;
-    }
-  }
+	// retrieve the job list from JES with the given filter
+	joblist = jesjob(jes, filter, jesfilt, 0);
 
-  // end the JSON array
-  endArray(builder);
+	// start a new JSON array
+	startArray(builder);
 
-  sendJSONResponse(session, HTTP_STATUS_OK, builder);
+	int ii = 0;
+	for (ii = 0; ii < MIN(max_jobs, array_count(&joblist)); ii++) {
+		rc = process_single_job(builder, joblist[ii], owner, host);
+		if (rc < 0) {
+			goto quit;
+		}
+	}
+
+	// end the JSON array
+	endArray(builder);
+
+	sendJSONResponse(session, HTTP_STATUS_OK, builder);
 
 quit:
 
-  if (builder) {
-    freeJsonBuilder(builder);
-  }
+	if (builder) {
+		freeJsonBuilder(builder);
+	}
 
-  if (jes) {
-    jesclose(&jes);
-  }
+	if (jes) {
+		jesclose(&jes);
+	}
 
-  return rc;
+	return 0;
 }
 
-int jobFilesHandler(Session *session) {
-  int rc = 0;
-  unsigned first = 1;
-  unsigned jcount = 0;
-  unsigned ddcount = 0;
-  unsigned i, j, k = 0;
+int 
+jobFilesHandler(Session *session) 
+{
+	int rc = 0;
 
-  HASPCP *cp = NULL;
-  JES *jes = NULL;
-  JESJOB **joblist = NULL;
-  JESFILT jesfilt = FILTER_NONE;
+	unsigned first = 1;
+	unsigned jcount = 0;
+	unsigned ddcount = 0;
 
-  int dd = 1;
-  char jesinfo[20] = "unknown";
+	HASPCP *cp = NULL;
+	JES *jes = NULL;
+	JESJOB **joblist = NULL;
+	JESFILT jesfilt = FILTER_NONE;
 
-  const char *filter = NULL;
-  const char *jobname = NULL;
-  const char *jobid = NULL;
+	JsonBuilder *builder = createJsonBuilder();
 
-  char recfm[12] = {0};
+	int dd = 1;
+	
+	char jesinfo[JES_INFO_SIZE] = "unknown";
+  	char recfm[RECFM_SIZE] = {0};
 
-  jobname =
-      (char *)http_get_env(session->httpc, (const UCHAR *)"HTTP_job-name");
-  jobid = (char *)http_get_env(session->httpc, (const UCHAR *)"HTTP_jobid");
-  wtof("FOO> jobname=%s; jobid=%s", jobname, jobid);
+	const char *filter = NULL;
+	const char *jobname = NULL;
+	const char *jobid = NULL;
 
-  if (!jobname || !jobid) {
-    rc = http_resp_internal_error(session->httpc);
-    return rc;
-  }
+	
+	unsigned job_found = 0;
 
-  filter = jobid;
-  jesfilt = FILTER_JOBID;
 
-  /* Open the JES2 checkpoint and spool datasets */
-  jes = jesopen();
-  if (!jes) {
-    wtof("*** unable to open JES2 checkpoint and spool datasets ***");
-    /* we don't quit here, instead we'll send back an empty JSON object */
-  }
+	if (!builder) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		goto quit;
+	}
 
-  if (jes) {
-    cp = jes->cp;
-    joblist = jesjob(jes, filter, jesfilt, dd);
-  }
+	jobname = getPathParam(session, "job-name");
+	jobid   = getPathParam(session, "jobid");
 
-  if (cp && cp->buf) {
-    sanitize_jesinfo(cp, jesinfo, sizeof(jesinfo));
-  }
+	if (!jobname || !jobid) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		goto quit;
+	}
 
-  if ((rc = http_resp(session->httpc, 200)) < 0)
-    goto quit;
-  if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0)
-    goto quit;
-  if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n",
-                        "application/json")) < 0)
-    goto quit;
-  if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) <
-      0)
-    goto quit;
-  if ((rc = http_printf(session->httpc, "\r\n")) < 0)
-    goto quit;
+	filter = jobid;
+	jesfilt = FILTER_JOBID;
 
-  jcount = array_count(&joblist);
+	jes = jesopen();
+	if (!jes) {
+		wtof(MSG_JOB_JES_ERROR);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM,
+						RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
+						ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
+		goto quit;
+	}
 
-  if ((rc = http_printf(session->httpc, "[\n")) < 0)
-    goto quit;
+	cp = jes->cp;
+	joblist = jesjob(jes, filter, jesfilt, dd);
 
-  for (i = 0; i < jcount; i++) {
-    JESJOB *job = joblist[i];
+	if (cp && cp->buf) {
+		sanitize_jesinfo(cp, jesinfo, sizeof(jesinfo));
+	}
 
-    if (!job)
-      continue;
-    if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) != 0)
-      continue;
+	int ii = 0;
+	int jj = 0;
+	int kk = 0;
+	for (ii = 0; ii < array_count(&joblist); ii++) {
 
-    ddcount = array_count(&job->jesdd);
-    for (j = 0; j < ddcount; j++) {
-      JESDD *dd = job->jesdd[j];
+		JESJOB *job = joblist[ii];
 
-      // skip JESINTXT
-      if (http_cmp((const UCHAR *)dd->ddname, (const UCHAR *)"JESINTXT") == 0)
-        continue;
+		if (!job) {
+			continue;
+		}
+		
+		if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) != 0) {
+			continue;
+		}
 
-      if (first) {
-        /* first time we're printing this '{' so no ',' needed */
-        if ((rc = http_printf(session->httpc, "  {\n")) < 0)
-          goto quit;
-        first = 0;
-      } else {
-        /* all other times we need a ',' before the '{' */
-        if ((rc = http_printf(session->httpc, " ,{\n")) < 0)
-          goto quit;
-      }
+		// check if we have more than one job with the same name
+		job_found++;
+		if (job_found > 1) {
+			wtof("MVSMF22E More than one job found for reference: '%s(%s)'", jobname, jobid);
+			sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,
+						RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
 
-      k = 0;
-      if ((dd->recfm & RECFM_U) == RECFM_U) {
-        recfm[k++] = 'U';
-      } else if ((dd->recfm & RECFM_F) == RECFM_F) {
-        recfm[k++] = 'F';
-      } else if ((dd->recfm & RECFM_V) == RECFM_V) {
-        recfm[k++] = 'V';
-      }
+			goto quit;
+		}
 
-      if (dd->recfm & RECFM_BR) {
-        recfm[k++] = 'B';
-      }
+		// start a new JSON array
+		startArray(builder);
 
-      if (dd->recfm & RECFM_CA) {
-        recfm[k++] = 'A';
-      } else if (dd->recfm & RECFM_CM) {
-        recfm[k++] = 'M';
-      }
+		for (jj = 0; jj < array_count(&job->jesdd); jj++) {
+			JESDD *dd = job->jesdd[jj];
 
-      if (recfm[0] == 'V' && (dd->recfm & RECFM_SB)) {
-        recfm[k++] = 'S'; /* spanned records */
-      }
-      recfm[k] = 0;
+			// skip JESINTXT
+			if (http_cmp((const UCHAR *)dd->ddname, (const UCHAR *)"JESINTXT") == 0) {
+				continue;
+			}
 
-      if ((rc = http_printf(session->httpc, "    \"recfm\": \"%s\",\n",
-                            recfm)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"records-url\": \"%s\",\n",
-                            "http://foo")) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"subsystem\": \"%s\",\n",
-                            "JES2")) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"job-correlator\": \"%s\",\n",
-                            "")) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"byte-count\": %d,\n", 0)) <
-          0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"lrecl\": %d,\n",
-                            dd->lrecl)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"jobid\": \"%s\",\n",
-                            job->jobid)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"ddname\": \"%s\",\n",
-                            dd->ddname)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"id\": %d,\n", dd->dsid)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"record-count\": %d,\n",
-                            dd->records)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"class\": \"%c\",\n",
-                            dd->oclass)) < 0)
-        goto quit;
-      if ((rc = http_printf(session->httpc, "    \"jobname\": \"%s\",\n",
-                            job->jobname)) < 0)
-        goto quit;
 
-      if (strlen((const char *)dd->stepname) > 0) {
-        if ((rc = http_printf(session->httpc, "    \"stepname\": \"%s\",\n",
-                              dd->stepname)) < 0)
-          goto quit;
-      } else {
-        if ((rc = http_printf(session->httpc,
-                              "    \"stepname\": \"JES2\",\n")) < 0)
-          goto quit;
-      }
+			kk = 0;
+			if ((dd->recfm & RECFM_U) == RECFM_U) {
+				recfm[kk++] = 'U';
+			} else if ((dd->recfm & RECFM_F) == RECFM_F) {
+				recfm[kk++] = 'F';
+			} else if ((dd->recfm & RECFM_V) == RECFM_V) {
+				recfm[kk++] = 'V';
+			}
 
-      if (strlen((const char *)dd->procstep) > 0) {
-        if ((rc = http_printf(session->httpc, "    \"procstep\": \"%s\"\n",
-                              dd->procstep)) < 0)
-          goto quit;
-      } else {
-        if ((rc = http_printf(session->httpc, "    \"procstep\": null\n")) < 0)
-          goto quit;
-      }
+			if (dd->recfm & RECFM_BR) {
+				recfm[kk++] = 'B';
+			}
 
-      if ((rc = http_printf(session->httpc, "  }\n")) < 0)
-        goto quit;
-    }
-  }
+			if (dd->recfm & RECFM_CA) {
+				recfm[kk++] = 'A';
+			} else if (dd->recfm & RECFM_CM) {
+				recfm[kk++] = 'M';
+			}
 
-  if ((rc = http_printf(session->httpc, "]\n")) < 0)
-    goto quit;
+			if (recfm[0] == 'V' && (dd->recfm & RECFM_SB)) {
+				recfm[kk++] = 'S'; /* spanned records */
+			}
+			recfm[kk] = 0;
+
+			rc = startJsonObject(builder);
+
+			rc = addJsonString(builder, "recfm", recfm);
+			rc = addJsonString(builder, "records-url", "http://foo");
+			rc = addJsonString(builder, "subsystem", "JES2");
+			// addJsonString(builder, "job-correlator", "");
+			rc = addJsonString(builder, "byte-count", 0);
+			rc = addJsonNumber(builder, "lrecl", dd->lrecl);
+			rc = addJsonString(builder, "jobid", (char *) job->jobid);
+			rc = addJsonString(builder, "ddname", (char *) dd->ddname);
+			rc = addJsonNumber(builder, "id", dd->dsid);
+			rc = addJsonNumber(builder, "record-count", (int) dd->records);
+			rc = addJsonString(builder, "class", (char[]){(char)dd->oclass, '\0'});
+			rc = addJsonString(builder, "jobname", (char *) job->jobname);
+		
+			if (dd->stepname[0] != '\0') {
+				rc = addJsonString(builder, "stepname", (char *) dd->stepname);
+			} else {
+				rc = addJsonString(builder, "stepname", "JES2");
+			}
+
+			if (dd->procstep[0] != '\0') {
+				rc = addJsonString(builder, "procstep", (char *) dd->procstep);
+			} else {
+				rc = addJsonString(builder, "procstep", NULL);
+			}
+
+			rc = endJsonObject(builder);
+
+			if (rc < 0) {
+				goto quit;
+			}
+		}
+
+		// end the JSON array
+		endArray(builder);
+	}
+	
+	if (job_found == 0) {
+		char msg[MAX_ERR_MSG_LENGTH] = {0};
+		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
+		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+						RC_WARNING, REASON_JOB_NOT_FOUND,
+						msg, NULL, 0);
+		goto quit;
+	}
+
+	sendJSONResponse(session, HTTP_STATUS_OK, builder);
 
 quit:
 
-  if (jes) {
-    jesclose(&jes);
-  }
+	if (builder) {
+		freeJsonBuilder(builder);
+	}
 
-  return rc;
+	if (jes) {
+		jesclose(&jes);
+	}
+
+	return 0;
 }
 
 int jobRecordsHandler(Session *session) {
@@ -327,7 +343,7 @@ int jobRecordsHandler(Session *session) {
   JESFILT jesfilt = FILTER_NONE;
 
   int dd = 1;
-  char jesinfo[20] = "unknown";
+  char jesinfo[JES_INFO_SIZE] = "unknown";
 
   const char *filter = NULL;
   const char *jobname = NULL;
@@ -765,7 +781,7 @@ int jobStatusHandler(Session *session) {
   JESFILT jesfilt = FILTER_NONE;
 
   int dd = 1;
-  char jesinfo[20] = "unknown";
+  char jesinfo[JES_INFO_SIZE] = "unknown";
 
   const char *filter = NULL;
   const char *jobname = NULL;
@@ -958,7 +974,7 @@ int jobPurgeHandler(Session *session) {
     goto quit;
   }
 
-  getself(thisjobname, thisjobid);
+  get_self(thisjobname, thisjobid);
 
   // Open JES2
   jes = jesopen();
@@ -1241,9 +1257,9 @@ quit:
   return rc;
 }
 
-__asm__("\n&FUNC	SETC 'getself'");
+__asm__("\n&FUNC	SETC 'get_self'");
 static int
-getself(char *jobname, char *jobid) 
+get_self(char *jobname, char *jobid) 
 {
   unsigned *psa = (unsigned *)0;
   unsigned *tcb = (unsigned *)psa[540 / 4];   /* A(current TCB) */
@@ -1303,70 +1319,85 @@ process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt
 
 __asm__("\n&FUNC	SETC 'process_single_job'");
 static int 
-process_single_job(JsonBuilder *builder, JESJOB *job, const char *owner) 
+process_single_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host) 
 {
-  int rc = 0;
+	int rc = 0;
 
-  char *host_str = "drnbrx3a.neunetz.it";
-  char *port_str = "1080";
-  unsigned port = 1080;
+	const char *host_str = NULL;
 
-  char type_str[TYPE_STR_SIZE];
-  char class_str[CLASS_STR_SIZE];
-  char url_str[MAX_URL_LENGTH];
-  char files_url_str[MAX_URL_LENGTH];
+	char type_str[TYPE_STR_SIZE];
+	char class_str[CLASS_STR_SIZE];
+	char url_str[MAX_URL_LENGTH];
+	char files_url_str[MAX_URL_LENGTH];
+	char *stat_str = "UNKNOWN";
 
-  char *stat_str = "UNKNOWN";
+	if (should_skip_job(job, owner)) {
+		return 0;
+	}
 
-  if (should_skip_job(job, owner)) {
-    return 0;
-  }
+	if (host != NULL) {
+		host_str = host;
+	} else {
+		host_str = "127.0.0.1:8080";
+	}
 
-  rc = snprintf(type_str, sizeof(type_str), "%.3s", job->jobid);
-  rc = snprintf(class_str, sizeof(class_str), "%.1s",
-                job->eclass != '\\' ? (char)job->eclass : ' ');
-  rc = snprintf(url_str, sizeof(url_str),
-                "http://%s:%d/zosmf/restjobs/jobs/%s/%s", host_str, port,
-                job->jobname, job->jobid);
-  rc = snprintf(files_url_str, sizeof(files_url_str), "%s/files", url_str);
+	// type is the first 3 characters of the jobid
+	rc = snprintf(type_str, sizeof(type_str), "%.3s", job->jobid);
+	
+	// for STCs and TSO users, class is the first 3 characters of the jobid
+	rc = snprintf(class_str, sizeof(class_str), "%.3s", job->jobid);
+	
+	// for standard jobs, class is the job class
+	if (isalnum(job->eclass)) {
+		rc = snprintf(class_str, sizeof(class_str), "%c", job->eclass);
+	} 
 
-  if (rc < 0) {
-    wtof("MVSMF19E internal error");
-    return -1;
-  }
+	// url is the full url to the job
+	rc = snprintf(url_str, sizeof(url_str),
+					"http://%s/zosmf/restjobs/jobs/%s/%s", host_str, job->jobname, job->jobid);
+	
+	// files_url is the full url to the job sysout files
+	rc = snprintf(files_url_str, sizeof(files_url_str), "%s/files", url_str);
 
-  if (job->q_type) {
-    if (job->q_type & _XEQ) {
-      stat_str = "ACTIVE";
-    } else if (job->q_type & _INPUT) {
-      stat_str = "INPUT";
-    } else if (job->q_type & _XMIT) {
-      stat_str = "XMIT";
-    } else if (job->q_type & _SETUP) {
-      stat_str = "SSETUP";
-    } else if (job->q_type & _RECEIVE) {
-      stat_str = "RECEIVE";
-    } else if (job->q_type & _OUTPUT || job->q_type & _HARDCPY) {
-      stat_str = "OUTPUT";
-    } else {
-      stat_str = "UNKNOWN";
-    }
-  }
+	if (rc < 0) {
+		wtof("MVSMF19E internal error");
+		return -1;
+	}
 
-  rc = startJsonObject(builder);
-  rc = addJsonString(builder, "subsystem", "JES2");
-  rc = addJsonString(builder, "jobname", (const char *)job->jobname);
-  rc = addJsonString(builder, "jobid", (const char *)job->jobid);
-  rc = addJsonString(builder, "owner", (const char *)job->owner);
-  rc = addJsonString(builder, "type", type_str);
-  rc = addJsonString(builder, "class", class_str);
-  rc = addJsonString(builder, "url", url_str);
-  rc = addJsonString(builder, "files-url", files_url_str);
-  rc = addJsonString(builder, "status", stat_str);
-  rc = addJsonString(builder, "retcode", "n/a");
-  rc = endJsonObject(builder);
+	if (job->q_type) {
+		if (job->q_type & _XEQ) {
+			stat_str = "ACTIVE";
+		} else if (job->q_type & _INPUT) {
+			stat_str = "INPUT";
+		} else if (job->q_type & _XMIT) {
+			stat_str = "XMIT";
+		} else if (job->q_type & _SETUP) {
+			stat_str = "SETUP";
+		} else if (job->q_type & _RECEIVE) {
+			stat_str = "RECEIVE";
+		} else if (job->q_type & _OUTPUT || job->q_type & _HARDCPY) {
+			stat_str = "OUTPUT";
+		} else {
+			stat_str = "UNKNOWN";
+		}
+	}
 
-  return rc;
+	rc = startJsonObject(builder);
+
+	rc = addJsonString(builder, "subsystem", "JES2");
+	rc = addJsonString(builder, "jobname", (const char *)job->jobname);
+	rc = addJsonString(builder, "jobid", (const char *)job->jobid);
+	rc = addJsonString(builder, "owner", (const char *)job->owner);
+	rc = addJsonString(builder, "type", type_str);
+	rc = addJsonString(builder, "class", class_str);
+	rc = addJsonString(builder, "url", url_str);
+	rc = addJsonString(builder, "files-url", files_url_str);
+	rc = addJsonString(builder, "status", stat_str);
+	rc = addJsonString(builder, "retcode", "n/a");
+	
+	rc = endJsonObject(builder);
+
+	return rc;
 }
 
 __asm__("\n&FUNC	SETC 'sanitize_jesinfo'");
@@ -1415,4 +1446,184 @@ should_skip_job(const JESJOB *job, const char *owner)
   }
 
   return 0;
+}
+
+__asm__("\n&FUNC	SETC 'uint_to_hex_ascii'");
+static 
+void uint_to_hex_ascii(size_t value, char *output) 
+{
+    int pos = 0;
+    int i;
+    char temp;
+    
+    /* Spezialfall für 0 */
+    if (value == 0) {
+        output[0] = 0x30; 
+        output[1] = CR;  
+        output[2] = LF;  
+		output[3] = CR;
+		output[4] = LF;
+        output[5] = '\0';
+        return;
+    }
+    
+    /* Hex-Ziffern von rechts nach links aufbauen */
+    while (value > 0) {
+        int digit = value % 16;
+        if (digit < 10) {
+            output[pos++] = 0x30 + digit;    /* ASCII '0'-'9' (0x30-0x39) */
+        } else {
+            output[pos++] = 0x41 + digit - 10;  /* ASCII 'A'-'F' (0x41-0x46) */
+        }
+        value /= 16;
+    }
+    
+    /* String umdrehen */
+    for (i = 0; i < pos/2; i++) {
+        temp = output[i];
+        output[i] = output[pos-1-i];
+        output[pos-1-i] = temp;
+    }
+    
+    /* CRLF hinzufügen */
+    output[pos++] = CR; 
+    output[pos++] = LF; 
+    output[pos] = '\0';
+}
+
+__asm__("\n&FUNC	SETC '_recv'");
+static int 
+_recv(HTTPC *httpc, char *buf, int len)
+{
+    int total_bytes_received = 0;
+    int bytes_received;
+    int sockfd;
+
+    sockfd = httpc->socket;
+    while (total_bytes_received < len) {
+        bytes_received = recv(sockfd, buf + total_bytes_received, len - total_bytes_received, 0);
+		if (bytes_received < 0) {
+            if (errno == EINTR) {
+                // Interrupted by a signal, retry
+                continue;
+            } else {
+                // An error occurred
+                return -1;
+            }
+        } else if (bytes_received == 0) {
+            // Connection closed by the client
+            break;
+        }
+        total_bytes_received += bytes_received;
+    }
+
+    return total_bytes_received;
+}
+
+__asm__("\n&FUNC	SETC '_send_response'");
+static int 
+_send_response(Session *session, int status_code, const char *content_type, const char *data)
+{
+    char buffer[INITIAL_BUFFER_SIZE];
+    int ret;
+
+    // HTTP-Statuszeile erstellen
+    sprintf(buffer, "HTTP/1.0 %d ", status_code);
+
+    // Statusnachricht basierend auf dem Statuscode hinzufügen
+    switch (status_code) {
+        case 200:
+            strcat(buffer, "OK\r\n");
+            break;
+		case 201:
+			strcat(buffer, "Created\r\n");
+			break;
+		case 400:
+			strcat(buffer, "Bad Request\r\n");
+			break;
+		case 403:
+			strcat(buffer, "Forbidden\r\n");
+			break;			
+        case 404:
+            strcat(buffer, "Not Found\r\n");
+            break;
+		case 415:
+			strcat(buffer, "Unsupported Media Type\r\n");
+			break;
+		case 500:
+			strcat(buffer, "Internal Server Error\r\n");
+			break; 
+		default:
+            strcat(buffer, "Unknown\r\n");
+            break;
+    }
+
+    sprintf(buffer + strlen(buffer),
+            "Content-Type: %s\r\n"
+            "Transfer-Encoding: chunked\r\n"
+            "Connection: close\r\n\r\n",
+            content_type);
+    
+    http_etoa((UCHAR *) buffer, strlen(buffer));
+    ret = send(session->httpc->socket, buffer, strlen(buffer), 0);
+    if (ret < 0) {
+        wtof("Failed to send HTTP header: %s", strerror(errno));
+        return -1;
+    }
+
+    const char *current = data;
+    size_t remaining = strlen(data);
+
+    while (remaining > 0) {
+        // Chunk-Größe bestimmen (angepasst an Puffergröße)
+        size_t chunk_size = remaining > INITIAL_BUFFER_SIZE ? INITIAL_BUFFER_SIZE : remaining;
+   
+   	 	char chunk_size_str[32 + 2];
+    	uint_to_hex_ascii(chunk_size, chunk_size_str);
+
+    	ret = send(session->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
+        if (ret < 0) {
+            wtof("Failed to send chunk size: %s", strerror(errno));
+            return -1;
+        }
+
+
+        // Chunk-Daten in temporären Puffer kopieren
+        char chunk_buffer[INITIAL_BUFFER_SIZE];
+        memcpy(chunk_buffer, current, chunk_size);
+
+        // Chunk-Daten kodieren
+        http_etoa((UCHAR *) chunk_buffer, chunk_size);
+
+        // Chunk-Daten senden
+        ret = send(session->httpc->socket, chunk_buffer, chunk_size, 0);
+        if (ret < 0) {
+            perror("Failed to send chunk data");
+            return -1;
+        }
+
+        ret = send(session->httpc->socket, ASCII_CRLF, 2, 0);
+        if (ret < 0) {
+            perror("Failed to send CRLF");
+            return -1;
+        }
+
+        // Zum nächsten Chunk fortschreiten
+        current += chunk_size;
+        remaining -= chunk_size;
+    }
+
+    // Finalen leeren Chunk senden, um das Ende zu signalisieren
+	size_t chunk_size = 0;
+   
+	char chunk_size_str[32 + 2];
+	uint_to_hex_ascii(chunk_size, chunk_size_str);
+
+    ret = send(session->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
+    if (ret < 0) {
+        perror("Failed to send final chunk");
+        return -1;
+    }
+
+    return 0;
 }

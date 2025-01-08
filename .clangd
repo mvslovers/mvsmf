@@ -30,6 +30,7 @@
         "hicpp-no-assembler",
         "altera-unroll-loops",
         "bugprone-easily-swappable-parameters",
+		"bugprone-not-null-terminated-result",
         "readability-identifier-length"
       ]
     },

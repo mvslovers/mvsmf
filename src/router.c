@@ -8,10 +8,10 @@
 
 #define INITIAL_BUFFER_SIZE 4096
 
-#define CR 0x0D
-#define LF 0x0A
+//	
+// private function prototypes
+//
 
-// internal functions declaration
 static int route_matching_middleware(Session *session);
 static int path_vars_extracting_middleware(Session *session);
 
@@ -19,10 +19,6 @@ static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
 static int is_pattern_match(const char *pattern, const char *path);
 static int extract_path_vars(Session *session, const char *pattern, const char *path);
-
-static void uint_to_hex_ascii(size_t value, char *output) ;
-
-static const unsigned char ASCII_CRLF[] = {CR, LF};
 
 //
 // public functions
@@ -72,7 +68,7 @@ void add_route(Router *router, HttpMethod method, const char *pattern, RouteHand
 void add_middleware(Router *router, char *middleware_name, MiddlewareHandler handler)
 {
     if (router->middleware_count >= MAX_MIDDLEWARES) {
-        wtof("MAX_MIDDLEWARES limit reached.");
+        wtof("MVSMF12E MAX_MIDDLEWARES limit reached.");
         return;
     }
 
@@ -124,154 +120,10 @@ int handle_request(Router *router, Session *session)
 }
 
 //
-// internal functions
+// private functions
 //
 
-int _send_response(Session *session, int status_code, const char *content_type, const char *data)
-{
-    char buffer[INITIAL_BUFFER_SIZE];
-    int ret;
-
-    // HTTP-Statuszeile erstellen
-    sprintf(buffer, "HTTP/1.0 %d ", status_code);
-
-    // Statusnachricht basierend auf dem Statuscode hinzufügen
-    switch (status_code) {
-        case 200:
-            strcat(buffer, "OK\r\n");
-            break;
-		case 201:
-			strcat(buffer, "Created\r\n");
-			break;
-		case 400:
-			strcat(buffer, "Bad Request\r\n");
-			break;
-		case 403:
-			strcat(buffer, "Forbidden\r\n");
-			break;			
-        case 404:
-            strcat(buffer, "Not Found\r\n");
-            break;
-		case 415:
-			strcat(buffer, "Unsupported Media Type\r\n");
-			break;
-		case 500:
-			strcat(buffer, "Internal Server Error\r\n");
-			break; 
-		default:
-            strcat(buffer, "Unknown\r\n");
-            break;
-    }
-
-    sprintf(buffer + strlen(buffer),
-            "Content-Type: %s\r\n"
-            "Transfer-Encoding: chunked\r\n"
-            "Connection: close\r\n\r\n",
-            content_type);
-    
-    http_etoa((UCHAR *) buffer, strlen(buffer));
-    ret = send(session->httpc->socket, buffer, strlen(buffer), 0);
-    if (ret < 0) {
-        wtof("Failed to send HTTP header: %s", strerror(errno));
-        return -1;
-    }
-
-    const char *current = data;
-    size_t remaining = strlen(data);
-
-    while (remaining > 0) {
-        // Chunk-Größe bestimmen (angepasst an Puffergröße)
-        size_t chunk_size = remaining > INITIAL_BUFFER_SIZE ? INITIAL_BUFFER_SIZE : remaining;
-   
-   	 	/* Chunk-Größe als ASCII Hex */
-    	char chunk_size_str[32 + 2];
-    	uint_to_hex_ascii(chunk_size, chunk_size_str);
-
-    	/* Sende Chunk-Größe */
-    	ret = send(session->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
-        if (ret < 0) {
-            wtof("Failed to send chunk size: %s", strerror(errno));
-            return -1;
-        }
-
-
-        // Chunk-Daten in temporären Puffer kopieren
-        char chunk_buffer[INITIAL_BUFFER_SIZE];
-        memcpy(chunk_buffer, current, chunk_size);
-
-        // Chunk-Daten kodieren
-        http_etoa((UCHAR *) chunk_buffer, chunk_size);
-
-        // Chunk-Daten senden
-        ret = send(session->httpc->socket, chunk_buffer, chunk_size, 0);
-        if (ret < 0) {
-            perror("Failed to send chunk data");
-            return -1;
-        }
-
-        ret = send(session->httpc->socket, ASCII_CRLF, 2, 0);
-        if (ret < 0) {
-            perror("Failed to send CRLF");
-            return -1;
-        }
-
-        // Zum nächsten Chunk fortschreiten
-        current += chunk_size;
-        remaining -= chunk_size;
-    }
-
-    // Finalen leeren Chunk senden, um das Ende zu signalisieren
-	size_t chunk_size = 0;
-   
-	char chunk_size_str[32 + 2];
-	uint_to_hex_ascii(chunk_size, chunk_size_str);
-
-    ret = send(session->httpc->socket, chunk_size_str, strlen(chunk_size_str), 0);
-    if (ret < 0) {
-        perror("Failed to send final chunk");
-        return -1;
-    }
-
-    return 0;
-}
- 
-int _recv(HTTPC *httpc, char *buf, int len)
-{
-    int total_bytes_received = 0;
-    int bytes_received;
-    int sockfd;
-
-    sockfd = httpc->socket;
-    while (total_bytes_received < len) {
-        bytes_received = recv(sockfd, buf + total_bytes_received, len - total_bytes_received, 0);
-		if (bytes_received < 0) {
-            if (errno == EINTR) {
-                // Interrupted by a signal, retry
-                continue;
-            } else {
-                // An error occurred
-                return -1;
-            }
-        } else if (bytes_received == 0) {
-            // Connection closed by the client
-            break;
-        }
-        total_bytes_received += bytes_received;
-    }
-
-    return total_bytes_received;
-}
-
-char* _get_host(HTTPD *httpd, HTTPC *httpc)
-{
-	// TODO: Implement this function
-    return "http://drnbrx3a.neunetz.it:1080";
-}
-
-//
-// static functions
-//
-
+__asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 
 int route_matching_middleware(Session *sessionr) 
 {
@@ -282,6 +134,7 @@ int route_matching_middleware(Session *sessionr)
     return 0;
 }
 
+__asm__("\n&FUNC	SETC 'path_vars_extracting_middleware'");
 static 
 int path_vars_extracting_middleware(Session *session) 
 {
@@ -292,6 +145,7 @@ int path_vars_extracting_middleware(Session *session)
     return 0;
 }
 
+__asm__("\n&FUNC	SETC 'parseMethod'");
 static 
 HttpMethod parseMethod(const char *method) 
 {
@@ -303,6 +157,7 @@ HttpMethod parseMethod(const char *method)
     return (HttpMethod) -1; 
 }
 
+__asm__("\n&FUNC	SETC 'find_route'");
 static 
 Route *find_route(Router *router, HttpMethod method, const char *path)
 {
@@ -316,6 +171,7 @@ Route *find_route(Router *router, HttpMethod method, const char *path)
     return NULL;
 }
 
+__asm__("\n&FUNC	SETC 'is_pattern_match'");
 static 
 int is_pattern_match(const char *pattern, const char *path) 
 {
@@ -338,6 +194,7 @@ int is_pattern_match(const char *pattern, const char *path)
     return *pattern == '\0' && *path == '\0';
 }
 
+__asm__("\n&FUNC	SETC 'extract_path_vars'");
 static 
 int extract_path_vars(Session *session, const char *pattern, const char *path) 
 {
@@ -384,46 +241,6 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
             }
         }
     }
-}
 
-static 
-void uint_to_hex_ascii(size_t value, char *output) 
-{
-    int pos = 0;
-    int i;
-    char temp;
-    
-    /* Spezialfall für 0 */
-    if (value == 0) {
-        output[0] = 0x30; 
-        output[1] = CR;  
-        output[2] = LF;  
-		output[3] = CR;
-		output[4] = LF;
-        output[5] = '\0';
-        return;
-    }
-    
-    /* Hex-Ziffern von rechts nach links aufbauen */
-    while (value > 0) {
-        int digit = value % 16;
-        if (digit < 10) {
-            output[pos++] = 0x30 + digit;    /* ASCII '0'-'9' (0x30-0x39) */
-        } else {
-            output[pos++] = 0x41 + digit - 10;  /* ASCII 'A'-'F' (0x41-0x46) */
-        }
-        value /= 16;
-    }
-    
-    /* String umdrehen */
-    for (i = 0; i < pos/2; i++) {
-        temp = output[i];
-        output[i] = output[pos-1-i];
-        output[pos-1-i] = temp;
-    }
-    
-    /* CRLF hinzufügen */
-    output[pos++] = CR; 
-    output[pos++] = LF; 
-    output[pos] = '\0';
+	return 0;
 }

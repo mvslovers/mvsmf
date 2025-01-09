@@ -26,7 +26,8 @@
 #define TYPE_STR_SIZE    3 + 1
 #define CLASS_STR_SIZE   3 + 1
 #define JES_INFO_SIZE   20 + 1
-#define RECFM_SIZE       3 + 1
+#define RECFM_SIZE       4 + 1
+
 //
 // private functions prototypes
 //
@@ -35,7 +36,7 @@
 static int  do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid);
 static void sanitize_jesinfo(const HASPCP *cp, char *jesinfo, size_t size);
 static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt);
-static int  process_single_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host);
+static int  process_job_list_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host);
 static int  submit_file(Session *session, VSFILE *intrdr, const char *filename);
 static int  get_self(char *jobname, char *jobid);
 static int  should_skip_job(const JESJOB *job, const char *owner);
@@ -118,7 +119,7 @@ jobListHandler(Session *session)
 
 	int ii = 0;
 	for (ii = 0; ii < MIN(max_jobs, array_count(&joblist)); ii++) {
-		rc = process_single_job(builder, joblist[ii], owner, host);
+		rc = process_job_list_job(builder, joblist[ii], owner, host);
 		if (rc < 0) {
 			goto quit;
 		}
@@ -166,7 +167,6 @@ jobFilesHandler(Session *session)
 	const char *filter = NULL;
 	const char *jobname = NULL;
 	const char *jobid = NULL;
-
 	
 	unsigned job_found = 0;
 
@@ -206,6 +206,7 @@ jobFilesHandler(Session *session)
 	if (cp && cp->buf) {
 		sanitize_jesinfo(cp, jesinfo, sizeof(jesinfo));
 	}
+
 
 	int ii = 0;
 	int jj = 0;
@@ -272,7 +273,9 @@ jobFilesHandler(Session *session)
 			rc = startJsonObject(builder);
 
 			rc = addJsonString(builder, "recfm", recfm);
-			rc = addJsonString(builder, "records-url", "http://foo");
+			
+			//  "records-url": "http://%s/zosmf/restjobs/jobs/%s/%s/files/%d/records",
+			rc = addJsonString(builder, "records-url", "https://10.56.83.100:443/zosmf/restjobs/jobs/NAME/ID/files/{DSID}/records");
 			rc = addJsonString(builder, "subsystem", "JES2");
 			// addJsonString(builder, "job-correlator", "");
 			rc = addJsonString(builder, "byte-count", 0);
@@ -1142,64 +1145,69 @@ __asm__("\n&FUNC	SETC 'do_print_sysout_line'");
 static int 
 do_print_sysout_line(const char *line, unsigned linelen) 
 {
-  int rc = 0;
+	int rc = 0;
 
 // we do not have httpr in this function,
 // so we have to use httpd
 #undef httpx
 #define httpx httpd->httpx
 
-  CLIBGRT *grt = __grtget();
-  HTTPD *httpd = grt->grtapp1;
-  HTTPC *httpc = grt->grtapp2;
+	CLIBGRT *grt = __grtget();
+	HTTPD *httpd = grt->grtapp1;
+	HTTPC *httpc = grt->grtapp2;
 
-  rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
+	rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
 
 // switch back to httpr
 #undef httpx
 #define httpx session->httpd->httpx
 
-  return rc;
+	return rc;
 }
 
 __asm__("\n&FUNC	SETC 'do_print_sysout'");
 static int 
 do_print_sysout(Session *session, JES *jes, JESJOB *job, unsigned dsid) 
 {
-  int rc = 0;
-  unsigned count;
-  unsigned n;
+	int rc = 0;
 
-  count = array_count(&job->jesdd);
-  for (n = 0; n < count; n++) {
-    JESDD *dd = job->jesdd[n];
+	unsigned ii = 0;
+	for (ii = 0; ii < array_count(&job->jesdd); ii++) {
+		JESDD *dd = job->jesdd[ii];
 
-    if (!dd)
-      continue;
+		if (!dd) {
+			continue;
+		}
 
-    if (!dd->mttr)
-      continue; /* no spool data for this dd	*/
+		if (dd->dsid != dsid) {
+			continue;
+		}
 
-    if (dd->dsid != dsid)
-      continue;
+		/* no spool data for this dd */
+		if (!dd->mttr) {
+			continue;
+		}
+				
+		if ((dd->flag & FLAG_SYSIN) && !dsid) {
+			continue;
+		}
 
-    if ((dd->flag & FLAG_SYSIN) && !dsid)
-      continue; /* don't show SYSIN data		*/
+		rc = jesprint(jes, job, dd->dsid, do_print_sysout_line);
+		if (rc < 0) {
+			goto quit;
+		}
 
-    rc = jesprint(jes, job, dd->dsid, do_print_sysout_line);
-    if (rc < 0)
-      goto quit;
-
-    rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
-                                     "- - - - - - - - - - - - - - - - - - - - "
-                                     "- - - - - - - - - - - - - - - - - - - - "
-                                     "- - - - - -\r\n");
-    if (rc < 0)
-      goto quit;
-  }
+		rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
+										"- - - - - - - - - - - - - - - - - - - - "
+										"- - - - - - - - - - - - - - - - - - - - "
+										"- - - - - -\r\n");
+		if (rc < 0) {
+			goto quit;
+		}
+	}
 
 quit:
-  return rc;
+	return rc;
 }
 
 __asm__("\n&FUNC	SETC 'submit_file'");
@@ -1293,33 +1301,33 @@ __asm__("\n&FUNC	SETC 'process_job_list_filters'");
 static void 
 process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt) 
 {
-  const char *prefix = getQueryParam(session, "prefix");
-  const char *status = getQueryParam(session, "status");
-  const char *jobid = getQueryParam(session, "jobid");
+	const char *prefix = getQueryParam(session, "prefix");
+ 	const char *status = getQueryParam(session, "status");
+  	const char *jobid  = getQueryParam(session, "jobid");
 
-  if (prefix && prefix[0] == '*') {
-    prefix = NULL;
-  }
+	if (prefix && prefix[0] == '*') {
+		prefix = NULL;
+	}
 
-  if (status && status[0] == '*') {
-    status = NULL;
-  }
+	if (status && status[0] == '*') {
+		status = NULL;
+	}
 
-  if (prefix && !jobid) {
-    *filter = prefix;
-    *jesfilt = FILTER_JOBNAME;
-  } else if (jobid) {
-    *filter = jobid;
-    *jesfilt = FILTER_JOBID;
-  } else {
-    *filter = "";
-    *jesfilt = FILTER_NONE;
-  }
+	if (prefix && !jobid) {
+		*filter = prefix;
+		*jesfilt = FILTER_JOBNAME;
+	} else if (jobid) {
+		*filter = jobid;
+		*jesfilt = FILTER_JOBID;
+	} else {
+		*filter = "";
+		*jesfilt = FILTER_NONE;
+	}
 }
 
-__asm__("\n&FUNC	SETC 'process_single_job'");
+__asm__("\n&FUNC	SETC 'process_job_list_job'");
 static int 
-process_single_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host) 
+process_job_list_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host) 
 {
 	int rc = 0;
 
@@ -1404,48 +1412,48 @@ __asm__("\n&FUNC	SETC 'sanitize_jesinfo'");
 static void 
 sanitize_jesinfo(const HASPCP *cp, char *jesinfo, size_t size) 
 {
-  size_t i;
-  for (i = 0; i < size - 1; i++) {
-    if (!isprint(cp->buf[i]) || cp->buf[i] == '\\' || cp->buf[i] == '\"') {
-      jesinfo[i] = '.';
-    } else {
-      jesinfo[i] = cp->buf[i];
-    }
-  }
-  jesinfo[size - 1] = '\0';
+	size_t i;
+	for (i = 0; i < size - 1; i++) {
+		if (!isprint(cp->buf[i]) || cp->buf[i] == '\\' || cp->buf[i] == '\"') {
+		jesinfo[i] = '.';
+		} else {
+		jesinfo[i] = cp->buf[i];
+		}
+	}
+	jesinfo[size - 1] = '\0';
 }
 
 __asm__("\n&FUNC	SETC 'should_skip_job'");
 static int 
 should_skip_job(const JESJOB *job, const char *owner) 
 {
-  if (!job) {
-    return 1;
-  }
+	if (!job) {
+		return 1;
+	}
 
-  // skip job if owner does not match
-  if (owner) {
-    if (strncmp((const char *)job->owner, owner,
-                MIN(strlen((const char *)job->owner), strlen(owner))) != 0) {
-      return 1;
-    }
-  }
+	// skip job if owner does not match
+	if (owner) {
+		if (strncmp((const char *)job->owner, owner,
+					MIN(strlen((const char *)job->owner), strlen(owner))) != 0) {
+		return 1;
+		}
+	}
 
-  /* skip system log and batch initiator */
-  if (job->q_flag2 & QUEINIT) {
-    return 1;
-  }
+	/* skip system log and batch initiator */
+	if (job->q_flag2 & QUEINIT) {
+		return 1;
+	}
 
-  /* although the QUEINIT flag should cover SYSLOG and INIT jobs,
-     it sometimes doesn't */
-  if (strcmp((const char *)job->jobname, "SYSLOG") == 0) {
-    return 1;
-  }
-  if (strcmp((const char *)job->jobname, "INIT") == 0) {
-    return 1;
-  }
+	/* although the QUEINIT flag should cover SYSLOG and INIT jobs,
+		it sometimes doesn't */
+	if (strcmp((const char *)job->jobname, "SYSLOG") == 0) {
+		return 1;
+	}
+	if (strcmp((const char *)job->jobname, "INIT") == 0) {
+		return 1;
+	}
 
-  return 0;
+	return 0;
 }
 
 __asm__("\n&FUNC	SETC 'uint_to_hex_ascii'");

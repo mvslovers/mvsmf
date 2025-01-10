@@ -63,7 +63,6 @@
 #define ERR_MSG_INVALID_PATH			"Submit input filename must be absolute path: %s"
 #define ERR_MSG_INVALID_READER_MODE		"Internal reader mode must be RECORD for data set submission: %s"
 #define ERR_MSG_NOT_IMPLEMENTED			"Service not implemented: %s"
-#define ERR_MSG_SELF_PURGE				"Purge of HTTPD STC is not allowed"
 #define ERR_MSG_STC_PURGE				"Purge of a STC or a TSO useris not allowed"
 
 // Category 7 error messages

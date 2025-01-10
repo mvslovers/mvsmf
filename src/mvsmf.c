@@ -48,7 +48,10 @@ int main(int argc, char **argv)
 	init_session(&session, &router, httpd, httpc);
 
 	add_middleware(&router, "Authentication", authentication_middleware);
+
+#if 0
 	add_middleware(&router, "Logging", logging_middleware);
+#endif
 
 	/* add the URL mappings */
 	add_route(&router, GET, "/zosmf/info", infoHandler);

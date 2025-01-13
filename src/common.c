@@ -77,7 +77,7 @@ sendDefaultHeaders(Session *session, int status, const char *content_type,
   	}
 
 quit:
-  	return irc;
+	return irc;
 }
 
 int 

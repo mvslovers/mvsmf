@@ -15,7 +15,6 @@
 #include "common.h"
 #include "httpd.h"
 #include "jobsapi.h"
-#include "jobsapi_err.h"
 #include "jobsapi_msg.h"
 #include "json.h"
 #include "router.h"
@@ -24,10 +23,13 @@
 #define MAX_JOBS_LIMIT 1000
 #define MAX_URL_LENGTH 256
 #define MAX_ERR_MSG_LENGTH 256
+
+#define JES_INFO_SIZE   20 + 1
 #define TYPE_STR_SIZE    3 + 1
 #define CLASS_STR_SIZE   3 + 1
-#define JES_INFO_SIZE   20 + 1
-#define RECFM_SIZE       4 + 1
+#define RECFM_STR_SIZE   4 + 1
+#define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
+#define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
 
 //
 // private functions prototypes
@@ -50,6 +52,11 @@ static int _recv(HTTPC *httpc, char *buf, int len);
 static int _send_response(Session *session, int status_code, const char *content_type, const char *data);
 
 static const unsigned char ASCII_CRLF[] = {CR, LF};
+
+// Add to private function prototypes
+static int validate_intrdr_headers(Session *session);
+static int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length);
+static int read_request_content(Session *session, char **content, size_t *content_size);
 
 //
 // public functions
@@ -373,334 +380,49 @@ quit:
 int jobSubmitHandler(Session *session) 
 {
 	int rc = 0;
+	
+	VSFILE *intrdr = NULL;
+	
+	char *data = NULL;
+	size_t data_size = 0;
 
-	char *data = NULL;      // Dynamic buffer to hold incoming data
-	size_t data_size = 0;   // Total data size accumulated
-	size_t buffer_size = 0; // Current allocated size of the data buffer
-	size_t bytes_received = 0;
-	char recv_buffer[1024]; // Buffer for each recv() call
-	int has_content_length = 0;
-	size_t content_length = 0;
-	int is_chunked = 0;
-	int done = 0;
-
-	const char crlf[] = "\r\n";
-
-	char jobname[9] = {0};
-	char jobclass = 'A';
-	char jobid[9] = {0};
-
-	int was_submitted = 0;
-
-	VSFILE *intrdr;
-
-  rc = jesiropn(&intrdr);
-  if (rc < 0) {
-    // TODO: return 500 Internal Server Error and / or a defined json error
-    // object
-    wtof("Unable to open JES internal reader");
-    goto quit;
-  }
-
-	/* check for valid intrdr_mode */
-	const char *intrdr_mode = (char *)http_get_env(
-		session->httpc, (const UCHAR *)"HTTP_X-IBM-Intrdr-Mode");
-	if (intrdr_mode != NULL && strcmp(intrdr_mode, "TEXT") != 0) {
-		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined
-		// json error object
-		wtof("JOBSAPI: Invalid intrdr_mode - must be TEXT");
-		goto quit;
-	}
-
-	/* check for valid intrdr_lrecl */
-	const char *intrdr_lrecl = (char *)http_get_env(
-		session->httpc, (const UCHAR *)"HTTP_X-IBM-Intrdr-Lrecl");
-	if (intrdr_lrecl != NULL && strcmp(intrdr_lrecl, "80") != 0) {
-		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined
-		// json error object
-		wtof("JOBSAPI: Invalid intrdr_lrecl - must be 80");
-		goto quit;
-	}
-
-	/* check for valid intrdr_recfm */
-	const char *intrdr_recfm = (char *)http_get_env(
-		session->httpc, (const UCHAR *)"HTTP_X-IBM-Intrdr-Recfm");
-	if (intrdr_recfm != NULL && strcmp(intrdr_recfm, "F") != 0) {
-		// TODO: return 400 Bad Request or 415 Unsupported Media Type or a defined
-		// json error object
-		wtof("JOBSAPI: Invalid intrdr_recfm - must be F");
-		goto quit;
-	}
-
-	// Try to get the Content-Length header
-	const char *content_length_str = (char *)http_get_env(
-		session->httpc, (const UCHAR *)"HTTP_CONTENT-LENGTH");
-	if (content_length_str != NULL) {
-		has_content_length = 1;
-		content_length = strtoul(content_length_str, NULL, 10);
-	}
-
-	// Check for Transfer-Encoding: chunked
-	const char *transfer_encoding_str = (char *)http_get_env(
-		session->httpc, (const UCHAR *)"HTTP_TRANSFER-ENCODING");
-	if (transfer_encoding_str != NULL &&
-		strstr(transfer_encoding_str, "chunked") != NULL) {
-		is_chunked = 1;
-	}
-
-	if (!is_chunked && !has_content_length) {
-		rc = http_resp(session->httpc, 400);
-		if (rc < 0)
-			goto quit;
-		if ((rc = http_printf(session->httpc,
-							  "Content-Type: application/json\r\n\r\n")) < 0)
-			goto quit;
-		if ((rc = http_printf(session->httpc,
-							  "{\"rc\": -1, \"message\": \"Missing Content-Length "
-							  "or Transfer-Encoding header\"}\n")) < 0)
-			goto quit;
-		goto quit;
-	}
-
-	// Allocate initial buffer
-	data = malloc(INITIAL_BUFFER_SIZE);
-	if (!data) {
-		rc = -1;
-		goto quit;
-	}
-	buffer_size = INITIAL_BUFFER_SIZE;
-
-	if (is_chunked) {
-		int chunk_size;
-		char chunk_size_str[10];
-
-		while (!done) {
-
-			int i = 0;
-			// Read chunk size as ASCII hex string
-			while (i < sizeof(chunk_size_str) - 1) {
-				if (_recv(session->httpc, chunk_size_str + i, 1) != 1) {
-					rc = -1;
-					goto quit;
-				}
-				if (chunk_size_str[i] == '\r') {
-					chunk_size_str[i] = '\0';
-					_recv(session->httpc, chunk_size_str + i, 1); // Read \n
-					break;
-				}
-				i++;
-			}
-
-			// convert chunk size from ASCII hex to EBCDIC hex
-			http_atoe((UCHAR *)chunk_size_str, sizeof(chunk_size_str));
-
-			// convert chunk size from string to integer
-			chunk_size = strtoul(chunk_size_str, NULL, 16);
-
-			if (chunk_size == 0) {
-				done = 1;
-				break;
-			}
-
-			// check if we need to reallocate the buffer
-			if (data_size + chunk_size > buffer_size) {
-				// calculate new buffer size
-				char *new_data = realloc(data, data_size + chunk_size + 1);
-				if (new_data == NULL) {
-					// TODO: return 500 Internal Server Error and / or a defined json
-					// error object
-					free(data);
-					data = NULL;
-					rc = -1;
-					goto quit;
-				}
-
-				data = new_data;
-				buffer_size = data_size + chunk_size;
-			}
-
-			// eread chunked data
-			size_t bytes_read = 0;
-			while (bytes_read < chunk_size) {
-				bytes_received = _recv(session->httpc, data + data_size + bytes_read,
-									   chunk_size - bytes_read);
-
-				if (bytes_received <= 0) {
-					rc = -1;
-					goto quit;
-				}
-				bytes_read += bytes_received;
-			}
-
-			data_size += chunk_size;
-
-			// read trailing CRLF
-			char crlf[2];
-			if (_recv(session->httpc, crlf, 2) != 2) {
-				// TODO: return 500 Internal Server Error and / or a defined json error
-				// object
-				rc = -1;
-				goto quit;
-			}
-		}
-	} else {
-		// Read content-length data
-		while (data_size < content_length) {
-			if (data_size + sizeof(recv_buffer) > buffer_size) {
-				char *new_data = realloc(data, buffer_size * 2);
-				if (!new_data) {
-					rc = -1;
-					goto quit;
-				}
-				data = new_data;
-				buffer_size *= 2;
-			}
-
-			bytes_received = _recv(session->httpc, data + data_size,
-								   content_length - data_size < sizeof(recv_buffer)
-									   ? content_length - data_size
-									   : sizeof(recv_buffer));
-
-			if (bytes_received <= 0) {
-				rc = -1;
-				goto quit;
-			}
-
-			data_size += bytes_received;
-		}
-	}
-
-	// convert data from ASCII to EBCDIC
-	http_atoe((UCHAR *)data, data_size);
-
-	// null terminate the data
-	if (data_size + 1 > buffer_size) {
-		char *new_data = realloc(data, data_size + 1);
-		if (!new_data) {
-			rc = -1;
-			goto quit;
-		}
-		data = new_data;
-	}
-	data[data_size] = '\0';
-
-	char delimiter[2];
-	delimiter[0] = 0x25; // EBCDIC Line Feed
-	delimiter[1] = '\0';
-
-	char *line = strtok(data, delimiter);
-	int line_number = 0;
-
-	while (line != NULL) {
-		size_t line_len = strlen(line);
-		if (line_len > 0 && line[line_len - 1] == '\r') {
-			line[line_len - 1] = '\0';
-			line_len--;
-		}
-
-		if (line_number == 0) {
-			if (strncmp(line, "//", 2) == 0) {
-				int i;
-				for (i = 2; i < line_len && line[i] != ' ' && i - 2 < 8; i++) {
-					jobname[i - 2] = line[i];
-				}
-				jobname[i - 2] = '\0';
-
-				char *class_param = strstr(line, "CLASS=");
-				if (class_param && strlen(class_param) > 6) {
-					jobclass = class_param[6];
-				}
-			} else {
-				if (data[0] == '{') {
-					char filename[256];
-					char *file_start = strstr(data, "\"file\":\"");
-					if (!file_start) {
-						rc = -1;
-						goto quit;
-					}
-					file_start += 8;
-					char *file_end = strchr(file_start, '\"');
-					if (!file_end) {
-						rc = -1;
-						goto quit;
-					}
-					strncpy(filename, file_start, file_end - file_start);
-					filename[file_end - file_start] = '\0';
-
-					// TODO: Submit file contents
-					rc = submit_file(session, intrdr, filename);
-					if (rc < 0)
-						goto quit;
-					was_submitted = 1;
-					goto close;
-				}
-			}
-		}
-
-		rc = jesirput(intrdr, line);
-		if (rc < 0) {
-			// TODO: return 500 Internal Server Error and / or a defined json error
-			// object
-			goto quit;
-		}
-
-		line = strtok(NULL, delimiter);
-		line_number++;
-	}
-
-	was_submitted = 1;
-
-close:
-
-	rc = jesircls(intrdr);
+	// Validate internal reader headers
+	rc = validate_intrdr_headers(session);
 	if (rc < 0) {
-		// TODO: return 500 Internal Server Error and / or a defined json error
-		// object
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_INVALID_QUERY,
+						"Invalid internal reader parameters", NULL, 0);
 		goto quit;
 	}
 
-	if (was_submitted) {
-		strncpy(jobid, (const char *)intrdr->rpl.rplrbar, 8);
-		jobid[8] = '\0';
-
-		wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
-
-	} else {
-		jobid[0] = '\0';
+	// Open internal reader
+	rc = jesiropn(&intrdr);
+	if (rc < 0) {
+		wtof("MVSMF22E Unable to open JES internal reader");
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_SERVICE,
+						RC_SEVERE, REASON_SERVER_ERROR,
+						"Failed to open internal reader", NULL, 0);
+		goto quit;
 	}
 
-	char response[INITIAL_BUFFER_SIZE];
-	sprintf(
-		response,
-		""
-		"{ "
-		"\"owner\": \"\", "
-		"\"phase\": 128, "
-		"\"subsystem\": \"JES2\", "
-		"\"phase-name\": \"Job is active in input processing\", "
-		"\"job-correlator\": \"\", "
-		"\"type\": \"JOB\", "
-		"\"url\": \"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s\", "
-		"\"jobid\": \"%s\", "
-		"\"class\": \"%c\", "
-		"\"files-url\": "
-		"\"http://drnbrx3a.neunetz.it:1080/zosmf/restjobs/jobs/%s/%s/files\", "
-		"\"jobname\": \"%s\", "
-		"\"status\": \"INPUT\", "
-		"\"retcode\": null "
-		" }",
-		jobname, jobid, jobid, jobclass, jobname, jobid, jobname);
-
-	// Send initial HTTP response
-	// if ((rc = http_resp(httpc, 201)) < 0) goto quit;
-	if ((rc = _send_response(session, 201, "application/json", response)) < 0)
+	// Read request content
+	rc = read_request_content(session, &data, &data_size);
+	if (rc < 0) {
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_INVALID_REQUEST,
+						"Failed to read request content", NULL, 0);
 		goto quit;
+	}
+
+	// Submit JCL content
+	rc = submit_jcl_content(session, intrdr, data, data_size);
 
 quit:
-	if (data)
+	if (data) {
 		free(data);
-
-	return rc;
+	}
+	
+	return 0;
 }
 
 //
@@ -1292,7 +1014,7 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
 	const char *host_str = host ? host : "127.0.0.1:8080";
     
 	char url_str[MAX_URL_LENGTH] = {0};
-    char recfm_str[RECFM_SIZE] = {0};
+    char recfm_str[RECFM_STR_SIZE] = {0};
 
     if (!job) {
 		return -1;
@@ -1358,4 +1080,279 @@ unsigned get_max_jobs(Session *session)
     }
 
     return max_jobs;
+}
+
+__asm__("\n&FUNC    SETC 'validate_intrdr_headers'");
+static 
+int validate_intrdr_headers(Session *session) 
+{
+    const char *intrdr_mode = getHeaderParam(session, "X-IBM-Intrdr-Mode");
+    if (intrdr_mode != NULL && strcmp(intrdr_mode, "TEXT") != 0) {
+        wtof("MVSMF22E Invalid intrdr_mode - must be TEXT");
+        return -1;
+    }
+
+    const char *intrdr_lrecl = getHeaderParam(session, "X-IBM-Intrdr-Lrecl");
+    if (intrdr_lrecl != NULL && strcmp(intrdr_lrecl, "80") != 0) {
+        wtof("MVSMF22E Invalid intrdr_lrecl - must be 80");
+        return -1;
+    }
+
+    const char *intrdr_recfm = getHeaderParam(session, "X-IBM-Intrdr-Recfm");
+    if (intrdr_recfm != NULL && strcmp(intrdr_recfm, "F") != 0) {
+        wtof("MVSMF22E Invalid intrdr_recfm - must be F");
+        return -1;
+    }
+
+    return 0;
+}
+
+__asm__("\n&FUNC    SETC 'submit_jcl_content'");
+static 
+int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length) 
+{
+    int rc = 0;
+    
+	char jobclass = 'A';
+	char jobname[JOBNAME_STR_SIZE + 1] = {0};
+    char jobid[JOBID_STR_SIZE + 1] = {0};
+    
+	int was_submitted = 0;
+
+    // Convert content from ASCII to EBCDIC
+    char *ebcdic_content = strdup(content);
+    if (!ebcdic_content) {
+        wtof("MVSMF22E Memory allocation failed for EBCDIC conversion");
+        return -1;
+    }
+    
+	http_atoe((UCHAR *)ebcdic_content, content_length);
+
+    // Split content into lines and submit
+    char delimiter[2];
+    delimiter[0] = 0x25; // EBCDIC Line Feed
+    delimiter[1] = '\0';
+
+    char *line = strtok(ebcdic_content, delimiter);
+    int line_number = 0;
+
+    while (line != NULL) {
+        size_t line_len = strlen(line);
+        if (line_len > 0 && line[line_len - 1] == '\r') {
+            line[line_len - 1] = '\0';
+            line_len--;
+        }
+
+        // Extract jobname and class from JOB card
+        if (line_number == 0) {
+            if (strncmp(line, "//", 2) == 0) {
+                int i;
+                for (i = 2; i < line_len && line[i] != ' ' && i - 2 < 8; i++) {
+                    jobname[i - 2] = line[i];
+                }
+                jobname[i - 2] = '\0';
+
+                char *class_param = strstr(line, "CLASS=");
+                if (class_param && strlen(class_param) > 6) {
+                    jobclass = class_param[6];
+                }
+            }
+        }
+
+        rc = jesirput(intrdr, line);
+        if (rc < 0) {
+            wtof("MVSMF22E Failed to write to internal reader");
+            free(ebcdic_content);
+            return rc;
+        }
+
+        line = strtok(NULL, delimiter);
+        line_number++;
+    }
+
+    free(ebcdic_content);
+
+    // Close internal reader and get jobid
+    rc = jesircls(intrdr);
+    if (rc < 0) {
+        wtof("MVSMF22E Failed to close internal reader");
+        return rc;
+    }
+
+    strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
+    jobid[JOBID_STR_SIZE] = '\0';
+
+    wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
+
+    // Build and send response
+	JsonBuilder *builder = createJsonBuilder();
+	const char *host = getHeaderParam(session, "HOST");
+	char url_str[MAX_URL_LENGTH] = {0};
+	rc = snprintf(url_str, sizeof(url_str), "http://%s/zosmf/restjobs/jobs/%s/%s", host, jobname, jobid);
+
+	rc = startJsonObject(builder);
+	
+	rc = addJsonString(builder, "owner", "");
+	rc = addJsonString(builder, "subsystem", "JES2");
+	rc = addJsonString(builder, "type", "JOB");
+	rc = addJsonString(builder, "url", url_str);
+	rc = addJsonString(builder, "jobid", jobid);
+	rc = addJsonString(builder, "class", &jobclass);
+	
+	rc = endJsonObject(builder);
+	if (rc < 0) {
+		goto quit;
+	}
+	
+	rc = sendJSONResponse(session, HTTP_STATUS_CREATED, builder);
+
+quit:
+	if (builder) {	
+		freeJsonBuilder(builder);
+	}
+
+    return rc;
+}
+
+__asm__("\n&FUNC    SETC 'read_request_content'");
+static 
+int read_request_content(Session *session, char **content, size_t *content_size) 
+{
+    int rc = 0;
+    size_t buffer_size = 0;
+    size_t bytes_received = 0;
+    char recv_buffer[1024];
+    int has_content_length = 0;
+    size_t content_length = 0;
+    int is_chunked = 0;
+    int done = 0;
+
+    // Check Content-Length header
+    const char *content_length_str = getHeaderParam(session, "Content-Length");
+    if (content_length_str != NULL) {
+        has_content_length = 1;
+        content_length = strtoul(content_length_str, NULL, 10);
+    }
+
+    // Check Transfer-Encoding header
+    const char *transfer_encoding = getHeaderParam(session, "Transfer-Encoding");
+    if (transfer_encoding != NULL && strstr(transfer_encoding, "chunked") != NULL) {
+        is_chunked = 1;
+    }
+
+    if (!is_chunked && !has_content_length) {
+        wtof("MVSMF22E Missing Content-Length or Transfer-Encoding header");
+        return -1;
+    }
+
+    // Allocate initial buffer
+    *content = malloc(INITIAL_BUFFER_SIZE);
+    if (!*content) {
+        wtof("MVSMF22E Memory allocation failed for content buffer");
+        return -1;
+    }
+    buffer_size = INITIAL_BUFFER_SIZE;
+    *content_size = 0;
+
+    if (is_chunked) {
+        // Handle chunked transfer encoding
+        while (!done) {
+            // Read chunk size
+            char chunk_size_str[10];
+            int i = 0;
+            while (i < sizeof(chunk_size_str) - 1) {
+                if (_recv(session->httpc, chunk_size_str + i, 1) != 1) {
+                    return -1;
+                }
+                if (chunk_size_str[i] == '\r') {
+                    chunk_size_str[i] = '\0';
+                    _recv(session->httpc, chunk_size_str + i, 1); // Read \n
+                    break;
+                }
+                i++;
+            }
+
+            // Convert chunk size
+            http_atoe((UCHAR *)chunk_size_str, sizeof(chunk_size_str));
+            int chunk_size = strtoul(chunk_size_str, NULL, 16);
+
+            if (chunk_size == 0) {
+                done = 1;
+                break;
+            }
+
+            // Ensure buffer capacity
+            if (*content_size + chunk_size > buffer_size) {
+                char *new_content = realloc(*content, *content_size + chunk_size + 1);
+                if (!new_content) {
+                    wtof("MVSMF22E Memory reallocation failed");
+                    free(*content);
+                    *content = NULL;
+                    return -1;
+                }
+                *content = new_content;
+                buffer_size = *content_size + chunk_size;
+            }
+
+            // Read chunk data
+            size_t bytes_read = 0;
+            while (bytes_read < chunk_size) {
+                bytes_received = _recv(session->httpc, *content + *content_size + bytes_read,
+                                   chunk_size - bytes_read);
+                if (bytes_received <= 0) {
+                    return -1;
+                }
+                bytes_read += bytes_received;
+            }
+
+            *content_size += chunk_size;
+
+            // Read trailing CRLF
+            char crlf[2];
+            if (_recv(session->httpc, crlf, 2) != 2) {
+                return -1;
+            }
+        }
+    } else {
+        // Handle content-length data
+        while (*content_size < content_length) {
+            if (*content_size + sizeof(recv_buffer) > buffer_size) {
+                char *new_content = realloc(*content, buffer_size * 2);
+                if (!new_content) {
+                    wtof("MVSMF22E Memory reallocation failed");
+                    free(*content);
+                    *content = NULL;
+                    return -1;
+                }
+                *content = new_content;
+                buffer_size *= 2;
+            }
+
+            bytes_received = _recv(session->httpc, *content + *content_size,
+                               content_length - *content_size < sizeof(recv_buffer)
+                                   ? content_length - *content_size
+                                   : sizeof(recv_buffer));
+
+            if (bytes_received <= 0) {
+                return -1;
+            }
+
+            *content_size += bytes_received;
+        }
+    }
+
+    // Ensure null termination
+    if (*content_size + 1 > buffer_size) {
+        char *new_content = realloc(*content, *content_size + 1);
+        if (!new_content) {
+            wtof("MVSMF22E Memory reallocation failed");
+            free(*content);
+            *content = NULL;
+            return -1;
+        }
+        *content = new_content;
+    }
+    (*content)[*content_size] = '\0';
+
+    return 0;
 }

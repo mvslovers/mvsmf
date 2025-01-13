@@ -16,13 +16,15 @@ int authentication_middleware(Session *session)
    
     if (!auth_header) {
 		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
-		return -1;
+		rc = -1;
+		goto quit;
     }
 
     // Basic Auth Header parsen
     if (strncmp(auth_header, "Basic ", 6) != 0) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
-        return -1;
+        rc = -1;
+        goto quit;
     }
 
     UCHAR  encoded[256] = {0};
@@ -35,15 +37,16 @@ int authentication_middleware(Session *session)
 
     if (decoded == NULL) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
-        return -1;
+		rc = -1;
+        goto quit;
     }
 
     // extract username and password
     char *colon = strchr((char *) decoded, ':');
     if (!colon) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
-        free(decoded);
-        return -1;
+        rc = -1;
+        goto quit;
     }
 
     *colon = '\0';
@@ -52,15 +55,18 @@ int authentication_middleware(Session *session)
 
     if (!validate_user(session, username, password)) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
-        free(decoded);
-        return -1;
+        rc = -1;
+        goto quit;
     }
     
     http_set_env(session->httpc, "HTTP_CURRENT_USER", strdup(username));
 
-    free(decoded);
+quit:
+	if (decoded) {	
+		free(decoded);
+	}
 
-    return 0;
+    return rc;
 }
 
 //

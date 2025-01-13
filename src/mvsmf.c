@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 
 	add_middleware(&router, "Authentication", authentication_middleware);
 
-#if 0
+#if 1
 	add_middleware(&router, "Logging", logging_middleware);
 #endif
 
@@ -75,10 +75,6 @@ int main(int argc, char **argv)
 	/* dispatch the request */
 	irc = handle_request(&router, &session);
 
-	if (irc > 4 || irc < 0) {
-		wtof("MVSMF01E REQUEST PROCESSING FAILED - RC(%d)", irc);
-	}
-
 quit:
 
 	/* TODO (mig): the whole security stuff must be reworked */
@@ -91,7 +87,6 @@ quit:
 
 	/* restore crt values */
 	if (crt) {
-		/* restore crt values */
 		crt->crtapp1 = crtapp1;
 		crt->crtapp2 = crtapp2;
 	}

@@ -28,6 +28,9 @@
 /** @brief ASCII line feed */
 #define LF 0x0A
 
+/** @brief EBCDIC line feed */
+#define EBCDIC_LF 0x25
+
 /** @brief HTTP status codes */
 #define HTTP_STATUS_OK 200                    /**< Success */
 #define HTTP_STATUS_CREATED 201               /**< Resource created */

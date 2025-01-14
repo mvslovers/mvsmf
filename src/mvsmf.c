@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 
 	add_middleware(&router, "Authentication", authentication_middleware);
 
-#if 1
+#if 0
 	add_middleware(&router, "Logging", logging_middleware);
 #endif
 

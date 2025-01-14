@@ -60,7 +60,8 @@ int authentication_middleware(Session *session)
     }
     
     http_set_env(session->httpc, "HTTP_CURRENT_USER", strdup(username));
-
+    http_set_env(session->httpc, "HTTP_CURRENT_PASSWORD", strdup(password));
+	
 quit:
 	if (decoded) {	
 		free(decoded);

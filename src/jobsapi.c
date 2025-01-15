@@ -1214,8 +1214,6 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
     *start_idx = -1;
     *end_idx = -1;
 
-    wtof("MVSMF84D Finding job card range in %d lines", count);
-
     int ii = 0;
     for (ii = 0; ii < count; ii++) {
         // Skip if line is NULL or too short
@@ -1223,14 +1221,10 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
             continue;
         }
 
-        wtof("MVSMF84D Line %d: %s", ii, lines[ii]);
-
         // Check if this is a JCL line
         if (!is_jcl_line(lines[ii])) {
             continue;
         }
-
-        wtof("MVSMF84D Found JCL line");
 
         // Get operation field
         char op[5] = {0};
@@ -1238,7 +1232,6 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
 
         // Is this a JOB statement?
         if (strcmp(op, "JOB") == 0) {
-            wtof("MVSMF84D Found JOB statement");
             // Found the start of job card
             *start_idx = ii;
             *end_idx = ii;
@@ -1255,14 +1248,12 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
                 for (kk = len - 1; kk >= 0; kk--) {
                     if (!isspace((unsigned char)line[kk])) {
                         has_comma = (line[kk] == ',');
-                        wtof("MVSMF84D Found comma at position %d", kk);
                         break;
                     }
                 }
 
                 // If no comma at end, this is the last line of job card
                 if (!has_comma) {
-                    wtof("MVSMF84D Found last line of job card");
                     *end_idx = jj;
                     break;
                 }
@@ -1270,14 +1261,12 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
                 // Check next line
                 jj++;
                 if (jj >= count) {
-                    wtof("MVSMF84D Found last line of job card");
                     *end_idx = jj - 1;
                     break;
                 }
 
                 // Next line must be a JCL continuation line
                 if (!is_jcl_line(lines[jj])) {
-                    wtof("MVSMF84D Found non-JCL line");
                     *end_idx = jj - 1;
                     break;
                 }
@@ -1290,10 +1279,8 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
                         break;
                     }
                 }
-                wtof("MVSMF84D Found continuation line");
 
                 if (!is_continuation) {
-                    wtof("MVSMF84D Found last line of job card");
                     *end_idx = jj - 1;
                     break;
                 }
@@ -1486,7 +1473,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     int job_card_lines = end_idx - start_idx + 1;  // Original Job Card
     job_card_lines += 2;  // USER und PASSWORD Zeilen
 
-    wtof("MVSMF22D Job card lines: %d, Total lines: %d", job_card_lines, out_line);
     rc = out_line;
 
 cleanup:
@@ -1621,7 +1607,6 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     int submit_idx = 0;
     for (submit_idx = 0; submit_idx < modified_lines_count; submit_idx++) {
         if (modified_lines[submit_idx][0] != '\0') {  // Only submit non-empty lines
-            wtof("INTRDR > %s", modified_lines[submit_idx]);
             rc = jesirput(intrdr, modified_lines[submit_idx]);
             if (rc < 0) {
                 wtof("MVSMF22E Failed to write to internal reader");

@@ -1013,7 +1013,7 @@ int read_request_content(Session *session, char **content, size_t *content_size)
                 char *new_content = realloc(*content, *content_size + chunk_size + 1);
                 if (!new_content) {
                     wtof("MVSMF22E Memory reallocation failed");
-                    free(*content);
+                    free((void *) *content);
                     *content = NULL;
                     return -1;
                 }
@@ -1047,7 +1047,7 @@ int read_request_content(Session *session, char **content, size_t *content_size)
                 char *new_content = realloc(*content, buffer_size * 2);
                 if (!new_content) {
                     wtof("MVSMF22E Memory reallocation failed");
-                    free(*content);
+                    free((void *) *content);
                     *content = NULL;
                     return -1;
                 }
@@ -1073,7 +1073,7 @@ int read_request_content(Session *session, char **content, size_t *content_size)
         char *new_content = realloc(*content, *content_size + 1);
         if (!new_content) {
             wtof("MVSMF22E Memory reallocation failed");
-            free(*content);
+            free((void *) *content);
             *content = NULL;
             return -1;
         }
@@ -1156,22 +1156,31 @@ get_operation(const char *line, char *op, size_t op_size)
         return;
     }
 
+    size_t line_len = strlen(line);
+    if (line_len < 3) {  // Mindestens // + 1 Zeichen
+        op[0] = '\0';
+        return;
+    }
+
     // Skip // at start
     const char *pos = line + 2;
+    const char *end = line + line_len;
     
     // Skip name field (up to 8 chars)
-    while (*pos && *pos != ' ' && pos < line + 10) {
+    size_t name_chars = 0;
+    while (*pos && pos < end && *pos != ' ' && name_chars < 8) {
         pos++;
+        name_chars++;
     }
     
     // Skip spaces between name and operation
-    while (*pos && *pos == ' ') {
+    while (*pos && pos < end && *pos == ' ') {
         pos++;
     }
     
     // Copy operation field (up to 4 chars)
-    int i = 0;
-    while (i < 4 && *pos && *pos != ' ') {
+    size_t i = 0;
+    while (i < 4 && i < op_size - 1 && pos < end && *pos && *pos != ' ') {
         op[i++] = *pos++;
     }
     op[i] = '\0';
@@ -1299,17 +1308,21 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                const char *user, const char *password) 
 {
     int rc = -1;
+    char **temp_lines = NULL;
+    int start_idx = -1;
+    int end_idx = -1;
+    int out_line = 0;
+    int notify_replaced = 0;
 
     if (!lines || num_lines <= 0 || !jobname || !jobclass || !user) {
         wtof("MVSMF22E Invalid parameters for process_jobcard");
         return rc;
     }
 
-    int start_idx = -1;
-    int end_idx = -1;
-    int out_line = 0;
-    
-    char **temp_lines = NULL;
+    if (!password) {
+        wtof("MVSMF22E Password is required for user %s", user);
+        return rc;
+    }
 
     // Find the job card range
     find_job_card_range(lines, num_lines, &start_idx, &end_idx);
@@ -1320,8 +1333,19 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
 
     // Extract jobname from first line (columns 3-10)
     const char *first_line = lines[start_idx];
+    if (!first_line) {
+        wtof("MVSMF22E First line is NULL");
+        return rc;
+    }
+
+    size_t first_line_len = strlen(first_line);
+    if (first_line_len < 3) {
+        wtof("MVSMF22E First line too short");
+        return rc;
+    }
+
     int ii = 0;
-    for (ii = 2; ii < 10 && first_line[ii] != ' ' && first_line[ii] != '\0'; ii++) {
+    for (ii = 2; ii < 10 && ii < first_line_len && first_line[ii] != ' ' && first_line[ii] != '\0'; ii++) {
         jobname[ii - 2] = first_line[ii];
     }
     jobname[ii - 2] = '\0';
@@ -1336,79 +1360,89 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     temp_lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
     if (!temp_lines) {
         wtof("MVSMF22E Memory allocation failed for temp lines");
-        return -1;
+        return rc;
     }
 
     for (ii = 0; ii < MAX_JCL_LINES; ii++) {
         temp_lines[ii] = calloc(72, sizeof(char));
         if (!temp_lines[ii]) {
-            int jj = 0;
-            for (jj = 0; jj < ii; jj++) {
-                free(temp_lines[jj]);
-            }
-            free((void *)temp_lines);
             wtof("MVSMF22E Memory allocation failed for temp line");
-            return -1;
+            goto cleanup;
         }
     }
 
     // Process job card lines
     for (ii = start_idx; ii <= end_idx; ii++) {
-        char temp_line[80];
+        if (!lines[ii]) {
+            wtof("MVSMF22E NULL line at index %d", ii);
+            goto cleanup;
+        }
+
+        char temp_line[80] = {0};
         strncpy(temp_line, lines[ii], sizeof(temp_line) - 1);
-        temp_line[sizeof(temp_line) - 1] = '\0';
 
-        // Replace &SYSUID with actual user if present
-        char *notify_pos = strstr(temp_line, "NOTIFY=&SYSUID");
-        if (notify_pos) {
-            char before[80];
-            char after[80];
+        // Replace &SYSUID with actual user if present and not already replaced
+        if (!notify_replaced) {
+            char *notify_start = strstr(temp_line, "NOTIFY");
+            if (notify_start) {
+                char *equals = strchr(notify_start, '=');
+                if (equals) {
+                    // Skip any whitespace after the equals sign
+                    char *sysuid = equals + 1;
+                    while (*sysuid == ' ') sysuid++;
+                    
+                    if (strncmp(sysuid, "&SYSUID", 7) == 0) {
+                        char before[80] = {0};
+                        char after[80] = {0};
+                        size_t notify_offset = notify_start - temp_line;
+                        
+                        // Copy part before NOTIFY
+                        strncpy(before, temp_line, notify_offset);
+                        
+                        // Find end of &SYSUID
+                        char *sysuid_end = sysuid + 7;
+                        char *real_end = sysuid_end;
+                        
+                        // Skip spaces after &SYSUID
+                        while (*real_end == ' ') real_end++;
 
-            size_t notify_offset = notify_pos - temp_line;
-            
-            // Copy part before NOTIFY
-            strncpy(before, temp_line, notify_offset);
-            before[notify_offset] = '\0';
-            
-            // Find end of &SYSUID
-            char *sysuid_end = notify_pos + 13;  // 13 is length of "NOTIFY=&SYSUID"
-            char *real_end = sysuid_end;
-            
-            // Skip spaces after &SYSUID
-            while (*real_end == ' ') {
-                real_end++;
-            }
+                        // Find actual end of parameter (comma or end of line)
+                        while (*real_end != '\0' && *real_end != ',' && *real_end != ' ') {
+                            real_end++;
+                        }
+                        
+                        // Copy remaining text after parameter
+                        if (*real_end == ',') {
+                            strncpy(after, real_end, sizeof(after) - 1);
+                        } else {
+                            // Skip any trailing spaces
+                            while (*real_end == ' ') real_end++;
 
-            // Find actual end of parameter (comma or end of line)
-            while (*real_end != '\0' && *real_end != ',' && *real_end != ' ') {
-                real_end++;
-            }
-            
-            // Copy remaining text after parameter
-            if (*real_end == ',') {
-                strcpy(after, real_end);  // Keep the comma and everything after
-            } else {
-                // Skip any trailing spaces
-                while (*real_end == ' ') {
-                    real_end++;
-                }
-
-                if (*real_end) {
-                    rc = snprintf(after, sizeof(after), ",%s", real_end);
-                    if (rc < 0) {
-                        wtof("MVSMF22E Buffer overflow in snprintf");
-                        goto cleanup;
+                            if (*real_end) {
+                                rc = snprintf(after, sizeof(after), ",%s", real_end);
+                                if (rc < 0 || rc >= sizeof(after)) {
+                                    wtof("MVSMF21E Buffer overflow in snprintf");
+                                    goto cleanup;
+                                }
+                            }
+                        }
+                        
+                        // Combine parts with actual user
+                        rc = snprintf(temp_lines[out_line], 71, "%sNOTIFY=%s%s", 
+                                    before, user, after);
+                        if (rc < 0 || rc >= 71) {
+                            wtof("MVSMF22E Buffer overflow in snprintf");
+                            goto cleanup;
+                        }
+                        notify_replaced = 1;
+                    } else {
+                        strncpy(temp_lines[out_line], temp_line, 71);
                     }
                 } else {
-                    after[0] = '\0';
+                    strncpy(temp_lines[out_line], temp_line, 71);
                 }
-            }
-            
-            // Combine parts with actual user
-            rc = snprintf(temp_lines[out_line], 71, "%sNOTIFY=%s%s", before, user, after);
-            if (rc < 0) {
-                wtof("MVSMF22E Buffer overflow in snprintf");
-                goto cleanup;
+            } else {
+                strncpy(temp_lines[out_line], temp_line, 71);
             }
         } else {
             strncpy(temp_lines[out_line], temp_line, 71);
@@ -1422,6 +1456,10 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                 len--;
             }
             if (len > 0 && temp_lines[out_line][len-1] != ',') {
+                if (len >= 70) {
+                    wtof("MVSMF22E No space for comma at end of job card");
+                    goto cleanup;
+                }
                 temp_lines[out_line][len++] = ',';
                 temp_lines[out_line][len] = '\0';
             }
@@ -1430,21 +1468,19 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     }
 
     // Add USER and PASSWORD parameters
-    rc = snprintf(temp_lines[out_line++], 71, "//         USER=%s,", user);
-    if (rc < 0) {
-        wtof("MVSMF22E Buffer overflow in snprintf");
+    rc = snprintf(temp_lines[out_line], 71, "//         USER=%s,", user);
+    if (rc < 0 || rc >= 71) {
+        wtof("MVSMF23E Buffer overflow in snprintf ");
         goto cleanup;
     }
+    out_line++;
     
-    if (!password) {
-        wtof("MVSMF22E Password is required for user %s", user);
+    rc = snprintf(temp_lines[out_line], 71, "//         PASSWORD=%s", password);
+    if (rc < 0 || rc >= 71) {
+        wtof("MVSMF24E Buffer overflow in snprintf");
         goto cleanup;
     }
-    rc = snprintf(temp_lines[out_line++], 71, "//         PASSWORD=%s", password);
-    if (rc < 0) {
-        wtof("MVSMF22E Buffer overflow in snprintf");
-        goto cleanup;
-    }
+    out_line++;
 
     // Copy remaining JCL statements
     for (ii = end_idx + 1; ii < num_lines; ii++) {
@@ -1469,10 +1505,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         lines[ii][71] = '\0';
     }
 
-    // Berechne die tatsächliche Anzahl der Job Card Zeilen
-    int job_card_lines = end_idx - start_idx + 1;  // Original Job Card
-    job_card_lines += 2;  // USER und PASSWORD Zeilen
-
     rc = out_line;
 
 cleanup:
@@ -1480,8 +1512,7 @@ cleanup:
         for (ii = 0; ii < MAX_JCL_LINES; ii++) {
             free(temp_lines[ii]);
         }
-
-        free((void *)temp_lines);
+        free(temp_lines);
     }
 
     return rc;
@@ -1493,24 +1524,35 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
                       char *jobname, char *jobid, char *jobclass) 
 {
     int rc = 0;
-   
+    char *ebcdic_content = NULL;
+    char **lines = NULL;
+    char **modified_lines = NULL;
+    int num_lines = 0;
+    int modified_lines_count = 0;
+    
     *jobclass = 'A';
     memset(jobname, 0, JOBNAME_STR_SIZE + 1);
     memset(jobid, 0, JOBID_STR_SIZE + 1);
 
-    char *ebcdic_content = strdup(content);
+    ebcdic_content = strdup(content);
     if (!ebcdic_content) {
         wtof("MVSMF22E Memory allocation failed for EBCDIC conversion");
-        return -1;
+        rc = -1;
+        goto quit;
     }
     
     http_atoe((UCHAR *)ebcdic_content, content_length);
 
-    int num_lines = 0;
-    char *lines[MAX_JCL_LINES] = {0}; 
+    // Allocate lines array
+    lines = (char **) calloc(MAX_JCL_LINES, sizeof(char *));
+    if (!lines) {
+        wtof("MVSMF22E Memory allocation failed for lines array");
+        rc = -1;
+        goto quit;
+    }
+
     char delimiter[2] = {EBCDIC_LF, '\0'}; // EBCDIC Line Feed
     char *saveptr = NULL;
-    
     char *line = tokenize(ebcdic_content, delimiter, &saveptr);
 
     // Collect all lines
@@ -1525,29 +1567,21 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         
         // Skip empty lines
         if (line_len == 0) {
-            // get next line
             line = tokenize(NULL, delimiter, &saveptr);
             continue;
         }
 
         // Allocate and copy line
-        char *line_copy = calloc(72, sizeof(char));
-        if (!line_copy) {
+        lines[num_lines] = calloc(72, sizeof(char));
+        if (!lines[num_lines]) {
             wtof("MVSMF22E Memory allocation failed for line copy");
-            int cleanup_idx = 0;
-            for (cleanup_idx = 0; cleanup_idx < num_lines; cleanup_idx++) {
-                free(lines[cleanup_idx]);
-            }
-            free(ebcdic_content);
-
-            // exit with emergency cleanup
             rc = -1;
-            goto error;
+            goto quit;
         }
 
-        strncpy(line_copy, line, 71);
-        line_copy[71] = '\0';
-        lines[num_lines++] = line_copy;
+        strncpy(lines[num_lines], line, 71);
+        lines[num_lines][71] = '\0';
+        num_lines++;
         
         line = tokenize(NULL, delimiter, &saveptr);
     }
@@ -1557,28 +1591,20 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
     
     // Allocate memory for modified job card lines
-    char **modified_lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
+    modified_lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
     if (!modified_lines) {
         wtof("MVSMF22E Memory allocation failed for modified lines");
-        free(ebcdic_content);
-        
         rc = -1;
-        goto error;
+        goto quit;
     }
 
     int alloc_idx = 0;
     for (alloc_idx = 0; alloc_idx < MAX_JCL_LINES; alloc_idx++) {
         modified_lines[alloc_idx] = calloc(72, sizeof(char));
         if (!modified_lines[alloc_idx]) {
-            int free_idx = 0;
-            for (free_idx = 0; free_idx < alloc_idx; free_idx++) {
-                free(modified_lines[free_idx]);
-            }
-            free((void *) modified_lines);
-            free(ebcdic_content);
-            
+            wtof("MVSMF22E Memory allocation failed for modified line");
             rc = -1;
-            goto error;
+            goto quit;
         }
     }
 
@@ -1592,48 +1618,25 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     rc = process_jobcard(modified_lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
-        int cleanup_idx = 0;
-        for (cleanup_idx = 0; cleanup_idx < MAX_JCL_LINES; cleanup_idx++) {
-            free(modified_lines[cleanup_idx]);
-        }
-        free((void *) modified_lines);
-        free(ebcdic_content);
-        
-        goto error;
+        goto quit;
     }
 
     // Submit all lines
-    int modified_lines_count = rc;
+    modified_lines_count = rc;
     int submit_idx = 0;
     for (submit_idx = 0; submit_idx < modified_lines_count; submit_idx++) {
         if (modified_lines[submit_idx][0] != '\0') {  // Only submit non-empty lines
             rc = jesirput(intrdr, modified_lines[submit_idx]);
             if (rc < 0) {
                 wtof("MVSMF22E Failed to write to internal reader");
-                int error_cleanup_idx = 0;
-                for (error_cleanup_idx = 0; error_cleanup_idx < MAX_JCL_LINES; error_cleanup_idx++) {
-                    free(modified_lines[error_cleanup_idx]);
-                }
-                free((void *) modified_lines);
-                free(ebcdic_content);
-                
-                goto error;
+                goto quit;
             }
         }
     }
 
-    // Cleanup
-    int final_idx = 0;
-    for (final_idx = 0; final_idx < MAX_JCL_LINES; final_idx++) {
-        free(modified_lines[final_idx]);
-    }
-    free((void *) modified_lines);
-    free(ebcdic_content);
-
     rc = jesircls(intrdr);
-    if (rc < 0) {
+	if (rc < 0) {
         wtof("MVSMF22E Failed to close internal reader");
-        
         goto quit;
     }
 
@@ -1641,16 +1644,38 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     jobid[JOBID_STR_SIZE] = '\0';
 
     wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
-
     rc = 0;
-    goto quit;
 
-error:
-    rc = jesircls(intrdr);
-    if (rc < 0) {
-        wtof("MVSMF22E Failed to close internal reader");
+	intrdr = NULL; 
+    
+quit:
+	// Close internal reader if it was still opened
+	if (intrdr)	 {
+		wtof("MVSMF22E Emergency closing of INTRDR");
+		jesircls(intrdr);
+	}
+
+    // Free all allocated memory
+    if (modified_lines) {
+        int cleanup_idx = 0;
+        for (cleanup_idx = 0; cleanup_idx < MAX_JCL_LINES; cleanup_idx++) {
+            free(modified_lines[cleanup_idx]);
+        }
+        free((void *) modified_lines);
     }
 
-quit:
+    if (lines) {
+        int cleanup_idx = 0;
+        for (cleanup_idx = 0; cleanup_idx < num_lines; cleanup_idx++) {
+            free(lines[cleanup_idx]);
+        }
+        free((void *) lines);
+    }
+
+    if (ebcdic_content) {
+        free((void *) ebcdic_content);
+    }
+
     return rc;
 }
+

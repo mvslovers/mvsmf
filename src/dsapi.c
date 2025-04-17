@@ -249,7 +249,7 @@ int datasetListHandler(Session *session)
 			if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
 		}
 
-		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%s\",\n", ds->dsn)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
 		
 		// TODO: the following fields should only be generated if X-IBM-Attributes == base
 		// TODO: add vol field only if X-IBM-Attributes has 'vol'
@@ -261,12 +261,12 @@ int datasetListHandler(Session *session)
 			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "UNKNOWN")) < 0) goto quit;
 		}
 
-		if ((rc = http_printf(session->httpc, "      \"recfm\": \"%s\",\n", ds->recfm)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"recfm\": \"%.4s\",\n", ds->recfm)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"lrecl\": %d,\n", ds->lrecl)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"blksize\": %d,\n", ds->blksize)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"vol\": \"%s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"vols\": \"%s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%s\",\n", ds->dsorg)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"vol\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"vols\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.2s\",\n", ds->dsorg)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
 		
@@ -381,11 +381,11 @@ int datasetPutHandler(Session *session)
 
     char mode_str[2+1];
     if (data_type == DATA_TYPE_TEXT) {
-        snprintf(mode_str, 1, "%s", "w"); 
+        snprintf(mode_str, sizeof(mode_str), "%s", "w"); 
     } else if (data_type == DATA_TYPE_BINARY) {
-        snprintf(mode_str, 2, "%s", "wb");
+        snprintf(mode_str, sizeof(mode_str), "%s", "wb");
     } else if (data_type == DATA_TYPE_RECORD) {
-        snprintf(mode_str, 2, "%s", "wb");
+        snprintf(mode_str, sizeof(mode_str), "%s", "wb");
     }
 
     fp = fopen(dsname, mode_str);
@@ -643,7 +643,7 @@ int memberListHandler(Session *session)
 		}
 
 		// TODO: extract user data from pds->udata, if X-IBM-Attributes == base 
-		if ((rc = http_printf(session->httpc, "      \"member\": \"%s\"\n", pds->name)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"member\": \"%.8s\"\n", pds->name)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
 	}
 

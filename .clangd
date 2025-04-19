@@ -13,10 +13,8 @@
       "-Wno-include-hygiene",
       "-Wno-system-headers",
       "-nostdinc",
-      "-isystem/home/mike/repos/crent370/include",
-      "-isystem/home/mike/repos/crent370/thdmgr",
-      "-isystem/home/mike/repos/crent370/time64",
-      "-isystem/home/mike/repos/httpd_cgi_sdk/inc",
+      "-isystem/home/mike/repos/mvsmf/contrib/cren370_sdk/inc",
+      "-isystem/home/mike/repos/mvsmf/contrib/httpd_cgi_sdk/inc",
       "-I/home/mike/repos/mvsmf/inc"
     ]
   },
@@ -30,7 +28,7 @@
         "hicpp-no-assembler",
         "altera-unroll-loops",
         "bugprone-easily-swappable-parameters",
-		"bugprone-not-null-terminated-result",
+        "bugprone-not-null-terminated-result",
         "readability-identifier-length"
       ]
     },

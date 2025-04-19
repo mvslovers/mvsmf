@@ -1,8 +1,7 @@
 INC1 := -I/home/mike/repos/mvsmf/inc
-INC2 := -I/home/mike/repos/crent370/include
-INC3 := -I/home/mike/repos/crent370/thdmgr
-INC4 := -I/home/mike/repos/httpd_cgi_sdk/inc
-INCS := $(INC1) $(INC2) $(INC3) $(INC4)
+INC2 := -I/home/mike/repos/mvsmf/contrib/crent370_sdk/inc
+INC3 := -I/home/mike/repos/mvsmf/contrib/httpd_cgi_sdk/inc
+INCS := $(INC1) $(INC2) $(INC3) 
 DEF1 := -DLUA_USE_C89
 DEF2 := -DLUA_USE_JUMPTABLE=0
 DEFS := $(DEF1) $(DEF2)
@@ -34,7 +33,7 @@ O_FILES := $(foreach filename,$(C_FILES),$(filename:.c=.o)) \
 # expoort MSGCLASS
 export MSGCLASS=H
 # export MACn variables for mvsasm->jobasm script
-export MAC1=FIX0MIG.CRENT370.MACLIB
+export MAC1=CRENT370.MACLIB
 #export MAC2=SYS1.HASPSRC
 
 # export dataset names used by mvsasm script

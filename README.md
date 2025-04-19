@@ -44,23 +44,23 @@ If you'd like to build mvsMF from source, follow these steps:
 1. Clone the repository:
 
    ```bash
-   git clone https://github.com/mvslovers/mvsmf.git
+   git clone --recursive https://github.com/mvslovers/mvsmf.git
    cd mvsmf
-   ...
-   ... 
-   ...
    ```
 
 2. Make sure you have a cross-compilation environment for MVS 3.8j. You'll need:
    - CRENT370 libraries by Mike Rayborn - see <https://github.com/mvslovers/crent370>
    - A suitable C compiler configured for MVS 3.8j
-3. Compile the CGI module using the provided Makefile:
+
+3. Update any project path and project dataset in the Makefile
+
+4. Compile the CGI module using the provided Makefile:
 
    ```bash
    make
    ```
 
-4. Follow the installation steps to transfer the load module to your MVS system.
+5. Follow the installation steps to transfer the load module to your MVS system.
 
 ## Usage
 

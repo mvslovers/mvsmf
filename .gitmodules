@@ -1,0 +1,6 @@
+[submodule "contrib/crent370_sdk"]
+	path = contrib/crent370_sdk
+	url = https://github.com/mvslovers/crent370_sdk.git
+[submodule "contrib/httpd_cgi_sdk"]
+	path = contrib/httpd_cgi_sdk
+	url = https://github.com/mvslovers/httpd_cgi_sdk.git

@@ -4,6 +4,7 @@
 #include "httpd.h"
 #include "racf.h"
 #include "router.h"
+#include "xlate.h"
 #include <ctype.h>
 
 static int validate_user(Session *session, char *username, char *password);
@@ -33,7 +34,7 @@ int authentication_middleware(Session *session)
     
     strncpy((char *) encoded, auth_header + 6, sizeof(encoded) - 1);
     decoded = base64_decode( (const UCHAR *) encoded, strlen((char *) encoded), &decoded_len);
-    http_atoe((UCHAR *) decoded, decoded_len);
+    mvsmf_atoe((unsigned char *) decoded, decoded_len);
 
     if (decoded == NULL) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);

@@ -6,6 +6,7 @@
 #include "common.h"
 #include "httpd.h"
 #include "json.h"
+#include "xlate.h"
 
 //
 // private function prototypes
@@ -215,7 +216,7 @@ send_data(Session *session, char *buf)
 	size_t len = strlen(buf);
 	size_t pos = 0;
 
-	http_etoa(buf, len);
+	mvsmf_etoa((unsigned char *)buf, len);
 
 	for (pos = 0; pos < len; pos += rc) {
 		rc = http_send(session->httpc, &buf[pos], len - pos);

@@ -19,6 +19,7 @@
 #include "jobsapi_msg.h"
 #include "json.h"
 #include "router.h"
+#include "xlate.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 #define MAX_JOBS_LIMIT 1000
@@ -1000,7 +1001,7 @@ int read_request_content(Session *session, char **content, size_t *content_size)
             }
 
             // Convert chunk size
-            http_atoe((UCHAR *)chunk_size_str, sizeof(chunk_size_str));
+            mvsmf_atoe((unsigned char *)chunk_size_str, sizeof(chunk_size_str));
             int chunk_size = strtoul(chunk_size_str, NULL, 16);
 
             if (chunk_size == 0) {
@@ -1541,7 +1542,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         goto quit;
     }
     
-    http_atoe((UCHAR *)ebcdic_content, content_length);
+    mvsmf_atoe((unsigned char *)ebcdic_content, content_length);
 
     // Allocate lines array
     lines = (char **) calloc(MAX_JCL_LINES, sizeof(char *));

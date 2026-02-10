@@ -6,6 +6,7 @@
 
 #include "dsapi.h"
 #include "httpd.h"
+#include "xlate.h"
 
 // Record format flags
 #define FIXED     0x0001
@@ -179,7 +180,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Copy to temporary buffer and convert to EBCDIC
             memcpy(ebcdic_buffer, record_buffer, record_length);
-            http_atoe((UCHAR *)ebcdic_buffer, record_length);
+            mvsmf_atoe((unsigned char *)ebcdic_buffer, record_length);
   
             // Write the converted record
             if (fwrite(ebcdic_buffer, 1, record_length, fp) != record_length) return -1;
@@ -322,7 +323,9 @@ int datasetGetHandler(Session *session)
 
     // Read and send file content
     while (fgets(buffer, fp->lrecl + 2, fp) > 0) {
-        if ((rc = http_printf(session->httpc, "%s", buffer)) < 0) {
+        size_t len = strlen(buffer);
+        mvsmf_etoa((unsigned char *)buffer, len);
+        if ((rc = http_send(session->httpc, (const UCHAR *)buffer, len)) < 0) {
             break;
         }
     }
@@ -418,11 +421,11 @@ int datasetPutHandler(Session *session)
             }
             
             // Convert chunk size from ASCII hex to EBCDIC hex
-            http_atoe((UCHAR *)chunk_size_str, strlen(chunk_size_str));
-            
+            mvsmf_atoe((unsigned char *)chunk_size_str, strlen(chunk_size_str));
+
             // Convert chunk size from string to integer
             chunk_size = strtoul(chunk_size_str, NULL, 16);
-            
+
             if (chunk_size == 0) {
                 // Write last incomplete record if any
                 if (record_pos > 0) {
@@ -432,24 +435,24 @@ int datasetPutHandler(Session *session)
                         return handle_error(session, ERR_IO, "Error writing final record");
                     }
                 }
-                
-                // Read final CRLF 
+
+                // Read final CRLF
                 char crlf[2] = {0};
                 if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
                     wtof("MVSMF40E Error reading final line ending");
                     fclose(fp);
                     return handle_error(session, ERR_IO, "Error reading final line ending");
                 }
-                
+
                 if (crlf[0] != 0x0d || crlf[1] != 0x0a) {
                     wtof("MVSMF41E Final line ending not CRLF");
                     fclose(fp);
                     return handle_error(session, ERR_IO, "Final line ending not CRLF");
                 }
-               
+
                 break;
             }
-            
+
             // Process chunk data
             size_t bytes_read = 0;
             while (bytes_read < chunk_size) {
@@ -459,15 +462,15 @@ int datasetPutHandler(Session *session)
                     return handle_error(session, ERR_IO, "Error reading chunk data");
                 }
                 bytes_read++;
-                
+
                 // Add character to buffer
                 if (record_pos < sizeof(record_buffer) - 1) {
                     record_buffer[record_pos++] = c;
                 }
-                
+
                 // If we find a newline (ASCII LF = 0x0A), write the record immediately
                 if (c == 0x0A) {
-                    
+
                     if (record_pos > fp->lrecl + 1) {
                         // TODO: HTTP 400 must be send
                         wtof("MVSMF43E Record too long");
@@ -483,7 +486,7 @@ int datasetPutHandler(Session *session)
                     record_pos = 0;  // Reset buffer for next record
                 }
             }
-            
+
             // Write any remaining data in the buffer
             if (record_pos > 0) {
                 if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
@@ -705,7 +708,9 @@ int memberGetHandler(Session *session)
 
     // Read and send file content
     while (fgets(buffer, fp->lrecl + 2, fp) > 0) {
-        if ((rc = http_printf(session->httpc, "%s", buffer)) < 0) {
+        size_t len = strlen(buffer);
+        mvsmf_etoa((unsigned char *)buffer, len);
+        if ((rc = http_send(session->httpc, (const UCHAR *)buffer, len)) < 0) {
             break;
         }
     }
@@ -804,11 +809,11 @@ int memberPutHandler(Session *session)
             }
             
             // Convert chunk size from ASCII hex to EBCDIC hex
-            http_atoe((UCHAR *)chunk_size_str, strlen(chunk_size_str));
-            
+            mvsmf_atoe((unsigned char *)chunk_size_str, strlen(chunk_size_str));
+
             // Convert chunk size from string to integer
             chunk_size = strtoul(chunk_size_str, NULL, 16);
-  
+
             if (chunk_size == 0) {
                 // Write last incomplete record if any
                 if (record_pos > 0) {

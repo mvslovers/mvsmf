@@ -20,6 +20,7 @@ C_FILES := 				\
 		src/logmw.c 		\
 		src/dsapi.c 		\
 		src/infoapi.c 		\
+		src/xlate.c			\
 		src/jobsapi.c		\
 		src/cgxstart.c
 

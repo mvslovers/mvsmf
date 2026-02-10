@@ -37,6 +37,12 @@
 #define CATEGORY_VSAM 7         /**< VSAM related error */
 #define CATEGORY_UNEXPECTED 8   /**< Unexpected error */
 
+/** @brief Error message for missing file field in JSON body */
+#define ERR_MSG_MISSING_FILE_FIELD "Missing or invalid 'file' field in request body"
+
+/** @brief Error message for dataset open failure */
+#define ERR_MSG_SUBMIT_FILE_OPEN "Cannot open dataset: %s"
+
 /** @brief Error reason codes */
 #define REASON_SERVER_ERROR 1           /**< Internal server error */
 #define REASON_JOB_NOT_FOUND 2         /**< Job not found */
@@ -44,5 +50,7 @@
 #define REASON_INVALID_REQUEST 4       /**< Invalid request content */
 #define REASON_STC_PURGE 5            /**< Cannot purge STC */
 #define REASON_INCORRECT_JES_VSAM_HANDLE 6  /**< JES VSAM handle error */
+#define REASON_MISSING_FILE_FIELD 7    /**< Missing file field in JSON */
+#define REASON_SUBMIT_FILE_OPEN 8      /**< Cannot open dataset */
 
-#endif // JOBSAPI_MSG_H 
+#endif // JOBSAPI_MSG_H

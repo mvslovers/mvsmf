@@ -56,7 +56,9 @@ static int process_job_files(Session *session, JESJOB *job, const char *host, Js
 static int validate_intrdr_headers(Session *session);
 static int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length, 
                               char *jobname, char *jobid, char *jobclass);
-static int submit_file(VSFILE *intrdr, const char *filename);
+static const char *extract_file_value(char *json, size_t len);
+static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
+                       char *jobname, char *jobid, char *jobclass);
 static int read_request_content(Session *session, char **content, size_t *content_size);
 static char* tokenize(char *str, const char *delim, char **saveptr);
 static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass, 
@@ -345,19 +347,19 @@ quit:
 	return 0;
 }
 
-int jobSubmitHandler(Session *session) 
+int jobSubmitHandler(Session *session)
 {
 	int rc = 0;
 
 	VSFILE *intrdr = NULL;
-	
+
 	char *data = NULL;
 	size_t data_size = 0;
 	char jobname[JOBNAME_STR_SIZE + 1];
 	char jobid[JOBID_STR_SIZE + 1];
 	char jobclass = 'A';
 
-	// Validate internal reader headers
+	/* validate internal reader headers */
 	rc = validate_intrdr_headers(session);
 	if (rc < 0) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
@@ -366,7 +368,7 @@ int jobSubmitHandler(Session *session)
 		goto quit;
 	}
 
-	// Open internal reader
+	/* open internal reader */
 	rc = jesiropn(&intrdr);
 	if (rc < 0) {
 		wtof("MVSMF22E Unable to open JES internal reader");
@@ -376,7 +378,7 @@ int jobSubmitHandler(Session *session)
 		goto quit;
 	}
 
-	// Read request content
+	/* read request content */
 	rc = read_request_content(session, &data, &data_size);
 	if (rc < 0) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
@@ -385,16 +387,55 @@ int jobSubmitHandler(Session *session)
 		goto quit;
 	}
 
-	// Submit JCL content
-	rc = submit_jcl_content(session, intrdr, data, data_size, jobname, jobid, &jobclass);
-	if (rc < 0) {
-		goto quit;
+	/* dispatch based on Content-Type */
+	{
+		const char *content_type = getHeaderParam(session, "Content-Type");
+		int is_json = (content_type && strstr(content_type, "application/json") != NULL);
+
+		if (is_json) {
+			/* convert ASCII request body to EBCDIC so strstr/strchr work */
+			mvsmf_atoe((unsigned char *)data, data_size);
+
+			/* JSON body: extract file reference and submit from dataset */
+			{
+				const char *file_value = extract_file_value(data, data_size);
+				if (!file_value || file_value[0] == '\0') {
+					sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+									RC_ERROR, REASON_MISSING_FILE_FIELD,
+									ERR_MSG_MISSING_FILE_FIELD, NULL, 0);
+					rc = -1;
+					goto quit;
+				}
+
+				/* file_value is already EBCDIC after atoe conversion */
+				rc = submit_file(session, intrdr, file_value,
+								jobname, jobid, &jobclass);
+			}
+			intrdr = NULL; /* submit_file handles intrdr lifecycle */
+
+			if (rc < 0) {
+				goto quit;
+			}
+		} else {
+			/* text/plain or absent: inline JCL submission */
+			rc = submit_jcl_content(session, intrdr, data, data_size,
+									jobname, jobid, &jobclass);
+			intrdr = NULL; /* submit_jcl_content handles intrdr lifecycle */
+			if (rc < 0) {
+				goto quit;
+			}
+		}
 	}
 
-	const char *host = getHeaderParam(session, "HOST");
-	rc = find_and_send_job_status(session, jobname, jobid, host);
+	{
+		const char *host = getHeaderParam(session, "HOST");
+		rc = find_and_send_job_status(session, jobname, jobid, host);
+	}
 
 quit:
+	if (intrdr) {
+		jesircls(intrdr);
+	}
 	if (data) {
 		free(data);
 	}
@@ -851,62 +892,230 @@ receive_raw_data(HTTPC *httpc, char *buf, int len)
 	return total_bytes_received;
 }
 
+__asm__("\n&FUNC	SETC 'extract_file_value'");
+static const char *
+extract_file_value(char *json, size_t len)
+{
+	char *pos = NULL;
+	char *val_start = NULL;
+	char *val_end = NULL;
+
+	if (!json || len == 0) {
+		return NULL;
+	}
+
+	/* find "file" key in ASCII JSON */
+	pos = strstr(json, "\"file\"");
+	if (!pos) {
+		return NULL;
+	}
+
+	/* skip past "file" */
+	pos += 6;
+
+	/* skip whitespace */
+	while (pos < json + len && (*pos == ' ' || *pos == '\t')) {
+		pos++;
+	}
+
+	/* expect colon */
+	if (pos >= json + len || *pos != ':') {
+		return NULL;
+	}
+	pos++;
+
+	/* skip whitespace */
+	while (pos < json + len && (*pos == ' ' || *pos == '\t')) {
+		pos++;
+	}
+
+	/* expect opening quote */
+	if (pos >= json + len || *pos != '"') {
+		return NULL;
+	}
+	pos++;
+	val_start = pos;
+
+	/* find closing quote */
+	val_end = strchr(val_start, '"');
+	if (!val_end) {
+		return NULL;
+	}
+
+	/* null-terminate the value in place */
+	*val_end = '\0';
+
+	return val_start;
+}
+
 __asm__("\n&FUNC	SETC 'submit_file'");
-static int 
-submit_file(VSFILE *intrdr, const char *filename) 
+static int
+submit_file(Session *session, VSFILE *intrdr, const char *filename,
+            char *jobname, char *jobid, char *jobclass)
 {
 	int rc = 0;
 
 	FILE *fp = NULL;
-	
 	char *buffer = NULL;
 	size_t buffer_size = 0;
+	char **lines = NULL;
+	int num_lines = 0;
+	int modified_lines_count = 0;
 
 	char dsname[DSNAME_STR_SIZE + 1];
 
+	*jobclass = 'A';
+	memset(jobname, 0, JOBNAME_STR_SIZE + 1);
+	memset(jobid, 0, JOBID_STR_SIZE + 1);
+
+	/* strip //'DSN' → DSN */
 	size_t len = strlen(filename);
 	if (len > 4 && filename[0] == '/' && filename[1] == '/' &&
 		filename[2] == '\'' && filename[len - 1] == '\'') {
-		// strip leading " //' " and trailing " ' "
 		strncpy(dsname, &filename[3], len - 4);
-		dsname[len - 4] = '\0'; // Nullterminator hinzufügen
+		dsname[len - 4] = '\0';
 	} else {
-		// TODO (MIG) - return HTTP 400 error and / or a defined json error object
-		wtof("invalid filename %s", filename);
+		char msg[MAX_ERR_MSG_LENGTH] = {0};
+		snprintf(msg, sizeof(msg), ERR_MSG_SUBMIT_FILE_OPEN, filename);
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_SUBMIT_FILE_OPEN, msg, NULL, 0);
 		rc = -1;
 		goto quit;
 	}
 
 	fp = fopen(dsname, "re");
 	if (!fp) {
-		// TODO (MIG) - return HTTP 404 error and / or a defined json error object
+		char msg[MAX_ERR_MSG_LENGTH] = {0};
+		snprintf(msg, sizeof(msg), ERR_MSG_SUBMIT_FILE_OPEN, dsname);
+		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+						RC_ERROR, REASON_SUBMIT_FILE_OPEN, msg, NULL, 0);
+		rc = -1;
 		goto quit;
 	}
 
 	buffer_size = fp->lrecl + 2;
 	buffer = calloc(1, buffer_size);
-
 	if (!buffer) {
-		// TODO (MIG) - return HTTP error 500
-		rc = fclose(fp);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		rc = -1;
 		goto quit;
 	}
 
-	while (fgets(buffer, (int)buffer_size, fp) > 0) {
-		// TODO (MIG) - extract jobname and jobclass from the first line of the file
-		rc = jesirput(intrdr, buffer);
-		if (rc < 0) {
-			// TODO (MIG) - return HTTP error 500
-			rc = fclose(fp);
-			goto quit;
+	/* allocate lines array — all MAX_JCL_LINES slots, because
+	   process_jobcard() adds USER/PASSWORD lines beyond num_lines */
+	lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
+	if (!lines) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		rc = -1;
+		goto quit;
+	}
+	{
+		int alloc_idx = 0;
+		for (alloc_idx = 0; alloc_idx < MAX_JCL_LINES; alloc_idx++) {
+			lines[alloc_idx] = calloc(72, sizeof(char));
+			if (!lines[alloc_idx]) {
+				rc = -1;
+				goto quit;
+			}
 		}
 	}
 
-	free(buffer);
-	rc = fclose(fp);
+	/* read dataset into lines array */
+	while (fgets(buffer, (int)buffer_size, fp) > 0 && num_lines < MAX_JCL_LINES) {
+		size_t line_len = strlen(buffer);
+
+		/* remove trailing newline/CR */
+		while (line_len > 0 && (buffer[line_len - 1] == '\n' ||
+				buffer[line_len - 1] == '\r' ||
+				buffer[line_len - 1] == EBCDIC_LF)) {
+			buffer[line_len - 1] = '\0';
+			line_len--;
+		}
+
+		strncpy(lines[num_lines], buffer, 71);
+		lines[num_lines][71] = '\0';
+		num_lines++;
+	}
+
+	fclose(fp);
+	fp = NULL;
+
+	/* process jobcard: inject USER/PASSWORD */
+	{
+		const char *user = getHeaderParam(session, "CURRENT_USER");
+		const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
+
+		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
+		if (rc < 0) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+							RC_ERROR, REASON_INVALID_REQUEST,
+							"No valid JOB card found in dataset", NULL, 0);
+			goto quit;
+		}
+		modified_lines_count = rc;
+	}
+
+	/* submit all lines to internal reader */
+	{
+		int ii = 0;
+		for (ii = 0; ii < modified_lines_count; ii++) {
+			if (lines[ii][0] != '\0') {
+				rc = jesirput(intrdr, lines[ii]);
+				if (rc < 0) {
+					wtof("MVSMF22E Failed to write to internal reader");
+					sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+									CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+									ERR_MSG_SERVER_ERROR, NULL, 0);
+					goto quit;
+				}
+			}
+		}
+	}
+
+	/* close internal reader and retrieve jobid */
+	rc = jesircls(intrdr);
+	if (rc < 0) {
+		wtof("MVSMF22E Failed to close internal reader");
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		goto quit;
+	}
+
+	strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
+	jobid[JOBID_STR_SIZE] = '\0';
+
+	wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
+	rc = 0;
+
+	intrdr = NULL;
 
 quit:
-	return 0;
+	if (intrdr) {
+		jesircls(intrdr);
+	}
+
+	if (fp) {
+		fclose(fp);
+	}
+
+	if (buffer) {
+		free(buffer);
+	}
+
+	if (lines) {
+		int ii = 0;
+		for (ii = 0; ii < MAX_JCL_LINES; ii++) {
+			free(lines[ii]);
+		}
+		free((void *)lines);
+	}
+
+	return rc;
 }
 
 __asm__("\n&FUNC    SETC 'tokenize'");

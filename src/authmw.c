@@ -9,12 +9,15 @@
 
 static int validate_user(Session *session, char *username, char *password);
 
-int authentication_middleware(Session *session) 
+int authentication_middleware(Session *session)
 {
     int rc = 0;
+    UCHAR  encoded[256] = {0};
+    UCHAR *decoded = NULL;
+    size_t decoded_len;
     const char *auth_header = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_Authorization");
     const char *content_type = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_Content-Type");
-   
+
     if (!auth_header) {
 		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
 		rc = -1;
@@ -28,19 +31,16 @@ int authentication_middleware(Session *session)
         goto quit;
     }
 
-    UCHAR  encoded[256] = {0};
-    UCHAR *decoded;
-    size_t decoded_len;
-    
     strncpy((char *) encoded, auth_header + 6, sizeof(encoded) - 1);
     decoded = base64_decode( (const UCHAR *) encoded, strlen((char *) encoded), &decoded_len);
-    mvsmf_atoe((unsigned char *) decoded, decoded_len);
 
     if (decoded == NULL) {
         sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
 		rc = -1;
         goto quit;
     }
+
+    mvsmf_atoe((unsigned char *) decoded, decoded_len);
 
     // extract username and password
     char *colon = strchr((char *) decoded, ':');

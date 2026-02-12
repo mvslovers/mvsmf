@@ -1,11 +1,7 @@
 #ifndef JOBSAPI_ERR_H
 #define JOBSAPI_ERR_H
 
-// Job API Categories
-#define CATEGORY_VSAM					 3  // VSAM error
-#define CATEGORY_SERVICE				 6  // Service error
-#define CATEGORY_UNEXPECTED				 7  // Unexpected error
-#define CATEGORY_CIM					 9  // Common Information Model (CIM) error
+#include "zosmferr.h"
 
 // Reason codes for Category 3 (VSAM error)
 #define REASON_INCORRECT_JES_VSAM_HANDLE 1  // Incorrect JesVsam handle
@@ -40,7 +36,7 @@
 #define REASON_STC_PURGE				51  // STC purge
 
 // Reason codes for Category 7 (Server error)
-#define REASON_SERVER_ERROR				0  // Server error
+// REASON_SERVER_ERROR defined in zosmferr.h
 
 // Error messages for Category 6
 #define ERR_MSG_INVALID_INTRDR_MODE		"Incorrect Internal Reader mode: %s. Must be one of TEXT | RECORD | BINARY"
@@ -66,7 +62,7 @@
 #define ERR_MSG_STC_PURGE				"Purge of a STC or a TSO useris not allowed"
 
 // Category 7 error messages
-#define ERR_MSG_SERVER_ERROR			"Server error occurred"
+// ERR_MSG_SERVER_ERROR defined in zosmferr.h
 
 // Category 9 error messages
 #define ERR_MSG_INVALID_JOBNAME			"Incorrect jobname: \"%s\""

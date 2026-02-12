@@ -2,9 +2,13 @@
 #include <string.h>
 #include <clibwto.h>
 #include <cliblist.h>
+#include <clibdscb.h>
+#include <osdcb.h>
 #include <errno.h>
 
 #include "dsapi.h"
+#include "dsapi_err.h"
+#include "common.h"
 #include "httpd.h"
 #include "xlate.h"
 
@@ -82,6 +86,37 @@ static int handle_error(Session *session, int error_code, const char* message) {
     return http_printf(session->httpc, 
                       "{\n  \"error\": \"%s\",\n  \"code\": %d\n}\n", 
                       message, error_code);
+}
+
+// Helper function to check if a dataset is a PDS via VTOC DSCB lookup
+__asm__("\n&FUNC    SETC 'is_pds'");
+static int
+is_pds(const char *dsname)
+{
+	LOCWORK locwork;
+	DSCB dscb;
+	char dsn44[44];
+	int rc;
+
+	// Pad dataset name to 44 bytes (required by __locate/__dscbdv)
+	memset(dsn44, ' ', sizeof(dsn44));
+	memcpy(dsn44, dsname, strlen(dsname));
+
+	// Locate dataset in catalog to get volume serial
+	memset(&locwork, 0, sizeof(locwork));
+	rc = __locate(dsn44, &locwork);
+	if (rc != 0) {
+		return 0;
+	}
+
+	// Read DSCB from VTOC to get real dsorg
+	memset(&dscb, 0, sizeof(dscb));
+	rc = __dscbdv(dsn44, locwork.volser, &dscb);
+	if (rc != 0) {
+		return 0;
+	}
+
+	return (dscb.dscb1.dsorg1 & DSGPO) != 0;
 }
 
 // Helper function to parse X-IBM-Data-Type header
@@ -301,6 +336,13 @@ int datasetGetHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
     }
 
+    // Reject PDS - this endpoint is for sequential datasets only
+    if (is_pds(dsname)) {
+        return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+            CATEGORY_SERVICE, RC_ERROR, REASON_PDS_NOT_SEQUENTIAL,
+            ERR_MSG_PDS_NOT_SEQUENTIAL, NULL, 0);
+    }
+
     // Open file
     fp = fopen(dsname, "r");
     if (!fp) {
@@ -358,6 +400,13 @@ int datasetPutHandler(Session *session)
     if (!dsname) {
         wtof("MVSMF31E Missing required parameter: dsname=NULL");
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
+    }
+
+    // Reject PDS - this endpoint is for sequential datasets only
+    if (is_pds(dsname)) {
+        return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+            CATEGORY_SERVICE, RC_ERROR, REASON_PDS_NOT_SEQUENTIAL,
+            ERR_MSG_PDS_NOT_SEQUENTIAL, NULL, 0);
     }
 
     // Get headers

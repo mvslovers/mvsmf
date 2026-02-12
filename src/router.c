@@ -4,6 +4,7 @@
 #include "router.h"
 #include "common.h"
 #include "httpd.h"
+#include "xlate.h"
 
 
 #define INITIAL_BUFFER_SIZE 4096
@@ -15,7 +16,11 @@
 static int route_matching_middleware(Session *session);
 static int path_vars_extracting_middleware(Session *session);
 
-static HttpMethod parseMethod(const char *method); 
+static unsigned char hex_nibble(char c);
+static int is_hex_digit(char c);
+static void percent_decode(char *str);
+
+static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
 static int is_pattern_match(const char *pattern, const char *path);
 static int extract_path_vars(Session *session, const char *pattern, const char *path);
@@ -89,8 +94,14 @@ int handle_request(Router *router, Session *session)
     HTTPC *httpc = session->httpc;
 
     char *method = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_METHOD");
-    char *path = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_PATH");
-    
+    char *raw_path = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_PATH");
+    char path[1024];
+
+    // Percent-decode the request path (e.g. %28/%29 -> parentheses)
+    strncpy(path, raw_path, sizeof(path) - 1);
+    path[sizeof(path) - 1] = '\0';
+    percent_decode(path);
+
     HttpMethod reqMethod = parseMethod(method);
     if (reqMethod == -1) {
         http_resp(httpc, 405);
@@ -122,6 +133,50 @@ int handle_request(Router *router, Session *session)
 //
 // private functions
 //
+
+__asm__("\n&FUNC    SETC 'hex_nibble'");
+static unsigned char
+hex_nibble(char c)
+{
+	if (c >= '0' && c <= '9') return c - '0';
+	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+	return 0;
+}
+
+__asm__("\n&FUNC    SETC 'is_hex_digit'");
+static int
+is_hex_digit(char c)
+{
+	return (c >= '0' && c <= '9') ||
+	       (c >= 'A' && c <= 'F') ||
+	       (c >= 'a' && c <= 'f');
+}
+
+// Decode percent-encoded characters in-place.
+// URL percent-encoding uses ASCII byte values (e.g. %28 = ASCII '(').
+// Since we run on EBCDIC, decoded bytes must be converted from ASCII to EBCDIC.
+__asm__("\n&FUNC    SETC 'percent_decode'");
+static void
+percent_decode(char *str)
+{
+	char *src = str;
+	char *dst = str;
+
+	while (*src) {
+		if (*src == '%' && is_hex_digit(src[1]) && is_hex_digit(src[2])) {
+			unsigned char ascii_val = (hex_nibble(src[1]) << 4) | hex_nibble(src[2]);
+			mvsmf_atoe(&ascii_val, 1);
+			*dst = (char)ascii_val;
+			src += 3;
+		} else {
+			*dst = *src;
+			src++;
+		}
+		dst++;
+	}
+	*dst = '\0';
+}
 
 __asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 
@@ -163,9 +218,10 @@ Route *find_route(Router *router, HttpMethod method, const char *path)
 {
     int i = 0;
     for (i = 0; i < router->route_count; i++) {
-        if (router->routes[i].method == method && 
-            is_pattern_match(router->routes[i].pattern, path)) {
-            return &router->routes[i];
+        if (router->routes[i].method == method) {
+            if (is_pattern_match(router->routes[i].pattern, path)) {
+                return &router->routes[i];
+            }
         }
     }
     return NULL;

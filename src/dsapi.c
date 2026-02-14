@@ -157,6 +157,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Write the raw data
             if (fwrite(record_buffer, 1, record_length, fp) != record_length) return -1;
+            fflush(fp);
             *total_written += record_length;
             break;
             
@@ -190,6 +191,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Write the record data
             if (fwrite(record_buffer, 1, rec_len, fp) != rec_len) return -1;
+            fflush(fp);
             *total_written += rec_len;
             break;
             

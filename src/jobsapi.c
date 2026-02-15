@@ -661,7 +661,31 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 	rc = addJsonString(builder, "url", url_str);
 	rc = addJsonString(builder, "files-url", files_url_str);
 	rc = addJsonString(builder, "status", stat_str);
-	rc = addJsonString(builder, "retcode", "n/a");
+	/* build retcode from JCTCNVRC completion info:
+	   after execution  (high byte 0x77): bits 12-23 = system ABEND, bits 0-11 = max CC
+	   before execution (converter RC):   4 = JCL error, 8 = I/O error, 36 = abend */
+	const char *retcode = NULL;
+	char retcode_buf[16];
+	if (job->q_type & (_OUTPUT | _HARDCPY)) {
+		unsigned int comp = job->completion;
+		if ((comp >> 24) == 0x77) {
+			/* job executed — decode completion info */
+			unsigned int abend = (comp >> 12) & 0xFFF;
+			unsigned int maxcc =  comp        & 0xFFF;
+			if (abend) {
+				snprintf(retcode_buf, sizeof(retcode_buf), "ABEND S%03X", abend);
+			} else if ((job->jtflg & JESJOB_ABD) && maxcc) {
+				snprintf(retcode_buf, sizeof(retcode_buf), "ABEND U%04d", maxcc);
+			} else {
+				snprintf(retcode_buf, sizeof(retcode_buf), "CC %04d", maxcc);
+			}
+			retcode = retcode_buf;
+		} else if (comp == 4 || comp == 8 || comp == 36) {
+			/* JCL converter error */
+			retcode = "JCL ERROR";
+		}
+	}
+	rc = addJsonString(builder, "retcode", retcode);
 	
 	rc = endJsonObject(builder);
 

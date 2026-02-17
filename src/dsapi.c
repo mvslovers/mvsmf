@@ -33,6 +33,10 @@
 #define ERR_MEMORY -2
 #define ERR_IO -3
 
+// Forward declarations
+static int handle_error(Session *session, int error_code, const char* message);
+static int send_standard_headers(Session *session, const char* content_type);
+
 // Helper functions for memory management
 static void cleanup_resources(char* buffer, FILE* fp) {
     if (buffer) {
@@ -76,6 +80,150 @@ static int send_standard_headers(Session *session, const char* content_type) {
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
     
     return rc;
+}
+
+// Calculate total record count for an FB dataset from VTOC info.
+// Returns total number of records, or -1 on error / non-FB dataset.
+__asm__("\n&FUNC    SETC 'get_fb_reccnt'");
+static long
+get_fb_record_count(const char *dsname)
+{
+	LOCWORK locwork;
+	DSCB dscb1, dscb4;
+	char dsn44[44];
+	unsigned short blksz, lrecl, devtk, devov, devk;
+	unsigned overhead, bpt, recs_per_block;
+	unsigned tt, r;
+	long total_blocks;
+	int rc;
+
+	memset(dsn44, ' ', sizeof(dsn44));
+	memcpy(dsn44, dsname, strlen(dsname));
+
+	/* Locate dataset to get volser */
+	memset(&locwork, 0, sizeof(locwork));
+	rc = __locate(dsn44, &locwork);
+	if (rc != 0) return -1;
+
+	/* Read DSCB1 for dataset attributes */
+	memset(&dscb1, 0, sizeof(dscb1));
+	rc = __dscbdv(dsn44, locwork.volser, &dscb1);
+	if (rc != 0) return -1;
+
+	/* Must be FB (fixed, non-keyed) */
+	if ((dscb1.dscb1.recfm & RECFF) == 0) return -1;
+	if (dscb1.dscb1.keyl != 0) return -1;
+
+	blksz = dscb1.dscb1.blksz;
+	lrecl = dscb1.dscb1.lrecl;
+	if (blksz == 0 || lrecl == 0) return -1;
+
+	/* Read DSCB4 for device geometry */
+	memset(&dscb4, 0, sizeof(dscb4));
+	rc = __dscbv(locwork.volser, &dscb4);
+	if (rc != 0) return -1;
+
+	devtk = dscb4.dscb4.devtk;
+	devov = dscb4.dscb4.devov;
+	devk  = dscb4.dscb4.devk;
+
+	/* blocks_per_track = floor((devtk - overhead) / (overhead + blksz))
+	   where overhead = devov - devk for non-keyed records */
+	overhead = devov - devk;
+	if (overhead + blksz == 0) return -1;
+	bpt = (devtk - overhead) / (overhead + blksz);
+	if (bpt == 0) return -1;
+
+	/* DS1LSTAR: TT = relative track (0-based), R = block on track (1-based) */
+	tt = ((unsigned)dscb1.dscb1.lstar[0] << 8) | dscb1.dscb1.lstar[1];
+	r  = dscb1.dscb1.lstar[2];
+
+	total_blocks = (long)tt * bpt + r;
+	recs_per_block = blksz / lrecl;
+
+	return total_blocks * recs_per_block;
+}
+
+// Read and send dataset content respecting data type.
+//
+// TEXT mode: uses fgets (fp must be opened "r") for correct record
+// boundaries and EOF. BINARY/RECORD mode: uses fread (fp must be
+// opened "rb") with max_records limit to avoid reading past logical
+// EOF. If max_records is -1, reads until fread returns 0.
+__asm__("\n&FUNC    SETC 'read_and_send_ds'");
+static int
+read_and_send_dataset(Session *session, FILE *fp, int data_type,
+	long max_records)
+{
+	int rc = 0;
+	char *buffer = NULL;
+	const char *content_type;
+	int lrecl = fp->lrecl;
+	long count = 0;
+
+	buffer = calloc(1, lrecl + 2);
+	if (!buffer) {
+		return handle_error(session, ERR_MEMORY, "Memory allocation failed");
+	}
+
+	if (data_type == DATA_TYPE_TEXT) {
+		content_type = "text/plain";
+	} else {
+		content_type = "application/octet-stream";
+	}
+
+	rc = send_standard_headers(session, content_type);
+	if (rc < 0) {
+		free(buffer);
+		return rc;
+	}
+
+	if (data_type == DATA_TYPE_TEXT) {
+		/* Text mode: fgets + EBCDIC->ASCII + strlen for length */
+		while (fgets(buffer, lrecl + 2, fp) > 0) {
+			size_t len = strlen(buffer);
+			mvsmf_etoa((unsigned char *)buffer, len);
+			if ((rc = http_send(session->httpc,
+					(const UCHAR *)buffer, len)) < 0) {
+				break;
+			}
+		}
+	} else if (data_type == DATA_TYPE_BINARY) {
+		/* Binary: fread raw bytes, no conversion */
+		size_t n;
+		while ((n = fread(buffer, 1, lrecl, fp)) > 0) {
+			if (max_records >= 0 && count >= max_records) break;
+			if ((rc = http_send(session->httpc,
+					(const UCHAR *)buffer, n)) < 0) {
+				break;
+			}
+			count++;
+		}
+	} else if (data_type == DATA_TYPE_RECORD) {
+		/* Record: like binary but prefix each record with 4-byte
+		   big-endian length */
+		size_t n;
+		while ((n = fread(buffer, 1, lrecl, fp)) > 0) {
+			unsigned char len_prefix[4];
+			if (max_records >= 0 && count >= max_records) break;
+			len_prefix[0] = (n >> 24) & 0xFF;
+			len_prefix[1] = (n >> 16) & 0xFF;
+			len_prefix[2] = (n >> 8) & 0xFF;
+			len_prefix[3] = n & 0xFF;
+			if ((rc = http_send(session->httpc,
+					(const UCHAR *)len_prefix, 4)) < 0) {
+				break;
+			}
+			if ((rc = http_send(session->httpc,
+					(const UCHAR *)buffer, n)) < 0) {
+				break;
+			}
+			count++;
+		}
+	}
+
+	free(buffer);
+	return rc;
 }
 
 // Helper function for error handling
@@ -328,9 +476,10 @@ int datasetGetHandler(Session *session)
 {
     int rc = 0;
     char *dsname = NULL;
-    char *volser = NULL;
+    const char *data_type_str = NULL;
+    int data_type;
+    long max_records = -1;
     FILE *fp = NULL;
-    char *buffer = NULL;
 
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
@@ -345,36 +494,24 @@ int datasetGetHandler(Session *session)
             ERR_MSG_PDS_NOT_SEQUENTIAL, NULL, 0);
     }
 
-    // Open file
-    fp = fopen(dsname, "r");
+    // Parse X-IBM-Data-Type header
+    data_type_str = (char *) http_get_env(session->httpc,
+        (const UCHAR *) "HTTP_X-IBM-Data-Type");
+    data_type = parse_data_type(data_type_str);
+
+    if (data_type == DATA_TYPE_TEXT) {
+        fp = fopen(dsname, "r");
+    } else {
+        max_records = get_fb_record_count(dsname);
+        fp = fopen(dsname, "rb");
+    }
     if (!fp) {
         return handle_error(session, ERR_IO, "Cannot open dataset");
     }
 
-    // Allocate buffer
-    buffer = allocate_buffer(fp, &rc);
-    if (!buffer) {
-        cleanup_resources(buffer, fp);
-        return handle_error(session, ERR_MEMORY, "Memory allocation failed");
-    }
+    rc = read_and_send_dataset(session, fp, data_type, max_records);
 
-    // Send HTTP headers
-    rc = send_standard_headers(session, "application/json");
-    if (rc < 0) {
-        cleanup_resources(buffer, fp);
-        return rc;
-    }
-
-    // Read and send file content
-    while (fgets(buffer, fp->lrecl + 2, fp) > 0) {
-        size_t len = strlen(buffer);
-        mvsmf_etoa((unsigned char *)buffer, len);
-        if ((rc = http_send(session->httpc, (const UCHAR *)buffer, len)) < 0) {
-            break;
-        }
-    }
-
-    cleanup_resources(buffer, fp);
+    fclose(fp);
     return rc;
 }
 
@@ -784,14 +921,15 @@ int memberGetHandler(Session *session)
     int rc = 0;
     char *dsname = NULL;
     char *member = NULL;
+    const char *data_type_str = NULL;
+    int data_type;
     char dataset[MAX_DATASET_NAME] = {0};
     FILE *fp = NULL;
-    char *buffer = NULL;
 
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
     member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
-    
+
     if (!dsname || !member) {
         return handle_error(session, ERR_INVALID_PARAM, "Dataset and member names are required");
     }
@@ -804,36 +942,24 @@ int memberGetHandler(Session *session)
     // Create dataset path
     snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
 
-    // Open file
-    fp = fopen(dataset, "r");
+    // Parse X-IBM-Data-Type header
+    data_type_str = (char *) http_get_env(session->httpc,
+        (const UCHAR *) "HTTP_X-IBM-Data-Type");
+    data_type = parse_data_type(data_type_str);
+
+    if (data_type == DATA_TYPE_TEXT) {
+        fp = fopen(dataset, "r");
+    } else {
+        fp = fopen(dataset, "rb");
+    }
     if (!fp) {
         return handle_error(session, ERR_IO, "Cannot open dataset member");
     }
 
-    // Allocate buffer
-    buffer = allocate_buffer(fp, &rc);
-    if (!buffer) {
-        cleanup_resources(buffer, fp);
-        return handle_error(session, ERR_MEMORY, "Memory allocation failed");
-    }
+    // PDS member: record count unknown, pass -1 (no limit)
+    rc = read_and_send_dataset(session, fp, data_type, -1);
 
-    // Send HTTP headers
-    rc = send_standard_headers(session, "application/json");
-    if (rc < 0) {
-        cleanup_resources(buffer, fp);
-        return rc;
-    }
-
-    // Read and send file content
-    while (fgets(buffer, fp->lrecl + 2, fp) > 0) {
-        size_t len = strlen(buffer);
-        mvsmf_etoa((unsigned char *)buffer, len);
-        if ((rc = http_send(session->httpc, (const UCHAR *)buffer, len)) < 0) {
-            break;
-        }
-    }
-
-    cleanup_resources(buffer, fp);
+    fclose(fp);
     return rc;
 }
 

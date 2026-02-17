@@ -26,7 +26,7 @@
 #define MAX_JOBS_LIMIT 1000
 #define MAX_URL_LENGTH 256
 #define MAX_ERR_MSG_LENGTH 256
-#define MAX_JCL_LINES 1000  // Neue Konstante für maximale JCL Zeilen
+#define MAX_JCL_LINES 5000
 
 #define JES_INFO_SIZE   20 + 1
 #define TYPE_STR_SIZE    3 + 1
@@ -1081,6 +1081,16 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		num_lines++;
 	}
 
+	if (num_lines >= MAX_JCL_LINES &&
+		fgets(buffer, (int)buffer_size, fp) > 0) {
+		wtof("MVSMF22E JCL too large, truncated at %d lines",
+			MAX_JCL_LINES);
+		fclose(fp);
+		fp = NULL;
+		rc = -1;
+		goto quit;
+	}
+
 	fclose(fp);
 	fp = NULL;
 
@@ -1740,6 +1750,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         
         if (out_line >= MAX_JCL_LINES) {
             wtof("MVSMF22E Too many lines in JCL (max %d)", MAX_JCL_LINES);
+            rc = -1;
             goto cleanup;
         }
 
@@ -1828,6 +1839,12 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         num_lines++;
 
         line = tokenize(NULL, delimiter, &saveptr);
+    }
+
+    if (line != NULL) {
+        wtof("MVSMF22E JCL too large, truncated at %d lines", MAX_JCL_LINES);
+        rc = -1;
+        goto quit;
     }
 
     /* Analyze and potentially modify job card */

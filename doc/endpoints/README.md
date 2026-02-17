@@ -42,5 +42,6 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | Header | Used By | Description |
 |--------|---------|-------------|
 | `X-IBM-Data-Type` | Dataset/member GET & PUT | `text` (default), `binary`, `record` |
-| `X-IBM-Intrdr-Lrecl` | Job submit | Internal reader LRECL |
-| `X-IBM-Intrdr-Recfm` | Job submit | Internal reader RECFM |
+| `X-IBM-Intrdr-Mode` | Job submit | Validated but fixed to `TEXT` |
+| `X-IBM-Intrdr-Lrecl` | Job submit | Validated but fixed to `80` |
+| `X-IBM-Intrdr-Recfm` | Job submit | Validated but fixed to `F` |

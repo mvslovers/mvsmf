@@ -10,8 +10,9 @@ PUT
 
 ## Request Headers
 - `Content-Type`: Either `text/plain` (inline JCL) or `application/json` (dataset reference)
-- `X-IBM-Intrdr-Lrecl` (optional): Logical record length for internal reader
-- `X-IBM-Intrdr-Recfm` (optional): Record format for internal reader
+- `X-IBM-Intrdr-Mode` (optional): Validated if present, must be `TEXT`
+- `X-IBM-Intrdr-Lrecl` (optional): Validated if present, must be `80`
+- `X-IBM-Intrdr-Recfm` (optional): Validated if present, must be `F`
 
 ## Request Body
 

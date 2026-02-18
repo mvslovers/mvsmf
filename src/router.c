@@ -284,9 +284,9 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
 
             char env_name[256];
             sprintf(env_name, "HTTP_%s", var_name);
+            /* strdup required: http_set_env stores the pointer,
+               freed when HTTPD tears down the request environment */
             http_set_env(httpc, (UCHAR *) env_name, (UCHAR *) strdup(value));
-            
-            //insert(vars, strdup(var_name), strdup(value));
 
         } else {
             if (*pattern == *path) {

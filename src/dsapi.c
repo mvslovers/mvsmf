@@ -469,6 +469,10 @@ end:
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 
 quit:
+	if (dslist) {
+		__freeds(&dslist);
+	}
+
 	return rc;
 }
 
@@ -913,6 +917,10 @@ end:
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 
 quit:
+	if (pdslist) {
+		__freepd(&pdslist);
+	}
+
 	return rc;
 }
 

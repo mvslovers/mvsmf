@@ -26,7 +26,7 @@
 #define MAX_JOBS_LIMIT 1000
 #define MAX_URL_LENGTH 256
 #define MAX_ERR_MSG_LENGTH 256
-#define MAX_JCL_LINES 5000
+#define MAX_JCL_LINES 2500
 
 #define JES_INFO_SIZE   20 + 1
 #define TYPE_STR_SIZE    3 + 1
@@ -138,6 +138,10 @@ jobListHandler(Session *session)
 	sendJSONResponse(session, HTTP_STATUS_OK, builder);
 
 quit:
+	if (joblist) {
+		jesjobfr(&joblist);
+	}
+
 	if (builder) {
 		freeJsonBuilder(builder);
 	}
@@ -149,7 +153,7 @@ quit:
 	return 0;
 }
 
-int 
+int
 jobFilesHandler(Session *session) 
 {
 	int rc = 0;

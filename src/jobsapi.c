@@ -52,7 +52,7 @@ static int  do_print_sysout(Session *session, JESJOB *job, unsigned dsid);
 static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt);
 static unsigned get_max_jobs(Session *session);
 static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host);
-static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid);
+static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
 static int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length, 
@@ -154,11 +154,12 @@ quit:
 }
 
 int
-jobFilesHandler(Session *session) 
+jobFilesHandler(Session *session)
 {
 	int rc = 0;
-	
+
 	JESJOB *job = NULL;
+	JESJOB **joblist = NULL;
 
 	JsonBuilder *builder = createJsonBuilder();
 	
@@ -181,7 +182,7 @@ jobFilesHandler(Session *session)
 		goto quit;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
 	if (!job) {
 		char msg[MAX_ERR_MSG_LENGTH] = {0};
 		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
@@ -205,6 +206,10 @@ jobFilesHandler(Session *session)
 	sendJSONResponse(session, HTTP_STATUS_OK, builder);
 
 quit:
+	if (joblist) {
+		jesjobfr(&joblist);
+	}
+
 	if (builder) {
 		freeJsonBuilder(builder);
 	}
@@ -213,11 +218,12 @@ quit:
 }
 
 int 
-jobRecordsHandler(Session *session) 
+jobRecordsHandler(Session *session)
 {
 	int rc = 0;
 
 	JESJOB *job = NULL;
+	JESJOB **joblist = NULL;
 
 	const char *jobname = getPathParam(session, "job-name");
 	const char *jobid = getPathParam(session, "jobid");
@@ -230,7 +236,7 @@ jobRecordsHandler(Session *session)
 		return rc;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
 	if (!job) {
 		char msg[MAX_ERR_MSG_LENGTH] = {0};
 		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
@@ -241,10 +247,10 @@ jobRecordsHandler(Session *session)
 	}
 
 	sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
-	
+
 	char *endptr = NULL;
 	long ddid_val = strtol(ddid, &endptr, DECIMAL_BASE);
-	
+
 	if (*endptr != '\0' || ddid_val < 0) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 						RC_ERROR, REASON_INVALID_QUERY,
@@ -262,6 +268,10 @@ jobRecordsHandler(Session *session)
 	}
 
 quit:
+	if (joblist) {
+		jesjobfr(&joblist);
+	}
+
 	return 0;
 }
 
@@ -283,6 +293,7 @@ jobPurgeHandler(Session *session)
 	int rc = 0;
 
 	JESJOB 	*job = NULL;
+	JESJOB **joblist = NULL;
 
 	// Get jobname and jobid from request
 	const char *jobname = getPathParam(session, "job-name");
@@ -297,7 +308,7 @@ jobPurgeHandler(Session *session)
 		goto quit;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
 	if (!job) {
 		char msg[MAX_ERR_MSG_LENGTH] = {0};
 		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
@@ -320,18 +331,18 @@ jobPurgeHandler(Session *session)
 		rc = addJsonString(builder, "original-jobid", jobid);
 		rc = addJsonString(builder, "jobname", jobname);
 		rc = addJsonNumber(builder, "status", 0);
-		
+
 		rc = endJsonObject(builder);
 		if (rc < 0) {
 			goto quit;
 		}
 
 		sendJSONResponse(session, HTTP_STATUS_OK, builder);
-		
+
 		break;
 	case CANJ_ICAN:
 		sendErrorResponse(session, HTTP_STATUS_FORBIDDEN, CATEGORY_SERVICE,
-							RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE, 
+							RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE,
 							NULL, 0);
 
 		break;
@@ -339,12 +350,16 @@ jobPurgeHandler(Session *session)
 		// TODO (MIG) - adding details to the error message (different rc's) and a new error message in jobsapi_msg.h
 		wtof("MVSMF42D JESCANJ got RC(%d)", rc);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,
-							RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR, 
+							RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR,
 							NULL, 0);
 		break;
 	}
 
 quit:
+	if (joblist) {
+		jesjobfr(&joblist);
+	}
+
 	if (builder) {
 		freeJsonBuilder(builder);
 	}
@@ -699,16 +714,20 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 
 __asm__("\n&FUNC    SETC 'find_job_by_name_and_id'");
 static 
-JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid) 
+JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist)
 {
 	int job_found = 0;
-	
+
 	JES *jes = NULL;
 
 	JESJOB *found_job = NULL;
 	JESJOB **joblist = NULL;
 	JESFILT jesfilt = FILTER_JOBID;
 	const char *filter = jobid;
+
+	if (out_joblist) {
+		*out_joblist = NULL;
+	}
 
 	if (!jobname || !jobid) {
 		wtof("MVSMF22E Invalid parameters for find_job_by_name_and_id");
@@ -733,7 +752,7 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 		if (!job) {
 			continue;
 		}
-		
+
 		if (http_cmp((const UCHAR *)job->jobname, (const UCHAR *)jobname) != 0) {
 			continue;
 		}
@@ -751,6 +770,10 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 quit:
 	if (jes) {
 		jesclose(&jes);
+	}
+
+	if (out_joblist) {
+		*out_joblist = joblist;
 	}
 
 	return found_job;
@@ -1252,6 +1275,8 @@ int read_request_content(Session *session, char **content, size_t *content_size)
             /* Read chunk size line (hex + CRLF) */
             while (i < sizeof(chunk_size_str) - 1) {
                 if (receive_raw_data(session->httpc, chunk_size_str + i, 1) != 1) {
+                    free((void *) *content);
+                    *content = NULL;
                     return -1;
                 }
                 if (chunk_size_str[i] == '\r') {
@@ -1291,6 +1316,8 @@ int read_request_content(Session *session, char **content, size_t *content_size)
                                        *content + *content_size + bytes_read,
                                        chunk_size - bytes_read);
                     if (bytes_received <= 0) {
+                        free((void *) *content);
+                        *content = NULL;
                         return -1;
                     }
                     bytes_read += bytes_received;
@@ -1303,6 +1330,8 @@ int read_request_content(Session *session, char **content, size_t *content_size)
             {
                 char crlf[2];
                 if (receive_raw_data(session->httpc, crlf, 2) != 2) {
+                    free((void *) *content);
+                    *content = NULL;
                     return -1;
                 }
             }
@@ -1327,6 +1356,8 @@ int read_request_content(Session *session, char **content, size_t *content_size)
                                    : sizeof(recv_buffer));
 
             if (bytes_received <= 0) {
+                free((void *) *content);
+                *content = NULL;
                 return -1;
             }
 
@@ -1384,16 +1415,17 @@ find_and_send_job_status(Session *session, const char *jobname, const char *jobi
     int rc = 0;
 
     JESJOB *job = NULL;
+    JESJOB **joblist = NULL;
 
     if (!jobname || !jobid) {
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
-                      RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR, 
+                      RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR,
                       NULL, 0);
         rc = -1;
 	   	goto quit;
     }
 
-    job = find_job_by_name_and_id(session, jobname, jobid);
+    job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
     if (!job) {
         char msg[MAX_ERR_MSG_LENGTH] = {0};
         rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
@@ -1407,7 +1439,10 @@ find_and_send_job_status(Session *session, const char *jobname, const char *jobi
     rc = send_job_status_response(session, job, host);
 
 quit:
-  
+    if (joblist) {
+        jesjobfr(&joblist);
+    }
+
 	return rc;
 }
 
@@ -1574,11 +1609,8 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                const char *user, const char *password) 
 {
     int rc = -1;
-    char **temp_lines = NULL;
-    char *temp_lines_buf = NULL;
     int start_idx = -1;
     int end_idx = -1;
-    int out_line = 0;
     int notify_replaced = 0;
 
     if (!lines || num_lines <= 0 || !jobname || !jobclass || !user) {
@@ -1623,49 +1655,38 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         *jobclass = class_param[6];
     }
 
-    // Allocate temporary lines array (contiguous buffer)
-    temp_lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
-    temp_lines_buf = (char *) calloc(MAX_JCL_LINES, 81);
-    if (!temp_lines || !temp_lines_buf) {
-        wtof("MVSMF22E Memory allocation failed for temp lines");
-        return rc;
-    }
-    for (ii = 0; ii < MAX_JCL_LINES; ii++) {
-        temp_lines[ii] = temp_lines_buf + (ii * 81);
-    }
-
-    // Process job card lines
+    // Process job card lines in-place: replace NOTIFY=&SYSUID
     for (ii = start_idx; ii <= end_idx; ii++) {
         if (!lines[ii]) {
             wtof("MVSMF22E NULL line at index %d", ii);
-            goto cleanup;
+            return -1;
         }
-
-        char temp_line[81] = {0};
-        strncpy(temp_line, lines[ii], 80);
 
         // Replace &SYSUID with actual user if present and not already replaced
         if (!notify_replaced) {
-            char *notify_start = strstr(temp_line, "NOTIFY");
+            char *notify_start = strstr(lines[ii], "NOTIFY");
             if (notify_start) {
                 char *equals = strchr(notify_start, '=');
                 if (equals) {
                     // Skip any whitespace after the equals sign
                     char *sysuid = equals + 1;
                     while (*sysuid == ' ') sysuid++;
-                    
+
                     if (strncmp(sysuid, "&SYSUID", 7) == 0) {
+                        char temp_line[81] = {0};
                         char before[80] = {0};
                         char after[80] = {0};
-                        size_t notify_offset = notify_start - temp_line;
-                        
+                        size_t notify_offset = notify_start - lines[ii];
+
+                        strncpy(temp_line, lines[ii], 80);
+
                         // Copy part before NOTIFY
                         strncpy(before, temp_line, notify_offset);
-                        
+
                         // Find end of &SYSUID
                         char *sysuid_end = sysuid + 7;
                         char *real_end = sysuid_end;
-                        
+
                         // Skip spaces after &SYSUID
                         while (*real_end == ' ') real_end++;
 
@@ -1673,7 +1694,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                         while (*real_end != '\0' && *real_end != ',' && *real_end != ' ') {
                             real_end++;
                         }
-                        
+
                         // Copy remaining text after parameter
                         if (*real_end == ',') {
                             strncpy(after, real_end, sizeof(after) - 1);
@@ -1685,101 +1706,68 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                                 rc = snprintf(after, sizeof(after), ",%s", real_end);
                                 if (rc < 0 || rc >= sizeof(after)) {
                                     wtof("MVSMF21E Buffer overflow in snprintf");
-                                    goto cleanup;
+                                    return -1;
                                 }
                             }
                         }
-                        
-                        // Combine parts with actual user
-                        rc = snprintf(temp_lines[out_line], 72, "%sNOTIFY=%s%s",
+
+                        // Combine parts with actual user directly into lines[ii]
+                        rc = snprintf(lines[ii], 72, "%sNOTIFY=%s%s",
                                     before, user, after);
                         if (rc < 0 || rc >= 72) {
                             wtof("MVSMF22E Buffer overflow in snprintf");
-                            goto cleanup;
+                            return -1;
                         }
+                        lines[ii][80] = '\0';
                         notify_replaced = 1;
-                    } else {
-                        strncpy(temp_lines[out_line], temp_line, 80);
                     }
-                } else {
-                    strncpy(temp_lines[out_line], temp_line, 80);
                 }
-            } else {
-                strncpy(temp_lines[out_line], temp_line, 80);
             }
-        } else {
-            strncpy(temp_lines[out_line], temp_line, 80);
         }
-        temp_lines[out_line][80] = '\0';
 
         // For last job card line, ensure it ends with comma
         if (ii == end_idx) {
-            size_t len = strlen(temp_lines[out_line]);
-            while (len > 0 && temp_lines[out_line][len-1] == ' ') {
+            size_t len = strlen(lines[ii]);
+            while (len > 0 && lines[ii][len-1] == ' ') {
                 len--;
             }
-            if (len > 0 && temp_lines[out_line][len-1] != ',') {
+            if (len > 0 && lines[ii][len-1] != ',') {
                 if (len >= 70) {
                     wtof("MVSMF22E No space for comma at end of job card");
-                    goto cleanup;
+                    return -1;
                 }
-                temp_lines[out_line][len++] = ',';
-                temp_lines[out_line][len] = '\0';
+                lines[ii][len++] = ',';
+                lines[ii][len] = '\0';
             }
         }
-        out_line++;
     }
 
-    // Add USER and PASSWORD parameters
-    rc = snprintf(temp_lines[out_line], 72, "//         USER=%s,", user);
+    // Check we have room for 2 more lines
+    if (num_lines + 2 > MAX_JCL_LINES) {
+        wtof("MVSMF22E Too many lines in JCL (max %d)", MAX_JCL_LINES);
+        return -1;
+    }
+
+    // Shift remaining lines (after job card) down by 2 to make room for USER/PASSWORD
+    for (ii = num_lines - 1; ii > end_idx; ii--) {
+        strncpy(lines[ii + 2], lines[ii], 80);
+        lines[ii + 2][80] = '\0';
+    }
+
+    // Insert USER and PASSWORD parameters after the last job card line
+    rc = snprintf(lines[end_idx + 1], 72, "//         USER=%s,", user);
     if (rc < 0 || rc >= 72) {
         wtof("MVSMF23E Buffer overflow in snprintf ");
-        goto cleanup;
+        return -1;
     }
-    out_line++;
 
-    rc = snprintf(temp_lines[out_line], 72, "//         PASSWORD=%s", password);
+    rc = snprintf(lines[end_idx + 2], 72, "//         PASSWORD=%s", password);
     if (rc < 0 || rc >= 72) {
         wtof("MVSMF24E Buffer overflow in snprintf");
-        goto cleanup;
-    }
-    out_line++;
-
-    // Copy remaining JCL statements
-    for (ii = end_idx + 1; ii < num_lines; ii++) {
-        if (!lines[ii]) {
-            wtof("MVSMF22W Skipping NULL line at index %d", ii);
-            continue;
-        }
-        
-        if (out_line >= MAX_JCL_LINES) {
-            wtof("MVSMF22E Too many lines in JCL (max %d)", MAX_JCL_LINES);
-            rc = -1;
-            goto cleanup;
-        }
-
-        strncpy(temp_lines[out_line], lines[ii], 80);
-        temp_lines[out_line][80] = '\0';
-        out_line++;
+        return -1;
     }
 
-    // Copy temp lines back to original array
-    for (ii = 0; ii < out_line; ii++) {
-        strncpy(lines[ii], temp_lines[ii], 80);
-        lines[ii][80] = '\0';
-    }
-
-    rc = out_line;
-
-cleanup:
-    if (temp_lines) {
-        free(temp_lines);
-    }
-    if (temp_lines_buf) {
-        free(temp_lines_buf);
-    }
-
-    return rc;
+    return num_lines + 2;
 }
 
 __asm__("\n&FUNC    SETC 'submit_jcl_content'");
@@ -1791,10 +1779,8 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     char *ebcdic_content = NULL;
     char **lines = NULL;
     char *lines_buf = NULL;
-    char **modified_lines = NULL;
-    char *modified_lines_buf = NULL;
     int num_lines = 0;
-    int modified_lines_count = 0;
+    int final_lines_count = 0;
     
     *jobclass = 'A';
     memset(jobname, 0, JOBNAME_STR_SIZE + 1);
@@ -1855,41 +1841,19 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     const char *user = getHeaderParam(session, "CURRENT_USER");
     const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
     
-    // Allocate memory for modified job card lines (contiguous buffer)
-    modified_lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
-    modified_lines_buf = (char *) calloc(MAX_JCL_LINES, 81);
-    if (!modified_lines || !modified_lines_buf) {
-        wtof("MVSMF22E Memory allocation failed for modified lines");
-        rc = -1;
-        goto quit;
-    }
-    {
-        int mi;
-        for (mi = 0; mi < MAX_JCL_LINES; mi++) {
-            modified_lines[mi] = modified_lines_buf + (mi * 81);
-        }
-    }
-
-    // Copy original lines to modified lines
-    int copy_idx = 0;
-    for (copy_idx = 0; copy_idx < num_lines; copy_idx++) {
-        strncpy(modified_lines[copy_idx], lines[copy_idx], 80);
-        modified_lines[copy_idx][80] = '\0';
-    }
-    
-    rc = process_jobcard(modified_lines, num_lines, jobname, jobclass, user, password);
+    rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         goto quit;
     }
 
     // Submit all lines
-    modified_lines_count = rc;
+    final_lines_count = rc;
 
     int submit_idx = 0;
-    for (submit_idx = 0; submit_idx < modified_lines_count; submit_idx++) {
-        if (modified_lines[submit_idx][0] != '\0') {  // Only submit non-empty lines
-            rc = jesirput(intrdr, modified_lines[submit_idx]);
+    for (submit_idx = 0; submit_idx < final_lines_count; submit_idx++) {
+        if (lines[submit_idx][0] != '\0') {  // Only submit non-empty lines
+            rc = jesirput(intrdr, lines[submit_idx]);
             if (rc < 0) {
                 wtof("MVSMF22E Failed to write to internal reader");
                 goto quit;
@@ -1919,12 +1883,6 @@ quit:
 	}
 
     // Free all allocated memory
-    if (modified_lines) {
-        free((void *) modified_lines);
-    }
-    if (modified_lines_buf) {
-        free((void *) modified_lines_buf);
-    }
     if (lines) {
         free((void *) lines);
     }

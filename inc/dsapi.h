@@ -121,4 +121,19 @@ int memberPutHandler(Session *session) asm("DAPI0012");
  */
 int datasetCreateHandler(Session *session) asm("DAPI0004");
 
+/**
+ * @brief Deletes (uncatalogs and scratches) a dataset
+ *
+ * Removes a dataset from the system. Checks that the dataset
+ * exists before attempting deletion.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ *
+ * Error cases:
+ * - HTTP 404 if dataset not found
+ * - HTTP 500 if delete operation fails
+ */
+int datasetDeleteHandler(Session *session) asm("DAPI0005");
+
 #endif // DSAPI_H

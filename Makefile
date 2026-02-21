@@ -64,6 +64,23 @@ all: $(S_FILES) $(O_FILES)
 	@echo "Compile $(notdir $<)"
 	$(CC) $(CFLAGS) -c $< -o $@
 
+# generate compile_commands.json for clangd
+compiledb:
+	@echo "[" > compile_commands.json
+	@first=1; \
+	for f in $(C_FILES); do \
+		if [ $$first -eq 0 ]; then echo "," >> compile_commands.json; fi; \
+		first=0; \
+		echo "  {" >> compile_commands.json; \
+		echo "    \"directory\": \"$(CURDIR)\"," >> compile_commands.json; \
+		echo "    \"file\": \"$$f\"," >> compile_commands.json; \
+		echo "    \"command\": \"clang -c $(DEFS) $(INCS) -std=c89 $$f\"" >> compile_commands.json; \
+		echo "  }" >> compile_commands.json; \
+	done
+	@echo "]" >> compile_commands.json
+	@echo "Generated compile_commands.json"
+.PHONY: compiledb
+
 # remove generated files
 clean:
 	@rm -f $(S_FILES) $(O_FILES)

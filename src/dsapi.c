@@ -1597,3 +1597,56 @@ int datasetDeleteHandler(Session *session)
 
 	return rc;
 }
+
+__asm__("\n&FUNC    SETC 'DAPI0013'");
+int memberDeleteHandler(Session *session)
+{
+	int rc = 0;
+	char *dsname = NULL;
+	char *member = NULL;
+	char dataset[MAX_DATASET_NAME] = {0};
+	FILE *fp = NULL;
+
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
+
+	if (!dsname || !member) {
+		wtof("MVSMF74E Member delete: missing parameters");
+		return handle_error(session, ERR_INVALID_PARAM,
+			"Dataset and member names are required");
+	}
+
+	if (strlen(dsname) + strlen(member) + 3 > MAX_DATASET_NAME) {
+		return handle_error(session, ERR_INVALID_PARAM,
+			"Dataset or member name too long");
+	}
+
+	snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
+
+	/* Verify member exists by attempting to open it */
+	fp = fopen(dataset, "r");
+	if (!fp) {
+		wtof("MVSMF75E Member delete: member not found: %s", dataset);
+		return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+			CATEGORY_SERVICE, RC_ERROR, REASON_MEMBER_NOT_FOUND,
+			ERR_MSG_MEMBER_NOT_FOUND, NULL, 0);
+	}
+	fclose(fp);
+
+	/* remove() deletes the PDS directory entry */
+	rc = remove(dataset);
+	if (rc != 0) {
+		wtof("MVSMF76E Member delete failed: rc=%d ds=%s errno=%d",
+			rc, dataset, errno);
+		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
+			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+	}
+
+	wtof("MVSMF77I Member deleted: %s", dataset);
+
+	/* Send HTTP 204 No Content */
+	rc = sendDefaultHeaders(session, 204, "application/json", 0);
+
+	return rc;
+}

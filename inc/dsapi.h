@@ -136,4 +136,19 @@ int datasetCreateHandler(Session *session) asm("DAPI0004");
  */
 int datasetDeleteHandler(Session *session) asm("DAPI0005");
 
+/**
+ * @brief Deletes a PDS member
+ *
+ * Removes a member from a partitioned dataset. Checks that the
+ * member exists before attempting deletion.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ *
+ * Error cases:
+ * - HTTP 404 if member not found
+ * - HTTP 500 if delete operation fails
+ */
+int memberDeleteHandler(Session *session) asm("DAPI0013");
+
 #endif // DSAPI_H

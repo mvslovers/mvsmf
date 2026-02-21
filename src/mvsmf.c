@@ -73,6 +73,7 @@ int main(int argc, char **argv)
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}/member", memberListHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberPutHandler);
+	add_route(&router, DELETE, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberDeleteHandler);
 
 	/* dispatch the request */
 	irc = handle_request(&router, &session);

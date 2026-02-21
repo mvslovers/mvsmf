@@ -68,6 +68,7 @@ int main(int argc, char **argv)
 	add_route(&router, GET, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}", datasetGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/{dataset-name}", datasetPutHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}", datasetPutHandler);
+	add_route(&router, POST, "/zosmf/restfiles/ds/{dataset-name}", datasetCreateHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}/member", memberListHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberPutHandler);

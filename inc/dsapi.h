@@ -105,4 +105,20 @@ int memberGetHandler(Session *session) asm("DAPI0011");
  */
 int memberPutHandler(Session *session) asm("DAPI0012");
 
+/**
+ * @brief Creates a new dataset with specified allocation parameters
+ *
+ * Allocates a new dataset using attributes from the JSON request body
+ * (dsorg, recfm, lrecl, blksize, space, etc.). Used by Zowe CLI/Explorer
+ * before uploading data to ensure correct dataset characteristics.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ *
+ * Error cases:
+ * - HTTP 400 if invalid or missing allocation parameters
+ * - HTTP 500 if dataset allocation fails
+ */
+int datasetCreateHandler(Session *session) asm("DAPI0004");
+
 #endif // DSAPI_H

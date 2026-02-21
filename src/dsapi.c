@@ -1,8 +1,10 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <clibwto.h>
 #include <cliblist.h>
 #include <clibdscb.h>
+#include <clibio.h>
 #include <osdcb.h>
 #include <errno.h>
 
@@ -228,12 +230,19 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 
 // Helper function for error handling
 static int handle_error(Session *session, int error_code, const char* message) {
-	int rc = http_resp_internal_error(session->httpc);
-    if (rc < 0) return rc;
-    
-    return http_printf(session->httpc, 
-                      "{\n  \"error\": \"%s\",\n  \"code\": %d\n}\n", 
-                      message, error_code);
+    int status;
+
+    switch (error_code) {
+        case ERR_INVALID_PARAM:
+            status = HTTP_STATUS_BAD_REQUEST;
+            break;
+        default:
+            status = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+            break;
+    }
+
+    return sendErrorResponse(session, status,
+        CATEGORY_SERVICE, RC_ERROR, -error_code, message, NULL, 0);
 }
 
 // Helper function to check if a dataset is a PDS via VTOC DSCB lookup
@@ -1291,4 +1300,253 @@ error:
         fclose(fp);
     }
     return rc;
+}
+
+// JSON parsing helpers for dataset create
+__asm__("\n&FUNC    SETC 'ext_json_str'");
+static int
+extract_json_string(const char *json, const char *key, char *out, size_t outlen)
+{
+	char search[64];
+	char *pos, *val_start, *val_end;
+	size_t len;
+
+	snprintf(search, sizeof(search), "\"%s\"", key);
+	pos = strstr(json, search);
+	if (!pos) return -1;
+
+	pos += strlen(search);
+	while (*pos == ' ' || *pos == '\t') pos++;
+	if (*pos != ':') return -1;
+	pos++;
+	while (*pos == ' ' || *pos == '\t') pos++;
+	if (*pos != '"') return -1;
+	pos++;
+	val_start = pos;
+
+	val_end = strchr(val_start, '"');
+	if (!val_end) return -1;
+
+	len = val_end - val_start;
+	if (len >= outlen) len = outlen - 1;
+	memcpy(out, val_start, len);
+	out[len] = '\0';
+	return 0;
+}
+
+__asm__("\n&FUNC    SETC 'ext_json_int'");
+static int
+extract_json_int(const char *json, const char *key, int *out)
+{
+	char search[64];
+	char *pos;
+
+	snprintf(search, sizeof(search), "\"%s\"", key);
+	pos = strstr(json, search);
+	if (!pos) return -1;
+
+	pos += strlen(search);
+	while (*pos == ' ' || *pos == '\t') pos++;
+	if (*pos != ':') return -1;
+	pos++;
+	while (*pos == ' ' || *pos == '\t') pos++;
+
+	if (*pos < '0' || *pos > '9') return -1;
+	*out = atoi(pos);
+	return 0;
+}
+
+__asm__("\n&FUNC    SETC 'DAPI0004'");
+int datasetCreateHandler(Session *session)
+{
+	int rc = 0;
+	char *dsname = NULL;
+	char *content_length_str = NULL;
+	char *transfer_encoding = NULL;
+	size_t content_length = 0;
+	int is_chunked = 0;
+	char *body = NULL;
+	size_t body_size = 0;
+	size_t body_pos = 0;
+
+	char dsorg[8] = {0};
+	char alcunit[8] = {0};
+	char recfm[8] = {0};
+	int primary = 0;
+	int secondary = 0;
+	int dirblk = 0;
+	int lrecl = 0;
+	int blksize = 0;
+
+	char ddname[9] = {0};
+	char opts[512];
+
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	if (!dsname) {
+		wtof("MVSMF60E Dataset create: missing dataset name");
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+	}
+
+	/* Read request body */
+	transfer_encoding = (char *) http_get_env(session->httpc,
+		(const UCHAR *) "HTTP_TRANSFER-ENCODING");
+	content_length_str = (char *) http_get_env(session->httpc,
+		(const UCHAR *) "HTTP_CONTENT-LENGTH");
+
+	is_chunked = (transfer_encoding && strstr(transfer_encoding, "chunked") != NULL);
+
+	if (content_length_str) {
+		content_length = strtoul(content_length_str, NULL, 10);
+	}
+
+	if (!is_chunked && !content_length_str) {
+		wtof("MVSMF61E Dataset create: no body");
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+	}
+
+	if (is_chunked) {
+		/* Read chunked body into buffer */
+		size_t buf_size = 4096;
+		body = malloc(buf_size);
+		if (!body) goto alloc_error;
+		body_pos = 0;
+
+		while (1) {
+			char chunk_hdr[10] = {0};
+			int i = 0;
+			char c;
+			size_t chunk_size;
+
+			while (i < (int)sizeof(chunk_hdr) - 1) {
+				if (recv(session->httpc->socket, &c, 1, 0) != 1) goto read_error;
+				if (c == 0x0D) {
+					chunk_hdr[i] = '\0';
+					recv(session->httpc->socket, &c, 1, 0); /* LF */
+					break;
+				}
+				chunk_hdr[i++] = c;
+			}
+			mvsmf_atoe((unsigned char *)chunk_hdr, strlen(chunk_hdr));
+			chunk_size = strtoul(chunk_hdr, NULL, 16);
+
+			if (chunk_size == 0) {
+				/* Read trailing CRLF */
+				char crlf[2];
+				recv(session->httpc->socket, crlf, 2, 0);
+				break;
+			}
+
+			if (body_pos + chunk_size >= buf_size) {
+				buf_size = body_pos + chunk_size + 1;
+				body = realloc(body, buf_size);
+				if (!body) goto alloc_error;
+			}
+
+			{
+				size_t read = 0;
+				while (read < chunk_size) {
+					int n = recv(session->httpc->socket, body + body_pos + read,
+						chunk_size - read, 0);
+					if (n <= 0) goto read_error;
+					read += n;
+				}
+			}
+			body_pos += chunk_size;
+
+			/* chunk trailer CRLF */
+			{
+				char crlf[2];
+				recv(session->httpc->socket, crlf, 2, 0);
+			}
+		}
+		body_size = body_pos;
+	} else {
+		/* Content-Length body */
+		body = malloc(content_length + 1);
+		if (!body) goto alloc_error;
+
+		{
+			size_t read = 0;
+			while (read < content_length) {
+				int n = recv(session->httpc->socket, body + read,
+					content_length - read, 0);
+				if (n <= 0) goto read_error;
+				read += n;
+			}
+		}
+		body_size = content_length;
+	}
+
+	body[body_size] = '\0';
+
+	/* Convert ASCII body to EBCDIC for strstr-based parsing */
+	mvsmf_atoe((unsigned char *)body, body_size);
+
+	/* Parse JSON fields */
+	if (extract_json_string(body, "dsorg", dsorg, sizeof(dsorg)) < 0 ||
+	    extract_json_string(body, "recfm", recfm, sizeof(recfm)) < 0 ||
+	    extract_json_int(body, "lrecl", &lrecl) < 0 ||
+	    extract_json_int(body, "blksize", &blksize) < 0 ||
+	    extract_json_int(body, "primary", &primary) < 0) {
+		wtof("MVSMF62E Dataset create: missing required JSON fields");
+		free(body);
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+	}
+
+	/* Optional fields */
+	extract_json_int(body, "secondary", &secondary);
+	extract_json_int(body, "dirblk", &dirblk);
+	if (extract_json_string(body, "alcunit", alcunit, sizeof(alcunit)) < 0) {
+		strcpy(alcunit, "TRK");
+	}
+
+	free(body);
+	body = NULL;
+
+	/* Build allocation options string */
+	snprintf(opts, sizeof(opts),
+		"DSN=%s;DISP=(NEW,CATLG,DELETE);DSORG=%s;RECFM=%s;"
+		"LRECL=%d;BLKSIZE=%d;SPACE=%s(%d,%d,%d)",
+		dsname, dsorg, recfm, lrecl, blksize,
+		alcunit, primary, secondary, dirblk);
+
+	wtof("MVSMF63I Dataset create: %s", opts);
+
+	/* Allocate the dataset */
+	rc = __dsalcf(ddname, "%s", opts);
+	if (rc != 0) {
+		wtof("MVSMF64E Dataset create failed: rc=%d dsn=%s", rc, dsname);
+		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
+			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+	}
+
+	/* Free the DD allocation */
+	__dsfree(ddname);
+
+	/* Send HTTP 201 Created */
+	rc = sendDefaultHeaders(session, HTTP_STATUS_CREATED,
+		"application/json", 0);
+
+	return rc;
+
+alloc_error:
+	wtof("MVSMF65E Dataset create: memory allocation failed");
+	if (body) free(body);
+	return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
+		ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+
+read_error:
+	wtof("MVSMF66E Dataset create: error reading request body");
+	if (body) free(body);
+	return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+		CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+		ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 }

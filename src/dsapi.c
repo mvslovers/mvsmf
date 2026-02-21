@@ -1550,3 +1550,50 @@ read_error:
 		CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
 		ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 }
+
+__asm__("\n&FUNC    SETC 'DAPI0005'");
+int datasetDeleteHandler(Session *session)
+{
+	int rc = 0;
+	char *dsname = NULL;
+	LOCWORK locwork;
+	char dsn44[44];
+
+	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
+	if (!dsname) {
+		wtof("MVSMF70E Dataset delete: missing dataset name");
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+	}
+
+	/* Check if dataset exists via catalog locate */
+	memset(dsn44, ' ', sizeof(dsn44));
+	memcpy(dsn44, dsname, strlen(dsname));
+	memset(&locwork, 0, sizeof(locwork));
+
+	rc = __locate(dsn44, &locwork);
+	if (rc != 0) {
+		wtof("MVSMF71E Dataset delete: dataset not found: %s", dsname);
+		return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+			ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+	}
+
+	/* remove() uncatalogs and scratches the dataset */
+	rc = remove(dsname);
+	if (rc != 0) {
+		wtof("MVSMF72E Dataset delete failed: rc=%d dsn=%s errno=%d",
+			rc, dsname, errno);
+		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
+			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+	}
+
+	wtof("MVSMF73I Dataset deleted: %s", dsname);
+
+	/* Send HTTP 204 No Content */
+	rc = sendDefaultHeaders(session, 204, "application/json", 0);
+
+	return rc;
+}

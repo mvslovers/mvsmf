@@ -14,10 +14,12 @@
 #define REASON_PDS_NOT_SEQUENTIAL		1	// Dataset is PDS, not sequential
 #define REASON_DATASET_ALLOC_FAILED		2	// Dataset allocation failed
 #define REASON_INVALID_ALLOC_PARAMS		3	// Invalid or missing allocation parameters
+#define REASON_DATASET_NOT_FOUND		4	// Dataset not found
 
 // Error messages for Category 6
 #define ERR_MSG_PDS_NOT_SEQUENTIAL		"Dataset is a partitioned dataset (PDS). Use /ds/{dataset-name}({member-name}) to access members"
 #define ERR_MSG_DATASET_ALLOC_FAILED	"Dataset allocation failed"
 #define ERR_MSG_INVALID_ALLOC_PARAMS	"Invalid or missing allocation parameters"
+#define ERR_MSG_DATASET_NOT_FOUND	"Dataset not found"
 
 #endif // DSAPI_ERR_H

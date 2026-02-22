@@ -118,9 +118,10 @@ int handle_request(Router *router, Session *session)
     }
 
     Route *route = find_route(router, reqMethod, path);
-    
+
     if (route == NULL) {
-        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);        
+        wtof("MVSMF01W No route for %s %s", method, path);
+        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);
         return -1;
     }
 

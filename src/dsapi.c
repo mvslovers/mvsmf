@@ -1361,13 +1361,10 @@ int datasetCreateHandler(Session *session)
 {
 	int rc = 0;
 	char *dsname = NULL;
-	char *content_length_str = NULL;
-	char *transfer_encoding = NULL;
-	size_t content_length = 0;
-	int is_chunked = 0;
 	char *body = NULL;
+	char local_body[4096];
+	int free_body = 0;
 	size_t body_size = 0;
-	size_t body_pos = 0;
 
 	char dsorg[8] = {0};
 	char alcunit[8] = {0};
@@ -1389,102 +1386,102 @@ int datasetCreateHandler(Session *session)
 			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 	}
 
-	/* Read request body */
-	transfer_encoding = (char *) http_get_env(session->httpc,
-		(const UCHAR *) "HTTP_TRANSFER-ENCODING");
-	content_length_str = (char *) http_get_env(session->httpc,
-		(const UCHAR *) "HTTP_CONTENT-LENGTH");
+	/*
+	 * Try POST_STRING first — HTTPD sets this when the request
+	 * includes a Content-Type header (already in EBCDIC).
+	 *
+	 * If POST_STRING is empty (e.g. Zowe CLI sends no Content-Type),
+	 * read the body directly from the socket.
+	 */
+	body = (char *) http_get_env(session->httpc,
+		(const UCHAR *) "POST_STRING");
 
-	is_chunked = (transfer_encoding && strstr(transfer_encoding, "chunked") != NULL);
+	if (!body || !*body) {
+		const char *te = (const char *) http_get_env(session->httpc,
+			(const UCHAR *) "HTTP_TRANSFER-ENCODING");
+		const char *cl = (const char *) http_get_env(session->httpc,
+			(const UCHAR *) "HTTP_CONTENT-LENGTH");
+		int is_chunked = (te && strstr(te, "chunked") != NULL);
 
-	if (content_length_str) {
-		content_length = strtoul(content_length_str, NULL, 10);
-	}
+		memset(local_body, 0, sizeof(local_body));
+		body_size = 0;
 
-	if (!is_chunked && !content_length_str) {
-		wtof("MVSMF61E Dataset create: no body");
-		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
-			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
-			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
-	}
+		if (is_chunked) {
+			/* Read chunked transfer encoding */
+			while (1) {
+				char chunk_hdr[10] = {0};
+				size_t chunk_size;
+				int i = 0;
+				char c;
+				size_t n;
 
-	if (is_chunked) {
-		/* Read chunked body into buffer */
-		size_t buf_size = 4096;
-		body = malloc(buf_size);
-		if (!body) goto alloc_error;
-		body_pos = 0;
+				/* Read chunk size line (ASCII hex + CRLF) */
+				while (i < (int)sizeof(chunk_hdr) - 1) {
+					if (recv(session->httpc->socket, &c, 1, 0) != 1) break;
+					if (c == 0x0D) {	/* ASCII CR */
+						recv(session->httpc->socket, &c, 1, 0); /* LF */
+						break;
+					}
+					chunk_hdr[i++] = c;
+				}
+				chunk_hdr[i] = '\0';
 
-		while (1) {
-			char chunk_hdr[10] = {0};
-			int i = 0;
-			char c;
-			size_t chunk_size;
+				/* Convert ASCII hex to EBCDIC for strtoul */
+				mvsmf_atoe((unsigned char *)chunk_hdr, strlen(chunk_hdr));
+				chunk_size = strtoul(chunk_hdr, NULL, 16);
 
-			while (i < (int)sizeof(chunk_hdr) - 1) {
-				if (recv(session->httpc->socket, &c, 1, 0) != 1) goto read_error;
-				if (c == 0x0D) {
-					chunk_hdr[i] = '\0';
-					recv(session->httpc->socket, &c, 1, 0); /* LF */
+				if (chunk_size == 0) {
+					/* Read trailing CRLF */
+					char crlf[2];
+					recv(session->httpc->socket, crlf, 2, 0);
 					break;
 				}
-				chunk_hdr[i++] = c;
-			}
-			mvsmf_atoe((unsigned char *)chunk_hdr, strlen(chunk_hdr));
-			chunk_size = strtoul(chunk_hdr, NULL, 16);
 
-			if (chunk_size == 0) {
-				/* Read trailing CRLF */
-				char crlf[2];
-				recv(session->httpc->socket, crlf, 2, 0);
-				break;
-			}
+				/* Read chunk data */
+				n = 0;
+				while (n < chunk_size) {
+					int r = recv(session->httpc->socket, local_body + body_size + n, 1, 0);
+					if (r != 1) break;
+					n++;
+					if (body_size + n >= sizeof(local_body) - 1) break;
+				}
+				body_size += n;
 
-			if (body_pos + chunk_size >= buf_size) {
-				buf_size = body_pos + chunk_size + 1;
-				body = realloc(body, buf_size);
-				if (!body) goto alloc_error;
-			}
-
-			{
-				size_t read = 0;
-				while (read < chunk_size) {
-					int n = recv(session->httpc->socket, body + body_pos + read,
-						chunk_size - read, 0);
-					if (n <= 0) goto read_error;
-					read += n;
+				/* Read chunk trailing CRLF */
+				{
+					char crlf[2];
+					recv(session->httpc->socket, crlf, 2, 0);
 				}
 			}
-			body_pos += chunk_size;
+		} else if (cl) {
+			/* Read Content-Length bytes */
+			size_t content_length = strtoul(cl, NULL, 10);
+			if (content_length >= sizeof(local_body))
+				content_length = sizeof(local_body) - 1;
 
-			/* chunk trailer CRLF */
-			{
-				char crlf[2];
-				recv(session->httpc->socket, crlf, 2, 0);
+			while (body_size < content_length) {
+				int r = recv(session->httpc->socket,
+					local_body + body_size, 1, 0);
+				if (r != 1) break;
+				body_size++;
 			}
 		}
-		body_size = body_pos;
+
+		if (body_size == 0) {
+			wtof("MVSMF61E Dataset create: no body");
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+				ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+		}
+
+		local_body[body_size] = '\0';
+
+		/* Convert from ASCII to EBCDIC */
+		mvsmf_atoe((unsigned char *)local_body, body_size);
+		body = local_body;
 	} else {
-		/* Content-Length body */
-		body = malloc(content_length + 1);
-		if (!body) goto alloc_error;
-
-		{
-			size_t read = 0;
-			while (read < content_length) {
-				int n = recv(session->httpc->socket, body + read,
-					content_length - read, 0);
-				if (n <= 0) goto read_error;
-				read += n;
-			}
-		}
-		body_size = content_length;
+		body_size = strlen(body);
 	}
-
-	body[body_size] = '\0';
-
-	/* Convert ASCII body to EBCDIC for strstr-based parsing */
-	mvsmf_atoe((unsigned char *)body, body_size);
 
 	/* Parse JSON fields */
 	if (extract_json_string(body, "dsorg", dsorg, sizeof(dsorg)) < 0 ||
@@ -1493,7 +1490,6 @@ int datasetCreateHandler(Session *session)
 	    extract_json_int(body, "blksize", &blksize) < 0 ||
 	    extract_json_int(body, "primary", &primary) < 0) {
 		wtof("MVSMF62E Dataset create: missing required JSON fields");
-		free(body);
 		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
 			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
@@ -1505,9 +1501,6 @@ int datasetCreateHandler(Session *session)
 	if (extract_json_string(body, "alcunit", alcunit, sizeof(alcunit)) < 0) {
 		strcpy(alcunit, "TRK");
 	}
-
-	free(body);
-	body = NULL;
 
 	/* Build allocation options string */
 	snprintf(opts, sizeof(opts),
@@ -1535,20 +1528,6 @@ int datasetCreateHandler(Session *session)
 		"application/json", 0);
 
 	return rc;
-
-alloc_error:
-	wtof("MVSMF65E Dataset create: memory allocation failed");
-	if (body) free(body);
-	return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-		CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
-		ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
-
-read_error:
-	wtof("MVSMF66E Dataset create: error reading request body");
-	if (body) free(body);
-	return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
-		CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
-		ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 }
 
 __asm__("\n&FUNC    SETC 'DAPI0005'");

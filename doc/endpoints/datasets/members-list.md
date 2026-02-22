@@ -8,8 +8,13 @@ GET
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}/member`
 
+or with explicit volume:
+
+`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}/member`
+
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset
+- `volume-serial` (optional): Volume serial number
 
 ## Query Parameters
 - `start` (optional): Starting member name for pagination

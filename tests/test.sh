@@ -14,16 +14,20 @@
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-CURL_SUITE="${SCRIPT_DIR}/curl-jobs.sh"
-ZOWE_SUITE="${SCRIPT_DIR}/zowe-jobs.sh"
+CURL_JOBS="${SCRIPT_DIR}/curl-jobs.sh"
+CURL_DS="${SCRIPT_DIR}/curl-datasets.sh"
+ZOWE_JOBS="${SCRIPT_DIR}/zowe-jobs.sh"
+ZOWE_DS="${SCRIPT_DIR}/zowe-datasets.sh"
 ENV_FILE="${SCRIPT_DIR}/.config/.env"
 ZOWE_CONFIG="${SCRIPT_DIR}/.config/zowe.config.json"
 
 RUN_CURL=1
 RUN_ZOWE=1
 SETUP_FLAG=""
-CURL_RC=0
-ZOWE_RC=0
+CURL_JOBS_RC=0
+CURL_DS_RC=0
+ZOWE_JOBS_RC=0
+ZOWE_DS_RC=0
 
 # =========================================================================
 # Parse arguments
@@ -93,18 +97,28 @@ echo "=========================================="
 
 if [ "$RUN_CURL" -eq 1 ]; then
 	echo ""
-	echo ">>> Running curl test suite..."
+	echo ">>> Running curl jobs test suite..."
 	echo ""
 	# shellcheck disable=SC2086
-	bash "$CURL_SUITE" $SETUP_FLAG || CURL_RC=$?
+	bash "$CURL_JOBS" $SETUP_FLAG || CURL_JOBS_RC=$?
+
+	echo ""
+	echo ">>> Running curl datasets test suite..."
+	echo ""
+	bash "$CURL_DS" || CURL_DS_RC=$?
 fi
 
 if [ "$RUN_ZOWE" -eq 1 ]; then
 	echo ""
-	echo ">>> Running Zowe CLI test suite..."
+	echo ">>> Running Zowe CLI jobs test suite..."
 	echo ""
 	# shellcheck disable=SC2086
-	bash "$ZOWE_SUITE" $SETUP_FLAG || ZOWE_RC=$?
+	bash "$ZOWE_JOBS" $SETUP_FLAG || ZOWE_JOBS_RC=$?
+
+	echo ""
+	echo ">>> Running Zowe CLI datasets test suite..."
+	echo ""
+	bash "$ZOWE_DS" || ZOWE_DS_RC=$?
 fi
 
 # =========================================================================
@@ -117,23 +131,34 @@ echo " Overall Results"
 echo "=========================================="
 
 if [ "$RUN_CURL" -eq 1 ]; then
-	if [ "$CURL_RC" -eq 0 ]; then
-		echo "  curl suite:  PASSED"
+	if [ "$CURL_JOBS_RC" -eq 0 ]; then
+		echo "  curl jobs:      PASSED"
 	else
-		echo "  curl suite:  FAILED (exit code $CURL_RC)"
+		echo "  curl jobs:      FAILED (exit code $CURL_JOBS_RC)"
+	fi
+	if [ "$CURL_DS_RC" -eq 0 ]; then
+		echo "  curl datasets:  PASSED"
+	else
+		echo "  curl datasets:  FAILED (exit code $CURL_DS_RC)"
 	fi
 fi
 
 if [ "$RUN_ZOWE" -eq 1 ]; then
-	if [ "$ZOWE_RC" -eq 0 ]; then
-		echo "  zowe suite:  PASSED"
+	if [ "$ZOWE_JOBS_RC" -eq 0 ]; then
+		echo "  zowe jobs:      PASSED"
 	else
-		echo "  zowe suite:  FAILED (exit code $ZOWE_RC)"
+		echo "  zowe jobs:      FAILED (exit code $ZOWE_JOBS_RC)"
+	fi
+	if [ "$ZOWE_DS_RC" -eq 0 ]; then
+		echo "  zowe datasets:  PASSED"
+	else
+		echo "  zowe datasets:  FAILED (exit code $ZOWE_DS_RC)"
 	fi
 fi
 
 echo "=========================================="
 
-if [ "$CURL_RC" -ne 0 ] || [ "$ZOWE_RC" -ne 0 ]; then
+if [ "$CURL_JOBS_RC" -ne 0 ] || [ "$CURL_DS_RC" -ne 0 ] || \
+   [ "$ZOWE_JOBS_RC" -ne 0 ] || [ "$ZOWE_DS_RC" -ne 0 ]; then
 	exit 1
 fi

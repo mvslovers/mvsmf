@@ -1,0 +1,114 @@
+#!/bin/bash
+# mvspackage - TRANSMIT load library to XMIT format and download it
+set -euo pipefail
+
+# --- Load .env (working directory first, then script's repo root) ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -f "$PWD/.env" ]]; then
+  source "$PWD/.env"
+elif [[ -f "$ROOT_DIR/.env" ]]; then
+  source "$ROOT_DIR/.env"
+fi
+
+SOURCE="${MVSPACKAGE_SOURCE:?MVSPACKAGE_SOURCE not set (check config.mk)}"
+XMIT="${MVSPACKAGE_XMIT:?MVSPACKAGE_XMIT not set (check config.mk)}"
+NODE="${MVSPACKAGE_NODE:-GITHUB.COM}"
+JOBCLASS="${MVSASM_JOBCLASS:-A}"
+MSGCLASS="${MVSASM_MSGCLASS:-H}"
+
+# --- Validate required settings ---
+: "${MVSASM_HOST:?MVSASM_HOST not set (check .env)}"
+: "${MVSASM_PORT:?MVSASM_PORT not set (check .env)}"
+: "${MVSASM_USER:?MVSASM_USER not set (check .env)}"
+: "${MVSASM_PASS:?MVSASM_PASS not set (check .env)}"
+
+BASE_URL="http://${MVSASM_HOST}:${MVSASM_PORT}/zosmf/restjobs/jobs"
+DS_URL="http://${MVSASM_HOST}:${MVSASM_PORT}/zosmf/restfiles/ds"
+JOBNAME="PKGMVSMF"
+
+# --- Output filename ---
+OUTFILE="${1:-mvsmf.xmit}"
+
+# --- Generate JCL ---
+if [[ "${MVSASM_KEEP_JCL:-0}" == "1" ]]; then
+  TEMPFILE="$ROOT_DIR/jcl/$JOBNAME.jcl"
+else
+  TEMPFILE=$(mktemp)
+  trap 'rm -f "$TEMPFILE"' EXIT
+fi
+
+cat > "$TEMPFILE" <<ENDJCL
+//$JOBNAME JOB CLASS=$JOBCLASS,REGION=0K,MSGCLASS=$MSGCLASS,
+//            MSGLEVEL=(1,1),NOTIFY=DUMMY
+//*
+//PACKAGE  EXEC PGM=IKJEFT01
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+  TRANSMIT $NODE DA('$SOURCE') +
+    OUTDATASET('$XMIT')
+/*
+//*
+ENDJCL
+
+# --- Strip CR ---
+sed 's/\r$//' "$TEMPFILE" > "${TEMPFILE}.tmp" && mv "${TEMPFILE}.tmp" "$TEMPFILE"
+
+# --- Submit via curl ---
+RESULT=$(curl -s -S --connect-timeout 10 --max-time 60 -X PUT \
+  -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  -H "Content-Type: text/plain" \
+  -H "X-IBM-Intrdr-Mode: TEXT" \
+  -H "X-IBM-Intrdr-Lrecl: 80" \
+  -H "X-IBM-Intrdr-Recfm: F" \
+  --data-binary @"$TEMPFILE" \
+  "$BASE_URL" 2>&1) || {
+  echo "mvspackage: connection failed" >&2
+  echo "$RESULT" >&2
+  exit 1
+}
+
+JOBID=$(echo "$RESULT" | jq -r '.jobid // empty' 2>/dev/null) || true
+RETCODE=$(echo "$RESULT" | jq -r '.retcode // empty' 2>/dev/null) || true
+
+if [[ -z "$JOBID" ]]; then
+  echo "mvspackage: submit failed" >&2
+  echo "$RESULT" >&2
+  exit 1
+fi
+
+echo "mvspackage: $JOBNAME ($JOBID) submitted"
+
+# --- Poll for job completion ---
+while [[ -z "$RETCODE" || "$RETCODE" == "null" ]]; do
+  sleep 2
+  STATUS=$(curl -s --connect-timeout 10 --max-time 30 -u "${MVSASM_USER}:${MVSASM_PASS}" \
+    "$BASE_URL/$JOBNAME/$JOBID" 2>&1)
+  RETCODE=$(echo "$STATUS" | jq -r '.retcode // empty' 2>/dev/null) || true
+done
+
+# --- Evaluate return code ---
+RC_NUM=$(echo "$RETCODE" | grep -oE '[0-9]+' | head -1)
+RC_NUM=$((10#${RC_NUM:-9999}))
+
+if [[ "$RC_NUM" -gt 0 ]]; then
+  echo "mvspackage: $JOBNAME ($JOBID) FAILED RC=$RETCODE" >&2
+  exit 1
+fi
+
+echo "mvspackage: $JOBNAME ($JOBID) $RETCODE"
+
+# --- Download XMIT dataset as binary ---
+echo "mvspackage: downloading $XMIT -> $OUTFILE"
+curl -s -S --connect-timeout 10 --max-time 120 \
+  -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  -H "X-IBM-Data-Type: binary" \
+  -o "$OUTFILE" \
+  "$DS_URL/$XMIT" || {
+  echo "mvspackage: download failed" >&2
+  exit 1
+}
+
+echo "mvspackage: $OUTFILE ready"
+exit 0

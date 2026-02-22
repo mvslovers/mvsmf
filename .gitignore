@@ -42,6 +42,11 @@
 # Claude Code
 CLAUDE.md
 
+# Build system
+.env
+*.jcl
+.build-warnings
+
 # Test config (only examples are tracked)
 tests/.config/.env
 tests/.config/zowe.config.json

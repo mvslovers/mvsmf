@@ -388,33 +388,126 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
     return 0;
 }
 
+/*
+** extract_level_prefix - split a dslevel pattern into a catalog LEVEL
+** prefix and an optional wildcard filter for __listds().
+**
+** level_out must be at least 45 bytes. *filter_out is set to the
+** original dslevel when post-filtering is needed, NULL otherwise.
+*/
+static void
+extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
+{
+	const char	*p;
+	const char	*last_dot = NULL;
+	int		has_wildcard = 0;
+	int		dots = 0;
+
+	*filter_out = NULL;
+	level_out[0] = '\0';
+
+	if (!dslevel || !*dslevel) return;
+
+	/* scan for wildcards and count qualifiers */
+	for (p = dslevel; *p; p++) {
+		if (*p == '*' || *p == '?') has_wildcard = 1;
+		if (*p == '.') {
+			dots++;
+			last_dot = p;
+		}
+	}
+
+	if (!has_wildcard) {
+		if (dots >= 2 && last_dot) {
+			/* 3+ qualifiers, exact name: use up to last dot as LEVEL */
+			memcpy(level_out, dslevel, last_dot - dslevel);
+			level_out[last_dot - dslevel] = '\0';
+			*filter_out = (char *) dslevel;
+		} else {
+			/* 1-2 qualifiers: pass through as-is */
+			strcpy(level_out, dslevel);
+		}
+		return;
+	}
+
+	/* has wildcards — find longest prefix before first wild qualifier */
+	{
+		const char	*src = dslevel;
+		const char	*seg_start = dslevel;
+		const char	*prefix_end = NULL;
+		int		seg_has_wild;
+
+		while (*src) {
+			seg_start = src;
+			seg_has_wild = 0;
+
+			/* scan one qualifier */
+			while (*src && *src != '.') {
+				if (*src == '*' || *src == '?') seg_has_wild = 1;
+				src++;
+			}
+
+			if (seg_has_wild) break;
+
+			prefix_end = src;  /* end of this clean segment */
+
+			if (*src == '.') src++;  /* skip dot */
+		}
+
+		if (prefix_end && prefix_end > dslevel) {
+			memcpy(level_out, dslevel, prefix_end - dslevel);
+			level_out[prefix_end - dslevel] = '\0';
+		} else {
+			/* wildcard in first qualifier — use full dslevel */
+			strcpy(level_out, dslevel);
+		}
+
+		/* HLQ.** is equivalent to bare HLQ, no filter needed */
+		if (seg_start && strcmp(seg_start, "**") == 0 &&
+			prefix_end == seg_start - 1) {
+			*filter_out = NULL;
+		} else {
+			*filter_out = (char *) dslevel;
+		}
+	}
+}
+
 int datasetListHandler(Session *session)
 {
 	unsigned	rc		= 0;
 	unsigned	count		= 0;
 	unsigned	first		= 1;
 	unsigned	i		= 0;
+	unsigned	maxitems	= 0;
+	unsigned	emitted		= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
 	char		*verb		= NULL;
+	char		*maxitems_str	= NULL;
 
 	DSLIST		**dslist	= NULL;
 
 	char		*dslevel	= NULL;
 	char		*volser		= NULL;
 	char		*start		= NULL;
+	char		*filter		= NULL;
+	char		level_buf[45]	= {0};
 
 	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
 	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
 
 	verb	= strrchr(path, '/');
 
-	dslevel = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_DSLEVEL"); 
-	volser	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_VOLSER"); 
-	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START"); 
+	dslevel = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_DSLEVEL");
+	volser	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_VOLSER");
+	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START");
 
-	dslist = __listds(dslevel, "NONVSAM VOLUME", NULL);
+	extract_level_prefix(dslevel, level_buf, &filter);
+	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
+
+	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
+	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
 	
 	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
@@ -432,9 +525,11 @@ int datasetListHandler(Session *session)
 
 	for(i=0; i < count; i++) {
 		DSLIST *ds = dslist[i];
-		
+
 		if (!ds) continue;
-		
+
+		if (maxitems > 0 && emitted >= maxitems) break;
+
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
 			if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
@@ -445,7 +540,7 @@ int datasetListHandler(Session *session)
 		}
 
 		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
-		
+
 		// TODO: the following fields should only be generated if X-IBM-Attributes == base
 		// TODO: add vol field only if X-IBM-Attributes has 'vol'
 		if (strcmp(ds->dsorg, "PO") == 0) {
@@ -464,15 +559,18 @@ int datasetListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.2s\",\n", ds->dsorg)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
-		
+
 		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
+
+		emitted++;
 	}
 
 end:
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	if ((rc = http_printf(session->httpc, "  \"moreRows\": false,\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
+		(maxitems > 0 && emitted < count) ? "true" : "false")) < 0) goto quit;
 
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;

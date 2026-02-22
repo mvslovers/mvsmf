@@ -179,19 +179,79 @@ else
 	fail "read content matches" "expected 'LINE 1 TEST DATA' in output"
 fi
 
-# --- List datasets ---
+# --- List datasets (two-level prefix) ---
 echo ""
-echo "--- List Datasets ---"
+echo "--- List Datasets (two-level prefix) ---"
 
 RC=0
 OUTPUT=$(run_zowe_json files list ds "${MVS_USER}.ZOWE") || RC=$?
-assert_rc 0 "$RC" "list datasets"
+assert_rc 0 "$RC" "list datasets (two-level prefix)"
 
 ITEMS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items | length' 2>/dev/null) || ITEMS=0
 if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
 	pass "list returned results ($ITEMS)"
 else
 	fail "list returned results" "expected >0 items"
+fi
+
+# --- List datasets (exact three-level name) ---
+echo ""
+echo "--- List Datasets (exact name) ---"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "${TEST_SEQ}") || RC=$?
+assert_rc 0 "$RC" "list datasets (exact name)"
+
+DSN=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items[0].dsname' 2>/dev/null) || DSN=""
+if [ "$DSN" = "$TEST_SEQ" ]; then
+	pass "exact name returned correct dataset"
+else
+	fail "exact name returned correct dataset" "expected '$TEST_SEQ', got '$DSN'"
+fi
+
+# --- List datasets (wildcard *) ---
+echo ""
+echo "--- List Datasets (wildcard *) ---"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "${MVS_USER}.*") || RC=$?
+assert_rc 0 "$RC" "list datasets (wildcard *)"
+
+ITEMS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "wildcard * returned results ($ITEMS)"
+else
+	fail "wildcard * returned results" "expected >0 items"
+fi
+
+# --- List datasets (wildcard **) ---
+echo ""
+echo "--- List Datasets (wildcard **) ---"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "${MVS_USER}.**") || RC=$?
+assert_rc 0 "$RC" "list datasets (wildcard **)"
+
+ITEMS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "wildcard ** returned results ($ITEMS)"
+else
+	fail "wildcard ** returned results" "expected >0 items"
+fi
+
+# --- List datasets (max-items) ---
+echo ""
+echo "--- List Datasets (max-items) ---"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "${MVS_USER}.ZOWE" --max 1) || RC=$?
+assert_rc 0 "$RC" "list datasets (max-items=1)"
+
+RETURNED=$(echo "$OUTPUT" | jq -r '.data.apiResponse.returnedRows' 2>/dev/null) || RETURNED=0
+if [ "$RETURNED" -eq 1 ] 2>/dev/null; then
+	pass "max-items limited to 1 row"
+else
+	fail "max-items limited to 1 row" "expected returnedRows=1, got $RETURNED"
 fi
 
 # --- Delete sequential dataset ---

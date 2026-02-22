@@ -1,0 +1,160 @@
+#!/bin/bash
+# mvsasm - Assemble and link MVS source using curl against mvs/MF
+set -euo pipefail
+
+# --- Load .env (working directory first, then script's repo root) ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -f "$PWD/.env" ]]; then
+  source "$PWD/.env"
+elif [[ -f "$ROOT_DIR/.env" ]]; then
+  source "$ROOT_DIR/.env"
+fi
+
+# --- Argument parsing ---
+SOURCE="$1"
+PUNCH="${2:-${MVSASM_PUNCH:-}}"
+SYSLMOD="${3:-${MVSASM_SYSLMOD:-}}"
+
+JOBNAME=$(basename "$SOURCE" | tr '[:lower:]' '[:upper:]' | cut -d'.' -f1)
+JOBNAME="${JOBNAME:0:8}"
+
+[[ -n "$PUNCH" ]]   && PUNCH="$PUNCH($JOBNAME)"
+[[ -n "$SYSLMOD" ]] && SYSLMOD="$SYSLMOD($JOBNAME)"
+
+LKED_SYSLIB="${MVSASM_LKED_SYSLIB:-${MVSASM_SYSLMOD:-}}"
+JOBCLASS="${MVSASM_JOBCLASS:-A}"
+MSGCLASS="${MVSASM_MSGCLASS:-H}"
+
+# --- Validate required settings ---
+: "${MVSASM_HOST:?MVSASM_HOST not set (check .env)}"
+: "${MVSASM_PORT:?MVSASM_PORT not set (check .env)}"
+: "${MVSASM_USER:?MVSASM_USER not set (check .env)}"
+: "${MVSASM_PASS:?MVSASM_PASS not set (check .env)}"
+
+BASE_URL="http://${MVSASM_HOST}:${MVSASM_PORT}/zosmf/restjobs/jobs"
+
+# --- SYSLIB DD Karten aus MAC1..MAC9 ---
+MACLIBS=""
+for i in $(seq 1 9); do
+  var="MAC${i}"
+  val="${!var:-}"
+  [[ -n "$val" ]] && MACLIBS+="//         DD DSN=$(echo "$val" | tr '[:lower:]' '[:upper:]'),DISP=SHR
+"
+done
+
+# --- SYSPUNCH DD ---
+if [[ -n "$PUNCH" ]]; then
+  PUNCH_DD="//SYSPUNCH DD DSN=$PUNCH,DISP=SHR"
+else
+  PUNCH_DD="//SYSPUNCH DD DSN=&&ASMOUT,DISP=(,PASS),UNIT=SYSALLDA,
+//            DCB=(LRECL=80,BLKSIZE=6160,RECFM=FB),
+//            SPACE=(6160,(500,500))"
+fi
+
+# --- SYSLMOD DD ---
+if [[ -n "$SYSLMOD" ]]; then
+  SYSLMOD_DD="//SYSLMOD  DD DSN=$SYSLMOD,DISP=SHR"
+else
+  SYSLMOD_DD="//SYSLMOD  DD DSN=&&SYSLMOD(TEMPNAME),DISP=(,PASS),UNIT=SYSALLDA,
+//            DCB=(LRECL=0,BLKSIZE=15040,RECFM=U),
+//            SPACE=(15040,(500,500,5))"
+fi
+
+# --- SYSLIN Input fuer Linker ---
+LINKIN="${PUNCH:-&&ASMOUT}"
+
+# --- JCL generieren ---
+if [[ "${MVSASM_KEEP_JCL:-0}" == "1" ]]; then
+  SRCDIR="$(dirname "$SOURCE")"
+  TEMPFILE="$SRCDIR/$JOBNAME.jcl"
+else
+  TEMPFILE=$(mktemp)
+  trap 'rm -f "$TEMPFILE"' EXIT
+fi
+
+cat > "$TEMPFILE" <<ENDJCL
+//$JOBNAME JOB (001),'MVSASM',REGION=0K,
+//            CLASS=$JOBCLASS,MSGCLASS=$MSGCLASS,MSGLEVEL=(1,1),
+//            NOTIFY=DUMMY
+//*
+//ASM      EXEC PGM=ASMBLR,
+//            PARM='DECK,LIST,RENT'
+//SYSLIB   DD DSN=SYS1.MACLIB,DISP=SHR,DCB=BLKSIZE=32720
+//         DD DSN=SYS1.AMODGEN,DISP=SHR
+${MACLIBS}//SYSUT1   DD UNIT=SYSALLDA,SPACE=(CYL,(20,10))
+//SYSUT2   DD UNIT=SYSALLDA,SPACE=(CYL,(10,10))
+//SYSUT3   DD UNIT=SYSALLDA,SPACE=(CYL,(10,10))
+//SYSPRINT DD SYSOUT=*
+//SYSLIN   DD DUMMY
+//SYSGO    DD DUMMY
+${PUNCH_DD}
+//*
+//SYSIN    DD DATA,DLM='##'
+$(tr -d '\r' < "$SOURCE")
+##
+//*
+//LKED     EXEC PGM=IEWL,
+// PARM='NCAL,LET,XREF,RENT',
+// COND=(4,LT,ASM)
+//SYSLIB   DD DSN=${LKED_SYSLIB},DISP=SHR
+//SYSUT1   DD UNIT=SYSALLDA,SPACE=(CYL,(2,1))
+//SYSPRINT DD SYSOUT=*
+${SYSLMOD_DD}
+//SYSLIN   DD DDNAME=SYSIN
+//SYSIN    DD DSN=${LINKIN},DISP=SHR
+//*
+ENDJCL
+
+# --- Strip CR from generated JCL ---
+sed 's/\r$//' "$TEMPFILE" > "${TEMPFILE}.tmp" && mv "${TEMPFILE}.tmp" "$TEMPFILE"
+
+# --- Submit via curl ---
+RESULT=$(curl -s -S --connect-timeout 10 --max-time 60 -X PUT \
+  -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  -H "Content-Type: text/plain" \
+  -H "X-IBM-Intrdr-Mode: TEXT" \
+  -H "X-IBM-Intrdr-Lrecl: 80" \
+  -H "X-IBM-Intrdr-Recfm: F" \
+  --data-binary @"$TEMPFILE" \
+  "$BASE_URL" 2>&1) || {
+  echo "mvsasm: connection failed for $JOBNAME" >&2
+  echo "$RESULT" >&2
+  exit 1
+}
+
+JOBID=$(echo "$RESULT" | jq -r '.jobid // empty' 2>/dev/null) || true
+RETCODE=$(echo "$RESULT" | jq -r '.retcode // empty' 2>/dev/null) || true
+
+if [[ -z "$JOBID" ]]; then
+  echo "mvsasm: submit failed for $JOBNAME" >&2
+  echo "$RESULT" >&2
+  exit 1
+fi
+
+# --- Poll for job completion ---
+while [[ -z "$RETCODE" || "$RETCODE" == "null" ]]; do
+  sleep 2
+  STATUS=$(curl -s --connect-timeout 10 --max-time 30 -u "${MVSASM_USER}:${MVSASM_PASS}" \
+    "$BASE_URL/$JOBNAME/$JOBID" 2>&1)
+  RETCODE=$(echo "$STATUS" | jq -r '.retcode // empty' 2>/dev/null) || true
+done
+
+# --- RC auswerten ---
+# retcode Format: "CC 0000", "CC 0004", "CC 0008", etc.
+RC_NUM=$(echo "$RETCODE" | grep -oE '[0-9]+' | head -1)
+RC_NUM=$((10#${RC_NUM:-9999}))
+
+if [[ "$RC_NUM" -gt 4 ]]; then
+  echo "mvsasm: $JOBNAME ($JOBID) FAILED RC=$RETCODE" >&2
+  exit 1
+elif [[ "$RC_NUM" -eq 4 ]]; then
+  # CC=4: Warnung sammeln
+  if [[ -n "${BUILD_WARNINGS:-}" ]]; then
+    printf "%-10s %-10s %s\n" "$JOBNAME" "$JOBID" "CC 0004 (warning)" >> "$BUILD_WARNINGS"
+  else
+    echo "mvsasm: $JOBNAME ($JOBID) CC 0004 (warning)" >&2
+  fi
+fi
+
+exit 0

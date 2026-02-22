@@ -1,0 +1,119 @@
+#!/bin/bash
+# mvslink - Link-edit MVS object modules into a load module
+set -euo pipefail
+
+# --- Load .env (working directory first, then script's repo root) ---
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -f "$PWD/.env" ]]; then
+  source "$PWD/.env"
+elif [[ -f "$ROOT_DIR/.env" ]]; then
+  source "$ROOT_DIR/.env"
+fi
+
+# --- Argument parsing (module names) ---
+if [[ $# -eq 0 ]]; then
+  echo "mvslink: usage: mvslink MODULE [MODULE ...]" >&2
+  exit 1
+fi
+
+MODULES=("$@")
+
+SYSLIB="${MVSLINK_SYSLIB:?MVSLINK_SYSLIB not set (check config.mk)}"
+NCALIB="${MVSLINK_NCALIB:?MVSLINK_NCALIB not set (check config.mk)}"
+LOAD="${MVSLINK_LOAD:?MVSLINK_LOAD not set (check config.mk)}"
+ENTRY="${MVSLINK_ENTRY:-@@CRT0}"
+NAME="${MVSLINK_NAME:?MVSLINK_NAME not set (check config.mk)}"
+JOBCLASS="${MVSASM_JOBCLASS:-A}"
+MSGCLASS="${MVSASM_MSGCLASS:-H}"
+
+# --- Validate required settings ---
+: "${MVSASM_HOST:?MVSASM_HOST not set (check .env)}"
+: "${MVSASM_PORT:?MVSASM_PORT not set (check .env)}"
+: "${MVSASM_USER:?MVSASM_USER not set (check .env)}"
+: "${MVSASM_PASS:?MVSASM_PASS not set (check .env)}"
+
+BASE_URL="http://${MVSASM_HOST}:${MVSASM_PORT}/zosmf/restjobs/jobs"
+JOBNAME="LKD${NAME}"
+JOBNAME="${JOBNAME:0:8}"
+
+# --- Build INCLUDE statements ---
+INCLUDES="  INCLUDE SYSLIB(@@CRT1)"
+for MOD in "${MODULES[@]}"; do
+  INCLUDES+=$'\n'"  INCLUDE NCALIB($MOD)"
+done
+
+# --- Generate JCL ---
+if [[ "${MVSASM_KEEP_JCL:-0}" == "1" ]]; then
+  TEMPFILE="$ROOT_DIR/jcl/$JOBNAME.jcl"
+else
+  TEMPFILE=$(mktemp)
+  trap 'rm -f "$TEMPFILE"' EXIT
+fi
+
+cat > "$TEMPFILE" <<ENDJCL
+//$JOBNAME JOB CLASS=$JOBCLASS,REGION=0K,MSGCLASS=$MSGCLASS,
+//            MSGLEVEL=(1,1),NOTIFY=DUMMY
+//*
+//LINK     EXEC PGM=IEWL,PARM='LIST,MAP,XREF,RENT'
+//SYSPRINT DD SYSOUT=*
+//SYSLIB   DD DISP=SHR,DSN=$SYSLIB,DCB=BLKSIZE=32760
+//SYSLMOD  DD DISP=SHR,DSN=$LOAD
+//SYSUT1   DD UNIT=SYSALLDA,SPACE=(CYL,(2,1))
+//NCALIB   DD DISP=SHR,DSN=$NCALIB
+//SYSLIN   DD DDNAME=SYSIN
+//SYSIN    DD *
+$INCLUDES
+  ENTRY $ENTRY
+  NAME $NAME(R)
+/*
+//*
+ENDJCL
+
+# --- Strip CR ---
+sed 's/\r$//' "$TEMPFILE" > "${TEMPFILE}.tmp" && mv "${TEMPFILE}.tmp" "$TEMPFILE"
+
+# --- Submit via curl ---
+RESULT=$(curl -s -S --connect-timeout 10 --max-time 60 -X PUT \
+  -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  -H "Content-Type: text/plain" \
+  -H "X-IBM-Intrdr-Mode: TEXT" \
+  -H "X-IBM-Intrdr-Lrecl: 80" \
+  -H "X-IBM-Intrdr-Recfm: F" \
+  --data-binary @"$TEMPFILE" \
+  "$BASE_URL" 2>&1) || {
+  echo "mvslink: connection failed" >&2
+  echo "$RESULT" >&2
+  exit 1
+}
+
+JOBID=$(echo "$RESULT" | jq -r '.jobid // empty' 2>/dev/null) || true
+RETCODE=$(echo "$RESULT" | jq -r '.retcode // empty' 2>/dev/null) || true
+
+if [[ -z "$JOBID" ]]; then
+  echo "mvslink: submit failed" >&2
+  echo "$RESULT" >&2
+  exit 1
+fi
+
+echo "mvslink: $JOBNAME ($JOBID) submitted"
+
+# --- Poll for job completion ---
+while [[ -z "$RETCODE" || "$RETCODE" == "null" ]]; do
+  sleep 2
+  STATUS=$(curl -s --connect-timeout 10 --max-time 30 -u "${MVSASM_USER}:${MVSASM_PASS}" \
+    "$BASE_URL/$JOBNAME/$JOBID" 2>&1)
+  RETCODE=$(echo "$STATUS" | jq -r '.retcode // empty' 2>/dev/null) || true
+done
+
+# --- Evaluate return code ---
+RC_NUM=$(echo "$RETCODE" | grep -oE '[0-9]+' | head -1)
+RC_NUM=$((10#${RC_NUM:-9999}))
+
+if [[ "$RC_NUM" -gt 4 ]]; then
+  echo "mvslink: $JOBNAME ($JOBID) FAILED RC=$RETCODE" >&2
+  exit 1
+fi
+
+echo "mvslink: $JOBNAME ($JOBID) $RETCODE"
+exit 0

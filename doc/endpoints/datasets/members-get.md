@@ -8,9 +8,14 @@ GET
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}({member-name})`
 
+or with explicit volume:
+
+`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})`
+
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset
 - `member-name`: Name of the member to read
+- `volume-serial` (optional): Volume serial number
 
 ## Request Headers
 - `X-IBM-Data-Type` (optional): Data transfer mode

@@ -8,9 +8,14 @@ PUT
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}({member-name})`
 
+or with explicit volume:
+
+`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})`
+
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset
 - `member-name`: Name of the member to write
+- `volume-serial` (optional): Volume serial number
 
 ## Request Headers
 - `Content-Length` or `Transfer-Encoding: chunked`: One of these is required

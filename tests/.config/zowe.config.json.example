@@ -1,0 +1,19 @@
+{
+    "$schema": "../../zowe.schema.json",
+    "profiles": {
+        "mvsmf": {
+            "type": "zosmf",
+            "properties": {
+                "host": "localhost",
+                "protocol": "http",
+                "port": 1080,
+                "user": "IBMUSER",
+                "password": "secret"
+            }
+        }
+    },
+    "defaults": {
+        "zosmf": "mvsmf"
+    },
+    "autoStore": false
+}

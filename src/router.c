@@ -282,6 +282,12 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
             strncpy(value, value_start, value_len);
             value[value_len] = '\0';
 
+            /* Trim trailing spaces - clients like Zowe Explorer
+               may pad names with spaces (e.g. member names to 8 chars) */
+            while (value_len > 0 && value[value_len - 1] == ' ') {
+                value[--value_len] = '\0';
+            }
+
             char env_name[256];
             sprintf(env_name, "HTTP_%s", var_name);
             /* strdup required: http_set_env stores the pointer,

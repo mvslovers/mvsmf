@@ -1004,10 +1004,10 @@ int memberPutHandler(Session *session)
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
     member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
-    
+
     if (!dsname || !member) {
-        wtof("MVSMF02E Missing required parameters: dsname=%s, member=%s, Data-Type=%s", 
-             dsname ? dsname : "NULL", 
+        wtof("MVSMF02E Missing required parameters: dsname=%s, member=%s, Data-Type=%s",
+             dsname ? dsname : "NULL",
              member ? member : "NULL",
              data_type_str ? data_type_str : "NULL");
 

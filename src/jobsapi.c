@@ -26,7 +26,7 @@
 #define MAX_JOBS_LIMIT 1000
 #define MAX_URL_LENGTH 256
 #define MAX_ERR_MSG_LENGTH 256
-#define MAX_JCL_LINES 2500
+#define INITIAL_JCL_CAPACITY 256
 
 #define JES_INFO_SIZE   20 + 1
 #define TYPE_STR_SIZE    3 + 1
@@ -926,15 +926,16 @@ receive_raw_data(HTTPC *httpc, char *buf, int len)
 	sockfd = httpc->socket;
 	while (total_bytes_received < len) {
 		/*
-		 * Workaround: Limit recv() to 2048 bytes per call.
-		 * The MVS 3.8j TCP/IP stack appears to have a bug in its
-		 * internal 2048-byte ring buffer that causes data corruption
-		 * (replaying earlier data) when recv() is called with a
-		 * request size larger than 2048 bytes.
+		 * Workaround: Read one byte at a time from the socket.
+		 * The MVS 3.8j TCP/IP stack has a bug in its internal
+		 * ring buffer that causes data corruption (replaying
+		 * earlier data) when a multi-byte recv() spans the ring
+		 * buffer wrap-around point.  Single-byte reads never
+		 * cross the boundary, avoiding the bug entirely.
+		 * The HTTPD header parser (http_getc) uses the same
+		 * approach and is not affected by this bug.
 		 */
-		int request = len - total_bytes_received;
-		if (request > 2048) request = 2048;
-		bytes_received = recv(sockfd, buf + total_bytes_received, request, 0);
+		bytes_received = recv(sockfd, buf + total_bytes_received, 1, 0);
 		if (bytes_received < 0) {
 			if (errno == EINTR) {
 				continue;
@@ -1017,6 +1018,47 @@ extract_file_value(char *json, size_t len)
 	return val_start;
 }
 
+__asm__("\n&FUNC	SETC 'grow_lines_arrays'");
+static int
+grow_lines_arrays(char ***lines_p, char **lines_buf_p, int *capacity_p, int required)
+{
+	int new_cap;
+	char *new_buf;
+	char **new_lines;
+	int i;
+
+	if (required <= *capacity_p) {
+		return 0;
+	}
+
+	new_cap = *capacity_p;
+	while (new_cap < required) {
+		new_cap *= 2;
+	}
+
+	new_buf = (char *)realloc(*lines_buf_p, (size_t)new_cap * 81);
+	if (!new_buf) {
+		return -1;
+	}
+	memset(new_buf + (size_t)(*capacity_p) * 81, 0,
+		   (size_t)(new_cap - *capacity_p) * 81);
+
+	new_lines = (char **)realloc(*lines_p, (size_t)new_cap * sizeof(char *));
+	if (!new_lines) {
+		*lines_buf_p = new_buf;
+		return -1;
+	}
+
+	for (i = 0; i < new_cap; i++) {
+		new_lines[i] = new_buf + (i * 81);
+	}
+
+	*lines_buf_p = new_buf;
+	*lines_p = new_lines;
+	*capacity_p = new_cap;
+	return 0;
+}
+
 __asm__("\n&FUNC	SETC 'submit_file'");
 static int
 submit_file(Session *session, VSFILE *intrdr, const char *filename,
@@ -1030,6 +1072,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	char **lines = NULL;
 	char *lines_buf = NULL;
 	int num_lines = 0;
+	int capacity = INITIAL_JCL_CAPACITY;
 	int modified_lines_count = 0;
 
 	char dsname[DSNAME_STR_SIZE + 1];
@@ -1073,10 +1116,9 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		goto quit;
 	}
 
-	/* allocate lines array — all MAX_JCL_LINES slots, because
-	   process_jobcard() adds USER/PASSWORD lines beyond num_lines */
-	lines = (char **)calloc(MAX_JCL_LINES, sizeof(char *));
-	lines_buf = (char *) calloc(MAX_JCL_LINES, 81);
+	/* allocate lines array with initial capacity */
+	lines = (char **)calloc(capacity, sizeof(char *));
+	lines_buf = (char *)calloc(capacity, 81);
 	if (!lines || !lines_buf) {
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
@@ -1086,14 +1128,27 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	}
 	{
 		int alloc_idx = 0;
-		for (alloc_idx = 0; alloc_idx < MAX_JCL_LINES; alloc_idx++) {
+		for (alloc_idx = 0; alloc_idx < capacity; alloc_idx++) {
 			lines[alloc_idx] = lines_buf + (alloc_idx * 81);
 		}
 	}
 
 	/* read dataset into lines array */
-	while (fgets(buffer, (int)buffer_size, fp) > 0 && num_lines < MAX_JCL_LINES) {
-		size_t line_len = strlen(buffer);
+	while (fgets(buffer, (int)buffer_size, fp) > 0) {
+		size_t line_len;
+
+		if (num_lines >= capacity) {
+			if (grow_lines_arrays(&lines, &lines_buf, &capacity,
+								  num_lines + 1) < 0) {
+				sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+								CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+								ERR_MSG_SERVER_ERROR, NULL, 0);
+				rc = -1;
+				goto quit;
+			}
+		}
+
+		line_len = strlen(buffer);
 
 		/* remove trailing newline/CR */
 		while (line_len > 0 && (buffer[line_len - 1] == '\n' ||
@@ -1108,18 +1163,17 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		num_lines++;
 	}
 
-	if (num_lines >= MAX_JCL_LINES &&
-		fgets(buffer, (int)buffer_size, fp) > 0) {
-		wtof("MVSMF22E JCL too large, truncated at %d lines",
-			MAX_JCL_LINES);
-		fclose(fp);
-		fp = NULL;
+	fclose(fp);
+	fp = NULL;
+
+	/* ensure room for 2 extra lines added by process_jobcard */
+	if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 2) < 0) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
 		rc = -1;
 		goto quit;
 	}
-
-	fclose(fp);
-	fp = NULL;
 
 	/* process jobcard: inject USER/PASSWORD */
 	{
@@ -1742,12 +1796,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         }
     }
 
-    // Check we have room for 2 more lines
-    if (num_lines + 2 > MAX_JCL_LINES) {
-        wtof("MVSMF22E Too many lines in JCL (max %d)", MAX_JCL_LINES);
-        return -1;
-    }
-
     // Shift remaining lines (after job card) down by 2 to make room for USER/PASSWORD
     for (ii = num_lines - 1; ii > end_idx; ii--) {
         strncpy(lines[ii + 2], lines[ii], 80);
@@ -1780,24 +1828,29 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     char **lines = NULL;
     char *lines_buf = NULL;
     int num_lines = 0;
+    int capacity = INITIAL_JCL_CAPACITY;
     int final_lines_count = 0;
     
     *jobclass = 'A';
     memset(jobname, 0, JOBNAME_STR_SIZE + 1);
     memset(jobid, 0, JOBID_STR_SIZE + 1);
 
-    ebcdic_content = strdup(content);
+    /* Use malloc+memcpy instead of strdup to ensure all bytes are copied
+     * even if content contains embedded nulls */
+    ebcdic_content = (char *)malloc(content_length + 1);
     if (!ebcdic_content) {
         wtof("MVSMF22E Memory allocation failed for EBCDIC conversion");
         rc = -1;
         goto quit;
     }
+    memcpy(ebcdic_content, content, content_length);
+    ebcdic_content[content_length] = '\0';
 
     mvsmf_atoe((unsigned char *)ebcdic_content, content_length);
 
     /* Allocate lines array + contiguous buffer */
-    lines = (char **) calloc(MAX_JCL_LINES, sizeof(char *));
-    lines_buf = (char *) calloc(MAX_JCL_LINES, 81);
+    lines = (char **)calloc(capacity, sizeof(char *));
+    lines_buf = (char *)calloc(capacity, 81);
     if (!lines || !lines_buf) {
         wtof("MVSMF22E Memory allocation failed for lines array");
         rc = -1;
@@ -1805,7 +1858,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     }
     {
         int li;
-        for (li = 0; li < MAX_JCL_LINES; li++) {
+        for (li = 0; li < capacity; li++) {
             lines[li] = lines_buf + (li * 81);
         }
     }
@@ -1815,8 +1868,19 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     char *line = tokenize(ebcdic_content, delimiter, &saveptr);
 
     // Collect all lines
-    while (line != NULL && num_lines < MAX_JCL_LINES) {
-        size_t line_len = strlen(line);
+    while (line != NULL) {
+        size_t line_len;
+
+        if (num_lines >= capacity) {
+            if (grow_lines_arrays(&lines, &lines_buf, &capacity,
+                                  num_lines + 1) < 0) {
+                wtof("MVSMF22E Memory allocation failed growing lines array");
+                rc = -1;
+                goto quit;
+            }
+        }
+
+        line_len = strlen(line);
 
         // Remove trailing CR if present
         if (line_len > 0 && line[line_len - 1] == '\r') {
@@ -1831,8 +1895,9 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         line = tokenize(NULL, delimiter, &saveptr);
     }
 
-    if (line != NULL) {
-        wtof("MVSMF22E JCL too large, truncated at %d lines", MAX_JCL_LINES);
+    /* ensure room for 2 extra lines added by process_jobcard */
+    if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 2) < 0) {
+        wtof("MVSMF22E Memory allocation failed growing lines array");
         rc = -1;
         goto quit;
     }
@@ -1840,7 +1905,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     /* Analyze and potentially modify job card */
     const char *user = getHeaderParam(session, "CURRENT_USER");
     const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
-    
+
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");

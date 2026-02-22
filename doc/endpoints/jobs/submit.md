@@ -41,13 +41,12 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
     - Invalid internal reader parameters
     - Missing `file` field in JSON body
     - Failed to read request content
-    - JCL too large (exceeds 5000 lines)
+    - JCL memory allocation failure
 - HTTP 500 (Internal Server Error)
     - Failed to open internal reader
     - Failed to process job card
 
 ## Limitations
-- Maximum JCL size: 5000 lines
 - USER and PASSWORD are automatically injected into the job card from the authenticated user's credentials
 - The `NOTIFY` parameter in the job card is updated with the authenticated user's ID if `&SYSUID` is present
 

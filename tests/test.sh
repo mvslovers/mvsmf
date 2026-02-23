@@ -16,8 +16,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 CURL_JOBS="${SCRIPT_DIR}/curl-jobs.sh"
 CURL_DS="${SCRIPT_DIR}/curl-datasets.sh"
+CURL_BIN="${SCRIPT_DIR}/curl-binary.sh"
 ZOWE_JOBS="${SCRIPT_DIR}/zowe-jobs.sh"
 ZOWE_DS="${SCRIPT_DIR}/zowe-datasets.sh"
+ZOWE_BIN="${SCRIPT_DIR}/zowe-binary.sh"
 ENV_FILE="${SCRIPT_DIR}/.config/.env"
 ZOWE_CONFIG="${SCRIPT_DIR}/.config/zowe.config.json"
 
@@ -26,8 +28,10 @@ RUN_ZOWE=1
 SETUP_FLAG=""
 CURL_JOBS_RC=0
 CURL_DS_RC=0
+CURL_BIN_RC=0
 ZOWE_JOBS_RC=0
 ZOWE_DS_RC=0
+ZOWE_BIN_RC=0
 
 # =========================================================================
 # Parse arguments
@@ -106,6 +110,11 @@ if [ "$RUN_CURL" -eq 1 ]; then
 	echo ">>> Running curl datasets test suite..."
 	echo ""
 	bash "$CURL_DS" || CURL_DS_RC=$?
+
+	echo ""
+	echo ">>> Running curl binary test suite..."
+	echo ""
+	bash "$CURL_BIN" || CURL_BIN_RC=$?
 fi
 
 if [ "$RUN_ZOWE" -eq 1 ]; then
@@ -119,6 +128,11 @@ if [ "$RUN_ZOWE" -eq 1 ]; then
 	echo ">>> Running Zowe CLI datasets test suite..."
 	echo ""
 	bash "$ZOWE_DS" || ZOWE_DS_RC=$?
+
+	echo ""
+	echo ">>> Running Zowe CLI binary test suite..."
+	echo ""
+	bash "$ZOWE_BIN" || ZOWE_BIN_RC=$?
 fi
 
 # =========================================================================
@@ -141,6 +155,11 @@ if [ "$RUN_CURL" -eq 1 ]; then
 	else
 		echo "  curl datasets:  FAILED (exit code $CURL_DS_RC)"
 	fi
+	if [ "$CURL_BIN_RC" -eq 0 ]; then
+		echo "  curl binary:    PASSED"
+	else
+		echo "  curl binary:    FAILED (exit code $CURL_BIN_RC)"
+	fi
 fi
 
 if [ "$RUN_ZOWE" -eq 1 ]; then
@@ -154,11 +173,18 @@ if [ "$RUN_ZOWE" -eq 1 ]; then
 	else
 		echo "  zowe datasets:  FAILED (exit code $ZOWE_DS_RC)"
 	fi
+	if [ "$ZOWE_BIN_RC" -eq 0 ]; then
+		echo "  zowe binary:    PASSED"
+	else
+		echo "  zowe binary:    FAILED (exit code $ZOWE_BIN_RC)"
+	fi
 fi
 
 echo "=========================================="
 
 if [ "$CURL_JOBS_RC" -ne 0 ] || [ "$CURL_DS_RC" -ne 0 ] || \
-   [ "$ZOWE_JOBS_RC" -ne 0 ] || [ "$ZOWE_DS_RC" -ne 0 ]; then
+   [ "$CURL_BIN_RC" -ne 0 ] || \
+   [ "$ZOWE_JOBS_RC" -ne 0 ] || [ "$ZOWE_DS_RC" -ne 0 ] || \
+   [ "$ZOWE_BIN_RC" -ne 0 ]; then
 	exit 1
 fi

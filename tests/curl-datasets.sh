@@ -258,6 +258,18 @@ else
 	fail "partial wildcard returned results" "expected >0 items"
 fi
 
+# --- Create PDS (needed before max-items test so two datasets exist) ---
+echo ""
+echo "--- Create PDS ---"
+
+BODY='{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_pds.json \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
+assert_http_status "201" "$HTTP_CODE" "create PDS"
+
 # --- List datasets (X-IBM-Max-Items) ---
 echo ""
 echo "--- List Datasets (X-IBM-Max-Items) ---"
@@ -333,18 +345,6 @@ if [ "$HTTP_CODE" = "201" ] && [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 else
 	skip "delete dataset with volume prefix (could not create or no volume)"
 fi
-
-# --- Create PDS ---
-echo ""
-echo "--- Create PDS ---"
-
-BODY='{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}'
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_pds.json \
-	-X POST -u "$AUTH" \
-	-H "Content-Type: application/json" \
-	-d "$BODY" \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
-assert_http_status "201" "$HTTP_CODE" "create PDS"
 
 # --- Write PDS member ---
 echo ""

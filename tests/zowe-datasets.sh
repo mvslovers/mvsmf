@@ -239,6 +239,14 @@ else
 	fail "wildcard ** returned results" "expected >0 items"
 fi
 
+# --- Create PDS (needed before max-items test so two datasets exist) ---
+echo ""
+echo "--- Create PDS ---"
+
+RC=0
+OUTPUT=$(run_zowe files create pds "$TEST_PDS" --recfm FB --lrecl 80 --blksize 3120 --size 1TRK --dirblks 5) || RC=$?
+assert_rc 0 "$RC" "create PDS"
+
 # --- List datasets (max-items) ---
 echo ""
 echo "--- List Datasets (max-items) ---"
@@ -254,6 +262,13 @@ else
 	fail "max-items limited to 1 row" "expected returnedRows=1, got $RETURNED"
 fi
 
+MORE_ROWS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE_ROWS=""
+if [ "$MORE_ROWS" = "true" ]; then
+	pass "moreRows=true when truncated"
+else
+	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
+fi
+
 # --- Delete sequential dataset ---
 echo ""
 echo "--- Delete Sequential Dataset ---"
@@ -261,14 +276,6 @@ echo "--- Delete Sequential Dataset ---"
 RC=0
 OUTPUT=$(run_zowe files delete ds "$TEST_SEQ" -f) || RC=$?
 assert_rc 0 "$RC" "delete sequential dataset"
-
-# --- Create PDS ---
-echo ""
-echo "--- Create PDS ---"
-
-RC=0
-OUTPUT=$(run_zowe files create pds "$TEST_PDS" --recfm FB --lrecl 80 --blksize 3120 --size 1TRK --dirblks 5) || RC=$?
-assert_rc 0 "$RC" "create PDS"
 
 # --- Write PDS member ---
 # NOTE: Zowe CLI member PUT is blocked by a known issue where the

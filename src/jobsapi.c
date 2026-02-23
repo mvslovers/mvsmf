@@ -246,25 +246,42 @@ jobRecordsHandler(Session *session)
 		goto quit;
 	}
 
-	sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
+	{
+		char *endptr = NULL;
+		long ddid_val = strtol(ddid, &endptr, DECIMAL_BASE);
 
-	char *endptr = NULL;
-	long ddid_val = strtol(ddid, &endptr, DECIMAL_BASE);
+		if (*endptr != '\0' || ddid_val < 0) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+							RC_ERROR, REASON_INVALID_QUERY,
+							"Invalid DDID parameter", NULL, 0);
+			goto quit;
+		}
 
-	if (*endptr != '\0' || ddid_val < 0) {
-		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
-						RC_ERROR, REASON_INVALID_QUERY,
-						"Invalid DDID parameter", NULL, 0);
-		goto quit;
-	}
+		/* verify DDID exists in job's spool files */
+		{
+			unsigned ii = 0;
+			int found = 0;
+			for (ii = 0; ii < array_count(&job->jesdd); ii++) {
+				JESDD *dd = job->jesdd[ii];
+				if (dd && dd->dsid == (unsigned)ddid_val) {
+					found = 1;
+					break;
+				}
+			}
+			if (!found) {
+				sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+								RC_ERROR, REASON_INVALID_QUERY,
+								"DDID not found for job", NULL, 0);
+				goto quit;
+			}
+		}
 
-	rc = do_print_sysout(session, job, (unsigned)ddid_val);
-	if (rc < 0) {
-		// TODO (MIG) check if this will work, fater already sending default headers
-		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
-						ERR_MSG_SERVER_ERROR, NULL, 0);
-		goto quit;
+		sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
+
+		rc = do_print_sysout(session, job, (unsigned)ddid_val);
+		if (rc < 0) {
+			goto quit;
+		}
 	}
 
 quit:

@@ -411,6 +411,16 @@ int jobSubmitHandler(Session *session)
 	{
 		const char *content_type = getHeaderParam(session, "Content-Type");
 		int is_json = (content_type && strstr(content_type, "application/json") != NULL);
+		int is_text = (!content_type || strstr(content_type, "text/plain") != NULL);
+
+		if (!is_json && !is_text) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+							RC_ERROR, REASON_INVALID_REQUEST,
+							"Unsupported Content-Type for job submission. "
+							"Use application/json or text/plain", NULL, 0);
+			rc = -1;
+			goto quit;
+		}
 
 		if (is_json) {
 			/* convert ASCII request body to EBCDIC so strstr/strchr work */
@@ -1909,6 +1919,9 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
+        sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+                        RC_ERROR, REASON_INVALID_REQUEST,
+                        "No valid JOB card found in submitted JCL", NULL, 0);
         goto quit;
     }
 

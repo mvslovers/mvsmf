@@ -9,9 +9,12 @@ GET
 `/zosmf/restfiles/ds`
 
 ## Query Parameters
-- `dslevel` (required): Dataset name filter pattern (e.g. `USER.**`, `SYS1.MAC*`)
+- `dslevel` (required): Dataset name filter pattern. Supports exact names (`USER.TEST.DATA`), hierarchical prefixes (`USER.TEST`), and wildcard patterns (`USER.*`, `USER.**`, `USER.C*`). Internally, the longest concrete prefix is used for the catalog lookup and any wildcard or extra-qualifier filtering is applied afterwards.
 - `volser` (optional): Filter by volume serial
 - `start` (optional): Starting dataset name for pagination
+
+## Request Headers
+- `X-IBM-Max-Items` (optional): Maximum number of items to return. Value `0` means unlimited (default behavior). When the result set is truncated, `moreRows` is set to `true`.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON object:
@@ -51,7 +54,8 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 
 ## Limitations
 - Only NONVSAM datasets are listed
-- `moreRows` is always `false` (no pagination support yet)
+- `*` and `**` wildcards are treated identically (both match any number of qualifiers)
+- `start` parameter is not yet implemented
 
 ## Examples
 

@@ -175,19 +175,113 @@ else
 	fail "read content matches" "expected 'LINE 1 TEST DATA' in output"
 fi
 
-# --- List datasets ---
+# --- List datasets (two-level prefix) ---
 echo ""
-echo "--- List Datasets ---"
+echo "--- List Datasets (two-level prefix) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-assert_http_status "200" "$HTTP_CODE" "list datasets"
+assert_http_status "200" "$HTTP_CODE" "list datasets (two-level prefix)"
+
+ITEMS=$(echo "$CONTENT" | jq '.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "list returned results ($ITEMS items)"
+else
+	fail "list returned results" "expected >0 items"
+fi
 
 # Extract volume serial for later volume-prefix tests
 VOLUME=$(echo "$CONTENT" | jq -r --arg dsn "$TEST_SEQ" \
 	'.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || VOLUME=""
+
+# --- List datasets (exact three-level name) ---
+echo ""
+echo "--- List Datasets (exact name) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_SEQ}")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (exact name)"
+assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
+
+# --- List datasets (wildcard *) ---
+echo ""
+echo "--- List Datasets (wildcard *) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.*")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (wildcard *)"
+
+ITEMS=$(echo "$CONTENT" | jq '.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "wildcard * returned results ($ITEMS items)"
+else
+	fail "wildcard * returned results" "expected >0 items"
+fi
+
+# --- List datasets (wildcard **) ---
+echo ""
+echo "--- List Datasets (wildcard **) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.**")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (wildcard **)"
+
+ITEMS=$(echo "$CONTENT" | jq '.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "wildcard ** returned results ($ITEMS items)"
+else
+	fail "wildcard ** returned results" "expected >0 items"
+fi
+
+# --- List datasets (partial wildcard) ---
+echo ""
+echo "--- List Datasets (partial wildcard) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL*")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (partial wildcard)"
+
+ITEMS=$(echo "$CONTENT" | jq '.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -gt 0 ] 2>/dev/null; then
+	pass "partial wildcard returned results ($ITEMS items)"
+else
+	fail "partial wildcard returned results" "expected >0 items"
+fi
+
+# --- List datasets (X-IBM-Max-Items) ---
+echo ""
+echo "--- List Datasets (X-IBM-Max-Items) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	-H "X-IBM-Max-Items: 1" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (max-items=1)"
+
+RETURNED=$(echo "$CONTENT" | jq '.returnedRows' 2>/dev/null) || RETURNED=0
+if [ "$RETURNED" -eq 1 ] 2>/dev/null; then
+	pass "max-items limited to 1 row"
+else
+	fail "max-items limited to 1 row" "expected returnedRows=1, got $RETURNED"
+fi
+
+MORE_ROWS=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null) || MORE_ROWS=""
+if [ "$MORE_ROWS" = "true" ]; then
+	pass "moreRows=true when truncated"
+else
+	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
+fi
 
 # --- Read with volume prefix ---
 echo ""

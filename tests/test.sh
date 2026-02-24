@@ -20,7 +20,8 @@ CURL_BIN="${SCRIPT_DIR}/curl-binary.sh"
 ZOWE_JOBS="${SCRIPT_DIR}/zowe-jobs.sh"
 ZOWE_DS="${SCRIPT_DIR}/zowe-datasets.sh"
 ZOWE_BIN="${SCRIPT_DIR}/zowe-binary.sh"
-ENV_FILE="${SCRIPT_DIR}/.config/.env"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
 ZOWE_CONFIG="${SCRIPT_DIR}/.config/zowe.config.json"
 
 RUN_CURL=1
@@ -55,7 +56,7 @@ preflight() {
 	if [ "$RUN_CURL" -eq 1 ]; then
 		if [ ! -f "$ENV_FILE" ]; then
 			echo "ERROR: ${ENV_FILE} not found."
-			echo "  cp ${SCRIPT_DIR}/.config/.env.example ${ENV_FILE}"
+			echo "  cp .env.example .env   (at the repo root)"
 			ok=0
 		fi
 

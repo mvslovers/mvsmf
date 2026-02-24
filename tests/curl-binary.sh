@@ -6,7 +6,7 @@
 # Uploads a known binary file, downloads it back, and compares byte-exact.
 #
 # Prerequisites:
-#   - Copy tests/.config/.env.example to tests/.config/.env and fill in
+#   - Copy .env.example to .env at the repo root and fill in
 #   - curl and jq must be installed
 #
 # Usage:
@@ -16,7 +16,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.config/.env"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
 BINARY_FILE="${SCRIPT_DIR}/data/binary80.bin"
 
 if [ ! -f "$ENV_FILE" ]; then
@@ -30,15 +31,15 @@ if [ ! -f "$BINARY_FILE" ]; then
 	exit 1
 fi
 
-# shellcheck source=.config/.env
+# shellcheck source=../.env
 . "$ENV_FILE"
 
-BASE_URL="http://${MVS_HOST}:${MVS_PORT}"
-AUTH="${MVS_USER}:${MVS_PASS}"
+BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
+AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test dataset names
-TEST_SEQ="${MVS_USER}.CURL.TESTBIN"
-TEST_PDS="${MVS_USER}.CURL.TESTBPDS"
+TEST_SEQ="${MVSMF_USER}.CURL.TESTBIN"
+TEST_PDS="${MVSMF_USER}.CURL.TESTBPDS"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
@@ -102,8 +103,8 @@ cleanup_datasets() {
 echo ""
 echo "========================================"
 echo " mvsMF Datasets API - curl binary tests"
-echo " Host: ${MVS_HOST}:${MVS_PORT}"
-echo " User: ${MVS_USER}"
+echo " Host: ${MVSMF_HOST}:${MVSMF_PORT}"
+echo " User: ${MVSMF_USER}"
 echo "========================================"
 
 # Clean up leftovers

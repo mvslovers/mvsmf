@@ -19,21 +19,21 @@ fi
 
 MODULES=("$@")
 
-SYSLIB="${MVSLINK_SYSLIB:?MVSLINK_SYSLIB not set (check config.mk)}"
-NCALIB="${MVSLINK_NCALIB:?MVSLINK_NCALIB not set (check config.mk)}"
-LOAD="${MVSLINK_LOAD:?MVSLINK_LOAD not set (check config.mk)}"
-ENTRY="${MVSLINK_ENTRY:-@@CRT0}"
-NAME="${MVSLINK_NAME:?MVSLINK_NAME not set (check config.mk)}"
-JOBCLASS="${MVSASM_JOBCLASS:-A}"
-MSGCLASS="${MVSASM_MSGCLASS:-H}"
+SYSLIB="${MVSMF_LINK_SYSLIB:?MVSMF_LINK_SYSLIB not set (check .env)}"
+NCALIB="${MVSMF_LINK_NCALIB:?MVSMF_LINK_NCALIB not set (check .env)}"
+LOAD="${MVSMF_LINK_LOAD:?MVSMF_LINK_LOAD not set (check .env)}"
+ENTRY="${MVSMF_LINK_ENTRY:-@@CRT0}"
+NAME="${MVSMF_LINK_NAME:?MVSMF_LINK_NAME not set (check .env)}"
+JOBCLASS="${MVSMF_JOBCLASS:-A}"
+MSGCLASS="${MVSMF_MSGCLASS:-H}"
 
 # --- Validate required settings ---
-: "${MVSASM_HOST:?MVSASM_HOST not set (check .env)}"
-: "${MVSASM_PORT:?MVSASM_PORT not set (check .env)}"
-: "${MVSASM_USER:?MVSASM_USER not set (check .env)}"
-: "${MVSASM_PASS:?MVSASM_PASS not set (check .env)}"
+: "${MVSMF_HOST:?MVSMF_HOST not set (check .env)}"
+: "${MVSMF_PORT:?MVSMF_PORT not set (check .env)}"
+: "${MVSMF_USER:?MVSMF_USER not set (check .env)}"
+: "${MVSMF_PASS:?MVSMF_PASS not set (check .env)}"
 
-BASE_URL="http://${MVSASM_HOST}:${MVSASM_PORT}/zosmf/restjobs/jobs"
+BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}/zosmf/restjobs/jobs"
 JOBNAME="LKD${NAME}"
 JOBNAME="${JOBNAME:0:8}"
 
@@ -44,7 +44,7 @@ for MOD in "${MODULES[@]}"; do
 done
 
 # --- Generate JCL ---
-if [[ "${MVSASM_KEEP_JCL:-0}" == "1" ]]; then
+if [[ "${MVSMF_KEEP_JCL:-0}" == "1" ]]; then
   TEMPFILE="$ROOT_DIR/jcl/$JOBNAME.jcl"
 else
   TEMPFILE=$(mktemp)
@@ -75,7 +75,7 @@ sed 's/\r$//' "$TEMPFILE" > "${TEMPFILE}.tmp" && mv "${TEMPFILE}.tmp" "$TEMPFILE
 
 # --- Submit via curl ---
 RESULT=$(curl -s -S --connect-timeout 10 --max-time 60 -X PUT \
-  -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  -u "${MVSMF_USER}:${MVSMF_PASS}" \
   -H "Content-Type: text/plain" \
   -H "X-IBM-Intrdr-Mode: TEXT" \
   -H "X-IBM-Intrdr-Lrecl: 80" \
@@ -101,7 +101,7 @@ echo "mvslink: $JOBNAME ($JOBID) submitted"
 # --- Poll for job completion ---
 while [[ -z "$RETCODE" || "$RETCODE" == "null" ]]; do
   sleep 2
-  STATUS=$(curl -s --connect-timeout 10 --max-time 30 -u "${MVSASM_USER}:${MVSASM_PASS}" \
+  STATUS=$(curl -s --connect-timeout 10 --max-time 30 -u "${MVSMF_USER}:${MVSMF_PASS}" \
     "$BASE_URL/$JOBNAME/$JOBID" 2>&1)
   RETCODE=$(echo "$STATUS" | jq -r '.retcode // empty' 2>/dev/null) || true
 done

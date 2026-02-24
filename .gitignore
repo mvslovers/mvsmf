@@ -48,7 +48,6 @@ CLAUDE.md
 .build-warnings
 
 # Test config (only examples are tracked)
-tests/.config/.env
 tests/.config/zowe.config.json
 tests/.config/logs/
 tests/.config/plugins/

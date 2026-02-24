@@ -12,7 +12,7 @@
 #   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge)
 #
 # Prerequisites:
-#   - Copy tests/.config/.env.example to tests/.config/.env and fill in
+#   - Copy .env.example to .env at the repo root and fill in
 #   - curl and jq must be installed
 #
 # Usage:
@@ -24,7 +24,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.config/.env"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
 	echo "ERROR: ${ENV_FILE} not found."
@@ -32,13 +33,13 @@ if [ ! -f "$ENV_FILE" ]; then
 	exit 1
 fi
 
-# shellcheck source=.config/.env
+# shellcheck source=../.env
 . "$ENV_FILE"
 
-BASE_URL="http://${MVS_HOST}:${MVS_PORT}"
-AUTH="${MVS_USER}:${MVS_PASS}"
+BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
+AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 JCL_DIR="${SCRIPT_DIR}/jcl"
-TEST_PDS="${MVS_USER}.MVSMF.TESTJCL"
+TEST_PDS="${MVSMF_USER}.MVSMF.TESTJCL"
 
 # --- state ---
 PASSED=0
@@ -179,7 +180,7 @@ setup_test_pds() {
 
 	# Allocate PDS by submitting allocation JCL
 	local alloc_jcl
-	alloc_jcl=$(sed "s/\${USER}/${MVS_USER}/g" "${JCL_DIR}/allocpds.jcl")
+	alloc_jcl=$(sed "s/\${USER}/${MVSMF_USER}/g" "${JCL_DIR}/allocpds.jcl")
 
 	local resp
 	resp=$(do_curl PUT \
@@ -676,8 +677,8 @@ test_purge_not_found() {
 
 echo "========================================"
 echo " mvsMF Jobs API - curl test suite"
-echo " Host: ${MVS_HOST}:${MVS_PORT}"
-echo " User: ${MVS_USER}"
+echo " Host: ${MVSMF_HOST}:${MVSMF_PORT}"
+echo " User: ${MVSMF_USER}"
 echo "========================================"
 
 # Optional setup

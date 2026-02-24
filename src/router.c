@@ -57,20 +57,14 @@ void add_route(Router *router, HttpMethod method, const char *pattern, RouteHand
         return;
     }
 
-    const char *pattern_copy = strdup(pattern);
-    if (!pattern_copy) {
-        wtof("Memory allocation failed for route pattern");
-        return;
-    }
-
     Route *route = &router->routes[router->route_count++];
     route->method = method;
-    route->pattern = pattern_copy;
+    route->pattern = pattern;
     route->handler = handler;
 
 }
 
-void add_middleware(Router *router, char *middleware_name, MiddlewareHandler handler)
+void add_middleware(Router *router, const char *middleware_name, MiddlewareHandler handler)
 {
     if (router->middleware_count >= MAX_MIDDLEWARES) {
         wtof("MVSMF12E MAX_MIDDLEWARES limit reached.");
@@ -78,7 +72,7 @@ void add_middleware(Router *router, char *middleware_name, MiddlewareHandler han
     }
 
     Middleware *middleware = &router->middlewares[router->middleware_count++];
-    middleware->name = strdup(middleware_name);
+    middleware->name = middleware_name;
     middleware->handler = handler;
 }
 
@@ -291,9 +285,7 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
 
             char env_name[256];
             sprintf(env_name, "HTTP_%s", var_name);
-            /* strdup required: http_set_env stores the pointer,
-               freed when HTTPD tears down the request environment */
-            http_set_env(httpc, (UCHAR *) env_name, (UCHAR *) strdup(value));
+            http_set_env(httpc, (UCHAR *) env_name, (UCHAR *) value);
 
         } else {
             if (*pattern == *path) {

@@ -61,7 +61,7 @@ struct route {
  * @brief Middleware definition structure
  */
 struct middleware {
-    char *name;                /**< Middleware name for identification */
+    const char *name;          /**< Middleware name for identification */
     MiddlewareHandler handler; /**< Middleware handler function */
 } __attribute__((aligned(HALF_WORD_ALIGNMENT)));
 
@@ -133,7 +133,7 @@ void add_route(Router *router, HttpMethod method, const char *pattern, RouteHand
  * @param middleware_name Name of the middleware
  * @param handler Middleware handler function
  */
-void add_middleware(Router *router, char *middleware_name, MiddlewareHandler handler) asm("RTR0004");
+void add_middleware(Router *router, const char *middleware_name, MiddlewareHandler handler) asm("RTR0004");
 
 /**
  * @brief Handles an incoming HTTP request

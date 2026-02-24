@@ -52,5 +52,9 @@
 #define REASON_INCORRECT_JES_VSAM_HANDLE 6  /**< JES VSAM handle error */
 #define REASON_MISSING_FILE_FIELD 7    /**< Missing file field in JSON */
 #define REASON_SUBMIT_FILE_OPEN 8      /**< Cannot open dataset */
+#define REASON_JES_BUSY 9             /**< JES2 resources busy */
+
+/** @brief Error message for JES2 busy */
+#define ERR_MSG_JES_BUSY "JES2 subsystem is busy, please retry"
 
 #endif // JOBSAPI_MSG_H

@@ -304,15 +304,11 @@ jobStatusHandler(Session *session)
 	return 0;
 }
 
-int 
-jobPurgeHandler(Session *session) 
+int
+jobPurgeHandler(Session *session)
 {
 	int rc = 0;
 
-	JESJOB 	*job = NULL;
-	JESJOB **joblist = NULL;
-
-	// Get jobname and jobid from request
 	const char *jobname = getPathParam(session, "job-name");
 	const char *jobid = getPathParam(session, "jobid");
 
@@ -320,29 +316,17 @@ jobPurgeHandler(Session *session)
 
 	if (!jobname || !jobid) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
-						  RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR, 
+						  RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR,
 						  NULL, 0);
 		goto quit;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
-	if (!job) {
-		char msg[MAX_ERR_MSG_LENGTH] = {0};
-		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-						RC_WARNING, REASON_JOB_NOT_FOUND,
-						msg, NULL, 0);
-		goto quit;
-	}
-
-	// Purge the job
 	rc = jescanj(jobname, jobid, 1);
 
 	switch (rc) {
 	case CANJ_OK:
 		rc = startJsonObject(builder);
 
-		rc = addJsonString(builder, "owner", (const char *) job->owner);
 		rc = addJsonString(builder, "jobid", jobid);
 		rc = addJsonString(builder, "message", "Request was successful.");
 		rc = addJsonString(builder, "original-jobid", jobid);
@@ -357,14 +341,22 @@ jobPurgeHandler(Session *session)
 		sendJSONResponse(session, HTTP_STATUS_OK, builder);
 
 		break;
+	case CANJ_NOJB:
+	case CANJ_BADI:
+		{
+			char msg[MAX_ERR_MSG_LENGTH] = {0};
+			snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
+			sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+							RC_WARNING, REASON_JOB_NOT_FOUND,
+							msg, NULL, 0);
+		}
+		break;
 	case CANJ_ICAN:
 		sendErrorResponse(session, HTTP_STATUS_FORBIDDEN, CATEGORY_SERVICE,
 							RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE,
 							NULL, 0);
-
 		break;
 	default:
-		// TODO (MIG) - adding details to the error message (different rc's) and a new error message in jobsapi_msg.h
 		wtof("MVSMF42D JESCANJ got RC(%d)", rc);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,
 							RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR,
@@ -373,10 +365,6 @@ jobPurgeHandler(Session *session)
 	}
 
 quit:
-	if (joblist) {
-		jesjobfr(&joblist);
-	}
-
 	if (builder) {
 		freeJsonBuilder(builder);
 	}
@@ -523,11 +511,10 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 {
 	int rc = 0;
 
-	JES *jes = NULL;
-
-	jes = jesopen();
+	JES *jes = jesopen();
 	if (!jes) {
 		wtof(MSG_JOB_JES_ERROR);
+		rc = -1;
 		goto quit;
 	}
 
@@ -569,7 +556,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 quit:
 	if (jes) {
 		jesclose(&jes);
-	}	
+	}
 
 	return rc;
 }
@@ -745,8 +732,6 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 {
 	int job_found = 0;
 
-	JES *jes = NULL;
-
 	JESJOB *found_job = NULL;
 	JESJOB **joblist = NULL;
 	JESFILT jesfilt = FILTER_JOBID;
@@ -761,7 +746,7 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 		goto quit;
 	}
 
-	jes = jesopen();
+	JES *jes = jesopen();
 	if (!jes) {
 		wtof(MSG_JOB_JES_ERROR);
 		goto quit;

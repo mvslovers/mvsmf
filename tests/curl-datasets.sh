@@ -15,7 +15,7 @@
 #  10. Volume prefix variants: -(vol)/...
 #
 # Prerequisites:
-#   - Copy tests/.config/.env.example to tests/.config/.env and fill in
+#   - Copy .env.example to .env at the repo root and fill in
 #   - curl and jq must be installed
 #
 # Usage:
@@ -25,7 +25,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="${SCRIPT_DIR}/.config/.env"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
 
 if [ ! -f "$ENV_FILE" ]; then
 	echo "ERROR: ${ENV_FILE} not found."
@@ -33,15 +34,15 @@ if [ ! -f "$ENV_FILE" ]; then
 	exit 1
 fi
 
-# shellcheck source=.config/.env
+# shellcheck source=../.env
 . "$ENV_FILE"
 
-BASE_URL="http://${MVS_HOST}:${MVS_PORT}"
-AUTH="${MVS_USER}:${MVS_PASS}"
+BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
+AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test dataset names
-TEST_SEQ="${MVS_USER}.CURL.TESTSEQ"
-TEST_PDS="${MVS_USER}.CURL.TESTPDS"
+TEST_SEQ="${MVSMF_USER}.CURL.TESTSEQ"
+TEST_PDS="${MVSMF_USER}.CURL.TESTPDS"
 
 # --- state ---
 PASSED=0
@@ -129,8 +130,8 @@ cleanup_datasets() {
 echo ""
 echo "========================================"
 echo " mvsMF Datasets API - curl test suite"
-echo " Host: ${MVS_HOST}:${MVS_PORT}"
-echo " User: ${MVS_USER}"
+echo " Host: ${MVSMF_HOST}:${MVSMF_PORT}"
+echo " User: ${MVSMF_USER}"
 echo "========================================"
 
 # Clean up any leftovers from previous runs
@@ -180,7 +181,7 @@ echo ""
 echo "--- List Datasets (two-level prefix) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (two-level prefix)"
@@ -212,7 +213,7 @@ echo ""
 echo "--- List Datasets (wildcard *) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.*")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.*")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (wildcard *)"
@@ -229,7 +230,7 @@ echo ""
 echo "--- List Datasets (wildcard **) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.**")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.**")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (wildcard **)"
@@ -246,7 +247,7 @@ echo ""
 echo "--- List Datasets (partial wildcard) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL*")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL*")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (partial wildcard)"
@@ -276,7 +277,7 @@ echo "--- List Datasets (X-IBM-Max-Items) ---"
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	-H "X-IBM-Max-Items: 1" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (max-items=1)"
@@ -374,7 +375,7 @@ echo "--- List PDS Members with Volume Prefix ---"
 
 # Get volume from a dataset list query
 VOLBODY=$(curl -s -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVS_USER}.CURL")
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 PDS_VOLUME=$(echo "$VOLBODY" | jq -r --arg dsn "$TEST_PDS" \
 	'.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || PDS_VOLUME=""
 

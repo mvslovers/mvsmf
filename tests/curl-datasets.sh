@@ -208,6 +208,17 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (exact name)"
 assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
 
+# --- List datasets (exact two-level name, issue #61) ---
+echo ""
+echo "--- List Datasets (exact two-level name) ---"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=SYS1.MACLIB")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (exact two-level name)"
+assert_json_field "$CONTENT" '.items[0].dsname' "SYS1.MACLIB" "two-level exact name match"
+
 # --- List datasets (wildcard *) ---
 echo ""
 echo "--- List Datasets (wildcard *) ---"

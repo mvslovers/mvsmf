@@ -418,15 +418,10 @@ extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
 	}
 
 	if (!has_wildcard) {
-		if (last_dot) {
-			/* 2+ qualifiers, exact name: use up to last dot as LEVEL */
-			memcpy(level_out, dslevel, last_dot - dslevel);
-			level_out[last_dot - dslevel] = '\0';
-			*filter_out = (char *) dslevel;
-		} else {
-			/* single qualifier: pass through as-is */
-			strcpy(level_out, dslevel);
-		}
+		/* No wildcards: pass through as catalog LEVEL, no filter.
+		** Caller handles z/OSMF prefix semantics (the exact name
+		** plus anything below it) separately. */
+		strcpy(level_out, dslevel);
 		return;
 	}
 
@@ -472,6 +467,25 @@ extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
 	}
 }
 
+/* convert year + julian day (1-366) to month (1-12) + day (1-31) */
+static void
+jday_to_md(unsigned short year, unsigned short jday,
+	unsigned char *mon_out, unsigned char *day_out)
+{
+	static const unsigned short mdays[] =
+		{31,28,31,30,31,30,31,31,30,31,30,31};
+	int leap = (year % 4 == 0 && (year % 100 != 0 || year % 400 == 0));
+	int m, d;
+	d = jday;
+	for (m = 0; m < 12; m++) {
+		int dim = mdays[m] + (m == 1 && leap ? 1 : 0);
+		if (d <= dim) break;
+		d -= dim;
+	}
+	*mon_out = (unsigned char)(m + 1);
+	*day_out = (unsigned char)d;
+}
+
 int datasetListHandler(Session *session)
 {
 	unsigned	rc		= 0;
@@ -505,6 +519,64 @@ int datasetListHandler(Session *session)
 
 	extract_level_prefix(dslevel, level_buf, &filter);
 	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
+
+	/* z/OSMF prefix semantics: a bare multi-qualifier dslevel like
+	** "A.B" must return the exact dataset AND anything below it.
+	** LISTC LEVEL('A.B') returns entries cataloged *under* A.B
+	** (e.g. A.B.C) but not A.B itself.  Look up the exact name
+	** via __locate()+__dscbdv() and append it if it exists. */
+	if (!filter && dslevel && strchr(dslevel, '.') &&
+		!strchr(dslevel, '*') && !strchr(dslevel, '?')) {
+		LOCWORK locwork = {0};
+		if (__locate(dslevel, &locwork) == 0) {
+			DSCB dscb = {0};
+			DSCB1 *dscb1 = &dscb.dscb1;
+			char vol[7] = {0};
+			memcpy(vol, locwork.volser, 6);
+			if (__dscbdv(dslevel, vol, &dscb) == 0) {
+				DSLIST *ds = calloc(1, sizeof(DSLIST));
+				if (ds) {
+					char *p2;
+					strcpy(ds->dsn, dslevel);
+					strcpy(ds->volser, vol);
+					p2 = NULL;
+					switch(dscb1->dsorg1 & 0x7F) {
+					case DSGPS: p2 = "PS"; break;
+					case DSGPO: p2 = "PO"; break;
+					case DSGDA: p2 = "DA"; break;
+					case DSGIS: p2 = "IS"; break;
+					}
+					if (dscb1->dsorg2 == ORGAM) p2 = "VS";
+					if (p2) strcpy(ds->dsorg, p2);
+					p2 = NULL;
+					switch(dscb1->recfm & 0xC0) {
+					case RECFF: p2 = "F"; break;
+					case RECFV: p2 = "V"; break;
+					case RECFU: p2 = "U"; break;
+					}
+					if (p2) strcat(ds->recfm, p2);
+					if (dscb1->recfm & RECFB) strcat(ds->recfm,"B");
+					if (dscb1->recfm & RECFS) strcat(ds->recfm,"S");
+					if (dscb1->recfm & RECFA) strcat(ds->recfm,"A");
+					if (dscb1->recfm & RECMC) strcat(ds->recfm,"M");
+					ds->extents = dscb1->noepv;
+					ds->lrecl   = dscb1->lrecl;
+					ds->blksize = dscb1->blksz;
+					ds->cryear  = 1900 + dscb1->credt[0];
+					if (ds->cryear < 1980) ds->cryear += 100;
+					ds->crjday  = *(unsigned short*)&dscb1->credt[1];
+					jday_to_md(ds->cryear, ds->crjday,
+						&ds->crmon, &ds->crday);
+					ds->rfyear  = 1900 + dscb1->refd[0];
+					if (ds->rfyear < 1980) ds->rfyear += 100;
+					ds->rfjday  = *(unsigned short*)&dscb1->refd[1];
+					jday_to_md(ds->rfyear, ds->rfjday,
+						&ds->rfmon, &ds->rfday);
+					arrayadd(&dslist, ds);
+				}
+			}
+		}
+	}
 
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);

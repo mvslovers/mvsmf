@@ -219,6 +219,50 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (exact two-level name)"
 assert_json_field "$CONTENT" '.items[0].dsname' "SYS1.MACLIB" "two-level exact name match"
 
+# --- List datasets (two-level prefix returns exact + sub-datasets, issue #61) ---
+echo ""
+echo "--- List Datasets (two-level prefix semantics) ---"
+
+# Create a two-level dataset alongside the existing three-level TEST_SEQ
+TEST_2LVL="${MVSMF_USER}.CURL"
+BODY_2LVL='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY_2LVL" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_2LVL}" >/dev/null 2>&1
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_2LVL}")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "list datasets (two-level prefix)"
+
+# Should find both the exact two-level dataset and the three-level ones below it
+ITEMS=$(echo "$CONTENT" | jq '.items | length' 2>/dev/null) || ITEMS=0
+if [ "$ITEMS" -ge 2 ] 2>/dev/null; then
+	pass "two-level prefix returned exact + sub-datasets ($ITEMS items)"
+else
+	fail "two-level prefix returned exact + sub-datasets" "expected >=2 items, got $ITEMS"
+fi
+
+HAS_EXACT=$(echo "$CONTENT" | jq --arg n "$TEST_2LVL" '[.items[].dsname] | index($n) != null' 2>/dev/null)
+if [ "$HAS_EXACT" = "true" ]; then
+	pass "two-level prefix includes exact match ($TEST_2LVL)"
+else
+	fail "two-level prefix includes exact match" "expected $TEST_2LVL in results"
+fi
+
+HAS_SUB=$(echo "$CONTENT" | jq --arg n "$TEST_SEQ" '[.items[].dsname] | index($n) != null' 2>/dev/null)
+if [ "$HAS_SUB" = "true" ]; then
+	pass "two-level prefix includes sub-dataset ($TEST_SEQ)"
+else
+	fail "two-level prefix includes sub-dataset" "expected $TEST_SEQ in results"
+fi
+
+# Clean up the two-level dataset
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_2LVL}" >/dev/null 2>&1 || true
+
 # --- List datasets (wildcard *) ---
 echo ""
 echo "--- List Datasets (wildcard *) ---"

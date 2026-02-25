@@ -418,13 +418,13 @@ extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
 	}
 
 	if (!has_wildcard) {
-		if (dots >= 2 && last_dot) {
-			/* 3+ qualifiers, exact name: use up to last dot as LEVEL */
+		if (last_dot) {
+			/* 2+ qualifiers, exact name: use up to last dot as LEVEL */
 			memcpy(level_out, dslevel, last_dot - dslevel);
 			level_out[last_dot - dslevel] = '\0';
 			*filter_out = (char *) dslevel;
 		} else {
-			/* 1-2 qualifiers: pass through as-is */
+			/* single qualifier: pass through as-is */
 			strcpy(level_out, dslevel);
 		}
 		return;

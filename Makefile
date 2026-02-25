@@ -3,7 +3,8 @@ include config.mk
 # c source code files
 C_FILES := src/common.c  src/json.c    src/router.c   src/mvsmf.c   \
            src/authmw.c  src/logmw.c   src/dsapi.c    src/infoapi.c \
-           src/xlate.c   src/jobsapi.c src/cgxstart.c
+           src/xlate.c   src/jobsapi.c src/cgxstart.c \
+           src/testapi.c
 
 # assembler source files
 A_FILES :=

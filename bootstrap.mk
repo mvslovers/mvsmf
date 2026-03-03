@@ -86,8 +86,7 @@ bootstrap:
 	fi
 	@$(BMAKE) _bs_toolchain
 	@$(BMAKE) _bs_docker
-	@$(BMAKE) _bs_runtime
-	@$(BMAKE) _bs_datasets
+	@$(BMAKE) _bs_runtime 2>/dev/null && $(BMAKE) _bs_datasets || true
 	@if [ "$(PLAN)" = "0" ]; then \
 		$(BMAKE) compiledb || true; \
 	else \
@@ -197,8 +196,8 @@ _bs_docker:
 		exit 0; \
 	fi; \
 	if ! docker info >/dev/null 2>&1; then \
-		printf "$(_RED)[FAIL]$(_RST) %s\n" "Docker daemon not reachable"; \
-		exit 1; \
+		printf "$(_YLW)[WARN]$(_RST) %s\n" "Docker daemon not reachable — skipping"; \
+		exit 0; \
 	fi; \
 	if [ "$(PLAN)" = "1" ]; then \
 		printf "$(_CYN)[PLAN]$(_RST) %s\n" "Would ensure network $(DOCKER_NETWORK)"; \
@@ -234,13 +233,16 @@ _bs_runtime:
 	if [ "$$HTTP" = "200" ]; then \
 		printf "$(_GRN)[OK]$(_RST)   %s\n" "mvsMF reachable at $(BASE_URL) — auth OK"; \
 	elif [ "$$HTTP" = "000" ]; then \
-		printf "$(_RED)[FAIL]$(_RST) %s\n" "Cannot connect to $(BASE_URL) (connection refused or timeout)"; \
+		printf "$(_YLW)[WARN]$(_RST) %s\n" "MVS not reachable — skipping dataset setup"; \
+		printf "       %s\n" "Check .env and re-run: make bootstrap"; \
 		exit 1; \
 	elif [ "$$HTTP" = "401" ]; then \
-		printf "$(_RED)[FAIL]$(_RST) %s\n" "mvsMF reachable but auth failed (HTTP 401) — check MVSMF_USER/MVSMF_PASS"; \
+		printf "$(_YLW)[WARN]$(_RST) %s\n" "MVS auth failed (HTTP 401) — skipping dataset setup"; \
+		printf "       %s\n" "Check .env and re-run: make bootstrap"; \
 		exit 1; \
 	else \
-		printf "$(_RED)[FAIL]$(_RST) %s\n" "mvsMF returned HTTP $$HTTP"; \
+		printf "$(_YLW)[WARN]$(_RST) %s\n" "MVS not reachable (HTTP $$HTTP) — skipping dataset setup"; \
+		printf "       %s\n" "Check .env and re-run: make bootstrap"; \
 		exit 1; \
 	fi
 

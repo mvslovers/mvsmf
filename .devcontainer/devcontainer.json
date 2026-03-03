@@ -1,0 +1,17 @@
+{
+  "name": "mvsmf-dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "llvm-vs-code-extensions.vscode-clangd"
+      ]
+    }
+  },
+    "postCreateCommand": [
+      "test -f .env || cp .env.example .en",
+      "make compiledb"
+  ]
+}

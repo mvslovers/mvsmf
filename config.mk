@@ -19,7 +19,7 @@ CC       := c2asm370 #or classic gccmvs
 CFLAGS   := -fverbose-asm -S -O1
 
 # Defines and include paths
-DEFS     := -DLUA_USE_C89 -DLUA_USE_JUMPTABLE=0
+DEFS     := -DLUA_USE_C89 -DLUA_USE_JUMPTABLE=0 -DVERSION=\"V0R1M0\"
 INC_DIR  := $(ROOT_DIR)inc
 INC1     := $(ROOT_DIR)contrib/crent370_sdk/inc
 INC2     := $(ROOT_DIR)contrib/httpd_cgi_sdk/inc

@@ -12,10 +12,7 @@
       "-Wno-pragma-pack",
       "-Wno-include-hygiene",
       "-Wno-system-headers",
-      "-nostdinc",
-      "-isystem/home/mike/repos/mvsmf/contrib/cren370_sdk/inc",
-      "-isystem/home/mike/repos/mvsmf/contrib/httpd_cgi_sdk/inc",
-      "-I/home/mike/repos/mvsmf/inc"
+      "-nostdinc"
     ]
   },
   "Diagnostics": {

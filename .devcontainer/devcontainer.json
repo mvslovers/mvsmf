@@ -3,6 +3,11 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "21"
+    }
+  },
   "customizations": {
     "vscode": {
       "extensions": [

@@ -2,34 +2,38 @@
 set -e
 
 echo "Creating default environment..."
-if [ ! -f .env ]; then
-  cp .env.example .env
-fi
+[ -f .env ] || cp .env.example .env
 
 echo "Loading environment..."
 set -a
-source .env
+. ./.env
 set +a
-
-echo "Installing Zowe CLI..."
-npm install -g @zowe/cli
 
 echo "Generating compile_commands.json..."
 make compiledb
 
 echo "Configuring Zowe profile..."
 
-if ! zowe config list profiles | grep -q mvsmf; then
-  zowe config init --global-config
-
-  zowe config set profiles.mvsmf.type=zosmf
-  zowe config set profiles.mvsmf.properties.host="$MVSMF_HOST"
-  zowe config set profiles.mvsmf.properties.port="$MVSMF_PORT"
-  zowe config set profiles.mvsmf.properties.user="$MVSMF_USER"
-  zowe config set profiles.mvsmf.properties.password="$MVSMF_PASS"
-  zowe config set profiles.mvsmf.properties.rejectUnauthorized=false
-
-  zowe config set defaults.zosmf=mvsmf
-fi
+mkdir -p "$HOME/.zowe"
+cat > "$HOME/.zowe/zowe.config.json" <<EOF
+{
+  "profiles": {
+    "mvsmf": {
+      "type": "zosmf",
+      "properties": {
+        "host": "${MVSMF_HOST}",
+        "port": ${MVSMF_PORT},
+        "protocol": "http",
+        "user": "${MVSMF_USER}",
+        "password": "${MVSMF_PASS}",
+        "rejectUnauthorized": false
+      }
+    }
+  },
+  "defaults": {
+    "zosmf": "mvsmf"
+  }
+}
+EOF
 
 echo "Setup complete."

@@ -15,9 +15,5 @@
       ]
     }
   },
-  "postCreateCommand": [
-    "npm install -g @zowe/cli",
-    "test -f .env || cp .env.example .env",
-    "make compiledb"
-  ]
+  "postCreateCommand": ".devcontainer/setup.sh"
 }

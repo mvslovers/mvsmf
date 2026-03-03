@@ -39,28 +39,105 @@ This project is implemented as a **CGI module** for Mike Rayborn's HTTPD server 
 
 ## Building mvsMF
 
-If you'd like to build mvsMF from source, follow these steps:
+### Prerequisites
 
-1. Clone the repository:
+- An MVS 3.8j system reachable via IP (TK4-, TK5, MVSCE, or similar)
+- `curl` and `jq` installed on the build host
+- The [c2asm370](https://github.com/mvslovers/c2asm370) cross-compiler
 
-   ```bash
-   git clone --recursive https://github.com/mvslovers/mvsmf.git
-   cd mvsmf
-   ```
+### Quick Start
 
-2. Make sure you have a cross-compilation environment for MVS 3.8j. You'll need:
-   - CRENT370 libraries by Mike Rayborn - see <https://github.com/mvslovers/crent370>
-   - A suitable C compiler configured for MVS 3.8j
+```bash
+git clone --recursive https://github.com/mvslovers/mvsmf.git
+cd mvsmf
+make bootstrap
+make
+```
 
-3. Update any project path and project dataset in the Makefile
+`make bootstrap` sets up the build environment automatically:
 
-4. Compile the CGI module using the provided Makefile:
+1. Creates `.env` from `.env.example` if missing
+2. Validates required configuration variables
+3. Checks that `curl`, `jq`, and `c2asm370` are available
+4. Initializes git submodules if needed
+5. Creates a Docker network for container communication (if Docker is available)
+6. Verifies connectivity and authentication to the MVS system
+7. Allocates required datasets on MVS if they don't exist
+8. Generates `compile_commands.json` for clangd
 
-   ```bash
-   make
-   ```
+After bootstrap, edit `.env` with your MVS connection details if the defaults
+don't match your setup.
 
-5. Follow the installation steps to transfer the load module to your MVS system.
+### Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make` | Cross-compile all C sources and assemble on MVS |
+| `make link` | Link-edit all modules into a load module on MVS |
+| `make install` | Copy load module into the target LINKLIB on MVS |
+| `make package` | TRANSMIT load library to XMIT format and download it |
+| `make bootstrap` | Set up the build environment (idempotent) |
+| `make bootstrap PLAN=1` | Dry run — show what bootstrap would do without side effects |
+| `make doctor` | Read-only diagnostics — check environment health |
+| `make compiledb` | Regenerate `compile_commands.json` for clangd |
+| `make run-mvs` | Start the MVS build container (see below) |
+| `make stop-mvs` | Stop the MVS build container |
+| `make clean` | Remove generated `.s`, `.o`, and JCL files |
+
+### Configuration
+
+All build configuration lives in `.env` (never committed). Copy `.env.example`
+to get started — `make bootstrap` does this automatically.
+
+Key variables:
+
+| Variable | Description |
+|----------|-------------|
+| `MVSMF_HOST` | IP or hostname of the MVS system |
+| `MVSMF_PORT` | mvsMF API port |
+| `MVSMF_USER` | MVS userid |
+| `MVSMF_PASS` | MVS password |
+| `MVSMF_ASM_PUNCH` | Object deck PDS |
+| `MVSMF_ASM_SYSLMOD` | NCAL library PDS |
+| `MVSMF_LINK_LOAD` | Load library PDS |
+
+See `.env.example` for the full list of variables.
+
+## Development Environment
+
+You can build mvsMF against any reachable MVS system — just configure `.env`
+accordingly. For convenience, two Docker images are provided:
+
+### MVS Build Container (`mvsce-builder`)
+
+A headless MVSCE system with Hercules, ready for cross-compilation. Use this
+when you don't have access to a dedicated MVS system.
+
+```bash
+make run-mvs       # creates or starts the container
+make stop-mvs      # stops it
+```
+
+The container runs on the `mvs-net` Docker network. Set `MVSMF_HOST=mvs`
+in your `.env` to connect to it (this is the default in `.env.example`).
+
+### Development Container (`mvs-dev`)
+
+A full development environment with `c2asm370`, `curl`, `jq`, `git`, `zowe`,
+and Docker CLI pre-installed. Useful if you don't want to set up the toolchain
+locally.
+
+```bash
+docker run -it --rm \
+  -v "$(pwd)":/home/dev/workspace \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/mvslovers/mvs-dev
+```
+
+From inside the dev container you can run `make run-mvs` to start the MVS
+build container and `make bootstrap` to set up the build environment. Both
+commands automatically create the Docker network and join the dev container
+to it, so that `mvs` is reachable by name.
 
 ## Usage
 

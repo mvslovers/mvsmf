@@ -562,6 +562,38 @@ int datasetListHandler(Session *session)
 					ds->extents = dscb1->noepv;
 					ds->lrecl   = dscb1->lrecl;
 					ds->blksize = dscb1->blksz;
+					ds->scal1   = dscb1->scal1;
+					if (dscb1->scal1 & CYL)
+						ds->spacu = 'C';
+					else
+						ds->spacu = 'T';
+					ds->secondary = ((unsigned)dscb1->scal3[0] << 16)
+					              | ((unsigned)dscb1->scal3[1] << 8)
+					              |  (unsigned)dscb1->scal3[2];
+					ds->used_trks = ((unsigned)dscb1->lstar[0] << 8)
+					              |  (unsigned)dscb1->lstar[1];
+					{
+						int e;
+						unsigned short trks = 0;
+						DSCB dscb4buf = {0};
+						unsigned short tpc = 0;
+						if (__dscbv(vol, &dscb4buf) == 0)
+							tpc = dscb4buf.dscb4.dstrk;
+						if (tpc == 0) tpc = 30;
+						for (e = 0; e < 3 && e < dscb1->noepv; e++) {
+							unsigned short lc, lh, hc, hh;
+							lc = ((unsigned)dscb1->extent[e].lower[0] << 8)
+							   |  (unsigned)dscb1->extent[e].lower[1];
+							lh = ((unsigned)dscb1->extent[e].lower[2] << 8)
+							   |  (unsigned)dscb1->extent[e].lower[3];
+							hc = ((unsigned)dscb1->extent[e].upper[0] << 8)
+							   |  (unsigned)dscb1->extent[e].upper[1];
+							hh = ((unsigned)dscb1->extent[e].upper[2] << 8)
+							   |  (unsigned)dscb1->extent[e].upper[3];
+							trks += (hc - lc) * tpc + (hh - lh) + 1;
+						}
+						ds->alloc_trks = trks;
+					}
 					ds->cryear  = 1900 + dscb1->credt[0];
 					if (ds->cryear < 1980) ds->cryear += 100;
 					ds->crjday  = *(unsigned short*)&dscb1->credt[1];
@@ -629,6 +661,11 @@ int datasetListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "      \"vol\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"vols\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.2s\",\n", ds->dsorg)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"spacu\": \"%s\",\n",
+			ds->spacu == 'C' ? "CYLINDERS" : "TRACKS")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"sizex\": %u,\n", ds->alloc_trks)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"extx\": %u,\n", ds->secondary)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"usedx\": %u,\n", ds->used_trks)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
 

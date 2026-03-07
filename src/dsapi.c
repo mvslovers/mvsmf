@@ -562,6 +562,51 @@ int datasetListHandler(Session *session)
 					ds->extents = dscb1->noepv;
 					ds->lrecl   = dscb1->lrecl;
 					ds->blksize = dscb1->blksz;
+					ds->scal1   = dscb1->scal1;
+					if ((dscb1->scal1 & 0xC0) == CYL)
+						ds->spacu = 'C';
+					else
+						ds->spacu = 'T';
+					ds->secondary = ((unsigned)dscb1->scal3[0] << 16)
+					              | ((unsigned)dscb1->scal3[1] << 8)
+					              |  (unsigned)dscb1->scal3[2];
+					ds->used_trks = (((unsigned)dscb1->lstar[0] << 8)
+					              |  (unsigned)dscb1->lstar[1]) + 1;
+					{
+						int e, dscbrc;
+						unsigned short trks = 0;
+						DSCB dscb4buf = {0};
+						unsigned short tpc = 0;
+						dscbrc = __dscbv(vol, &dscb4buf);
+						/* workaround: struct dscb4 includes key[44]
+						** but __dscbv() returns data-only (96 bytes).
+						** dstrk is at data offset 20, not struct
+						** offset 64. Read directly from work area. */
+						if (dscbrc == 0)
+							tpc = ((unsigned char)dscb4buf.work[20] << 8)
+							    |  (unsigned char)dscb4buf.work[21];
+						if (tpc == 0) tpc = 30;
+						switch (tpc) {
+						case 30: strcpy(ds->dev, "3350"); break;
+						case 12: strcpy(ds->dev, "3375"); break;
+						case 19: strcpy(ds->dev, "3380"); break;
+						case 15: strcpy(ds->dev, "3390"); break;
+						default: strcpy(ds->dev, "3390"); break;
+						}
+						for (e = 0; e < 3 && e < dscb1->noepv; e++) {
+							unsigned short lc, lh, hc, hh;
+							lc = ((unsigned)dscb1->extent[e].lower[0] << 8)
+							   |  (unsigned)dscb1->extent[e].lower[1];
+							lh = ((unsigned)dscb1->extent[e].lower[2] << 8)
+							   |  (unsigned)dscb1->extent[e].lower[3];
+							hc = ((unsigned)dscb1->extent[e].upper[0] << 8)
+							   |  (unsigned)dscb1->extent[e].upper[1];
+							hh = ((unsigned)dscb1->extent[e].upper[2] << 8)
+							   |  (unsigned)dscb1->extent[e].upper[3];
+							trks += (hc - lc) * tpc + (hh - lh) + 1;
+						}
+						ds->alloc_trks = trks;
+					}
 					ds->cryear  = 1900 + dscb1->credt[0];
 					if (ds->cryear < 1980) ds->cryear += 100;
 					ds->crjday  = *(unsigned short*)&dscb1->credt[1];
@@ -611,26 +656,38 @@ int datasetListHandler(Session *session)
 			if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
 		}
 
+		{
+		const char *dsntp;
+		unsigned pct;
+
 		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
 
-		// TODO: the following fields should only be generated if X-IBM-Attributes == base
-		// TODO: add vol field only if X-IBM-Attributes has 'vol'
-		if (strcmp(ds->dsorg, "PO") == 0) {
-			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "PDS")) < 0) goto quit;
-		} else if (strcmp(ds->dsorg, "PS") == 0) {
-			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "BASIC")) < 0) goto quit;
-		} else {
-			if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", "UNKNOWN")) < 0) goto quit;
-		}
+		if (strcmp(ds->dsorg, "PO") == 0) dsntp = "PDS";
+		else if (strcmp(ds->dsorg, "PS") == 0) dsntp = "BASIC";
+		else dsntp = "UNKNOWN";
 
+		if ((rc = http_printf(session->httpc, "      \"blksz\": \"%u\",\n", ds->blksize)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"catnm\": \"\",\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u/%02u/%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dev\": \"%.4s\",\n", ds->dev[0] ? ds->dev : "3390")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", dsntp)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.4s\",\n", ds->dsorg)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"edate\": \"***None***\",\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"extx\": \"%u\",\n", ds->extents)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"lrecl\": \"%u\",\n", ds->lrecl)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"migr\": \"NO\",\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"mvol\": \"N\",\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"ovf\": \"NO\",\n")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u/%02u/%02u\",\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"recfm\": \"%.4s\",\n", ds->recfm)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"lrecl\": %d,\n", ds->lrecl)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"blksize\": %d,\n", ds->blksize)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"sizex\": \"%u\",\n", ds->alloc_trks)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"spacu\": \"%s\",\n",
+			ds->spacu == 'C' ? "CYLINDERS" : "TRACKS")) < 0) goto quit;
+		pct = ds->alloc_trks ? (ds->used_trks * 100 / ds->alloc_trks) : 0;
+		if ((rc = http_printf(session->httpc, "      \"used\": \"%u\",\n", pct)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"vol\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"vols\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.2s\",\n", ds->dsorg)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u-%02u-%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u-%02u-%02u\"\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"vols\": \"%.6s\"\n", ds->volser)) < 0) goto quit;
+		}
 
 		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
 

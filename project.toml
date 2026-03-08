@@ -1,0 +1,53 @@
+[project]
+name = "mvsmf"
+version = "0.1.0-dev"
+type = "module"
+
+[build]
+cflags = ["-I./contrib/httpd_cgi_sdk/inc"]
+
+[mvs.build.datasets.source]
+suffix = "SOURCE"
+dsorg = "PO"
+recfm = "FB"
+lrecl = 80
+blksize = 3120
+space = ["TRK", 10, 5, 15]
+
+[mvs.build.datasets.punch]
+suffix = "OBJECT"
+dsorg = "PO"
+recfm = "FB"
+lrecl = 80
+blksize = 3120
+space = ["TRK", 10, 5, 15]
+
+[mvs.build.datasets.ncalib]
+suffix = "NCALIB"
+dsorg = "PO"
+recfm = "U"
+lrecl = 0
+blksize = 32760
+space = ["TRK", 10, 5, 15]
+
+[mvs.build.datasets.syslmod]
+suffix = "LOAD"
+dsorg = "PO"
+recfm = "U"
+lrecl = 0
+blksize = 32760
+space = ["TRK", 5, 2, 5]
+
+[dependencies]
+"mvslovers/crent370" = ">=1.0.0"
+
+[link.module]
+name = "MVSMF"
+entry = "@@CRT0"
+options = ["LIST", "MAP", "XREF", "RENT"]
+
+[release]
+version_files = ["VERSION"]
+
+[artifacts]
+mvs = true

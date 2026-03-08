@@ -4,3 +4,6 @@
 [submodule "contrib/httpd_cgi_sdk"]
 	path = contrib/httpd_cgi_sdk
 	url = https://github.com/mvslovers/httpd_cgi_sdk.git
+[submodule "mbt"]
+	path = mbt
+	url = https://github.com/mvslovers/mbt.git

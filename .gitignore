@@ -46,6 +46,10 @@ CLAUDE.md
 .env
 *.jcl
 .build-warnings
+.mbt/stamps/
+.mbt/logs/
+contrib/crent370-*/
+dist/
 
 # Test config (only examples are tracked)
 tests/.config/zowe.config.json

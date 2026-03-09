@@ -46,16 +46,25 @@ CLAUDE.md
 .env
 *.jcl
 .build-warnings
-.mbt/stamps/
-.mbt/logs/
+.mbt/
 contrib/crent370-*/
 dist/
+compile_commands.json
+*.xmit
+
+# macOS
+.DS_Store
+
+# clangd cache
+.cache/
 
 # Test config (only examples are tracked)
 tests/.config/zowe.config.json
 tests/.config/logs/
 tests/.config/plugins/
 tests/.config/settings/
+tests/.config/.events/
+tests/.config/extenders.json
 
 # Debug files
 *.dSYM/

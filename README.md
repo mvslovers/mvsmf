@@ -57,7 +57,6 @@ cp .env.example .env    # edit with your MVS connection details
 make bootstrap          # resolve dependencies, allocate datasets
 make build              # cross-compile and assemble on MVS
 make link               # link-edit into load module
-make install            # copy to target LINKLIB on MVS
 ```
 
 ### Make Targets
@@ -67,7 +66,7 @@ make install            # copy to target LINKLIB on MVS
 | `make bootstrap` | Resolve dependencies, allocate MVS datasets |
 | `make build` | Cross-compile C sources and assemble on MVS |
 | `make link` | Link-edit all modules into a load module on MVS |
-| `make install` | Copy load module into the target LINKLIB on MVS |
+| `make install` | Copy load module into the target LINKLIB on MVS *(not yet implemented)* |
 | `make package` | TRANSMIT load library to XMIT format and download |
 | `make compiledb` | Generate `compile_commands.json` for clangd |
 | `make clean` | Remove generated `.s` and `.o` files |
@@ -86,8 +85,13 @@ Key variables:
 | `MBT_MVS_PORT` | mvsMF API port |
 | `MBT_MVS_USER` | MVS userid |
 | `MBT_MVS_PASS` | MVS password |
+| `MBT_MVS_DEPS_VOLUME` | Volume for RECEIVE (see note below) |
 
 See `.env.example` for the full list.
+
+> **MVS/CE users:** MVS/CE systems typically have no public volumes available
+> for TSO RECEIVE. Set `MBT_MVS_DEPS_VOLUME` in your `.env` to a work volume
+> (e.g. `PUB000`) so that dependency datasets are placed on a known volume.
 
 ## Usage
 

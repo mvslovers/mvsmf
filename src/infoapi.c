@@ -67,8 +67,8 @@ infoHandler(Session *session)
 
 	if (addJsonString(builder, "zosmf_hostname", hostname) < 0 ||
 		addJsonString(builder, "zosmf_port", port_str) < 0 ||
-		addJsonString(builder, "zosmf_version", "1.0") < 0 ||
-		addJsonString(builder, "zosmf_full_version", "V1R0M0") < 0 ||
+		addJsonString(builder, "zosmf_version", VERSION) < 0 ||
+		addJsonString(builder, "zosmf_full_version", VERSION) < 0 ||
 		addJsonString(builder, "zosmf_saf_realm", "SAFRealm") < 0 ||
 		addJsonString(builder, "api_version", "1") < 0 ||
 		addJsonString(builder, "zos_version", "MVS 3.8j") < 0) {

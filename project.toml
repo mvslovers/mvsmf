@@ -1,10 +1,14 @@
 [project]
 name = "mvsmf"
-version = "0.1.0-dev"
+version = "1.0.0-dev"
 type = "module"
 
 [build]
-cflags = ["-I./contrib/httpd_cgi_sdk/inc"]
+cflags = [
+	"-DLUA_USE_C89",
+	"-DLUA_USE_JUMPTABLE=0",
+	"-I./contrib/httpd_cgi_sdk/inc",
+]
 
 [mvs.build.datasets.source]
 suffix = "SOURCE"
@@ -35,16 +39,31 @@ suffix = "LOAD"
 dsorg = "PO"
 recfm = "U"
 lrecl = 0
-blksize = 32760
+blksize = 15040
 space = ["TRK", 5, 2, 5]
 
 [dependencies]
-"mvslovers/crent370" = ">=1.0.0"
+"mvslovers/crent370" = ">=1.0.4"
 
 [link.module]
 name = "MVSMF"
 entry = "@@CRT0"
 options = ["LIST", "MAP", "XREF", "RENT"]
+include = [
+	"@@CRT1",
+	"CGXSTART",
+	"MVSMF",
+	"ROUTER",
+	"AUTHMW",
+	"LOGMW",
+	"COMMON",
+	"JSON",
+	"XLATE",
+	"DSAPI",
+	"JOBSAPI",
+	"INFOAPI",
+	"TESTAPI",
+]
 
 [release]
 version_files = ["VERSION"]

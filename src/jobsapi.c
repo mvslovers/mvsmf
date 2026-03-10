@@ -12,10 +12,9 @@
 #include <clibvsam.h>
 #include <clibwto.h>
 #include <time64.h>
-#include <ufs/types.h>
 
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "json.h"
@@ -490,7 +489,7 @@ do_print_sysout_line(const char *line, unsigned linelen)
 // we do not have httpr in this function,
 // so we have to use httpd
 #undef httpx
-#define httpx httpd->httpx
+#define httpx http_get_httpx(httpd)
 
 	CLIBGRT *grt = __grtget();
 	HTTPD *httpd = grt->grtapp1;
@@ -500,7 +499,7 @@ do_print_sysout_line(const char *line, unsigned linelen)
 
 // switch back to httpr
 #undef httpx
-#define httpx session->httpd->httpx
+#define httpx http_get_httpx(session->httpd)
 
 	return rc;
 }

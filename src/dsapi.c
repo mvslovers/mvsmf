@@ -11,7 +11,7 @@
 #include "dsapi.h"
 #include "dsapi_err.h"
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "xlate.h"
 
 // Record format flags

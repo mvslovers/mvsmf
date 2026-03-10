@@ -11,7 +11,7 @@
 
 #include <stddef.h>
 #include "acee.h"
-#include "httpd.h"
+#include "httpcgi.h"
 
 /** @brief Memory alignment for half word */
 #define HALF_WORD_ALIGNMENT 16
@@ -25,7 +25,7 @@
 /** @brief Maximum number of middlewares that can be registered */
 #define MAX_MIDDLEWARES 10
 
-#define httpx session->httpd->httpx
+#define httpx http_get_httpx(session->httpd)
 
 // Forward declarations
 typedef struct route Route;

@@ -8,7 +8,7 @@
 
 #include "testapi.h"
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 
 int testHandler(Session *session)
 {

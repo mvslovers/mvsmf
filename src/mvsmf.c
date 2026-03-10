@@ -1,10 +1,14 @@
-#include <stddef.h> // Füge diese Zeile hinzu
+#include <stddef.h>
 #include <stdio.h>
+#include <clibgrt.h>
+#include <clibppa.h>
+#include <clibcrt.h>
+#include <clibwto.h>
 
 #include "authmw.h"
 #include "logmw.h"
 #include "dsapi.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "infoapi.h"
 #include "jobsapi.h"
 #include "testapi.h"

@@ -1,5 +1,7 @@
+#include <clibary.h>
+#include <clibwto.h>
 #include "logmw.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "router.h"
 
 int logging_middleware(Session *session) 

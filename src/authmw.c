@@ -1,7 +1,7 @@
 #include "authmw.h"
 #include "clibb64.h"
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "racf.h"
 #include "router.h"
 #include "xlate.h"

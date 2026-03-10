@@ -4,11 +4,7 @@ version = "1.0.0-dev"
 type = "module"
 
 [build]
-cflags = [
-	"-DLUA_USE_C89",
-	"-DLUA_USE_JUMPTABLE=0",
-	"-I./contrib/httpd_cgi_sdk/inc",
-]
+cflags = []
 
 [mvs.build.datasets.source]
 suffix = "SOURCE"

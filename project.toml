@@ -4,11 +4,7 @@ version = "1.0.0-dev"
 type = "module"
 
 [build]
-cflags = [
-	"-DLUA_USE_C89",
-	"-DLUA_USE_JUMPTABLE=0",
-	"-I./contrib/httpd_cgi_sdk/inc",
-]
+cflags = []
 
 [mvs.build.datasets.source]
 suffix = "SOURCE"
@@ -44,6 +40,7 @@ space = ["TRK", 5, 2, 5]
 
 [dependencies]
 "mvslovers/crent370" = ">=1.0.4"
+"mvslovers/httpd" = "=3.3.1-dev"
 
 [link.module]
 name = "MVSMF"

@@ -23,7 +23,13 @@
    the EXEC statement in the JCL.
 */
 
-#include "httpd.h"
+#include <stdlib.h>
+#include <string.h>
+#include <clibgrt.h>
+#include <clibppa.h>
+#include <clibary.h>
+#include <clibenv.h>
+#include "httpcgi.h"
 
 #define MAXPARMS 50 /* maximum number of arguments we can handle */
 
@@ -36,7 +42,7 @@ HTTPX *httpx = 0;
 /* we want to use the httpx pointer in the httpd struct for the various
    http_xxx functions, so we define httpx to do just that
 */
-#define httpx   (httpd->httpx)
+#define httpx   http_get_httpx(httpd)
 
 /* we want the internal label for __start as "cgistart" for use with dumps */
 __asm__("\n&FUNC    SETC 'cgistart'");

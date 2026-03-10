@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <clibary.h>
 #include <clibwto.h>
 #include <cliblist.h>
 #include <clibdscb.h>
@@ -11,7 +12,7 @@
 #include "dsapi.h"
 #include "dsapi_err.h"
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "xlate.h"
 
 // Record format flags

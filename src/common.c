@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "json.h"
 #include "xlate.h"
 

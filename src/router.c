@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include <string.h>
+#include <clibwto.h>
 
 #include "router.h"
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "xlate.h"
 
 

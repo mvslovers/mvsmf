@@ -12,10 +12,9 @@
 #include <clibvsam.h>
 #include <clibwto.h>
 #include <time64.h>
-#include <ufs/types.h>
 
 #include "common.h"
-#include "httpd.h"
+#include "httpcgi.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "json.h"
@@ -35,6 +34,8 @@
 #define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
 #define DSNAME_STR_SIZE  44     // the +1 for null termination will be added on initialization
+
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 #define MIN_JES_SYSOUT_DSID 	  2
 #define MAX_JES_SYSOUT_DSID 	  4
@@ -490,7 +491,7 @@ do_print_sysout_line(const char *line, unsigned linelen)
 // we do not have httpr in this function,
 // so we have to use httpd
 #undef httpx
-#define httpx httpd->httpx
+#define httpx http_get_httpx(httpd)
 
 	CLIBGRT *grt = __grtget();
 	HTTPD *httpd = grt->grtapp1;
@@ -500,7 +501,7 @@ do_print_sysout_line(const char *line, unsigned linelen)
 
 // switch back to httpr
 #undef httpx
-#define httpx session->httpd->httpx
+#define httpx http_get_httpx(session->httpd)
 
 	return rc;
 }

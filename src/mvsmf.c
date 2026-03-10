@@ -4,6 +4,7 @@
 #include <clibppa.h>
 #include <clibcrt.h>
 #include <clibwto.h>
+#include <racf.h>
 
 #include "authmw.h"
 #include "logmw.h"

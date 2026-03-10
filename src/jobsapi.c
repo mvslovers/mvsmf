@@ -35,6 +35,8 @@
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
 #define DSNAME_STR_SIZE  44     // the +1 for null termination will be added on initialization
 
+#define MIN(a,b) ((a) < (b) ? (a) : (b))
+
 #define MIN_JES_SYSOUT_DSID 	  2
 #define MAX_JES_SYSOUT_DSID 	  4
 #define MIN_USER_SYSOUT_DSID 	100

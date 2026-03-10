@@ -47,7 +47,7 @@ CLAUDE.md
 *.jcl
 .build-warnings
 .mbt/
-contrib/crent370-*/
+contrib/
 dist/
 compile_commands.json
 *.xmit

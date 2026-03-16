@@ -41,6 +41,7 @@ space = ["TRK", 5, 2, 5]
 [dependencies]
 "mvslovers/crent370" = ">=1.0.6"
 "mvslovers/httpd" = "=3.3.1-dev"
+"mvslovers/ufsd" = "=1.0.0-dev"
 
 [link.module]
 name = "MVSMF"

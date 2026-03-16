@@ -62,6 +62,7 @@ int main(int argc, char **argv)
 	/* add the URL mappings */
 	add_route(&router, GET, "/zosmf/info", infoHandler);
 	add_route(&router, GET, "/zosmf/test", testHandler);
+	add_route(&router, GET, "/zosmf/test/wildcard/{*filepath}", testWildcardHandler);
 
 	add_route(&router, GET, "/zosmf/restjobs/jobs", jobListHandler);
 	add_route(&router, GET, "/zosmf/restjobs/jobs/{job-name}/{jobid}/files", jobFilesHandler);

@@ -90,3 +90,24 @@ int testHandler(Session *session)
 quit:
 	return rc;
 }
+
+int testWildcardHandler(Session *session)
+{
+	int rc = 0;
+	char *filepath = NULL;
+
+	filepath = (char *) http_get_env(session->httpc,
+		(const UCHAR *) "HTTP_filepath");
+	if (!filepath) filepath = "(null)";
+
+	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit2;
+	if ((rc = http_printf(session->httpc,
+		"Content-Type: application/json\r\n\r\n")) < 0) goto quit2;
+
+	rc = http_printf(session->httpc,
+		"{ \"handler\": \"testWildcard\", \"filepath\": \"%s\" }\n",
+		filepath);
+
+quit2:
+	return rc;
+}

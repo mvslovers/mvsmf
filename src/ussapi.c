@@ -2,17 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <clibwto.h>
+#include <libufs.h>
 
 #include "ussapi.h"
 #include "common.h"
 #include "httpcgi.h"
 #include "xlate.h"
-
-// libufs.h redefines UFS/UFSFILE (as struct libufs_ufs / struct libufs_file)
-// which conflicts with the opaque forward declarations in httpcgi.h
-// (struct ufs / struct ufsfile). This is harmless — ussapi.c needs the
-// full libufs definitions, not the opaque HTTPD pointers.
-#include <libufs.h>
 
 // Data type constants
 #define USS_DATA_TYPE_TEXT   1

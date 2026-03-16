@@ -9,4 +9,9 @@
 */
 int testHandler(Session *session) asm("TAPI0000");
 
+/* Wildcard route test — echoes the captured {*filepath} variable.
+** GET /zosmf/test/wildcard/{*filepath}
+*/
+int testWildcardHandler(Session *session) asm("TAPI0001");
+
 #endif

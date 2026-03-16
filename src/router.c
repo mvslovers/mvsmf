@@ -224,15 +224,22 @@ Route *find_route(Router *router, HttpMethod method, const char *path)
 }
 
 __asm__("\n&FUNC	SETC 'is_pattern_match'");
-static 
-int is_pattern_match(const char *pattern, const char *path) 
+static
+int is_pattern_match(const char *pattern, const char *path)
 {
     while (*pattern && *path) {
         if (*pattern == '{') {
+            int is_wildcard = (*(pattern + 1) == '*');
+            if (is_wildcard) pattern++;
             while (*pattern && *pattern != '}') pattern++;
             if (*pattern == '}') pattern++;
 
-            while (*path && *path != '/' && *path != '(' && *path != ')') path++;
+            if (is_wildcard) {
+                /* {*var} consumes entire remaining path including slashes */
+                while (*path) path++;
+            } else {
+                while (*path && *path != '/' && *path != '(' && *path != ')') path++;
+            }
         } else {
             if (*pattern == *path) {
                 pattern++;
@@ -247,8 +254,8 @@ int is_pattern_match(const char *pattern, const char *path)
 }
 
 __asm__("\n&FUNC	SETC 'extract_path_vars'");
-static 
-int extract_path_vars(Session *session, const char *pattern, const char *path) 
+static
+int extract_path_vars(Session *session, const char *pattern, const char *path)
 {
     if (session == NULL || pattern == NULL || path == NULL) {
         return -1;
@@ -260,6 +267,8 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
     while (*pattern) {
         if (*pattern == '{') {
             pattern++;
+            int is_wildcard = (*pattern == '*');
+            if (is_wildcard) pattern++;
             const char *var_start = pattern;
             while (*pattern && *pattern != '}') pattern++;
             int var_name_len = pattern - var_start;
@@ -268,11 +277,18 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
             var_name[var_name_len] = '\0';
             if (*pattern == '}') pattern++;
 
-            const char *pattern_next = pattern;
-            while (*pattern_next && *pattern_next != '/' && *pattern_next != '(' && *pattern_next != ')') pattern_next++;
-
             const char *value_start = path;
-            while (*path && *path != *pattern_next) path++;
+
+            if (is_wildcard) {
+                /* {*var} captures entire remaining path */
+                while (*path) path++;
+            } else {
+                const char *pattern_next = pattern;
+                while (*pattern_next && *pattern_next != '/' && *pattern_next != '(' && *pattern_next != ')') pattern_next++;
+
+                while (*path && *path != *pattern_next) path++;
+            }
+
             int value_len = path - value_start;
             char value[1024];
             strncpy(value, value_start, value_len);

@@ -36,7 +36,7 @@ dsorg = "PO"
 recfm = "U"
 lrecl = 0
 blksize = 15040
-space = ["TRK", 5, 2, 5]
+space = ["TRK", 10, 5, 5]
 
 [dependencies]
 "mvslovers/crent370" = ">=1.0.6"
@@ -60,8 +60,12 @@ include = [
 	"DSAPI",
 	"JOBSAPI",
 	"INFOAPI",
+	"USSAPI",
 	"TESTAPI",
 ]
+
+[link.module.dep_includes]
+"mvslovers/ufsd" = "*"
 
 [release]
 version_files = ["VERSION"]

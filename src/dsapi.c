@@ -820,6 +820,17 @@ int datasetPutHandler(Session *session)
         snprintf(mode_str, sizeof(mode_str), "%s", "wb");
     }
 
+    /* Verify dataset exists - do not auto-create with wrong DCB (issue #65) */
+    {
+        FILE *chk = fopen(dsname, "r");
+        if (!chk) {
+            return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+                CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+                ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+        }
+        fclose(chk);
+    }
+
     fp = fopen(dsname, mode_str);
     if (!fp) {
         wtof("MVSMF34E Failed to open dataset for writing: %s (errno=%d)", dsname, errno);

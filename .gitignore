@@ -39,8 +39,6 @@
 *.x86_64
 *.hex
 
-# Claude Code
-CLAUDE.md
 
 # Build system
 .env

@@ -117,6 +117,25 @@ get_data_type(Session *session)
 }
 
 //
+// Build absolute path from {*filepath} capture.
+// The route pattern "/zosmf/restfiles/fs/{*filepath}" consumes the
+// slash before the wildcard, so the captured value lacks a leading "/".
+// This helper prepends it into a caller-supplied buffer.
+// Returns the buffer pointer, or NULL if the path would overflow.
+//
+
+__asm__("\n&FUNC    SETC 'uss_build_path'");
+static char *
+uss_build_path(char *buf, size_t bufsz, const char *captured)
+{
+	size_t len = strlen(captured);
+	if (len + 2 > bufsz) return NULL;  // +2 for '/' prefix and NUL
+	buf[0] = '/';
+	memcpy(buf + 1, captured, len + 1);  // includes NUL
+	return buf;
+}
+
+//
 // Default max items for directory listing
 //
 
@@ -268,18 +287,24 @@ int ussGetHandler(Session *session)
 {
 	int rc = 0;
 	int data_type;
-	char *filepath = NULL;
+	char *raw_path = NULL;
+	char abspath[UFS_PATH_MAX];
 	const char *content_type;
 	UFS *ufs = NULL;
 	UFSFILE *fp = NULL;
 	char buf[USS_READ_BUFSZ];
 	UINT32 n;
 
-	// Get filepath from path variable
-	filepath = getPathParam(session, "filepath");
-	if (!filepath || filepath[0] == '\0') {
+	// Get filepath from path variable and build absolute path
+	raw_path = getPathParam(session, "filepath");
+	if (!raw_path || raw_path[0] == '\0') {
 		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Missing file path", NULL, 0);
+	}
+
+	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
+		return sendErrorResponse(session, 414, 2, 8, 1,
+			"Path name too long", NULL, 0);
 	}
 
 	// Determine data type from X-IBM-Data-Type header
@@ -292,7 +317,7 @@ int ussGetHandler(Session *session)
 	}
 
 	// Open file for reading
-	fp = ufs_fopen(ufs, filepath, "r");
+	fp = ufs_fopen(ufs, abspath, "r");
 	if (!fp) {
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"File not found or is a directory", NULL, 0);

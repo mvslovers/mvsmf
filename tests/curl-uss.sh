@@ -5,6 +5,7 @@
 # Tests USS (Unix System Services) file endpoints:
 #   1. GET /zosmf/restfiles/fs?path=<dir>          (list directory)
 #   2. GET /zosmf/restfiles/fs/{filepath}           (read file)
+#   3. PUT /zosmf/restfiles/fs/{filepath}           (write file)
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -287,6 +288,70 @@ else
 	echo ""
 	echo "--- Read file tests ---"
 	skip "read file: USS_TEST_FILE not set in .env, skipping read tests"
+fi
+
+# =========================================================================
+# Write file tests
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	WRITE_FILE="${TEST_FILE}.writetest"
+
+	echo ""
+	echo "--- Write file (text mode) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "Hello from curl write test" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "write file text mode ${WRITE_FILE}"
+
+	# Read it back and verify content
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "read back written file"
+	if echo "$BODY" | grep -q "Hello from curl write test"; then
+		pass "write+read round-trip: content matches"
+	else
+		fail "write+read round-trip" "content mismatch: '$BODY'"
+	fi
+
+	# --- Write file (binary mode) ---
+	echo ""
+	echo "--- Write file (binary mode) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: binary" \
+		-d "Binary test data" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "write file binary mode"
+
+	# --- Write with application/json Content-Type → 501 ---
+	echo ""
+	echo "--- Write file error cases ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"request":"chmod","action":"set","mode":"0755"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "501" "$HTTP_CODE" "json content-type returns 501 (utilities not implemented)"
+
+	# --- Cleanup: delete the test file (will be 501 until delete is implemented) ---
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}" >/dev/null 2>&1 || true
+else
+	echo ""
+	echo "--- Write file tests ---"
+	skip "write file: USS_TEST_FILE not set in .env, skipping write tests"
 fi
 
 # =========================================================================

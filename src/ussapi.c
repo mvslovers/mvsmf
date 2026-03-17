@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 #include <clibwto.h>
+#include <clibthrd.h>
 #include <libufs.h>
 #include <time64.h>
 
@@ -133,6 +135,97 @@ uss_build_path(char *buf, size_t bufsz, const char *captured)
 	buf[0] = '/';
 	memcpy(buf + 1, captured, len + 1);  // includes NUL
 	return buf;
+}
+
+//
+// Receive raw data from socket, one byte at a time.
+// Mirrors the receive_raw_data() pattern in jobsapi.c to work around
+// the MVS 3.8j TCP/IP ring buffer bug (see Known Platform Bugs).
+// DO NOT change to multi-byte recv().
+//
+
+#define USS_RECV_MAX_RETRIES 200
+
+__asm__("\n&FUNC    SETC 'uss_recv_raw'");
+static int
+uss_recv_raw(HTTPC *httpc, char *buf, int len)
+{
+	int total = 0;
+	int n = 0;
+	int retries = 0;
+	unsigned ecb = 0;
+	int sockfd = httpc->socket;
+
+	while (total < len) {
+		n = recv(sockfd, buf + total, 1, 0);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			if (errno == EWOULDBLOCK) {
+				if (++retries > USS_RECV_MAX_RETRIES) {
+					wtof("MVSMF80E recv() EWOULDBLOCK timeout after %d retries", retries);
+					return -1;
+				}
+				ecb = 0;
+				cthread_timed_wait((void *)&ecb, 5, 0);
+				continue;
+			}
+			return -1;
+		}
+		if (n == 0) break;
+		retries = 0;
+		total += n;
+	}
+
+	return total;
+}
+
+//
+// Read the full request body into a malloc'd buffer.
+// Supports Content-Length transfer only (no chunked).
+// Caller must free the returned buffer.
+// Returns NULL on error (also sends error response).
+//
+
+__asm__("\n&FUNC    SETC 'uss_read_body'");
+static char *
+uss_read_body(Session *session, size_t *out_len)
+{
+	const char *cl_str = NULL;
+	size_t content_length = 0;
+	char *body = NULL;
+	int received = 0;
+
+	cl_str = getHeaderParam(session, "Content-Length");
+	if (!cl_str) {
+		sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing Content-Length header", NULL, 0);
+		return NULL;
+	}
+
+	content_length = strtoul(cl_str, NULL, 10);
+	if (content_length == 0) {
+		sendErrorResponse(session, 400, 2, 8, 1,
+			"Empty request body", NULL, 0);
+		return NULL;
+	}
+
+	body = (char *)malloc(content_length);
+	if (!body) {
+		sendErrorResponse(session, 500, 10, 8, 1,
+			"Memory allocation failed", NULL, 0);
+		return NULL;
+	}
+
+	received = uss_recv_raw(session->httpc, body, (int)content_length);
+	if (received < 0 || (size_t)received != content_length) {
+		free(body);
+		sendErrorResponse(session, 500, 10, 8, 1,
+			"Failed to read request body", NULL, 0);
+		return NULL;
+	}
+
+	*out_len = content_length;
+	return body;
 }
 
 //
@@ -372,10 +465,118 @@ quit:
 	return rc;
 }
 
+//
+// ussPutHandler — PUT /zosmf/restfiles/fs/{*filepath}
+//
+// Writes data to a file via ufs_fopen("w") + ufs_fwrite().
+// Creates the file if it does not exist.
+// Content-Type application/json dispatches to utilities (Phase 2, 501).
+// Text mode (default): ASCII→EBCDIC before write.
+// Binary mode: raw bytes, no conversion.
+//
+
 int ussPutHandler(Session *session)
 {
-	return sendErrorResponse(session, 501, 10, 8, 1,
-		"USS file write not yet implemented", NULL, 0);
+	int rc = 0;
+	int data_type;
+	char *raw_path = NULL;
+	char abspath[UFS_PATH_MAX];
+	char *body = NULL;
+	size_t body_len = 0;
+	const char *content_type = NULL;
+	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	UINT32 written;
+
+	// Get filepath from path variable and build absolute path
+	raw_path = getPathParam(session, "filepath");
+	if (!raw_path || raw_path[0] == '\0') {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing file path", NULL, 0);
+	}
+
+	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
+		return sendErrorResponse(session, 414, 2, 8, 1,
+			"Path name too long", NULL, 0);
+	}
+
+	// Check Content-Type: application/json → utilities (Phase 2)
+	content_type = getHeaderParam(session, "Content-Type");
+	if (content_type && strstr(content_type, "application/json") != NULL) {
+		return sendErrorResponse(session, 501, 10, 8, 1,
+			"USS utilities not yet implemented", NULL, 0);
+	}
+
+	// Determine data type from X-IBM-Data-Type header
+	data_type = get_data_type(session);
+
+	// Read request body
+	body = uss_read_body(session, &body_len);
+	if (!body) {
+		return -1;  // uss_read_body already sent error response
+	}
+
+	// Text mode: ASCII→EBCDIC before writing
+	if (data_type == USS_DATA_TYPE_TEXT) {
+		mvsmf_atoe((unsigned char *)body, (int)body_len);
+	}
+
+	// Open UFS session
+	ufs = uss_open_session(session);
+	if (!ufs) {
+		free(body);
+		return -1;
+	}
+
+	// Open file for writing (creates if not exists)
+	fp = ufs_fopen(ufs, abspath, "w");
+	if (!fp) {
+		rc = sendErrorResponse(session, 404, 6, 8, 1,
+			"Cannot open file for writing", NULL, 0);
+		goto quit;
+	}
+
+	// Check for error after open
+	if (fp->error != UFSD_RC_OK) {
+		int urc = fp->error;
+		ufs_fclose(&fp);
+		fp = NULL;
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
+		goto quit;
+	}
+
+	// Write body to file
+	written = ufs_fwrite(body, 1, (UINT32)body_len, fp);
+	if (written != (UINT32)body_len) {
+		int urc = fp->error;
+		ufs_fclose(&fp);
+		fp = NULL;
+		if (urc != UFSD_RC_OK) {
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+		} else {
+			rc = sendErrorResponse(session, 500, 10, 8, 1,
+				"Incomplete write to file", NULL, 0);
+		}
+		goto quit;
+	}
+
+	// Success — 204 No Content
+	rc = sendDefaultHeaders(session, 204, HTTP_CONTENT_TYPE_NONE, 0);
+
+quit:
+	if (fp) {
+		ufs_fclose(&fp);
+	}
+	free(body);
+	if (ufs) {
+		ufsfree(&ufs);
+	}
+
+	return rc;
 }
 
 int ussCreateHandler(Session *session)

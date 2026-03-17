@@ -117,6 +117,25 @@ get_data_type(Session *session)
 }
 
 //
+// Build absolute path from {*filepath} capture.
+// The route pattern "/zosmf/restfiles/fs/{*filepath}" consumes the
+// slash before the wildcard, so the captured value lacks a leading "/".
+// This helper prepends it into a caller-supplied buffer.
+// Returns the buffer pointer, or NULL if the path would overflow.
+//
+
+__asm__("\n&FUNC    SETC 'uss_build_path'");
+static char *
+uss_build_path(char *buf, size_t bufsz, const char *captured)
+{
+	size_t len = strlen(captured);
+	if (len + 2 > bufsz) return NULL;  // +2 for '/' prefix and NUL
+	buf[0] = '/';
+	memcpy(buf + 1, captured, len + 1);  // includes NUL
+	return buf;
+}
+
+//
 // Default max items for directory listing
 //
 
@@ -254,10 +273,103 @@ quit:
 	return rc;
 }
 
+//
+// ussGetHandler — GET /zosmf/restfiles/fs/{*filepath}
+//
+// Reads file content via ufs_fopen/ufs_fread in 4K chunks.
+// Text mode (default): EBCDIC→ASCII conversion after each chunk.
+// Binary mode: raw bytes, no conversion.
+//
+
+#define USS_READ_BUFSZ 4096
+
 int ussGetHandler(Session *session)
 {
-	return sendErrorResponse(session, 501, 10, 8, 1,
-		"USS file read not yet implemented", NULL, 0);
+	int rc = 0;
+	int data_type;
+	char *raw_path = NULL;
+	char abspath[UFS_PATH_MAX];
+	const char *content_type;
+	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	char buf[USS_READ_BUFSZ];
+	UINT32 n;
+
+	// Get filepath from path variable and build absolute path
+	raw_path = getPathParam(session, "filepath");
+	if (!raw_path || raw_path[0] == '\0') {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing file path", NULL, 0);
+	}
+
+	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
+		return sendErrorResponse(session, 414, 2, 8, 1,
+			"Path name too long", NULL, 0);
+	}
+
+	// Determine data type from X-IBM-Data-Type header
+	data_type = get_data_type(session);
+
+	// Open UFS session
+	ufs = uss_open_session(session);
+	if (!ufs) {
+		return -1;
+	}
+
+	// Open file for reading
+	fp = ufs_fopen(ufs, abspath, "r");
+	if (!fp) {
+		rc = sendErrorResponse(session, 404, 6, 8, 1,
+			"File not found or is a directory", NULL, 0);
+		ufsfree(&ufs);
+		return rc;
+	}
+
+	// Check for error after open (e.g. ISDIR)
+	if (fp->error != UFSD_RC_OK) {
+		int urc = fp->error;
+		ufs_fclose(&fp);
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
+		ufsfree(&ufs);
+		return rc;
+	}
+
+	// Send response headers
+	content_type = (data_type == USS_DATA_TYPE_BINARY)
+		? "application/octet-stream"
+		: "text/plain";
+
+	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
+
+	// Stream file content in chunks
+	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
+		if (data_type == USS_DATA_TYPE_TEXT) {
+			mvsmf_etoa((unsigned char *)buf, n);
+		}
+		rc = http_send(session->httpc, (const UCHAR *)buf, n);
+		if (rc < 0) {
+			goto quit;
+		}
+	}
+
+	rc = 0;
+
+quit:
+	if (fp) {
+		ufs_fclose(&fp);
+	}
+	if (ufs) {
+		ufsfree(&ufs);
+	}
+
+	return rc;
 }
 
 int ussPutHandler(Session *session)

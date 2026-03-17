@@ -250,6 +250,12 @@ int is_pattern_match(const char *pattern, const char *path)
         }
     }
 
+    /* A trailing {*wildcard} matches empty when path is already consumed */
+    while (*pattern == '{' && *(pattern + 1) == '*') {
+        while (*pattern && *pattern != '}') pattern++;
+        if (*pattern == '}') pattern++;
+    }
+
     return *pattern == '\0' && *path == '\0';
 }
 

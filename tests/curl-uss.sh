@@ -4,6 +4,7 @@
 #
 # Tests USS (Unix System Services) file endpoints:
 #   1. GET /zosmf/restfiles/fs?path=<dir>          (list directory)
+#   2. GET /zosmf/restfiles/fs/{filepath}           (read file)
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -34,6 +35,9 @@ AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test directory path (root of UFS filesystem)
 TEST_DIR="${USS_TEST_DIR:-/}"
+
+# Test file path for read tests (must exist on the UFS filesystem)
+TEST_FILE="${USS_TEST_FILE:-}"
 
 # --- state ---
 PASSED=0
@@ -220,6 +224,70 @@ RESP=$(curl -s -w '\n%{http_code}' \
 HTTP_CODE=$(echo "$RESP" | tail -1)
 
 assert_http_status "404" "$HTTP_CODE" "non-existent path returns 404"
+
+# =========================================================================
+# Read file tests
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	echo ""
+	echo "--- Read file (text mode, default) ---"
+
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${TEST_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "read file text mode ${TEST_FILE}"
+
+	if [ -n "$BODY" ]; then
+		pass "read file: response body is non-empty"
+	else
+		fail "read file: response body is empty"
+	fi
+
+	# --- Read file (binary mode) ---
+	echo ""
+	echo "--- Read file (binary mode) ---"
+
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		-H "X-IBM-Data-Type: binary" \
+		"${BASE_URL}/zosmf/restfiles/fs${TEST_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+
+	assert_http_status "200" "$HTTP_CODE" "read file binary mode ${TEST_FILE}"
+
+	# --- Read file: non-existent path ---
+	echo ""
+	echo "--- Read file error cases ---"
+
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/file/path.txt")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+
+	assert_http_status "404" "$HTTP_CODE" "read non-existent file returns 404"
+
+	# --- Read file: directory path (should fail) ---
+
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${TEST_DIR}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+
+	# Attempting to read a directory should return 400 (ISDIR) or 404
+	if [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "404" ]; then
+		pass "read directory as file returns error (HTTP $HTTP_CODE)"
+	else
+		fail "read directory as file" "expected HTTP 400 or 404, got $HTTP_CODE"
+	fi
+else
+	echo ""
+	echo "--- Read file tests ---"
+	skip "read file: USS_TEST_FILE not set in .env, skipping read tests"
+fi
 
 # =========================================================================
 # Summary

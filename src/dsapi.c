@@ -749,10 +749,11 @@ int datasetGetHandler(Session *session)
     if (!fp) {
         return handle_error(session, ERR_IO, "Cannot open dataset");
     }
+    session_register_file(session, fp);
 
     rc = read_and_send_dataset(session, fp, data_type, max_records);
 
-    fclose(fp);
+    session_fclose(session, fp);
     return rc;
 }
 
@@ -838,18 +839,19 @@ int datasetPutHandler(Session *session)
         wtof("MVSMF34E Failed to open dataset for writing: %s (errno=%d)", dsname, errno);
         return handle_error(session, ERR_IO, "Cannot open dataset for writing");
     }
+    session_register_file(session, fp);
 
     /* For RECFM=U (undefined record format), lrecl is 0. Use blksize instead. */
     is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)fp->blksize : (size_t)fp->lrecl;
     if (eff_lrecl == 0) {
         wtof("MVSMF34E Dataset has zero record length: %s", dsname);
-        fclose(fp);
+        session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
     record_buffer = calloc(1, eff_lrecl);
     if (!record_buffer) {
-        fclose(fp);
+        session_fclose(session, fp);
         return handle_error(session, ERR_MEMORY, "Memory allocation failed");
     }
 
@@ -866,7 +868,7 @@ int datasetPutHandler(Session *session)
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                     wtof("MVSMF36E Error reading chunk size");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading chunk size");
                 }
                 if (c == 0x0D) { // ASCII CR \r
@@ -894,7 +896,7 @@ int datasetPutHandler(Session *session)
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
                     }
                 }
@@ -904,14 +906,14 @@ int datasetPutHandler(Session *session)
                 if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
                     wtof("MVSMF40E Error reading final line ending");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading final line ending");
                 }
 
                 if (crlf[0] != 0x0d || crlf[1] != 0x0a) {
                     wtof("MVSMF41E Final line ending not CRLF");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Final line ending not CRLF");
                 }
 
@@ -932,7 +934,7 @@ int datasetPutHandler(Session *session)
                     if (n <= 0) {
                         wtof("MVSMF38E Error reading chunk data");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
                     }
                     bytes_read += n;
@@ -942,7 +944,7 @@ int datasetPutHandler(Session *session)
                         if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
-                            fclose(fp);
+                            session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
                         record_pos = 0;
@@ -955,7 +957,7 @@ int datasetPutHandler(Session *session)
                     if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                         wtof("MVSMF38E Error reading chunk data");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
                     }
                     bytes_read++;
@@ -963,7 +965,7 @@ int datasetPutHandler(Session *session)
                     if (record_pos >= eff_lrecl - 1) {
                         wtof("MVSMF43E Record too long");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Record too long");
                     }
                     record_buffer[record_pos++] = c;
@@ -972,7 +974,7 @@ int datasetPutHandler(Session *session)
                         if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
-                            fclose(fp);
+                            session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
                         record_pos = 0;
@@ -984,7 +986,7 @@ int datasetPutHandler(Session *session)
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
                     }
                     record_pos = 0;
@@ -996,7 +998,7 @@ int datasetPutHandler(Session *session)
             if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
                 wtof("MVSMF43E Error reading chunk trailer");
                 free(record_buffer);
-                fclose(fp);
+                session_fclose(session, fp);
                 return handle_error(session, ERR_IO, "Error reading chunk trailer");
             }
         }
@@ -1016,7 +1018,7 @@ int datasetPutHandler(Session *session)
                 if (n <= 0) {
                     wtof("MVSMF45E Error reading data in Content-Length mode");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
                 }
                 bytes_remaining -= n;
@@ -1026,7 +1028,7 @@ int datasetPutHandler(Session *session)
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
                     record_pos = 0;
@@ -1042,7 +1044,7 @@ int datasetPutHandler(Session *session)
                 if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
                 }
             }
@@ -1053,7 +1055,7 @@ int datasetPutHandler(Session *session)
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                     wtof("MVSMF45E Error reading data in Content-Length mode");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
                 }
                 bytes_remaining--;
@@ -1061,7 +1063,7 @@ int datasetPutHandler(Session *session)
                 if (record_pos >= eff_lrecl - 1) {
                     wtof("MVSMF43E Record too long");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Record too long");
                 }
                 record_buffer[record_pos++] = c;
@@ -1070,7 +1072,7 @@ int datasetPutHandler(Session *session)
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
                     record_pos = 0;
@@ -1093,7 +1095,7 @@ int datasetPutHandler(Session *session)
                 if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
                 }
             }
@@ -1102,7 +1104,7 @@ int datasetPutHandler(Session *session)
 
     free(record_buffer);
     record_buffer = NULL;
-    fclose(fp);
+    session_fclose(session, fp);
     fp = NULL;
 
     /* Send response */
@@ -1121,7 +1123,7 @@ error:
     wtof("MVSMF50E Error sending response: rc=%d", rc);
     free(record_buffer);
     if (fp) {
-        fclose(fp);
+        session_fclose(session, fp);
     }
     return rc;
 }
@@ -1250,11 +1252,12 @@ int memberGetHandler(Session *session)
     if (!fp) {
         return handle_error(session, ERR_IO, "Cannot open dataset member");
     }
+    session_register_file(session, fp);
 
     // PDS member: record count unknown, pass -1 (no limit)
     rc = read_and_send_dataset(session, fp, data_type, -1);
 
-    fclose(fp);
+    session_fclose(session, fp);
     return rc;
 }
 
@@ -1329,6 +1332,7 @@ int memberPutHandler(Session *session)
         wtof("MVSMF06E Failed to open dataset member for writing: %s (errno=%d)", dataset, errno);
         return handle_error(session, ERR_IO, "Cannot open dataset member for writing");
     }
+    session_register_file(session, fp);
 
     if (is_chunked) {
         // Handle chunked transfer encoding
@@ -1342,7 +1346,7 @@ int memberPutHandler(Session *session)
             while (i < sizeof(chunk_size_str)-1) {
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                     wtof("MVSMF08E Error reading chunk size");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading chunk size");
                 }
                 if (c == '\r') {
@@ -1369,7 +1373,7 @@ int memberPutHandler(Session *session)
                     }
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF11E Error writing final record");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
                     }
                 }
@@ -1378,13 +1382,13 @@ int memberPutHandler(Session *session)
                 char crlf[2] = {0};
                 if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
                     wtof("MVSMF40E Error reading final line ending");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading final line ending");
                 }
 
                 if (crlf[0] != 0x0d || crlf[1] != 0x0a) {
                     wtof("MVSMF41E Final line ending not CRLF");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Final line ending not CRLF");
                 }
 
@@ -1404,7 +1408,7 @@ int memberPutHandler(Session *session)
                     n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
                     if (n <= 0) {
                         wtof("MVSMF13E Error reading chunk data");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
                     }
                     bytes_read += n;
@@ -1413,7 +1417,7 @@ int memberPutHandler(Session *session)
                     if (record_pos >= fp->lrecl) {
                         if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                             wtof("MVSMF14E Error writing record");
-                            fclose(fp);
+                            session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
                         record_pos = 0;
@@ -1425,14 +1429,14 @@ int memberPutHandler(Session *session)
                 while (bytes_read < chunk_size) {
                     if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                         wtof("MVSMF13E Error reading chunk data");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
                     }
                     bytes_read++;
 
                     if (record_pos >= sizeof(record_buffer) - 1) {
                         wtof("MVSMF43E Record too long");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Record too long");
                     }
                     record_buffer[record_pos++] = c;
@@ -1440,7 +1444,7 @@ int memberPutHandler(Session *session)
                     if (c == 0x0A) {
                         if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                             wtof("MVSMF14E Error writing record");
-                            fclose(fp);
+                            session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
                         record_pos = 0;
@@ -1451,7 +1455,7 @@ int memberPutHandler(Session *session)
                 if (record_pos > 0) {
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF39E Error writing final record");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
                     }
                     record_pos = 0;
@@ -1462,7 +1466,7 @@ int memberPutHandler(Session *session)
             char crlf[2];
             if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
                 wtof("MVSMF15E Error reading chunk trailer");
-                fclose(fp);
+                session_fclose(session, fp);
                 return handle_error(session, ERR_IO, "Error reading chunk trailer");
             }
         }
@@ -1481,7 +1485,7 @@ int memberPutHandler(Session *session)
                 n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
                 if (n <= 0) {
                     wtof("MVSMF17E Error reading data in Content-Length mode");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
                 }
                 bytes_remaining -= n;
@@ -1490,7 +1494,7 @@ int memberPutHandler(Session *session)
                 if (record_pos >= fp->lrecl) {
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF18E Error writing record");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
                     record_pos = 0;
@@ -1503,7 +1507,7 @@ int memberPutHandler(Session *session)
                 record_pos = fp->lrecl;
                 if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                     wtof("MVSMF19E Error writing final record");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
                 }
             }
@@ -1513,14 +1517,14 @@ int memberPutHandler(Session *session)
             while (bytes_remaining > 0) {
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                     wtof("MVSMF17E Error reading data in Content-Length mode");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
                 }
                 bytes_remaining--;
 
                 if (record_pos >= sizeof(record_buffer) - 1) {
                     wtof("MVSMF43E Record too long");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Record too long");
                 }
                 record_buffer[record_pos++] = c;
@@ -1528,7 +1532,7 @@ int memberPutHandler(Session *session)
                 if (c == 0x0A || c == 0x0D) {
                     if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                         wtof("MVSMF18E Error writing record");
-                        fclose(fp);
+                        session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
                     record_pos = 0;
@@ -1550,14 +1554,14 @@ int memberPutHandler(Session *session)
                 }
                 if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type) < 0) {
                     wtof("MVSMF19E Error writing final record");
-                    fclose(fp);
+                    session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
                 }
             }
         }
     }
 
-    fclose(fp);
+    session_fclose(session, fp);
     fp = NULL;
 
     // Send response
@@ -1575,7 +1579,7 @@ int memberPutHandler(Session *session)
 error:
     wtof("MVSMF22E Error sending response: rc=%d", rc);
     if (fp) {
-        fclose(fp);
+        session_fclose(session, fp);
     }
     return rc;
 }

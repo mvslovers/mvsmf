@@ -99,6 +99,9 @@ uss_open_session(Session *session)
 		ufs_set_acee(ufs, session->acee);
 	}
 
+	// Track UFS session for ESTAE recovery
+	session->ufs = ufs;
+
 	return ufs;
 }
 
@@ -279,6 +282,7 @@ int ussListHandler(Session *session)
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"Path not found or is not a directory", NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
 
@@ -361,6 +365,7 @@ quit:
 	}
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;
@@ -415,17 +420,21 @@ int ussGetHandler(Session *session)
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"File not found or is a directory", NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
+	session->ufs_file = fp;
 
 	// Check for error after open (e.g. ISDIR)
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
 			ufsd_rc_message(urc), NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
 
@@ -457,9 +466,11 @@ int ussGetHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 	}
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;
@@ -535,11 +546,13 @@ int ussPutHandler(Session *session)
 			"Cannot open file for writing", NULL, 0);
 		goto quit;
 	}
+	session->ufs_file = fp;
 
 	// Check for error after open
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		fp = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -552,6 +565,7 @@ int ussPutHandler(Session *session)
 	if (written != (UINT32)body_len) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		fp = NULL;
 		if (urc != UFSD_RC_OK) {
 			rc = sendErrorResponse(session,
@@ -570,10 +584,12 @@ int ussPutHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 	}
 	free(body);
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;

@@ -81,6 +81,26 @@ ufsd_rc_message(int rc)
 }
 
 //
+// UFS cleanup callback for ESTAE recovery (called by session_cleanup)
+//
+
+__asm__("\n&FUNC    SETC 'uss_cleanup_cb'");
+static void
+uss_cleanup_callback(Session *session)
+{
+	if (session->ufs_file) {
+		wtof("MVSMF99I Recovery: closing UFS file at %p",
+			 session->ufs_file);
+		ufs_fclose((void *)&session->ufs_file);
+	}
+	if (session->ufs) {
+		wtof("MVSMF99I Recovery: freeing UFS session at %p",
+			 session->ufs);
+		ufsfree((void *)&session->ufs);
+	}
+}
+
+//
 // UFS session helper
 //
 
@@ -98,6 +118,10 @@ uss_open_session(Session *session)
 	if (session->acee) {
 		ufs_set_acee(ufs, session->acee);
 	}
+
+	// Track UFS session for ESTAE recovery
+	session->ufs = ufs;
+	session->ufs_cleanup = uss_cleanup_callback;
 
 	return ufs;
 }
@@ -279,10 +303,12 @@ int ussListHandler(Session *session)
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"Path not found or is not a directory", NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
 
 	// Send response headers (streaming JSON like dsapi.c)
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
@@ -361,6 +387,7 @@ quit:
 	}
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;
@@ -415,17 +442,21 @@ int ussGetHandler(Session *session)
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"File not found or is a directory", NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
+	session->ufs_file = fp;
 
 	// Check for error after open (e.g. ISDIR)
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
 			ufsd_rc_message(urc), NULL, 0);
 		ufsfree(&ufs);
+		session->ufs = NULL;
 		return rc;
 	}
 
@@ -434,6 +465,7 @@ int ussGetHandler(Session *session)
 		? "application/octet-stream"
 		: "text/plain";
 
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) goto quit;
@@ -457,9 +489,11 @@ int ussGetHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 	}
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;
@@ -535,11 +569,13 @@ int ussPutHandler(Session *session)
 			"Cannot open file for writing", NULL, 0);
 		goto quit;
 	}
+	session->ufs_file = fp;
 
 	// Check for error after open
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		fp = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -552,6 +588,7 @@ int ussPutHandler(Session *session)
 	if (written != (UINT32)body_len) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 		fp = NULL;
 		if (urc != UFSD_RC_OK) {
 			rc = sendErrorResponse(session,
@@ -570,10 +607,12 @@ int ussPutHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
+		session->ufs_file = NULL;
 	}
 	free(body);
 	if (ufs) {
 		ufsfree(&ufs);
+		session->ufs = NULL;
 	}
 
 	return rc;

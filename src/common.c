@@ -43,6 +43,8 @@ sendDefaultHeaders(Session *session, int status, const char *content_type,
 {
 	int irc = 0;
 
+	session->headers_sent = 1;
+
 	irc = http_resp(session->httpc, status);
 	if (irc < 0) {
 		goto quit;

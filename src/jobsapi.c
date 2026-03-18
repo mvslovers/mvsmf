@@ -1118,6 +1118,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		rc = -1;
 		goto quit;
 	}
+	session_register_file(session, fp);
 
 	buffer_size = fp->lrecl + 2;
 	buffer = calloc(1, buffer_size);
@@ -1176,7 +1177,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		num_lines++;
 	}
 
-	fclose(fp);
+	session_fclose(session, fp);
 	fp = NULL;
 
 	/* ensure room for 2 extra lines added by process_jobcard */
@@ -1244,7 +1245,7 @@ quit:
 	}
 
 	if (fp) {
-		fclose(fp);
+		session_fclose(session, fp);
 	}
 
 	if (buffer) {

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <clibwto.h>
+#include <clibtry.h>
 
 #include "router.h"
 #include "common.h"
@@ -10,9 +11,20 @@
 
 #define INITIAL_BUFFER_SIZE 4096
 
-//	
+// Context for ESTAE-protected handler invocation.
+// Captures the handler's return code since try() only returns 0/abend.
+struct handler_ctx {
+    RouteHandler handler;
+    Session *session;
+    int rc;
+};
+
+//
 // private function prototypes
 //
+
+static int handler_thunk(struct handler_ctx *ctx);
+static int safe_fclose_thunk(FILE *fp);
 
 static int route_matching_middleware(Session *session);
 static int path_vars_extracting_middleware(Session *session);
@@ -103,7 +115,9 @@ int handle_request(Router *router, Session *session)
         return -1;
     }
 
-    // Execute all middlewares in sequence
+    // Execute middlewares in sequence.
+    // NOTE: middlewares run outside ESTAE protection — they must be
+    // crash-safe. An abend here will not be caught by the try() below.
     size_t i = 0;
     for (i = 0; i < router->middleware_count; i++) {
         int rc = router->middlewares[i].handler(session);
@@ -122,8 +136,123 @@ int handle_request(Router *router, Session *session)
 
     extract_path_vars(session, route->pattern, path);
 
-    // call the handler
-    return route->handler(session);
+    // call the handler with ESTAE protection
+    struct handler_ctx ctx;
+    int try_rc;
+
+    ctx.handler = route->handler;
+    ctx.session = session;
+    ctx.rc = 0;
+
+    try_rc = try(handler_thunk, &ctx);
+    if (try_rc != 0) {
+        unsigned abend = tryrc();
+        unsigned sys = (abend >> 12) & 0xFFF;
+        unsigned usr = abend & 0xFFF;
+        wtof("MVSMF99E Handler abend S%03X U%04d for %s %s",
+             sys, usr, method, path);
+        session_cleanup(session);
+        if (!session->headers_sent) {
+            sendErrorResponse(session, 500, 6, 8, 99,
+                "Internal server error (abend recovery)", NULL, 0);
+        } else {
+            wtof("MVSMF99W Headers already sent, cannot send error response");
+        }
+        return -1;
+    }
+    return ctx.rc;
+}
+
+// Thunk for ESTAE-protected handler invocation.
+// Called by try(), stores the handler's return value in ctx->rc.
+__asm__("\n&FUNC    SETC 'handler_thunk'");
+static int handler_thunk(struct handler_ctx *ctx)
+{
+    ctx->rc = ctx->handler(ctx->session);
+    return 0;
+}
+
+//
+// session resource tracking
+//
+
+__asm__("\n&FUNC    SETC 'ses_reg_file'");
+int session_register_file(Session *session, FILE *fp)
+{
+    if (!session || !fp) return -1;
+    if (session->open_file_count >= MAX_SESSION_FILES) {
+        wtof("MVSMF98W session file tracking full, cannot register");
+        return -1;
+    }
+    session->open_files[session->open_file_count++] = fp;
+    return 0;
+}
+
+__asm__("\n&FUNC    SETC 'ses_unreg_file'");
+void session_unregister_file(Session *session, FILE *fp)
+{
+    int i;
+    if (!session || !fp) return;
+    for (i = 0; i < session->open_file_count; i++) {
+        if (session->open_files[i] == fp) {
+            // shift remaining entries down
+            session->open_file_count--;
+            for (; i < session->open_file_count; i++) {
+                session->open_files[i] = session->open_files[i + 1];
+            }
+            session->open_files[session->open_file_count] = NULL;
+            return;
+        }
+    }
+}
+
+__asm__("\n&FUNC    SETC 'ses_fclose'");
+void session_fclose(Session *session, FILE *fp)
+{
+    if (!session || !fp) return;
+    session_unregister_file(session, fp);
+    fclose(fp);
+}
+
+// Thunk for ESTAE-protected fclose during recovery.
+// Returns 0 on success; a secondary abend is caught by try().
+__asm__("\n&FUNC    SETC 'safe_fclose'");
+static int safe_fclose_thunk(FILE *fp)
+{
+    if (fp->buf) {
+        fp->upto = fp->buf;  // discard buffer — no flush
+    }
+    fclose(fp);
+    return 0;
+}
+
+__asm__("\n&FUNC    SETC 'ses_cleanup'");
+void session_cleanup(Session *session)
+{
+    int i;
+    if (!session) return;
+
+    // Close tracked FILE handles under individual ESTAE protection.
+    // A corrupted pointer from the original abend must not prevent
+    // cleanup of the remaining resources.
+    for (i = 0; i < session->open_file_count; i++) {
+        FILE *fp = session->open_files[i];
+        if (fp) {
+            wtof("MVSMF99I Recovery: closing %s (DD:%s)",
+                 fp->dataset, fp->ddname);
+            if (try(safe_fclose_thunk, fp) != 0) {
+                wtof("MVSMF99W Recovery: fclose abended for slot %d", i);
+            }
+            session->open_files[i] = NULL;
+        }
+    }
+    session->open_file_count = 0;
+
+    // Delegate UFS cleanup to the registered callback (set by ussapi).
+    // This keeps the router decoupled from libufs.
+    if (session->ufs_cleanup) {
+        session->ufs_cleanup(session);
+    }
 }
 
 //

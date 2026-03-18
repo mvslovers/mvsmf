@@ -708,6 +708,8 @@ int ussCreateHandler(Session *session)
 	unsigned int old_perm;
 	UFS *ufs = NULL;
 
+	wtof("MVSMF83D ussCreateHandler entered");
+
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
 	if (!raw_path || raw_path[0] == '\0') {
@@ -720,6 +722,8 @@ int ussCreateHandler(Session *session)
 			"Path name too long", NULL, 0);
 	}
 
+	wtof("MVSMF83D path=%s", abspath);
+
 	// Read request body — try POST_STRING first (HTTPD pre-reads when
 	// Content-Type is set), fall back to socket read otherwise.
 	// POST_STRING is already in EBCDIC; socket data needs conversion.
@@ -728,6 +732,7 @@ int ussCreateHandler(Session *session)
 
 	if (body && *body) {
 		body_len = strlen(body);
+		wtof("MVSMF83D POST_STRING len=%d", (int)body_len);
 	} else {
 		body = uss_read_body(session, &body_len);
 		if (!body) {
@@ -767,16 +772,23 @@ int ussCreateHandler(Session *session)
 	if (free_body) free(body);
 	body = NULL;
 
+	wtof("MVSMF83D type=%s perm=%04o", type_str, perm);
+
 	// Open UFS session
 	ufs = uss_open_session(session);
 	if (!ufs) {
 		return -1;
 	}
 
+	wtof("MVSMF83D UFS session opened");
+
 	// Set create permission and save old value
 	old_perm = ufs_set_create_perm(ufs, perm);
 
+	wtof("MVSMF83D set_create_perm done, old=%04o", old_perm);
+
 	if (strcmp(type_str, "file") == 0) {
+		wtof("MVSMF83D creating file: %s", abspath);
 		// Check if file already exists (ufs_fopen "w" would truncate)
 		UFSFILE *fp = ufs_fopen(ufs, abspath, "r");
 		if (fp) {
@@ -808,6 +820,7 @@ int ussCreateHandler(Session *session)
 		}
 		ufs_fclose(&fp);
 	} else {
+		wtof("MVSMF83D creating directory: %s", abspath);
 		// Check if directory already exists via diropen
 		UFSDDESC *dd = ufs_diropen(ufs, abspath, NULL);
 		if (dd) {
@@ -838,6 +851,7 @@ int ussCreateHandler(Session *session)
 	ufs_set_create_perm(ufs, old_perm);
 
 	// Success — 201 Created
+	wtof("MVSMF83D create succeeded, sending 201");
 	rc = sendDefaultHeaders(session, 201, HTTP_CONTENT_TYPE_NONE, 0);
 
 quit:

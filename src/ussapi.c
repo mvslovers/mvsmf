@@ -808,11 +808,25 @@ int ussCreateHandler(Session *session)
 		}
 		ufs_fclose(&fp);
 	} else {
+		// Check if directory already exists via diropen
+		UFSDDESC *dd = ufs_diropen(ufs, abspath, NULL);
+		if (dd) {
+			ufs_dirclose(&dd);
+			ufs_set_create_perm(ufs, old_perm);
+			rc = sendErrorResponse(session, 409, 4, 8, 1,
+				"File or directory already exists", NULL, 0);
+			goto quit;
+		}
+
 		// Create directory
 		rc = ufs_mkdir(ufs, abspath);
 		if (rc != 0) {
 			int urc = ufs_last_rc(ufs);
+			wtof("MVSMF85E ufs_mkdir(%s) failed: rc=%d urc=%d",
+				abspath, rc, urc);
 			ufs_set_create_perm(ufs, old_perm);
+			// ufs_mkdir returns -1 on failure; map via ufs_last_rc
+			if (urc == 0) urc = UFSD_RC_NOFILE;  // assume parent not found
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
 				ufsd_rc_message(urc), NULL, 0);

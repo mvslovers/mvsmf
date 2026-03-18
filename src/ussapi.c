@@ -28,15 +28,15 @@ ufsd_rc_to_http(int rc)
 	switch (rc) {
 	case UFSD_RC_OK:          return 200;
 	case UFSD_RC_NOFILE:      return 404;
-	case UFSD_RC_EXIST:       return 409;
+	case UFSD_RC_EXIST:       return 400;  /* 409 not supported by HTTPD */
 	case UFSD_RC_NOTDIR:      return 400;
 	case UFSD_RC_ISDIR:       return 400;
-	case UFSD_RC_NOSPACE:     return 507;
-	case UFSD_RC_NOINODES:    return 507;
+	case UFSD_RC_NOSPACE:     return 500;  /* 507 not supported by HTTPD */
+	case UFSD_RC_NOINODES:    return 500;  /* 507 not supported by HTTPD */
 	case UFSD_RC_IO:          return 500;
 	case UFSD_RC_BADFD:       return 500;
-	case UFSD_RC_NOTEMPTY:    return 409;
-	case UFSD_RC_NAMETOOLONG: return 414;
+	case UFSD_RC_NOTEMPTY:    return 400;  /* 409 not supported by HTTPD */
+	case UFSD_RC_NAMETOOLONG: return 400;  /* 414 not supported by HTTPD */
 	case UFSD_RC_ROFS:        return 403;
 	default:
 		wtof("MVSMF83D ufsd_rc_to_http: unmapped rc=%d, defaulting to 500", rc);
@@ -806,7 +806,7 @@ int ussCreateHandler(Session *session)
 			ufs_fclose(&fp);
 			fp = NULL;
 			ufs_set_create_perm(ufs, old_perm);
-			rc = sendErrorResponse(session, 409, 4, 8, 1,
+			rc = sendErrorResponse(session, 400, 4, 8, 1,
 				"File or directory already exists", NULL, 0);
 			goto quit;
 		}
@@ -845,7 +845,7 @@ int ussCreateHandler(Session *session)
 			ufs_dirclose(&dd);
 			dd = NULL;
 			ufs_set_create_perm(ufs, old_perm);
-			rc = sendErrorResponse(session, 409, 4, 8, 1,
+			rc = sendErrorResponse(session, 400, 4, 8, 1,
 				"File or directory already exists", NULL, 0);
 			goto quit;
 		}

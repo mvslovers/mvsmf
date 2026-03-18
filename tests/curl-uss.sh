@@ -384,7 +384,7 @@ if [ -n "$TEST_FILE" ]; then
 		-d '{"type":"directory"}' \
 		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
 
-	assert_http_status "409" "$HTTP_CODE" "create duplicate directory returns 409"
+	assert_http_status "400" "$HTTP_CODE" "create duplicate directory returns 400"
 
 	# --- Create file ---
 	echo ""

@@ -697,6 +697,7 @@ __asm__("\n&FUNC    SETC 'UAPI0004'");
 int ussCreateHandler(Session *session)
 {
 	int rc = 0;
+	int free_body = 0;
 	char *raw_path = NULL;
 	char abspath[UFS_PATH_MAX];
 	char *body = NULL;
@@ -719,18 +720,28 @@ int ussCreateHandler(Session *session)
 			"Path name too long", NULL, 0);
 	}
 
-	// Read request body
-	body = uss_read_body(session, &body_len);
-	if (!body) {
-		return -1;  // uss_read_body already sent error response
-	}
+	// Read request body — try POST_STRING first (HTTPD pre-reads when
+	// Content-Type is set), fall back to socket read otherwise.
+	// POST_STRING is already in EBCDIC; socket data needs conversion.
+	body = (char *)http_get_env(session->httpc,
+		(const UCHAR *)"POST_STRING");
 
-	// Convert from ASCII to EBCDIC for JSON parsing
-	mvsmf_atoe((unsigned char *)body, (int)body_len);
+	if (body && *body) {
+		body_len = strlen(body);
+	} else {
+		body = uss_read_body(session, &body_len);
+		if (!body) {
+			return -1;  // uss_read_body already sent error response
+		}
+		free_body = 1;
+
+		// Convert from ASCII to EBCDIC for JSON parsing
+		mvsmf_atoe((unsigned char *)body, (int)body_len);
+	}
 
 	// Parse required "type" field
 	if (uss_extract_json_string(body, "type", type_str, sizeof(type_str)) < 0) {
-		free(body);
+		if (free_body) free(body);
 		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Missing or invalid 'type' in request body", NULL, 0);
 	}
@@ -739,7 +750,7 @@ int ussCreateHandler(Session *session)
 	if (strcmp(type_str, "file") != 0 &&
 	    strcmp(type_str, "directory") != 0 &&
 	    strcmp(type_str, "dir") != 0) {
-		free(body);
+		if (free_body) free(body);
 		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Invalid 'type': must be 'file', 'directory', or 'dir'",
 			NULL, 0);
@@ -753,7 +764,7 @@ int ussCreateHandler(Session *session)
 		}
 	}
 
-	free(body);
+	if (free_body) free(body);
 	body = NULL;
 
 	// Open UFS session

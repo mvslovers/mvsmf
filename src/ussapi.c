@@ -793,9 +793,11 @@ int ussCreateHandler(Session *session)
 
 	if (strcmp(type_str, "file") == 0) {
 		wtof("MVSMF83D creating file: %s", abspath);
-		// Check if file already exists (ufs_fopen "w" would truncate)
+		wtof("MVSMF83D before fopen(r) existence check");
 		fp = ufs_fopen(ufs, abspath, "r");
+		wtof("MVSMF83D fopen(r) returned %p", (void *)fp);
 		if (fp) {
+			wtof("MVSMF83D file exists, closing and returning 409");
 			ufs_fclose(&fp);
 			fp = NULL;
 			ufs_set_create_perm(ufs, old_perm);
@@ -804,10 +806,12 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 
-		// Create file: open for write then immediately close
+		wtof("MVSMF83D before fopen(w) create");
 		fp = ufs_fopen(ufs, abspath, "w");
+		wtof("MVSMF83D fopen(w) returned %p", (void *)fp);
 		if (!fp) {
 			urc = ufs_last_rc(ufs);
+			wtof("MVSMF83D fopen(w) failed, urc=%d", urc);
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -828,9 +832,11 @@ int ussCreateHandler(Session *session)
 		fp = NULL;
 	} else {
 		wtof("MVSMF83D creating directory: %s", abspath);
-		// Check if directory already exists via diropen
+		wtof("MVSMF83D before diropen existence check");
 		dd = ufs_diropen(ufs, abspath, NULL);
+		wtof("MVSMF83D diropen returned %p", (void *)dd);
 		if (dd) {
+			wtof("MVSMF83D dir exists, closing and returning 409");
 			ufs_dirclose(&dd);
 			dd = NULL;
 			ufs_set_create_perm(ufs, old_perm);
@@ -839,15 +845,15 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 
-		// Create directory
+		wtof("MVSMF83D before mkdir");
 		rc = ufs_mkdir(ufs, abspath);
+		wtof("MVSMF83D mkdir returned rc=%d", rc);
 		if (rc != 0) {
 			urc = ufs_last_rc(ufs);
 			wtof("MVSMF85E ufs_mkdir(%s) failed: rc=%d urc=%d",
 				abspath, rc, urc);
 			ufs_set_create_perm(ufs, old_perm);
-			// ufs_mkdir returns -1 on failure; map via ufs_last_rc
-			if (urc == 0) urc = UFSD_RC_NOFILE;  // assume parent not found
+			if (urc == 0) urc = UFSD_RC_NOFILE;
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
 				ufsd_rc_message(urc), NULL, 0);

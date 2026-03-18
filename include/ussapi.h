@@ -24,6 +24,7 @@
 #define UFSD_RC_BADFD      56   /* Bad file descriptor    */
 #define UFSD_RC_NOTEMPTY   60   /* Directory not empty    */
 #define UFSD_RC_NAMETOOLONG 64  /* Name too long          */
+#define UFSD_RC_ROFS        68  /* Read-only filesystem   */
 
 /**
  * @brief Lists files/directories at a given path

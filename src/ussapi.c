@@ -28,15 +28,16 @@ ufsd_rc_to_http(int rc)
 	switch (rc) {
 	case UFSD_RC_OK:          return 200;
 	case UFSD_RC_NOFILE:      return 404;
-	case UFSD_RC_EXIST:       return 409;
+	case UFSD_RC_EXIST:       return 400;  /* 409 not supported by HTTPD */
 	case UFSD_RC_NOTDIR:      return 400;
 	case UFSD_RC_ISDIR:       return 400;
-	case UFSD_RC_NOSPACE:     return 507;
-	case UFSD_RC_NOINODES:    return 507;
+	case UFSD_RC_NOSPACE:     return 500;  /* 507 not supported by HTTPD */
+	case UFSD_RC_NOINODES:    return 500;  /* 507 not supported by HTTPD */
 	case UFSD_RC_IO:          return 500;
 	case UFSD_RC_BADFD:       return 500;
-	case UFSD_RC_NOTEMPTY:    return 409;
-	case UFSD_RC_NAMETOOLONG: return 414;
+	case UFSD_RC_NOTEMPTY:    return 400;  /* 409 not supported by HTTPD */
+	case UFSD_RC_NAMETOOLONG: return 400;  /* 414 not supported by HTTPD */
+	case UFSD_RC_ROFS:        return 403;
 	default:                  return 500;
 	}
 }
@@ -56,6 +57,7 @@ ufsd_rc_to_category(int rc)
 	case UFSD_RC_BADFD:       return 10; /* server    */
 	case UFSD_RC_NOTEMPTY:    return 4;  /* conflict  */
 	case UFSD_RC_NAMETOOLONG: return 2;  /* bad request */
+	case UFSD_RC_ROFS:        return 4;  /* forbidden */
 	default:                  return 10; /* server    */
 	}
 }
@@ -76,6 +78,7 @@ ufsd_rc_message(int rc)
 	case UFSD_RC_BADFD:       return "Bad file descriptor";
 	case UFSD_RC_NOTEMPTY:    return "Directory not empty";
 	case UFSD_RC_NAMETOOLONG: return "Path name too long";
+	case UFSD_RC_ROFS:        return "Read-only file system";
 	default:                  return "Unknown UFSD error";
 	}
 }
@@ -618,10 +621,240 @@ quit:
 	return rc;
 }
 
+//
+// Parse a Unix permission string like "rwxr-xr-x" into an octal value.
+// Returns the octal permission (e.g. 0755) or 0 on invalid input.
+//
+
+__asm__("\n&FUNC    SETC 'uss_parse_mode'");
+static unsigned int
+uss_parse_mode(const char *mode_str)
+{
+	unsigned int perm = 0;
+	int i;
+
+	if (!mode_str || strlen(mode_str) != 9) return 0;
+
+	// Each triple: [rwx-][rwx-][rwx-] → owner, group, other
+	for (i = 0; i < 9; i++) {
+		perm <<= 1;
+		if (mode_str[i] != '-') {
+			perm |= 1;
+		}
+	}
+
+	return perm;
+}
+
+//
+// Simple JSON string extraction for ussCreateHandler.
+// Operates on EBCDIC string (body already converted).
+// Returns 0 on success, -1 if key not found.
+//
+
+__asm__("\n&FUNC    SETC 'uss_json_str'");
+static int
+uss_extract_json_string(const char *json, const char *key,
+                        char *out, size_t outlen)
+{
+	char search[64];
+	char *pos, *val_start, *val_end;
+	size_t len;
+
+	snprintf(search, sizeof(search), "\"%s\"", key);
+	pos = strstr(json, search);
+	if (!pos) return -1;
+
+	pos += strlen(search);
+	while (*pos == ' ' || *pos == '\t') pos++;
+	if (*pos != ':') return -1;
+	pos++;
+	while (*pos == ' ' || *pos == '\t') pos++;
+	if (*pos != '"') return -1;
+	pos++;
+	val_start = pos;
+
+	val_end = strchr(val_start, '"');
+	if (!val_end) return -1;
+
+	len = val_end - val_start;
+	if (len >= outlen) len = outlen - 1;
+	memcpy(out, val_start, len);
+	out[len] = '\0';
+	return 0;
+}
+
+//
+// ussCreateHandler — POST /zosmf/restfiles/fs/{*filepath}
+//
+// Creates a file or directory from JSON body:
+//   {"type":"file|directory|dir","mode":"rwxr-xr-x"}
+//
+// - type "directory" or "dir" → ufs_mkdir()
+// - type "file" → ufs_fopen("w") + ufs_fclose()
+// - mode is optional (default: 0755)
+// - Permission set via ufs_set_create_perm() before create, restored after
+//
+
+__asm__("\n&FUNC    SETC 'UAPI0004'");
 int ussCreateHandler(Session *session)
 {
-	return sendErrorResponse(session, 501, 10, 8, 1,
-		"USS create not yet implemented", NULL, 0);
+	int rc = 0;
+	int free_body = 0;
+	int urc = 0;
+	char *raw_path = NULL;
+	char abspath[UFS_PATH_MAX];
+	char *body = NULL;
+	size_t body_len = 0;
+	char type_str[16] = {0};
+	char mode_str[16] = {0};
+	unsigned int perm = 0755;
+	unsigned int old_perm;
+	unsigned int parsed;
+	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	UFSDDESC *dd = NULL;
+
+	// Get filepath from path variable and build absolute path
+	raw_path = getPathParam(session, "filepath");
+	if (!raw_path || raw_path[0] == '\0') {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing file path", NULL, 0);
+	}
+
+	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Path name too long", NULL, 0);
+	}
+
+	// Read request body — try POST_STRING first (HTTPD pre-reads when
+	// Content-Type is set), fall back to socket read otherwise.
+	// POST_STRING is already in EBCDIC; socket data needs conversion.
+	body = (char *)http_get_env(session->httpc,
+		(const UCHAR *)"POST_STRING");
+
+	if (body && *body) {
+		body_len = strlen(body);
+	} else {
+		body = uss_read_body(session, &body_len);
+		if (!body) {
+			return -1;  // uss_read_body already sent error response
+		}
+		free_body = 1;
+
+		// Convert from ASCII to EBCDIC for JSON parsing
+		mvsmf_atoe((unsigned char *)body, (int)body_len);
+	}
+
+	// Parse required "type" field
+	if (uss_extract_json_string(body, "type", type_str, sizeof(type_str)) < 0) {
+		if (free_body) free(body);
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing or invalid 'type' in request body", NULL, 0);
+	}
+
+	// Validate type
+	if (strcmp(type_str, "file") != 0 &&
+	    strcmp(type_str, "directory") != 0 &&
+	    strcmp(type_str, "dir") != 0) {
+		if (free_body) free(body);
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Invalid 'type': must be 'file', 'directory', or 'dir'",
+			NULL, 0);
+	}
+
+	// Parse optional "mode" field
+	if (uss_extract_json_string(body, "mode", mode_str, sizeof(mode_str)) == 0) {
+		parsed = uss_parse_mode(mode_str);
+		if (parsed != 0) {
+			perm = parsed;
+		}
+	}
+
+	if (free_body) free(body);
+	body = NULL;
+
+	// Open UFS session
+	ufs = uss_open_session(session);
+	if (!ufs) {
+		return -1;
+	}
+
+	// Set create permission and save old value
+	old_perm = ufs_set_create_perm(ufs, perm);
+
+	if (strcmp(type_str, "file") == 0) {
+		// Check if file already exists (ufs_fopen "w" would truncate)
+		fp = ufs_fopen(ufs, abspath, "r");
+		if (fp) {
+			ufs_fclose(&fp);
+			fp = NULL;
+			ufs_set_create_perm(ufs, old_perm);
+			rc = sendErrorResponse(session, 400, 4, 8, 1,
+				"File or directory already exists", NULL, 0);
+			goto quit;
+		}
+
+		// Create file: open for write then immediately close
+		fp = ufs_fopen(ufs, abspath, "w");
+		if (!fp) {
+			urc = ufs_last_rc(ufs);
+			ufs_set_create_perm(ufs, old_perm);
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+		if (fp->error != UFSD_RC_OK) {
+			urc = fp->error;
+			ufs_fclose(&fp);
+			fp = NULL;
+			ufs_set_create_perm(ufs, old_perm);
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+		ufs_fclose(&fp);
+		fp = NULL;
+	} else {
+		// Check if directory already exists via diropen
+		dd = ufs_diropen(ufs, abspath, NULL);
+		if (dd) {
+			ufs_dirclose(&dd);
+			dd = NULL;
+			ufs_set_create_perm(ufs, old_perm);
+			rc = sendErrorResponse(session, 400, 4, 8, 1,
+				"File or directory already exists", NULL, 0);
+			goto quit;
+		}
+
+		// Create directory
+		rc = ufs_mkdir(ufs, abspath);
+		if (rc != 0) {
+			urc = ufs_last_rc(ufs);
+			ufs_set_create_perm(ufs, old_perm);
+			if (urc == 0) urc = UFSD_RC_NOFILE;
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+	}
+
+	// Restore default permission
+	ufs_set_create_perm(ufs, old_perm);
+
+	// Success — 201 Created
+	rc = sendDefaultHeaders(session, 201, HTTP_CONTENT_TYPE_NONE, 0);
+
+quit:
+	if (ufs) {
+		ufsfree(&ufs);
+		session->ufs = NULL;
+	}
+
+	return rc;
 }
 
 int ussDeleteHandler(Session *session)

@@ -3,9 +3,10 @@
 # mvsMF USS File REST API - curl test suite
 #
 # Tests USS (Unix System Services) file endpoints:
-#   1. GET /zosmf/restfiles/fs?path=<dir>          (list directory)
-#   2. GET /zosmf/restfiles/fs/{filepath}           (read file)
-#   3. PUT /zosmf/restfiles/fs/{filepath}           (write file)
+#   1. GET  /zosmf/restfiles/fs?path=<dir>          (list directory)
+#   2. GET  /zosmf/restfiles/fs/{filepath}          (read file)
+#   3. PUT  /zosmf/restfiles/fs/{filepath}          (write file)
+#   4. POST /zosmf/restfiles/fs/{filepath}          (create file/dir)
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -352,6 +353,129 @@ else
 	echo ""
 	echo "--- Write file tests ---"
 	skip "write file: USS_TEST_FILE not set in .env, skipping write tests"
+fi
+
+# =========================================================================
+# Create file/directory tests
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	CREATE_DIR="$(dirname "$TEST_FILE")/curl-create-test-dir"
+	CREATE_FILE="$(dirname "$TEST_FILE")/curl-create-test-file.txt"
+
+	echo ""
+	echo "--- Create directory ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
+
+	assert_http_status "201" "$HTTP_CODE" "create directory ${CREATE_DIR}"
+
+	# --- Create directory that already exists → 409 ---
+	echo ""
+	echo "--- Create directory (already exists) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
+
+	assert_http_status "400" "$HTTP_CODE" "create duplicate directory returns 400"
+
+	# --- Create file ---
+	echo ""
+	echo "--- Create file ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}")
+
+	assert_http_status "201" "$HTTP_CODE" "create file ${CREATE_FILE}"
+
+	# --- Create file with custom mode ---
+	echo ""
+	echo "--- Create file with mode ---"
+
+	CREATE_FILE_MODE="$(dirname "$TEST_FILE")/curl-create-mode.txt"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file","mode":"rw-r--r--"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}")
+
+	assert_http_status "201" "$HTTP_CODE" "create file with mode rw-r--r--"
+
+	# --- Create with "dir" alias ---
+	echo ""
+	echo "--- Create directory (dir alias) ---"
+
+	CREATE_DIR_ALIAS="$(dirname "$TEST_FILE")/curl-create-test-dir2"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"dir"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}")
+
+	assert_http_status "201" "$HTTP_CODE" "create directory with type=dir"
+
+	# --- Error: missing type field ---
+	echo ""
+	echo "--- Create error cases ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"rwxr-xr-x"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-no-type")
+
+	assert_http_status "400" "$HTTP_CODE" "create without type returns 400"
+
+	# --- Error: invalid type ---
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"symlink"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-bad-type")
+
+	assert_http_status "400" "$HTTP_CODE" "create with invalid type returns 400"
+
+	# --- Error: parent not found ---
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
+
+	# UFSD returns ROFS (read-only filesystem) for paths outside writable mounts
+	if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
+		pass "create in non-existent parent returns error (HTTP $HTTP_CODE)"
+	else
+		fail "create in non-existent parent" "expected HTTP 403 or 404, got $HTTP_CODE"
+	fi
+
+	# --- Cleanup ---
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}" >/dev/null 2>&1 || true
+else
+	echo ""
+	echo "--- Create file/directory tests ---"
+	skip "create: USS_TEST_FILE not set in .env, skipping create tests"
 fi
 
 # =========================================================================

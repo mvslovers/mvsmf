@@ -91,11 +91,13 @@ struct session {
     char *session_id;      /**< Unique session identifier */
     time_t created_at;     /**< Session creation timestamp */
     time_t last_accessed;  /**< Last access timestamp */
+    int headers_sent;      /**< Non-zero after HTTP headers written to socket */
     // Resource tracking for ESTAE abend recovery
     FILE *open_files[MAX_SESSION_FILES];  /**< Tracked FILE handles */
     int open_file_count;                  /**< Number of tracked files */
     void *ufs;             /**< UFS session (opaque, libufs UFS *) */
     void *ufs_file;        /**< UFS file handle (opaque, libufs UFSFILE *) */
+    void (*ufs_cleanup)(struct session *s); /**< UFS cleanup callback (set by ussapi) */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**
@@ -156,8 +158,9 @@ int handle_request(Router *router, Session *session) asm("RTR0005");
 
 /**
  * @brief Register a FILE handle for ESTAE recovery cleanup
+ * @return 0 on success, -1 if tracking table is full
  */
-void session_register_file(Session *session, FILE *fp) asm("RTR0006");
+int session_register_file(Session *session, FILE *fp) asm("RTR0006");
 
 /**
  * @brief Unregister a FILE handle after successful fclose
@@ -167,7 +170,7 @@ void session_unregister_file(Session *session, FILE *fp) asm("RTR0007");
 /**
  * @brief Unregister and close a tracked FILE handle
  */
-void session_fclose(Session *session, FILE *fp) asm("RTR0009");
+void session_fclose(Session *session, FILE *fp) asm("RTR0008");
 
 /**
  * @brief Close all tracked resources (ESTAE recovery)
@@ -175,6 +178,6 @@ void session_fclose(Session *session, FILE *fp) asm("RTR0009");
  * Closes all registered FILE handles, UFS file handles and UFS sessions.
  * Called by the router after catching a handler abend.
  */
-void session_cleanup(Session *session) asm("RTR0008");
+void session_cleanup(Session *session) asm("RTR0009");
 
 #endif // ROUTER_H

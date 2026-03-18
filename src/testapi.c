@@ -18,6 +18,7 @@ int testHandler(Session *session)
 	fn = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_FN");
 	if (!fn) fn = "help";
 
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc,
 		"Content-Type: application/json\r\n\r\n")) < 0) goto quit;
@@ -100,6 +101,7 @@ int testWildcardHandler(Session *session)
 		(const UCHAR *) "HTTP_filepath");
 	if (!filepath) filepath = "(null)";
 
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit2;
 	if ((rc = http_printf(session->httpc,
 		"Content-Type: application/json\r\n\r\n")) < 0) goto quit2;

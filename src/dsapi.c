@@ -74,7 +74,8 @@ static char* allocate_buffer(FILE* fp, int* rc) {
 // Helper function for HTTP headers
 static int send_standard_headers(Session *session, const char* content_type) {
     int rc = 0;
-    
+
+    session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, HTTP_OK)) < 0) return rc;
     if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) return rc;
     if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) return rc;
@@ -626,7 +627,8 @@ int datasetListHandler(Session *session)
 
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
-	
+
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
@@ -849,6 +851,9 @@ int datasetPutHandler(Session *session)
         session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
+    // NOTE: record_buffer is not tracked by session for ESTAE recovery.
+    // On abend, this allocation leaks. Acceptable since abends are rare
+    // and the leak is bounded by eff_lrecl bytes per occurrence.
     record_buffer = calloc(1, eff_lrecl);
     if (!record_buffer) {
         session_fclose(session, fp);
@@ -1108,6 +1113,7 @@ int datasetPutHandler(Session *session)
     fp = NULL;
 
     /* Send response */
+    session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, 204)) < 0) {
         wtof("MVSMF48E Error sending response status: rc=%d", rc);
         return rc;
@@ -1163,6 +1169,7 @@ int memberListHandler(Session *session)
 
 	pdslist = __listpd(dsname, NULL);
 
+	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
@@ -1565,6 +1572,7 @@ int memberPutHandler(Session *session)
     fp = NULL;
 
     // Send response
+    session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, 204)) < 0) {
         wtof("MVSMF20E Error sending response status: rc=%d", rc);
         return rc;

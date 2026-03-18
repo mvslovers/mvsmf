@@ -456,7 +456,12 @@ if [ -n "$TEST_FILE" ]; then
 		-d '{"type":"file"}' \
 		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
 
-	assert_http_status "404" "$HTTP_CODE" "create in non-existent parent returns 404"
+	# UFSD returns ROFS (read-only filesystem) for paths outside writable mounts
+	if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
+		pass "create in non-existent parent returns error (HTTP $HTTP_CODE)"
+	else
+		fail "create in non-existent parent" "expected HTTP 403 or 404, got $HTTP_CODE"
+	fi
 
 	# --- Cleanup ---
 	curl -s -X DELETE -u "$AUTH" \

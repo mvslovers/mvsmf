@@ -37,7 +37,10 @@ ufsd_rc_to_http(int rc)
 	case UFSD_RC_BADFD:       return 500;
 	case UFSD_RC_NOTEMPTY:    return 409;
 	case UFSD_RC_NAMETOOLONG: return 414;
-	default:                  return 500;
+	case UFSD_RC_ROFS:        return 403;
+	default:
+		wtof("MVSMF83D ufsd_rc_to_http: unmapped rc=%d, defaulting to 500", rc);
+		return 500;
 	}
 }
 
@@ -56,6 +59,7 @@ ufsd_rc_to_category(int rc)
 	case UFSD_RC_BADFD:       return 10; /* server    */
 	case UFSD_RC_NOTEMPTY:    return 4;  /* conflict  */
 	case UFSD_RC_NAMETOOLONG: return 2;  /* bad request */
+	case UFSD_RC_ROFS:        return 4;  /* forbidden */
 	default:                  return 10; /* server    */
 	}
 }
@@ -76,6 +80,7 @@ ufsd_rc_message(int rc)
 	case UFSD_RC_BADFD:       return "Bad file descriptor";
 	case UFSD_RC_NOTEMPTY:    return "Directory not empty";
 	case UFSD_RC_NAMETOOLONG: return "Path name too long";
+	case UFSD_RC_ROFS:        return "Read-only file system";
 	default:                  return "Unknown UFSD error";
 	}
 }
@@ -869,6 +874,7 @@ int ussCreateHandler(Session *session)
 	rc = sendDefaultHeaders(session, 201, HTTP_CONTENT_TYPE_NONE, 0);
 
 quit:
+	wtof("MVSMF83D quit: rc=%d headers_sent=%d", rc, session->headers_sent);
 	if (ufs) {
 		ufsfree(&ufs);
 		session->ufs = NULL;

@@ -38,9 +38,7 @@ ufsd_rc_to_http(int rc)
 	case UFSD_RC_NOTEMPTY:    return 400;  /* 409 not supported by HTTPD */
 	case UFSD_RC_NAMETOOLONG: return 400;  /* 414 not supported by HTTPD */
 	case UFSD_RC_ROFS:        return 403;
-	default:
-		wtof("MVSMF83D ufsd_rc_to_http: unmapped rc=%d, defaulting to 500", rc);
-		return 500;
+	default:                  return 500;
 	}
 }
 
@@ -717,8 +715,6 @@ int ussCreateHandler(Session *session)
 	UFSFILE *fp = NULL;
 	UFSDDESC *dd = NULL;
 
-	wtof("MVSMF83D ussCreateHandler entered");
-
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
 	if (!raw_path || raw_path[0] == '\0') {
@@ -727,11 +723,9 @@ int ussCreateHandler(Session *session)
 	}
 
 	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
-		return sendErrorResponse(session, 414, 2, 8, 1,
+		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Path name too long", NULL, 0);
 	}
-
-	wtof("MVSMF83D path=%s", abspath);
 
 	// Read request body — try POST_STRING first (HTTPD pre-reads when
 	// Content-Type is set), fall back to socket read otherwise.
@@ -741,7 +735,6 @@ int ussCreateHandler(Session *session)
 
 	if (body && *body) {
 		body_len = strlen(body);
-		wtof("MVSMF83D POST_STRING len=%d", (int)body_len);
 	} else {
 		body = uss_read_body(session, &body_len);
 		if (!body) {
@@ -781,28 +774,19 @@ int ussCreateHandler(Session *session)
 	if (free_body) free(body);
 	body = NULL;
 
-	wtof("MVSMF83D type=%s perm=%04o", type_str, perm);
-
 	// Open UFS session
 	ufs = uss_open_session(session);
 	if (!ufs) {
 		return -1;
 	}
 
-	wtof("MVSMF83D UFS session opened");
-
 	// Set create permission and save old value
 	old_perm = ufs_set_create_perm(ufs, perm);
 
-	wtof("MVSMF83D set_create_perm done, old=%04o", old_perm);
-
 	if (strcmp(type_str, "file") == 0) {
-		wtof("MVSMF83D creating file: %s", abspath);
-		wtof("MVSMF83D before fopen(r) existence check");
+		// Check if file already exists (ufs_fopen "w" would truncate)
 		fp = ufs_fopen(ufs, abspath, "r");
-		wtof("MVSMF83D fopen(r) returned %p", (void *)fp);
 		if (fp) {
-			wtof("MVSMF83D file exists, closing and returning 409");
 			ufs_fclose(&fp);
 			fp = NULL;
 			ufs_set_create_perm(ufs, old_perm);
@@ -811,12 +795,10 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 
-		wtof("MVSMF83D before fopen(w) create");
+		// Create file: open for write then immediately close
 		fp = ufs_fopen(ufs, abspath, "w");
-		wtof("MVSMF83D fopen(w) returned %p", (void *)fp);
 		if (!fp) {
 			urc = ufs_last_rc(ufs);
-			wtof("MVSMF83D fopen(w) failed, urc=%d", urc);
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -836,12 +818,9 @@ int ussCreateHandler(Session *session)
 		ufs_fclose(&fp);
 		fp = NULL;
 	} else {
-		wtof("MVSMF83D creating directory: %s", abspath);
-		wtof("MVSMF83D before diropen existence check");
+		// Check if directory already exists via diropen
 		dd = ufs_diropen(ufs, abspath, NULL);
-		wtof("MVSMF83D diropen returned %p", (void *)dd);
 		if (dd) {
-			wtof("MVSMF83D dir exists, closing and returning 409");
 			ufs_dirclose(&dd);
 			dd = NULL;
 			ufs_set_create_perm(ufs, old_perm);
@@ -850,13 +829,10 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 
-		wtof("MVSMF83D before mkdir");
+		// Create directory
 		rc = ufs_mkdir(ufs, abspath);
-		wtof("MVSMF83D mkdir returned rc=%d", rc);
 		if (rc != 0) {
 			urc = ufs_last_rc(ufs);
-			wtof("MVSMF85E ufs_mkdir(%s) failed: rc=%d urc=%d",
-				abspath, rc, urc);
 			ufs_set_create_perm(ufs, old_perm);
 			if (urc == 0) urc = UFSD_RC_NOFILE;
 			rc = sendErrorResponse(session,
@@ -870,11 +846,9 @@ int ussCreateHandler(Session *session)
 	ufs_set_create_perm(ufs, old_perm);
 
 	// Success — 201 Created
-	wtof("MVSMF83D create succeeded, sending 201");
 	rc = sendDefaultHeaders(session, 201, HTTP_CONTENT_TYPE_NONE, 0);
 
 quit:
-	wtof("MVSMF83D quit: rc=%d headers_sent=%d", rc, session->headers_sent);
 	if (ufs) {
 		ufsfree(&ufs);
 		session->ufs = NULL;

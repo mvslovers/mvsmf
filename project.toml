@@ -20,7 +20,7 @@ dsorg = "PO"
 recfm = "FB"
 lrecl = 80
 blksize = 19040
-space = ["TRK", 10, 5, 15]
+space = ["TRK", 20, 10, 15]
 
 [mvs.build.datasets.ncalib]
 suffix = "NCALIB"
@@ -37,6 +37,12 @@ recfm = "U"
 lrecl = 0
 blksize = 15040
 space = ["TRK", 20, 10, 20]
+
+[mvs.install]
+naming = "fixed"
+
+[mvs.install.datasets.syslmod]
+name = "'IBMUSER.HTTPD.V3R3M1D.LOAD'"
 
 [dependencies]
 "mvslovers/crent370" = ">=1.0.6"

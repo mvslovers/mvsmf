@@ -698,6 +698,7 @@ int ussCreateHandler(Session *session)
 {
 	int rc = 0;
 	int free_body = 0;
+	int urc = 0;
 	char *raw_path = NULL;
 	char abspath[UFS_PATH_MAX];
 	char *body = NULL;
@@ -706,7 +707,10 @@ int ussCreateHandler(Session *session)
 	char mode_str[16] = {0};
 	unsigned int perm = 0755;
 	unsigned int old_perm;
+	unsigned int parsed;
 	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	UFSDDESC *dd = NULL;
 
 	wtof("MVSMF83D ussCreateHandler entered");
 
@@ -763,7 +767,7 @@ int ussCreateHandler(Session *session)
 
 	// Parse optional "mode" field
 	if (uss_extract_json_string(body, "mode", mode_str, sizeof(mode_str)) == 0) {
-		unsigned int parsed = uss_parse_mode(mode_str);
+		parsed = uss_parse_mode(mode_str);
 		if (parsed != 0) {
 			perm = parsed;
 		}
@@ -790,9 +794,10 @@ int ussCreateHandler(Session *session)
 	if (strcmp(type_str, "file") == 0) {
 		wtof("MVSMF83D creating file: %s", abspath);
 		// Check if file already exists (ufs_fopen "w" would truncate)
-		UFSFILE *fp = ufs_fopen(ufs, abspath, "r");
+		fp = ufs_fopen(ufs, abspath, "r");
 		if (fp) {
 			ufs_fclose(&fp);
+			fp = NULL;
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session, 409, 4, 8, 1,
 				"File or directory already exists", NULL, 0);
@@ -802,7 +807,7 @@ int ussCreateHandler(Session *session)
 		// Create file: open for write then immediately close
 		fp = ufs_fopen(ufs, abspath, "w");
 		if (!fp) {
-			int urc = ufs_last_rc(ufs);
+			urc = ufs_last_rc(ufs);
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -810,8 +815,9 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 		if (fp->error != UFSD_RC_OK) {
-			int urc = fp->error;
+			urc = fp->error;
 			ufs_fclose(&fp);
+			fp = NULL;
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session,
 				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -819,12 +825,14 @@ int ussCreateHandler(Session *session)
 			goto quit;
 		}
 		ufs_fclose(&fp);
+		fp = NULL;
 	} else {
 		wtof("MVSMF83D creating directory: %s", abspath);
 		// Check if directory already exists via diropen
-		UFSDDESC *dd = ufs_diropen(ufs, abspath, NULL);
+		dd = ufs_diropen(ufs, abspath, NULL);
 		if (dd) {
 			ufs_dirclose(&dd);
+			dd = NULL;
 			ufs_set_create_perm(ufs, old_perm);
 			rc = sendErrorResponse(session, 409, 4, 8, 1,
 				"File or directory already exists", NULL, 0);
@@ -834,7 +842,7 @@ int ussCreateHandler(Session *session)
 		// Create directory
 		rc = ufs_mkdir(ufs, abspath);
 		if (rc != 0) {
-			int urc = ufs_last_rc(ufs);
+			urc = ufs_last_rc(ufs);
 			wtof("MVSMF85E ufs_mkdir(%s) failed: rc=%d urc=%d",
 				abspath, rc, urc);
 			ufs_set_create_perm(ufs, old_perm);

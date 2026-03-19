@@ -123,7 +123,7 @@ HTTP Request → cgxstart.c (CGI init) → mvsmf.c (router setup)
 - **router.c**: HTTP routing framework. Pattern-based URL matching with `{param-name}` path parameters, percent-decoding, middleware chain execution.
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
-- **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. *(Phase 1 in progress)*
+- **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **infoapi.c**: `/zosmf/info` endpoint (no auth required).
 - **authmw.c**: Basic Auth middleware using RACF/ACEE for security context.
 - **json.c**: JSON response builder with dynamic buffer management.
@@ -139,7 +139,7 @@ All endpoints are under `/zosmf/`:
 - `/zosmf/info` — system info (unauthenticated)
 - `/zosmf/restfiles/ds/...` — dataset operations (16 routes)
 - `/zosmf/restjobs/jobs/...` — job operations (6 routes)
-- `/zosmf/restfiles/fs/...` — USS file operations (5 routes, Phase 1 in progress)
+- `/zosmf/restfiles/fs/...` — USS file operations (5 routes)
 
 Endpoint documentation lives in `doc/endpoints/`.
 
@@ -197,18 +197,18 @@ The `receive_raw_data()` function in `jobsapi.c` works around this by reading on
 
 ## USS/UFS Endpoints
 
-> **Spec:** `doc/uss-spec.md` — read before working on any `uss-phase1` issue.
-> **Status:** Phase 1 in progress (Issues #77–#89)
-
-The following documents the design for USS/UFS file system endpoints.
+> **Spec:** `doc/uss-spec.md` — the authoritative architecture and design document.
+> **Status:** Phase 1 complete (Issues #77–#89). chtag utility implemented (#106).
 
 ### Architecture
 
-- All USS handlers will live in `ussapi.c` / `ussapi.h`
-- UFS session lifecycle: ALWAYS use `ufsnew()` at handler start, `ufsfree()` before return
+- All USS handlers live in `ussapi.c` / `ussapi.h`
+- UFS session lifecycle: use `uss_open_session()` helper at handler start, `ufsfree()` before return
+- ESTAE recovery: `uss_cleanup_callback()` auto-closes UFS handles on abend (via `session->ufs_cleanup`)
 - Route pattern `{*filepath}` captures entire remaining path including `/` characters
-- PUT to /fs/ dispatches by Content-Type: application/json → utilities (Phase 2), else → write
-- libufs dependency is managed via mbt (project.toml)
+- PUT to /fs/ dispatches by Content-Type: application/json → USS utilities handler, else → file write
+- chtag utility: `list` returns "untagged" stub, `set`/`remove` are accepted no-ops
+- libufs/ufsd dependency is managed via mbt (project.toml)
 
 ### Handler Naming Convention and ASM Labels
 
@@ -229,37 +229,43 @@ The following documents the design for USS/UFS file system endpoints.
 
 ### UFS Session Pattern (use in EVERY handler)
 
+Use the `uss_open_session()` helper which handles ufsnew(), ACEE, and ESTAE registration:
+
 ```c
 int ussXxxHandler(Session *session) {
-    UFS *ufs = ufsnew();
-    if (!ufs) {
-        return sendErrorResponse(session, 503, 1, 8, 1,
-            "UFSD subsystem not available", NULL, 0);
-    }
-
-    /* Optional: pass RACF ACEE for future auth support */
-    if (session->acee) {
-        ufs_set_acee(ufs, session->acee);
-    }
+    UFS *ufs = uss_open_session(session);
+    if (!ufs) return -1;  // 503 already sent
 
     /* ... handler logic ... */
 
-    ufsfree(&ufs);  /* ALWAYS cleanup, even on error paths */
+    ufsfree(&ufs);
+    session->ufs = NULL;  // clear ESTAE tracking
     return rc;
 }
 ```
 
 ### Error Code Mapping (UFSD_RC_* → HTTP)
 
-Use the ufsd_rc_to_http() and ufsd_rc_to_category() mapping functions.
-ALWAYS call sendErrorResponse() with the mapped values. Key mappings:
+Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` mapping functions
+in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
 
-- UFSD_RC_NOFILE (28) → 404
-- UFSD_RC_EXIST (32) → 409
-- UFSD_RC_NOTDIR (36) / UFSD_RC_ISDIR (40) → 400
-- UFSD_RC_NOSPACE (44) / UFSD_RC_NOINODES (48) → 507
-- UFSD_RC_IO (52) → 500
-- UFSD_RC_NOTEMPTY (60) → 409
+**Note:** HTTPD does not support HTTP 409, 414, or 507 status codes. These are
+mapped to the closest supported alternative (400 or 500).
+
+| UFSD RC | Constant | HTTP | Category | Description |
+|---------|----------|------|----------|-------------|
+| 0  | UFSD_RC_OK       | 200 | —  | Success |
+| 28 | UFSD_RC_NOFILE   | 404 | 6  | Not found |
+| 32 | UFSD_RC_EXIST    | 400 | 4  | Already exists |
+| 36 | UFSD_RC_NOTDIR   | 400 | 2  | Not a directory |
+| 40 | UFSD_RC_ISDIR    | 400 | 2  | Is a directory |
+| 44 | UFSD_RC_NOSPACE  | 500 | 8  | No space left |
+| 48 | UFSD_RC_NOINODES | 500 | 8  | No inodes available |
+| 52 | UFSD_RC_IO       | 500 | 10 | I/O error |
+| 56 | UFSD_RC_BADFD    | 500 | 10 | Bad file descriptor |
+| 60 | UFSD_RC_NOTEMPTY | 400 | 4  | Directory not empty |
+| 64 | UFSD_RC_NAMETOOLONG | 400 | 2 | Path name too long |
+| 68 | UFSD_RC_ROFS     | 403 | 4  | Read-only file system |
 
 ### I/O Pattern for File Read
 
@@ -277,17 +283,23 @@ while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
 ### I/O Pattern for File Write
 
 ```c
-char *body = receive_raw_data(session);  /* DO NOT MODIFY this function */
-int body_len = get_content_length(session);
+char *body = NULL;
+size_t body_len = 0;
+
+// Supports Content-Length and Transfer-Encoding: chunked
+if (read_request_content(session, &body, &body_len) < 0) {
+    return sendErrorResponse(session, 400, ...);
+}
 
 if (is_text_mode) {
-    mvsmf_atoe((UCHAR *)body, body_len);  /* ASCII → EBCDIC */
+    mvsmf_atoe((unsigned char *)body, (int)body_len);  /* ASCII → EBCDIC */
 }
 
 UFSFILE *fp = ufs_fopen(ufs, filepath, "w");
-if (!fp) { /* handle error using UFSFILE error field */ }
-ufs_fwrite(body, 1, body_len, fp);
+if (!fp) { /* handle error */ }
+ufs_fwrite(body, 1, (UINT32)body_len, fp);
 ufs_fclose(&fp);
+free(body);
 ```
 
 ### Recursive Delete Pattern
@@ -319,7 +331,7 @@ static int recursive_delete(UFS *ufs, const char *path) {
 ### File Size Limit
 
 - Max file size: 64 KB (UFSD Phase 1 — direct blocks only)
-- ufs_fwrite beyond 64K → UFSD_RC_NOSPACE → HTTP 507
+- ufs_fwrite beyond 64K → UFSD_RC_NOSPACE → HTTP 500
 
 ### Off-Limits
 

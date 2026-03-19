@@ -919,10 +919,13 @@ int ussDeleteHandler(Session *session)
 	int rc = 0;
 	int urc;
 	int is_recursive = 0;
+	int is_dir = 0;
 	char *raw_path = NULL;
 	char abspath[UFS_PATH_MAX];
 	char *option = NULL;
 	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	UFSDDESC *dd = NULL;
 
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
@@ -948,19 +951,54 @@ int ussDeleteHandler(Session *session)
 		return -1;
 	}
 
-	// Try file delete first
-	rc = ufs_remove(ufs, abspath);
-	if (rc == 0) {
-		// File deleted successfully
-		rc = sendDefaultHeaders(session, 204, HTTP_CONTENT_TYPE_NONE, 0);
-		goto quit;
+	// Probe whether the path is a file or directory.
+	// ufs_remove() may return 0 even for non-existent paths,
+	// so we must verify existence before attempting delete.
+	fp = ufs_fopen(ufs, abspath, "r");
+	if (fp) {
+		if (fp->error == UFSD_RC_OK) {
+			// It's a regular file — close and delete
+			ufs_fclose(&fp);
+			rc = ufs_remove(ufs, abspath);
+			if (rc == 0) {
+				rc = sendDefaultHeaders(session, 204,
+					HTTP_CONTENT_TYPE_NONE, 0);
+				goto quit;
+			}
+			urc = ufs_last_rc(ufs);
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+		// fopen succeeded but error set (e.g. ISDIR) — check below
+		urc = fp->error;
+		ufs_fclose(&fp);
+		fp = NULL;
+		if (urc == UFSD_RC_ISDIR) {
+			is_dir = 1;
+		} else {
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+	} else {
+		// fopen returned NULL — check if it's a directory
+		dd = ufs_diropen(ufs, abspath, NULL);
+		if (dd) {
+			ufs_dirclose(&dd);
+			is_dir = 1;
+		} else {
+			// Neither file nor directory — not found
+			rc = sendErrorResponse(session, 404, 6, 8, 1,
+				"File or directory not found", NULL, 0);
+			goto quit;
+		}
 	}
 
-	// Check the error code
-	urc = ufs_last_rc(ufs);
-
-	if (urc == UFSD_RC_ISDIR) {
-		// It's a directory — use rmdir or recursive delete
+	// Path is a directory — use rmdir or recursive delete
+	if (is_dir) {
 		if (is_recursive) {
 			rc = uss_recursive_delete(ufs, abspath);
 		} else {
@@ -968,18 +1006,16 @@ int ussDeleteHandler(Session *session)
 		}
 
 		if (rc == 0) {
-			rc = sendDefaultHeaders(session, 204, HTTP_CONTENT_TYPE_NONE, 0);
+			rc = sendDefaultHeaders(session, 204,
+				HTTP_CONTENT_TYPE_NONE, 0);
 			goto quit;
 		}
 
-		// rmdir/recursive failed — get the error code
 		urc = ufs_last_rc(ufs);
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
 	}
-
-	// Send error response with mapped HTTP status
-	rc = sendErrorResponse(session,
-		ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
-		ufsd_rc_message(urc), NULL, 0);
 
 quit:
 	if (ufs) {

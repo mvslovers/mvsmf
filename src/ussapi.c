@@ -857,8 +857,171 @@ quit:
 	return rc;
 }
 
+//
+// Recursively delete a directory and all its contents.
+// Walks the directory tree depth-first: removes files via ufs_remove(),
+// recurses into subdirectories, then removes the now-empty directory.
+//
+
+__asm__("\n&FUNC    SETC 'uss_rec_del'");
+static int
+uss_recursive_delete(UFS *ufs, const char *path)
+{
+	UFSDDESC *dd = NULL;
+	UFSDLIST *entry = NULL;
+	char fullpath[UFS_PATH_MAX];
+	int rc;
+
+	dd = ufs_diropen(ufs, path, NULL);
+	if (!dd) return -1;
+
+	while ((entry = ufs_dirread(dd)) != NULL) {
+		if (strcmp(entry->name, ".") == 0 ||
+			strcmp(entry->name, "..") == 0) {
+			continue;
+		}
+
+		snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->name);
+
+		if (entry->attr[0] == 'd') {
+			rc = uss_recursive_delete(ufs, fullpath);
+			if (rc != 0) {
+				ufs_dirclose(&dd);
+				return rc;
+			}
+		} else {
+			rc = ufs_remove(ufs, fullpath);
+			if (rc != 0) {
+				ufs_dirclose(&dd);
+				return rc;
+			}
+		}
+	}
+
+	ufs_dirclose(&dd);
+	return ufs_rmdir(ufs, path);
+}
+
+//
+// ussDeleteHandler — DELETE /zosmf/restfiles/fs/{*filepath}
+//
+// Deletes a file or directory. Strategy:
+// 1. Try ufs_remove() first (works for regular files)
+// 2. If ISDIR (RC 40): use ufs_rmdir() or recursive_delete()
+//    depending on X-IBM-Option: recursive header
+//
+// Response: 204 No Content on success
+//
+
+__asm__("\n&FUNC    SETC 'UAPI0005'");
 int ussDeleteHandler(Session *session)
 {
-	return sendErrorResponse(session, 501, 10, 8, 1,
-		"USS delete not yet implemented", NULL, 0);
+	int rc = 0;
+	int urc;
+	int is_recursive = 0;
+	int is_dir = 0;
+	char *raw_path = NULL;
+	char abspath[UFS_PATH_MAX];
+	char *option = NULL;
+	UFS *ufs = NULL;
+	UFSFILE *fp = NULL;
+	UFSDDESC *dd = NULL;
+
+	// Get filepath from path variable and build absolute path
+	raw_path = getPathParam(session, "filepath");
+	if (!raw_path || raw_path[0] == '\0') {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing file path", NULL, 0);
+	}
+
+	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Path name too long", NULL, 0);
+	}
+
+	// Check X-IBM-Option header for recursive delete
+	option = getHeaderParam(session, "X-IBM-Option");
+	if (option && strcmp(option, "recursive") == 0) {
+		is_recursive = 1;
+	}
+
+	// Open UFS session
+	ufs = uss_open_session(session);
+	if (!ufs) {
+		return -1;
+	}
+
+	// Probe whether the path is a file or directory.
+	// ufs_remove() may return 0 even for non-existent paths,
+	// so we must verify existence before attempting delete.
+	fp = ufs_fopen(ufs, abspath, "r");
+	if (fp) {
+		if (fp->error == UFSD_RC_OK) {
+			// It's a regular file — close and delete
+			ufs_fclose(&fp);
+			rc = ufs_remove(ufs, abspath);
+			if (rc == 0) {
+				rc = sendDefaultHeaders(session, 204,
+					HTTP_CONTENT_TYPE_NONE, 0);
+				goto quit;
+			}
+			urc = ufs_last_rc(ufs);
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+		// fopen succeeded but error set (e.g. ISDIR) — check below
+		urc = fp->error;
+		ufs_fclose(&fp);
+		fp = NULL;
+		if (urc == UFSD_RC_ISDIR) {
+			is_dir = 1;
+		} else {
+			rc = sendErrorResponse(session,
+				ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+				ufsd_rc_message(urc), NULL, 0);
+			goto quit;
+		}
+	} else {
+		// fopen returned NULL — check if it's a directory
+		dd = ufs_diropen(ufs, abspath, NULL);
+		if (dd) {
+			ufs_dirclose(&dd);
+			is_dir = 1;
+		} else {
+			// Neither file nor directory — not found
+			rc = sendErrorResponse(session, 404, 6, 8, 1,
+				"File or directory not found", NULL, 0);
+			goto quit;
+		}
+	}
+
+	// Path is a directory — use rmdir or recursive delete
+	if (is_dir) {
+		if (is_recursive) {
+			rc = uss_recursive_delete(ufs, abspath);
+		} else {
+			rc = ufs_rmdir(ufs, abspath);
+		}
+
+		if (rc == 0) {
+			rc = sendDefaultHeaders(session, 204,
+				HTTP_CONTENT_TYPE_NONE, 0);
+			goto quit;
+		}
+
+		urc = ufs_last_rc(ufs);
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
+	}
+
+quit:
+	if (ufs) {
+		ufsfree(&ufs);
+		session->ufs = NULL;
+	}
+
+	return rc;
 }

@@ -6,7 +6,8 @@
 #   1. GET  /zosmf/restfiles/fs?path=<dir>          (list directory)
 #   2. GET  /zosmf/restfiles/fs/{filepath}          (read file)
 #   3. PUT  /zosmf/restfiles/fs/{filepath}          (write file)
-#   4. POST /zosmf/restfiles/fs/{filepath}          (create file/dir)
+#   4. POST   /zosmf/restfiles/fs/{filepath}          (create file/dir)
+#   5. DELETE /zosmf/restfiles/fs/{filepath}          (delete file/dir)
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -476,6 +477,111 @@ else
 	echo ""
 	echo "--- Create file/directory tests ---"
 	skip "create: USS_TEST_FILE not set in .env, skipping create tests"
+fi
+
+# =========================================================================
+# Delete file/directory tests
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	DELETE_FILE="$(dirname "$TEST_FILE")/curl-delete-test-file.txt"
+	DELETE_DIR="$(dirname "$TEST_FILE")/curl-delete-test-dir"
+	DELETE_DIR_REC="$(dirname "$TEST_FILE")/curl-delete-test-rec"
+
+	echo ""
+	echo "--- Delete file ---"
+
+	# Create a file to delete
+	curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}" >/dev/null 2>&1
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "delete file ${DELETE_FILE}"
+
+	# Verify it's gone
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}")
+
+	assert_http_status "404" "$HTTP_CODE" "deleted file returns 404"
+
+	# --- Delete non-existent file → 404 ---
+	echo ""
+	echo "--- Delete non-existent file ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/file/path.txt")
+
+	assert_http_status "404" "$HTTP_CODE" "delete non-existent file returns 404"
+
+	# --- Delete empty directory ---
+	echo ""
+	echo "--- Delete empty directory ---"
+
+	# Create a directory to delete
+	curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}" >/dev/null 2>&1
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}")
+
+	assert_http_status "204" "$HTTP_CODE" "delete empty directory"
+
+	# --- Delete non-empty directory without recursive → 400 ---
+	echo ""
+	echo "--- Delete non-empty directory (no recursive) ---"
+
+	# Create dir with a file inside
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}" 2>&1
+
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}/child.txt" 2>&1
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}")
+
+	assert_http_status "400" "$HTTP_CODE" "delete non-empty dir without recursive returns 400"
+
+	# --- Delete non-empty directory with recursive ---
+	echo ""
+	echo "--- Delete non-empty directory (recursive) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		-H "X-IBM-Option: recursive" \
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}")
+
+	assert_http_status "204" "$HTTP_CODE" "delete non-empty dir with recursive"
+
+	# Verify it's gone
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${DELETE_DIR_REC}")
+
+	assert_http_status "404" "$HTTP_CODE" "recursively deleted dir returns 404"
+else
+	echo ""
+	echo "--- Delete file/directory tests ---"
+	skip "delete: USS_TEST_FILE not set in .env, skipping delete tests"
 fi
 
 # =========================================================================

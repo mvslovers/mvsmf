@@ -17,6 +17,10 @@
 #define USS_DATA_TYPE_TEXT   1
 #define USS_DATA_TYPE_BINARY 2
 
+// Forward declarations
+static int uss_extract_json_string(const char *json, const char *key,
+                                   char *out, size_t outlen);
+
 //
 // UFSD RC → HTTP status mapping
 //
@@ -503,11 +507,117 @@ quit:
 }
 
 //
+// chtag handler — responds to chtag list/set/remove requests.
+// UFSD has no file tagging, so list returns "untagged" and
+// set/remove are accepted as no-ops.
+//
+
+__asm__("\n&FUNC    SETC 'uss_chtag'");
+static int
+uss_handle_chtag(Session *session, const char *filepath, const char *body)
+{
+	char action[16] = {0};
+
+	if (uss_extract_json_string(body, "action", action, sizeof(action)) < 0) {
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing or invalid 'action' in chtag request", NULL, 0);
+	}
+
+	if (strcmp(action, "list") == 0) {
+		// Return untagged default — UFSD has no file tagging.
+		// Format matches z/OSMF: {"stdout":["- untagged    T=off <path>"]}
+		char tagline[300];
+		int len;
+
+		snprintf(tagline, sizeof(tagline),
+			"- untagged    T=off %s", filepath);
+
+		session->headers_sent = 1;
+		if (http_resp(session->httpc, 200) < 0) return -1;
+		if (http_printf(session->httpc,
+			"Content-Type: application/json\r\n") < 0) return -1;
+		if (http_printf(session->httpc,
+			"Cache-Control: no-store\r\n") < 0) return -1;
+		if (http_printf(session->httpc,
+			"Pragma: no-cache\r\n") < 0) return -1;
+		if (http_printf(session->httpc,
+			"Access-Control-Allow-Origin: *\r\n") < 0) return -1;
+		if (http_printf(session->httpc, "\r\n") < 0) return -1;
+
+		if (http_printf(session->httpc,
+			"{\"stdout\":[\"%s\"]}\n", tagline) < 0) return -1;
+
+		return 0;
+	}
+
+	if (strcmp(action, "set") == 0 || strcmp(action, "remove") == 0) {
+		// Accept but no-op — UFSD doesn't support file tags
+		return sendDefaultHeaders(session, 200, HTTP_CONTENT_TYPE_NONE, 0);
+	}
+
+	return sendErrorResponse(session, 400, 2, 8, 1,
+		"Invalid chtag action", NULL, 0);
+}
+
+//
+// USS utilities dispatcher — called when PUT has Content-Type: application/json.
+// Dispatches by the "request" field in the JSON body.
+// Currently only "chtag" is implemented; all others return 501.
+//
+
+__asm__("\n&FUNC    SETC 'uss_utilities'");
+static int
+uss_handle_utilities(Session *session, const char *filepath)
+{
+	int rc = 0;
+	int free_body = 0;
+	char *body = NULL;
+	size_t body_len = 0;
+	char request[32] = {0};
+
+	// Read request body — try POST_STRING first (HTTPD pre-reads when
+	// Content-Type is set), fall back to socket read otherwise.
+	body = (char *)http_get_env(session->httpc,
+		(const UCHAR *)"POST_STRING");
+
+	if (body && *body) {
+		body_len = strlen(body);
+	} else {
+		body = uss_read_body(session, &body_len);
+		if (!body) {
+			return -1;  // uss_read_body already sent error response
+		}
+		free_body = 1;
+
+		// Convert from ASCII to EBCDIC for JSON parsing
+		mvsmf_atoe((unsigned char *)body, (int)body_len);
+	}
+
+	// Extract "request" field to determine which utility
+	if (uss_extract_json_string(body, "request", request, sizeof(request)) < 0) {
+		if (free_body) free(body);
+		return sendErrorResponse(session, 400, 2, 8, 1,
+			"Missing or invalid 'request' in JSON body", NULL, 0);
+	}
+
+	if (strcmp(request, "chtag") == 0) {
+		rc = uss_handle_chtag(session, filepath, body);
+		if (free_body) free(body);
+		return rc;
+	}
+
+	// All other utilities: not implemented
+	if (free_body) free(body);
+	return sendErrorResponse(session, 501, 10, 8, 1,
+		"USS utility not implemented", NULL, 0);
+}
+
+//
 // ussPutHandler — PUT /zosmf/restfiles/fs/{*filepath}
 //
 // Writes data to a file via ufs_fopen("w") + ufs_fwrite().
 // Creates the file if it does not exist.
-// Content-Type application/json dispatches to utilities (Phase 2, 501).
+// Content-Type application/json dispatches to utilities handler.
 // Text mode (default): ASCII→EBCDIC before write.
 // Binary mode: raw bytes, no conversion.
 //
@@ -537,11 +647,10 @@ int ussPutHandler(Session *session)
 			"Path name too long", NULL, 0);
 	}
 
-	// Check Content-Type: application/json → utilities (Phase 2)
+	// Check Content-Type: application/json → dispatch to utilities handler
 	content_type = getHeaderParam(session, "Content-Type");
 	if (content_type && strstr(content_type, "application/json") != NULL) {
-		return sendErrorResponse(session, 501, 10, 8, 1,
-			"USS utilities not yet implemented", NULL, 0);
+		return uss_handle_utilities(session, abspath);
 	}
 
 	// Determine data type from X-IBM-Data-Type header

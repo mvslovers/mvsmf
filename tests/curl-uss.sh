@@ -354,7 +354,56 @@ if [ -n "$TEST_FILE" ]; then
 	assert_http_status "204" "$HTTP_CODE" "write file binary mode"
 
 	echo ""
-	echo "--- Write file error cases ---"
+	echo "--- USS utilities: chtag list ---"
+
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"request":"chtag","action":"list"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "chtag list returns 200"
+	assert_json_field_exists "$BODY" ".stdout" "chtag list: stdout array present"
+
+	STDOUT_VAL=$(echo "$BODY" | jq -r '.stdout[0]' 2>/dev/null) || STDOUT_VAL=""
+	if echo "$STDOUT_VAL" | grep -q "untagged"; then
+		pass "chtag list: stdout contains 'untagged'"
+	else
+		fail "chtag list: stdout contains 'untagged'" "got '$STDOUT_VAL'"
+	fi
+
+	if echo "$STDOUT_VAL" | grep -q "T=off"; then
+		pass "chtag list: stdout contains 'T=off'"
+	else
+		fail "chtag list: stdout contains 'T=off'" "got '$STDOUT_VAL'"
+	fi
+
+	echo ""
+	echo "--- USS utilities: chtag set (no-op) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"request":"chtag","action":"set","type":"text","codeset":"IBM-1047"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "200" "$HTTP_CODE" "chtag set returns 200 (no-op)"
+
+	echo ""
+	echo "--- USS utilities: chtag remove (no-op) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"request":"chtag","action":"remove"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "200" "$HTTP_CODE" "chtag remove returns 200 (no-op)"
+
+	echo ""
+	echo "--- USS utilities: unimplemented utility ---"
 
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 		-X PUT -u "$AUTH" \
@@ -362,7 +411,10 @@ if [ -n "$TEST_FILE" ]; then
 		-d '{"request":"chmod","action":"set","mode":"0755"}' \
 		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 
-	assert_http_status "501" "$HTTP_CODE" "json content-type returns 501 (utilities not implemented)"
+	assert_http_status "501" "$HTTP_CODE" "chmod returns 501 (not implemented)"
+
+	echo ""
+	echo "--- Write file error cases ---"
 
 	echo ""
 	echo "--- Write to directory path ---"

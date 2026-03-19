@@ -1,4 +1,8 @@
 #include <clibstr.h>
+#include <clibio.h>
+#include <clibthrd.h>
+#include <clibwto.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,6 +11,8 @@
 #include "httpcgi.h"
 #include "json.h"
 #include "xlate.h"
+
+#define INITIAL_BUFFER_SIZE 4096
 
 //
 // private function prototypes
@@ -175,6 +181,212 @@ quit:
 	}
 
 	return irc;
+}
+
+//
+// Read raw data from socket, one byte at a time.
+// Works around the MVS 3.8j TCP/IP ring buffer bug that corrupts data
+// when a multi-byte recv() spans the internal buffer wrap-around point.
+// DO NOT change to multi-byte recv().
+//
+
+#define RAW_RECV_MAX_RETRIES 200
+
+__asm__("\n&FUNC    SETC 'recv_raw_data'");
+static int
+receive_raw_data(HTTPC *httpc, char *buf, int len)
+{
+	int total = 0;
+	int n = 0;
+	int retries = 0;
+	unsigned ecb = 0;
+	int sockfd = httpc->socket;
+
+	while (total < len) {
+		n = recv(sockfd, buf + total, 1, 0);
+		if (n < 0) {
+			if (errno == EINTR) continue;
+			if (errno == EWOULDBLOCK) {
+				if (++retries > RAW_RECV_MAX_RETRIES) {
+					wtof("MVSMF80E recv() EWOULDBLOCK timeout after %d retries",
+						retries);
+					return -1;
+				}
+				ecb = 0;
+				cthread_timed_wait((void *)&ecb, 5, 0);
+				continue;
+			}
+			return -1;
+		}
+		if (n == 0) break;
+		retries = 0;
+		total += n;
+	}
+
+	return total;
+}
+
+//
+// Read the full request body into a malloc'd buffer.
+// Supports both Content-Length and Transfer-Encoding: chunked.
+// Caller must free the returned buffer via free().
+// Returns 0 on success, -1 on error.
+//
+
+int
+read_request_content(Session *session, char **content, size_t *content_size)
+{
+	size_t buffer_size = 0;
+	int bytes_received = 0;
+	int has_content_length = 0;
+	size_t content_length = 0;
+	int is_chunked = 0;
+	int done = 0;
+
+	// Check Content-Length header
+	const char *cl_str = getHeaderParam(session, "Content-Length");
+	if (cl_str != NULL) {
+		has_content_length = 1;
+		content_length = strtoul(cl_str, NULL, 10);
+	}
+
+	// Check Transfer-Encoding header
+	const char *te = getHeaderParam(session, "Transfer-Encoding");
+	if (te != NULL && strstr(te, "chunked") != NULL) {
+		is_chunked = 1;
+	}
+
+	if (!is_chunked && !has_content_length) {
+		wtof("MVSMF22E Missing Content-Length or Transfer-Encoding header");
+		return -1;
+	}
+
+	// Allocate initial buffer
+	*content = malloc(INITIAL_BUFFER_SIZE);
+	if (!*content) {
+		wtof("MVSMF22E Memory allocation failed for content buffer");
+		return -1;
+	}
+	buffer_size = INITIAL_BUFFER_SIZE;
+	*content_size = 0;
+
+	if (is_chunked) {
+		while (!done) {
+			char chunk_size_str[10];
+			int i = 0;
+
+			// Read chunk size line (hex + CRLF)
+			while (i < (int)sizeof(chunk_size_str) - 1) {
+				if (receive_raw_data(session->httpc,
+						chunk_size_str + i, 1) != 1) {
+					free(*content);
+					*content = NULL;
+					return -1;
+				}
+				if (chunk_size_str[i] == '\r') {
+					chunk_size_str[i] = '\0';
+					receive_raw_data(session->httpc,
+						chunk_size_str + i, 1);
+					break;
+				}
+				i++;
+			}
+
+			mvsmf_atoe((unsigned char *)chunk_size_str, i);
+			{
+				int chunk_size = (int)strtoul(chunk_size_str, NULL, 16);
+				int bytes_read = 0;
+
+				if (chunk_size == 0) {
+					done = 1;
+					break;
+				}
+
+				// Ensure buffer capacity
+				if (*content_size + chunk_size > buffer_size) {
+					char *new_buf = realloc(*content,
+						*content_size + chunk_size + 1);
+					if (!new_buf) {
+						wtof("MVSMF22E Memory reallocation failed");
+						free(*content);
+						*content = NULL;
+						return -1;
+					}
+					*content = new_buf;
+					buffer_size = *content_size + chunk_size;
+				}
+
+				// Read chunk data
+				while (bytes_read < chunk_size) {
+					bytes_received = receive_raw_data(session->httpc,
+						*content + *content_size + bytes_read,
+						chunk_size - bytes_read);
+					if (bytes_received <= 0) {
+						free(*content);
+						*content = NULL;
+						return -1;
+					}
+					bytes_read += bytes_received;
+				}
+
+				*content_size += chunk_size;
+			}
+
+			// Consume trailing CRLF after chunk data
+			{
+				char crlf[2];
+				if (receive_raw_data(session->httpc, crlf, 2) != 2) {
+					free(*content);
+					*content = NULL;
+					return -1;
+				}
+			}
+		}
+	} else {
+		char recv_buffer[1024];
+		while (*content_size < content_length) {
+			size_t remaining = content_length - *content_size;
+			size_t to_read = remaining < sizeof(recv_buffer)
+				? remaining : sizeof(recv_buffer);
+
+			if (*content_size + sizeof(recv_buffer) > buffer_size) {
+				char *new_buf = realloc(*content, buffer_size * 2);
+				if (!new_buf) {
+					wtof("MVSMF22E Memory reallocation failed");
+					free(*content);
+					*content = NULL;
+					return -1;
+				}
+				*content = new_buf;
+				buffer_size *= 2;
+			}
+
+			bytes_received = receive_raw_data(session->httpc,
+				*content + *content_size, (int)to_read);
+			if (bytes_received <= 0) {
+				free(*content);
+				*content = NULL;
+				return -1;
+			}
+
+			*content_size += bytes_received;
+		}
+	}
+
+	// Ensure null termination
+	if (*content_size + 1 > buffer_size) {
+		char *new_buf = realloc(*content, *content_size + 1);
+		if (!new_buf) {
+			wtof("MVSMF22E Memory reallocation failed");
+			free(*content);
+			*content = NULL;
+			return -1;
+		}
+		*content = new_buf;
+	}
+	(*content)[*content_size] = '\0';
+
+	return 0;
 }
 
 //

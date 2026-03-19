@@ -44,6 +44,34 @@ No response body.
 | 500    | I/O error or other server error |
 | 503    | UFSD subsystem not available |
 
+## Examples
+
+### Delete a file with curl
+
+```bash
+curl -X DELETE -u IBMUSER:sys1 \
+  "http://mvs:1080/zosmf/restfiles/fs/home/ibmuser/myfile.txt"
+```
+
+### Delete a directory recursively with curl
+
+```bash
+curl -X DELETE -u IBMUSER:sys1 \
+  -H "X-IBM-Option: recursive" \
+  "http://mvs:1080/zosmf/restfiles/fs/home/ibmuser/mydir"
+```
+
+### Delete with Zowe CLI
+
+```bash
+zowe files delete uf "/home/ibmuser/myfile.txt"
+```
+
+## Limitations vs Real z/OSMF
+
+- Only `recursive` is supported for `X-IBM-Option` (no other options)
+- No symbolic link handling (UFSD has no symlink support)
+
 ## Handler
 
 - Function: `ussDeleteHandler`

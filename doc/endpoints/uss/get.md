@@ -46,6 +46,37 @@ GET /zosmf/restfiles/fs/{filepath}
 64 KB (UFSD Phase 1 — direct blocks only). Reads beyond this limit
 will return partial data up to the UFSD_RC_NOSPACE boundary.
 
+## Examples
+
+### Read a text file with curl
+
+```bash
+curl -u IBMUSER:sys1 \
+  "http://mvs:1080/zosmf/restfiles/fs/home/ibmuser/hello.txt"
+```
+
+### Read a binary file with curl
+
+```bash
+curl -u IBMUSER:sys1 \
+  -H "X-IBM-Data-Type: binary" \
+  -o output.bin \
+  "http://mvs:1080/zosmf/restfiles/fs/home/ibmuser/data.bin"
+```
+
+### Read with Zowe CLI
+
+```bash
+zowe files download uf "/home/ibmuser/hello.txt" -f hello.txt
+```
+
+## Limitations vs Real z/OSMF
+
+- No `Content-Length` header in response (streamed without prior size calculation)
+- No `X-IBM-Intrdr-*` headers for record-mode reading
+- No `search` query parameter for in-file searching
+- No `If-None-Match` / ETag support
+
 ## Handler
 
 - Function: `ussGetHandler`

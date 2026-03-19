@@ -71,6 +71,36 @@ When `X-IBM-Max-Items` is set and the directory contains more entries:
 | 404    | Path not found or not a directory |
 | 503    | UFSD subsystem not available |
 
+## Examples
+
+### List a directory with curl
+
+```bash
+curl -u IBMUSER:sys1 \
+  "http://mvs:1080/zosmf/restfiles/fs?path=/home/ibmuser"
+```
+
+### List with max items
+
+```bash
+curl -u IBMUSER:sys1 \
+  -H "X-IBM-Max-Items: 10" \
+  "http://mvs:1080/zosmf/restfiles/fs?path=/home/ibmuser"
+```
+
+### List with Zowe CLI
+
+```bash
+zowe files list uf "/home/ibmuser"
+```
+
+## Limitations vs Real z/OSMF
+
+- No `depth` query parameter (lists one level only)
+- No `filesys`, `symlinks`, `group`, `mtime`, `size`, `perm`, `type` filters
+- No `lstat` mode — always follows symlinks (UFSD has no symlink support)
+- `mode` field returns UFSD `attr` string (e.g. `drwxr-xr-x`), not the numeric z/OSMF format
+
 ## Handler
 
 - Function: `ussListHandler`

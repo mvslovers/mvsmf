@@ -37,6 +37,16 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | GET | [`/zosmf/restfiles/ds/{name}({member})`](datasets/members-get.md) | Read PDS member |
 | PUT | [`/zosmf/restfiles/ds/{name}({member})`](datasets/members-put.md) | Write PDS member |
 
+## USS Files (`/zosmf/restfiles/fs`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | [`/zosmf/restfiles/fs?path=...`](uss/list.md) | List directory |
+| GET | [`/zosmf/restfiles/fs/{filepath}`](uss/get.md) | Read file |
+| PUT | [`/zosmf/restfiles/fs/{filepath}`](uss/put.md) | Write file (or invoke utilities) |
+| POST | [`/zosmf/restfiles/fs/{filepath}`](uss/create.md) | Create file or directory |
+| DELETE | [`/zosmf/restfiles/fs/{filepath}`](uss/delete.md) | Delete file or directory |
+
 ## Common Headers
 
 | Header | Used By | Description |
@@ -45,3 +55,5 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | `X-IBM-Intrdr-Mode` | Job submit | Validated but fixed to `TEXT` |
 | `X-IBM-Intrdr-Lrecl` | Job submit | Validated but fixed to `80` |
 | `X-IBM-Intrdr-Recfm` | Job submit | Validated but fixed to `F` |
+| `X-IBM-Max-Items` | Directory listing (datasets & USS) | Maximum items to return (0 = unlimited) |
+| `X-IBM-Option` | USS delete | `recursive` for non-empty directory deletion |

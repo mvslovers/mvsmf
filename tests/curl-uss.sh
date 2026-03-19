@@ -343,6 +343,31 @@ if [ -n "$TEST_FILE" ]; then
 	fi
 
 	echo ""
+	echo "--- Write file (chunked transfer encoding) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Transfer-Encoding: chunked" \
+		-d "Hello from chunked transfer test" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "write file chunked mode ${WRITE_FILE}"
+
+	# Read it back and verify content
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "read back chunked-written file"
+	if echo "$BODY" | grep -q "Hello from chunked transfer test"; then
+		pass "chunked write+read round-trip: content matches"
+	else
+		fail "chunked write+read round-trip" "content mismatch: '$BODY'"
+	fi
+
+	echo ""
 	echo "--- Write file (binary mode) ---"
 
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \

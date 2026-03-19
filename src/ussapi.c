@@ -2,9 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <errno.h>
 #include <clibwto.h>
-#include <clibthrd.h>
 #include <libufs.h>
 #include <time64.h>
 
@@ -168,96 +166,6 @@ uss_build_path(char *buf, size_t bufsz, const char *captured)
 	return buf;
 }
 
-//
-// Receive raw data from socket, one byte at a time.
-// Mirrors the receive_raw_data() pattern in jobsapi.c to work around
-// the MVS 3.8j TCP/IP ring buffer bug (see Known Platform Bugs).
-// DO NOT change to multi-byte recv().
-//
-
-#define USS_RECV_MAX_RETRIES 200
-
-__asm__("\n&FUNC    SETC 'uss_recv_raw'");
-static int
-uss_recv_raw(HTTPC *httpc, char *buf, int len)
-{
-	int total = 0;
-	int n = 0;
-	int retries = 0;
-	unsigned ecb = 0;
-	int sockfd = httpc->socket;
-
-	while (total < len) {
-		n = recv(sockfd, buf + total, 1, 0);
-		if (n < 0) {
-			if (errno == EINTR) continue;
-			if (errno == EWOULDBLOCK) {
-				if (++retries > USS_RECV_MAX_RETRIES) {
-					wtof("MVSMF80E recv() EWOULDBLOCK timeout after %d retries", retries);
-					return -1;
-				}
-				ecb = 0;
-				cthread_timed_wait((void *)&ecb, 5, 0);
-				continue;
-			}
-			return -1;
-		}
-		if (n == 0) break;
-		retries = 0;
-		total += n;
-	}
-
-	return total;
-}
-
-//
-// Read the full request body into a malloc'd buffer.
-// Supports Content-Length transfer only (no chunked).
-// Caller must free the returned buffer.
-// Returns NULL on error (also sends error response).
-//
-
-__asm__("\n&FUNC    SETC 'uss_read_body'");
-static char *
-uss_read_body(Session *session, size_t *out_len)
-{
-	const char *cl_str = NULL;
-	size_t content_length = 0;
-	char *body = NULL;
-	int received = 0;
-
-	cl_str = getHeaderParam(session, "Content-Length");
-	if (!cl_str) {
-		sendErrorResponse(session, 400, 2, 8, 1,
-			"Missing Content-Length header", NULL, 0);
-		return NULL;
-	}
-
-	content_length = strtoul(cl_str, NULL, 10);
-	if (content_length == 0) {
-		sendErrorResponse(session, 400, 2, 8, 1,
-			"Empty request body", NULL, 0);
-		return NULL;
-	}
-
-	body = (char *)malloc(content_length);
-	if (!body) {
-		sendErrorResponse(session, 500, 10, 8, 1,
-			"Memory allocation failed", NULL, 0);
-		return NULL;
-	}
-
-	received = uss_recv_raw(session->httpc, body, (int)content_length);
-	if (received < 0 || (size_t)received != content_length) {
-		free(body);
-		sendErrorResponse(session, 500, 10, 8, 1,
-			"Failed to read request body", NULL, 0);
-		return NULL;
-	}
-
-	*out_len = content_length;
-	return body;
-}
 
 //
 // Default max items for directory listing
@@ -583,9 +491,11 @@ uss_handle_utilities(Session *session, const char *filepath)
 	if (body && *body) {
 		body_len = strlen(body);
 	} else {
-		body = uss_read_body(session, &body_len);
-		if (!body) {
-			return -1;  // uss_read_body already sent error response
+		if (read_request_content(session, &body, &body_len) < 0 ||
+				body_len == 0) {
+			if (body) free(body);
+			return sendErrorResponse(session, 400, 2, 8, 1,
+				"Failed to read request body", NULL, 0);
 		}
 		free_body = 1;
 
@@ -656,10 +566,17 @@ int ussPutHandler(Session *session)
 	// Determine data type from X-IBM-Data-Type header
 	data_type = get_data_type(session);
 
-	// Read request body
-	body = uss_read_body(session, &body_len);
-	if (!body) {
-		return -1;  // uss_read_body already sent error response
+	// Read request body (supports Content-Length and chunked encoding)
+	if (read_request_content(session, &body, &body_len) < 0) {
+		sendErrorResponse(session, 400, 2, 8, 1,
+			"Failed to read request body", NULL, 0);
+		return -1;
+	}
+	if (body_len == 0) {
+		free(body);
+		sendErrorResponse(session, 400, 2, 8, 1,
+			"Empty request body", NULL, 0);
+		return -1;
 	}
 
 	// Text mode: ASCII→EBCDIC before writing
@@ -845,9 +762,11 @@ int ussCreateHandler(Session *session)
 	if (body && *body) {
 		body_len = strlen(body);
 	} else {
-		body = uss_read_body(session, &body_len);
-		if (!body) {
-			return -1;  // uss_read_body already sent error response
+		if (read_request_content(session, &body, &body_len) < 0 ||
+				body_len == 0) {
+			if (body) free(body);
+			return sendErrorResponse(session, 400, 2, 8, 1,
+				"Failed to read request body", NULL, 0);
 		}
 		free_body = 1;
 

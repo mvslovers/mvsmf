@@ -143,4 +143,19 @@ int sendErrorResponse(Session *session, int status, int category, int rc,
                      int reason, const char *message, const char **details,
                      int details_count) asm("CMN0012");
 
+/**
+ * @brief Reads the full request body into a malloc'd buffer
+ *
+ * Supports both Content-Length and Transfer-Encoding: chunked.
+ * Uses single-byte recv() to work around the MVS 3.8j TCP/IP
+ * ring buffer bug. Caller must free the returned buffer.
+ *
+ * @param session Current session context
+ * @param content Output pointer to allocated buffer (caller frees)
+ * @param content_size Output size of received content
+ * @return 0 on success, -1 on error
+ */
+int read_request_content(Session *session, char **content,
+                        size_t *content_size) asm("CMN0020");
+
 #endif // COMMON_H

@@ -9,7 +9,6 @@
 #include "ussapi.h"
 #include "common.h"
 #include "httpcgi.h"
-#include "xlate.h"
 
 // Data type constants
 #define USS_DATA_TYPE_TEXT   1
@@ -391,7 +390,7 @@ int ussGetHandler(Session *session)
 	// Stream file content in chunks
 	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
 		if (data_type == USS_DATA_TYPE_TEXT) {
-			mvsmf_etoa((unsigned char *)buf, n);
+			http_etoa((unsigned char *)buf, n);
 		}
 		rc = http_send(session->httpc, (const UCHAR *)buf, n);
 		if (rc < 0) {
@@ -500,7 +499,7 @@ uss_handle_utilities(Session *session, const char *filepath)
 		free_body = 1;
 
 		// Convert from ASCII to EBCDIC for JSON parsing
-		mvsmf_atoe((unsigned char *)body, (int)body_len);
+		http_atoe((unsigned char *)body, (int)body_len);
 	}
 
 	// Extract "request" field to determine which utility
@@ -581,7 +580,7 @@ int ussPutHandler(Session *session)
 
 	// Text mode: ASCII→EBCDIC before writing
 	if (data_type == USS_DATA_TYPE_TEXT) {
-		mvsmf_atoe((unsigned char *)body, (int)body_len);
+		http_atoe((unsigned char *)body, (int)body_len);
 	}
 
 	// Open UFS session
@@ -771,7 +770,7 @@ int ussCreateHandler(Session *session)
 		free_body = 1;
 
 		// Convert from ASCII to EBCDIC for JSON parsing
-		mvsmf_atoe((unsigned char *)body, (int)body_len);
+		http_atoe((unsigned char *)body, (int)body_len);
 	}
 
 	// Parse required "type" field

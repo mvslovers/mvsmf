@@ -6,7 +6,6 @@
 #include "router.h"
 #include "common.h"
 #include "httpcgi.h"
-#include "xlate.h"
 
 
 #define INITIAL_BUFFER_SIZE 4096
@@ -291,7 +290,7 @@ percent_decode(char *str)
 	while (*src) {
 		if (*src == '%' && is_hex_digit(src[1]) && is_hex_digit(src[2])) {
 			unsigned char ascii_val = (hex_nibble(src[1]) << 4) | hex_nibble(src[2]);
-			mvsmf_atoe(&ascii_val, 1);
+			http_atoe(&ascii_val, 1);
 			*dst = (char)ascii_val;
 			src += 3;
 		} else {

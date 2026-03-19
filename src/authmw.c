@@ -4,7 +4,6 @@
 #include "httpcgi.h"
 #include "racf.h"
 #include "router.h"
-#include "xlate.h"
 #include <ctype.h>
 
 static int validate_user(Session *session, char *username, char *password);
@@ -40,7 +39,7 @@ int authentication_middleware(Session *session)
         goto quit;
     }
 
-    mvsmf_atoe((unsigned char *) decoded, decoded_len);
+    http_atoe((unsigned char *) decoded, decoded_len);
 
     // extract username and password
     char *colon = strchr((char *) decoded, ':');

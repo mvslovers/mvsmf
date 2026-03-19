@@ -3,11 +3,14 @@
 # mvsMF USS File REST API - curl test suite
 #
 # Tests USS (Unix System Services) file endpoints:
-#   1. GET  /zosmf/restfiles/fs?path=<dir>          (list directory)
-#   2. GET  /zosmf/restfiles/fs/{filepath}          (read file)
-#   3. PUT  /zosmf/restfiles/fs/{filepath}          (write file)
-#   4. POST   /zosmf/restfiles/fs/{filepath}          (create file/dir)
-#   5. DELETE /zosmf/restfiles/fs/{filepath}          (delete file/dir)
+#   1. GET    /zosmf/restfiles/fs?path=<dir>          (list directory)
+#   2. GET    /zosmf/restfiles/fs/{filepath}          (read file)
+#   3. PUT    /zosmf/restfiles/fs/{filepath}          (write file)
+#   4. DELETE /zosmf/restfiles/fs/{filepath}          (delete file/dir)
+#   5. POST   /zosmf/restfiles/fs/{filepath}          (create file/dir)
+#
+# Sections are ordered so that each section can clean up after itself:
+# delete tests run before create tests, write tests clean up via delete.
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -125,6 +128,18 @@ assert_json_field_gte() {
 	fi
 }
 
+# Silent cleanup helper — DELETE, ignoring errors
+cleanup() {
+	curl -s -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs$1" >/dev/null 2>&1 || true
+}
+
+cleanup_recursive() {
+	curl -s -X DELETE -u "$AUTH" \
+		-H "X-IBM-Option: recursive" \
+		"${BASE_URL}/zosmf/restfiles/fs$1" >/dev/null 2>&1 || true
+}
+
 # =========================================================================
 # Tests
 # =========================================================================
@@ -137,7 +152,10 @@ echo " User: ${MVSMF_USER}"
 echo " Test dir: ${TEST_DIR}"
 echo "========================================"
 
-# --- 1. List directory (basic) ---
+# =========================================================================
+# 1. List directory tests (read-only, no cleanup needed)
+# =========================================================================
+
 echo ""
 echo "--- List directory ---"
 
@@ -168,7 +186,6 @@ else
 	skip "list: no items returned, skipping field checks"
 fi
 
-# --- 2. List with X-IBM-Max-Items ---
 echo ""
 echo "--- List with X-IBM-Max-Items ---"
 
@@ -193,7 +210,6 @@ if [ -n "$TOTAL_ROWS" ] && [ -n "$RETURNED" ] && [ "$TOTAL_ROWS" -gt 2 ] 2>/dev/
 	assert_json_field "$BODY" ".moreRows" "true" "list max-items: moreRows is true when truncated"
 fi
 
-# --- 3. List with X-IBM-Max-Items: 0 (unlimited) ---
 echo ""
 echo "--- List with X-IBM-Max-Items: 0 ---"
 
@@ -207,19 +223,15 @@ BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list with max-items=0 (unlimited)"
 assert_json_field "$BODY" ".moreRows" "false" "list unlimited: moreRows is false"
 
-# --- 4. Error: missing path parameter ---
 echo ""
-echo "--- Error cases ---"
+echo "--- List error cases ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
 	-u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/fs")
 HTTP_CODE=$(echo "$RESP" | tail -1)
-BODY=$(echo "$RESP" | sed '$d')
 
 assert_http_status "400" "$HTTP_CODE" "missing path returns 400"
-
-# --- 5. Error: non-existent path ---
 
 RESP=$(curl -s -w '\n%{http_code}' \
 	-u "$AUTH" \
@@ -229,7 +241,7 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 assert_http_status "404" "$HTTP_CODE" "non-existent path returns 404"
 
 # =========================================================================
-# Read file tests
+# 2. Read file tests (read-only, no cleanup needed)
 # =========================================================================
 
 if [ -n "$TEST_FILE" ]; then
@@ -250,7 +262,6 @@ if [ -n "$TEST_FILE" ]; then
 		fail "read file: response body is empty"
 	fi
 
-	# --- Read file (binary mode) ---
 	echo ""
 	echo "--- Read file (binary mode) ---"
 
@@ -262,7 +273,6 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "200" "$HTTP_CODE" "read file binary mode ${TEST_FILE}"
 
-	# --- Read file: non-existent path ---
 	echo ""
 	echo "--- Read file error cases ---"
 
@@ -273,14 +283,11 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "404" "$HTTP_CODE" "read non-existent file returns 404"
 
-	# --- Read file: directory path (should fail) ---
-
 	RESP=$(curl -s -w '\n%{http_code}' \
 		-u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/fs${TEST_DIR}")
 	HTTP_CODE=$(echo "$RESP" | tail -1)
 
-	# Attempting to read a directory should return 400 (ISDIR) or 404
 	if [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "404" ]; then
 		pass "read directory as file returns error (HTTP $HTTP_CODE)"
 	else
@@ -293,11 +300,14 @@ else
 fi
 
 # =========================================================================
-# Write file tests
+# 3. Write file tests (creates temp file, cleans up via DELETE)
 # =========================================================================
 
 if [ -n "$TEST_FILE" ]; then
 	WRITE_FILE="${TEST_FILE}.writetest"
+
+	# Pre-cleanup in case a previous run left debris
+	cleanup "$WRITE_FILE"
 
 	echo ""
 	echo "--- Write file (text mode) ---"
@@ -323,7 +333,6 @@ if [ -n "$TEST_FILE" ]; then
 		fail "write+read round-trip" "content mismatch: '$BODY'"
 	fi
 
-	# --- Write file (binary mode) ---
 	echo ""
 	echo "--- Write file (binary mode) ---"
 
@@ -335,7 +344,6 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "204" "$HTTP_CODE" "write file binary mode"
 
-	# --- Write with application/json Content-Type → 501 ---
 	echo ""
 	echo "--- Write file error cases ---"
 
@@ -347,9 +355,8 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "501" "$HTTP_CODE" "json content-type returns 501 (utilities not implemented)"
 
-	# --- Cleanup: delete the test file (will be 501 until delete is implemented) ---
-	curl -s -X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}" >/dev/null 2>&1 || true
+	# Cleanup
+	cleanup "$WRITE_FILE"
 else
 	echo ""
 	echo "--- Write file tests ---"
@@ -357,130 +364,7 @@ else
 fi
 
 # =========================================================================
-# Create file/directory tests
-# =========================================================================
-
-if [ -n "$TEST_FILE" ]; then
-	CREATE_DIR="$(dirname "$TEST_FILE")/curl-create-test-dir"
-	CREATE_FILE="$(dirname "$TEST_FILE")/curl-create-test-file.txt"
-
-	echo ""
-	echo "--- Create directory ---"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"directory"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
-
-	assert_http_status "201" "$HTTP_CODE" "create directory ${CREATE_DIR}"
-
-	# --- Create directory that already exists → 409 ---
-	echo ""
-	echo "--- Create directory (already exists) ---"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"directory"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
-
-	assert_http_status "400" "$HTTP_CODE" "create duplicate directory returns 400"
-
-	# --- Create file ---
-	echo ""
-	echo "--- Create file ---"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"file"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}")
-
-	assert_http_status "201" "$HTTP_CODE" "create file ${CREATE_FILE}"
-
-	# --- Create file with custom mode ---
-	echo ""
-	echo "--- Create file with mode ---"
-
-	CREATE_FILE_MODE="$(dirname "$TEST_FILE")/curl-create-mode.txt"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"file","mode":"rw-r--r--"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}")
-
-	assert_http_status "201" "$HTTP_CODE" "create file with mode rw-r--r--"
-
-	# --- Create with "dir" alias ---
-	echo ""
-	echo "--- Create directory (dir alias) ---"
-
-	CREATE_DIR_ALIAS="$(dirname "$TEST_FILE")/curl-create-test-dir2"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"dir"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}")
-
-	assert_http_status "201" "$HTTP_CODE" "create directory with type=dir"
-
-	# --- Error: missing type field ---
-	echo ""
-	echo "--- Create error cases ---"
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"mode":"rwxr-xr-x"}' \
-		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-no-type")
-
-	assert_http_status "400" "$HTTP_CODE" "create without type returns 400"
-
-	# --- Error: invalid type ---
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"symlink"}' \
-		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-bad-type")
-
-	assert_http_status "400" "$HTTP_CODE" "create with invalid type returns 400"
-
-	# --- Error: parent not found ---
-
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X POST -u "$AUTH" \
-		-H "Content-Type: application/json" \
-		-d '{"type":"file"}' \
-		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
-
-	# UFSD returns ROFS (read-only filesystem) for paths outside writable mounts
-	if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
-		pass "create in non-existent parent returns error (HTTP $HTTP_CODE)"
-	else
-		fail "create in non-existent parent" "expected HTTP 403 or 404, got $HTTP_CODE"
-	fi
-
-	# --- Cleanup ---
-	curl -s -X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}" >/dev/null 2>&1 || true
-else
-	echo ""
-	echo "--- Create file/directory tests ---"
-	skip "create: USS_TEST_FILE not set in .env, skipping create tests"
-fi
-
-# =========================================================================
-# Delete file/directory tests
+# 4. Delete file/directory tests (creates own fixtures, cleans up)
 # =========================================================================
 
 if [ -n "$TEST_FILE" ]; then
@@ -488,15 +372,20 @@ if [ -n "$TEST_FILE" ]; then
 	DELETE_DIR="$(dirname "$TEST_FILE")/curl-delete-test-dir"
 	DELETE_DIR_REC="$(dirname "$TEST_FILE")/curl-delete-test-rec"
 
+	# Pre-cleanup in case a previous run left debris
+	cleanup "$DELETE_FILE"
+	cleanup "$DELETE_DIR"
+	cleanup_recursive "$DELETE_DIR_REC"
+
 	echo ""
 	echo "--- Delete file ---"
 
 	# Create a file to delete
-	curl -s -w '%{http_code}' -o /dev/null \
+	curl -s -o /dev/null \
 		-X POST -u "$AUTH" \
 		-H "Content-Type: application/json" \
 		-d '{"type":"file"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}" >/dev/null 2>&1
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}" 2>&1
 
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 		-X DELETE -u "$AUTH" \
@@ -511,7 +400,6 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "404" "$HTTP_CODE" "deleted file returns 404"
 
-	# --- Delete non-existent file → 404 ---
 	echo ""
 	echo "--- Delete non-existent file ---"
 
@@ -521,16 +409,15 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "404" "$HTTP_CODE" "delete non-existent file returns 404"
 
-	# --- Delete empty directory ---
 	echo ""
 	echo "--- Delete empty directory ---"
 
 	# Create a directory to delete
-	curl -s -w '%{http_code}' -o /dev/null \
+	curl -s -o /dev/null \
 		-X POST -u "$AUTH" \
 		-H "Content-Type: application/json" \
 		-d '{"type":"directory"}' \
-		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}" >/dev/null 2>&1
+		"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}" 2>&1
 
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 		-X DELETE -u "$AUTH" \
@@ -538,7 +425,6 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "204" "$HTTP_CODE" "delete empty directory"
 
-	# --- Delete non-empty directory without recursive → 400 ---
 	echo ""
 	echo "--- Delete non-empty directory (no recursive) ---"
 
@@ -561,7 +447,6 @@ if [ -n "$TEST_FILE" ]; then
 
 	assert_http_status "400" "$HTTP_CODE" "delete non-empty dir without recursive returns 400"
 
-	# --- Delete non-empty directory with recursive ---
 	echo ""
 	echo "--- Delete non-empty directory (recursive) ---"
 
@@ -582,6 +467,120 @@ else
 	echo ""
 	echo "--- Delete file/directory tests ---"
 	skip "delete: USS_TEST_FILE not set in .env, skipping delete tests"
+fi
+
+# =========================================================================
+# 5. Create file/directory tests (cleans up own fixtures via DELETE)
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	CREATE_DIR="$(dirname "$TEST_FILE")/curl-create-test-dir"
+	CREATE_FILE="$(dirname "$TEST_FILE")/curl-create-test-file.txt"
+	CREATE_FILE_MODE="$(dirname "$TEST_FILE")/curl-create-mode.txt"
+	CREATE_DIR_ALIAS="$(dirname "$TEST_FILE")/curl-create-test-dir2"
+
+	# Pre-cleanup in case a previous run left debris
+	cleanup "$CREATE_FILE"
+	cleanup "$CREATE_FILE_MODE"
+	cleanup "$CREATE_DIR"
+	cleanup "$CREATE_DIR_ALIAS"
+
+	echo ""
+	echo "--- Create directory ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
+
+	assert_http_status "201" "$HTTP_CODE" "create directory ${CREATE_DIR}"
+
+	echo ""
+	echo "--- Create directory (already exists) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
+
+	assert_http_status "400" "$HTTP_CODE" "create duplicate directory returns 400"
+
+	echo ""
+	echo "--- Create file ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}")
+
+	assert_http_status "201" "$HTTP_CODE" "create file ${CREATE_FILE}"
+
+	echo ""
+	echo "--- Create file with mode ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file","mode":"rw-r--r--"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}")
+
+	assert_http_status "201" "$HTTP_CODE" "create file with mode rw-r--r--"
+
+	echo ""
+	echo "--- Create directory (dir alias) ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"dir"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}")
+
+	assert_http_status "201" "$HTTP_CODE" "create directory with type=dir"
+
+	echo ""
+	echo "--- Create error cases ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"mode":"rwxr-xr-x"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-no-type")
+
+	assert_http_status "400" "$HTTP_CODE" "create without type returns 400"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"symlink"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/tmp/test-bad-type")
+
+	assert_http_status "400" "$HTTP_CODE" "create with invalid type returns 400"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
+
+	# UFSD returns ROFS (read-only filesystem) for paths outside writable mounts
+	if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
+		pass "create in non-existent parent returns error (HTTP $HTTP_CODE)"
+	else
+		fail "create in non-existent parent" "expected HTTP 403 or 404, got $HTTP_CODE"
+	fi
+
+	# Cleanup
+	cleanup "$CREATE_FILE"
+	cleanup "$CREATE_FILE_MODE"
+	cleanup "$CREATE_DIR"
+	cleanup "$CREATE_DIR_ALIAS"
+else
+	echo ""
+	echo "--- Create file/directory tests ---"
+	skip "create: USS_TEST_FILE not set in .env, skipping create tests"
 fi
 
 # =========================================================================

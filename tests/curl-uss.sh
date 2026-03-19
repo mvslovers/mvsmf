@@ -240,6 +240,15 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 
 assert_http_status "404" "$HTTP_CODE" "non-existent path returns 404"
 
+if [ -n "$TEST_FILE" ]; then
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+
+	assert_http_status "404" "$HTTP_CODE" "list file path (not a directory) returns 404"
+fi
+
 # =========================================================================
 # 2. Read file tests (read-only, no cleanup needed)
 # =========================================================================
@@ -354,6 +363,17 @@ if [ -n "$TEST_FILE" ]; then
 		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 
 	assert_http_status "501" "$HTTP_CODE" "json content-type returns 501 (utilities not implemented)"
+
+	echo ""
+	echo "--- Write to directory path ---"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Content-Length: 10" \
+		-d "some data!" \
+		"${BASE_URL}/zosmf/restfiles/fs${TEST_DIR}")
+
+	assert_http_status "400" "$HTTP_CODE" "write to directory returns 400 (ISDIR)"
 
 	# Cleanup
 	cleanup "$WRITE_FILE"
@@ -581,6 +601,163 @@ else
 	echo ""
 	echo "--- Create file/directory tests ---"
 	skip "create: USS_TEST_FILE not set in .env, skipping create tests"
+fi
+
+# =========================================================================
+# 6. Integration tests (full CRUD lifecycle, nested recursive delete)
+# =========================================================================
+
+if [ -n "$TEST_FILE" ]; then
+	INT_DIR="$(dirname "$TEST_FILE")/curl-int-test-$$"
+	INT_FILE="${INT_DIR}/testfile.txt"
+
+	# Pre-cleanup in case a previous run left debris
+	cleanup_recursive "$INT_DIR"
+
+	echo ""
+	echo "--- Integration: full CRUD lifecycle ---"
+
+	# Create directory
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_DIR}")
+
+	assert_http_status "201" "$HTTP_CODE" "integration: create directory"
+
+	# Create file inside directory
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
+
+	assert_http_status "201" "$HTTP_CODE" "integration: create file"
+
+	# Write content to file
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "Integration test content line 1" \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "integration: write file"
+
+	# Read content back
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "integration: read file"
+	if echo "$BODY" | grep -q "Integration test content line 1"; then
+		pass "integration: content round-trip matches"
+	else
+		fail "integration: content round-trip" "content mismatch: '$BODY'"
+	fi
+
+	# List directory and verify file appears
+	RESP=$(curl -s -w '\n%{http_code}' \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${INT_DIR}")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+
+	assert_http_status "200" "$HTTP_CODE" "integration: list directory"
+
+	HAS_FILE=$(echo "$BODY" | jq '[.items[].name] | index("testfile.txt") != null' 2>/dev/null)
+	if [ "$HAS_FILE" = "true" ]; then
+		pass "integration: created file appears in listing"
+	else
+		fail "integration: created file in listing" "testfile.txt not found"
+	fi
+
+	# Delete file
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
+
+	assert_http_status "204" "$HTTP_CODE" "integration: delete file"
+
+	# Delete directory
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${INT_DIR}")
+
+	assert_http_status "204" "$HTTP_CODE" "integration: delete empty directory"
+
+	# Verify directory is gone
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${INT_DIR}")
+
+	assert_http_status "404" "$HTTP_CODE" "integration: directory gone after delete"
+
+	echo ""
+	echo "--- Integration: nested recursive delete ---"
+
+	NEST_DIR="${INT_DIR}"
+	NEST_SUB="${NEST_DIR}/subdir"
+	NEST_FILE1="${NEST_DIR}/top.txt"
+	NEST_FILE2="${NEST_SUB}/nested.txt"
+
+	# Create nested structure: dir/top.txt + dir/subdir/nested.txt
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}" 2>&1
+
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE1}" 2>&1
+
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_SUB}" 2>&1
+
+	curl -s -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"file"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE2}" 2>&1
+
+	# Non-recursive delete should fail
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}")
+
+	assert_http_status "400" "$HTTP_CODE" "nested: non-recursive delete fails"
+
+	# Recursive delete should succeed
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X DELETE -u "$AUTH" \
+		-H "X-IBM-Option: recursive" \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}")
+
+	assert_http_status "204" "$HTTP_CODE" "nested: recursive delete succeeds"
+
+	# Verify everything is gone
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${NEST_DIR}")
+
+	assert_http_status "404" "$HTTP_CODE" "nested: directory tree gone after recursive delete"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE2}")
+
+	assert_http_status "404" "$HTTP_CODE" "nested: nested file gone after recursive delete"
+else
+	echo ""
+	echo "--- Integration tests ---"
+	skip "integration: USS_TEST_FILE not set in .env, skipping integration tests"
 fi
 
 # =========================================================================

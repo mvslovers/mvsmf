@@ -30,7 +30,7 @@ static int path_vars_extracting_middleware(Session *session);
 
 static unsigned char hex_nibble(char c);
 static int is_hex_digit(char c);
-static void percent_decode(char *str);
+static void percent_decode(Session *session, char *str);
 
 static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
@@ -106,7 +106,7 @@ int handle_request(Router *router, Session *session)
     // Percent-decode the request path (e.g. %28/%29 -> parentheses)
     strncpy(path, raw_path, sizeof(path) - 1);
     path[sizeof(path) - 1] = '\0';
-    percent_decode(path);
+    percent_decode(session, path);
 
     HttpMethod reqMethod = parseMethod(method);
     if (reqMethod == -1) {
@@ -282,7 +282,7 @@ is_hex_digit(char c)
 // Since we run on EBCDIC, decoded bytes must be converted from ASCII to EBCDIC.
 __asm__("\n&FUNC    SETC 'percent_decode'");
 static void
-percent_decode(char *str)
+percent_decode(Session *session, char *str)
 {
 	char *src = str;
 	char *dst = str;

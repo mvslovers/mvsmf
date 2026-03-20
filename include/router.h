@@ -95,9 +95,6 @@ struct session {
     // Resource tracking for ESTAE abend recovery
     FILE *open_files[MAX_SESSION_FILES];  /**< Tracked FILE handles */
     int open_file_count;                  /**< Number of tracked files */
-    void *ufs;             /**< UFS session (opaque, libufs UFS *) */
-    void *ufs_file;        /**< UFS file handle (opaque, libufs UFSFILE *) */
-    void (*ufs_cleanup)(struct session *s); /**< UFS cleanup callback (set by ussapi) */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**

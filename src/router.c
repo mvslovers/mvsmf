@@ -247,11 +247,8 @@ void session_cleanup(Session *session)
     }
     session->open_file_count = 0;
 
-    // Delegate UFS cleanup to the registered callback (set by ussapi).
-    // This keeps the router decoupled from libufs.
-    if (session->ufs_cleanup) {
-        session->ufs_cleanup(session);
-    }
+    // UFS session lifecycle is managed by HTTPD (http_get_ufs).
+    // HTTPD's worker ESTAE handles cleanup on abend.
 }
 
 //

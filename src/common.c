@@ -10,7 +10,6 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "json.h"
-#include "xlate.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 
@@ -292,7 +291,7 @@ read_request_content(Session *session, char **content, size_t *content_size)
 				i++;
 			}
 
-			mvsmf_atoe((unsigned char *)chunk_size_str, i);
+			http_atoe((unsigned char *)chunk_size_str, i);
 			{
 				int chunk_size = (int)strtoul(chunk_size_str, NULL, 16);
 				int bytes_read = 0;
@@ -430,7 +429,7 @@ send_data(Session *session, char *buf)
 	size_t len = strlen(buf);
 	size_t pos = 0;
 
-	mvsmf_etoa((unsigned char *)buf, len);
+	http_etoa((unsigned char *)buf, len);
 
 	for (pos = 0; pos < len; pos += rc) {
 		rc = http_send(session->httpc, &buf[pos], len - pos);

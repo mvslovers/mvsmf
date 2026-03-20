@@ -19,7 +19,6 @@
 #include "jobsapi_msg.h"
 #include "json.h"
 #include "router.h"
-#include "xlate.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 #define MAX_JOBS_LIMIT 1000
@@ -429,7 +428,7 @@ int jobSubmitHandler(Session *session)
 
 		if (is_json) {
 			/* convert ASCII request body to EBCDIC so strstr/strchr work */
-			mvsmf_atoe((unsigned char *)data, data_size);
+			http_atoe((unsigned char *)data, data_size);
 
 			/* JSON body: extract file reference and submit from dataset */
 			{
@@ -1656,7 +1655,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     memcpy(ebcdic_content, content, content_length);
     ebcdic_content[content_length] = '\0';
 
-    mvsmf_atoe((unsigned char *)ebcdic_content, content_length);
+    http_atoe((unsigned char *)ebcdic_content, content_length);
 
     /* Allocate lines array + contiguous buffer */
     lines = (char **)calloc(capacity, sizeof(char *));

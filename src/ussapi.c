@@ -85,47 +85,35 @@ ufsd_rc_message(int rc)
 }
 
 //
-// UFS cleanup callback for ESTAE recovery (called by session_cleanup)
+// UFS session helper — uses HTTPD-managed session via http_get_ufs()
 //
 
-__asm__("\n&FUNC    SETC 'uss_cleanup_cb'");
-static void
-uss_cleanup_callback(Session *session)
-{
-	if (session->ufs_file) {
-		wtof("MVSMF99I Recovery: closing UFS file at %p",
-			 session->ufs_file);
-		ufs_fclose((void *)&session->ufs_file);
-	}
-	if (session->ufs) {
-		wtof("MVSMF99I Recovery: freeing UFS session at %p",
-			 session->ufs);
-		ufsfree((void *)&session->ufs);
-	}
-}
-
-//
-// UFS session helper
-//
-
-__asm__("\n&FUNC    SETC 'uss_open_session'");
+__asm__("\n&FUNC    SETC 'uss_get_ufs'");
 static UFS *
-uss_open_session(Session *session)
+uss_get_ufs(Session *session)
 {
-	UFS *ufs = ufsnew();
+	UFS *ufs = http_get_ufs(session->httpc);
 	if (!ufs) {
 		sendErrorResponse(session, 503, 1, 8, 1,
 			"UFSD subsystem not available", NULL, 0);
 		return NULL;
 	}
 
+	// Set session owner from ACEE (userid/group for permission checks)
 	if (session->acee) {
-		ufs_set_acee(ufs, session->acee);
+		ACEE *acee = session->acee;
+		char userid[9];
+		char group[9];
+		unsigned char ulen = (unsigned char)acee->aceeuser[0];
+		unsigned char glen = (unsigned char)acee->aceegrp[0];
+		if (ulen > 8) ulen = 8;
+		if (glen > 8) glen = 8;
+		memset(userid, 0, sizeof(userid));
+		memset(group, 0, sizeof(group));
+		memcpy(userid, acee->aceeuser + 1, ulen);
+		memcpy(group, acee->aceegrp + 1, glen);
+		ufs_setuser(ufs, userid, group);
 	}
-
-	// Track UFS session for ESTAE recovery
-	session->ufs = ufs;
-	session->ufs_cleanup = uss_cleanup_callback;
 
 	return ufs;
 }
@@ -206,7 +194,7 @@ int ussListHandler(Session *session)
 	}
 
 	// Open UFS session
-	ufs = uss_open_session(session);
+	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		return -1;
 	}
@@ -216,8 +204,6 @@ int ussListHandler(Session *session)
 	if (!dd) {
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"Path not found or is not a directory", NULL, 0);
-		ufsfree(&ufs);
-		session->ufs = NULL;
 		return rc;
 	}
 
@@ -300,8 +286,6 @@ quit:
 		ufs_dirclose(&dd);
 	}
 	if (ufs) {
-		ufsfree(&ufs);
-		session->ufs = NULL;
 	}
 
 	return rc;
@@ -345,7 +329,7 @@ int ussGetHandler(Session *session)
 	data_type = get_data_type(session);
 
 	// Open UFS session
-	ufs = uss_open_session(session);
+	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		return -1;
 	}
@@ -355,22 +339,16 @@ int ussGetHandler(Session *session)
 	if (!fp) {
 		rc = sendErrorResponse(session, 404, 6, 8, 1,
 			"File not found or is a directory", NULL, 0);
-		ufsfree(&ufs);
-		session->ufs = NULL;
 		return rc;
 	}
-	session->ufs_file = fp;
 
 	// Check for error after open (e.g. ISDIR)
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
-		session->ufs_file = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
 			ufsd_rc_message(urc), NULL, 0);
-		ufsfree(&ufs);
-		session->ufs = NULL;
 		return rc;
 	}
 
@@ -403,11 +381,8 @@ int ussGetHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
-		session->ufs_file = NULL;
 	}
 	if (ufs) {
-		ufsfree(&ufs);
-		session->ufs = NULL;
 	}
 
 	return rc;
@@ -584,7 +559,7 @@ int ussPutHandler(Session *session)
 	}
 
 	// Open UFS session
-	ufs = uss_open_session(session);
+	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		free(body);
 		return -1;
@@ -597,13 +572,11 @@ int ussPutHandler(Session *session)
 			"Cannot open file for writing", NULL, 0);
 		goto quit;
 	}
-	session->ufs_file = fp;
 
 	// Check for error after open
 	if (fp->error != UFSD_RC_OK) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
-		session->ufs_file = NULL;
 		fp = NULL;
 		rc = sendErrorResponse(session,
 			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
@@ -616,7 +589,6 @@ int ussPutHandler(Session *session)
 	if (written != (UINT32)body_len) {
 		int urc = fp->error;
 		ufs_fclose(&fp);
-		session->ufs_file = NULL;
 		fp = NULL;
 		if (urc != UFSD_RC_OK) {
 			rc = sendErrorResponse(session,
@@ -635,12 +607,9 @@ int ussPutHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
-		session->ufs_file = NULL;
 	}
 	free(body);
 	if (ufs) {
-		ufsfree(&ufs);
-		session->ufs = NULL;
 	}
 
 	return rc;
@@ -802,7 +771,7 @@ int ussCreateHandler(Session *session)
 	body = NULL;
 
 	// Open UFS session
-	ufs = uss_open_session(session);
+	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		return -1;
 	}
@@ -877,8 +846,6 @@ int ussCreateHandler(Session *session)
 
 quit:
 	if (ufs) {
-		ufsfree(&ufs);
-		session->ufs = NULL;
 	}
 
 	return rc;
@@ -973,7 +940,7 @@ int ussDeleteHandler(Session *session)
 	}
 
 	// Open UFS session
-	ufs = uss_open_session(session);
+	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		return -1;
 	}
@@ -1046,8 +1013,6 @@ int ussDeleteHandler(Session *session)
 
 quit:
 	if (ufs) {
-		ufsfree(&ufs);
-		session->ufs = NULL;
 	}
 
 	return rc;

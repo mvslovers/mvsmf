@@ -2,7 +2,6 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-**This file is listed in `.gitignore` and must not be committed to the repository.**
 
 ## Project Overview
 
@@ -203,8 +202,8 @@ The `receive_raw_data()` function in `jobsapi.c` works around this by reading on
 ### Architecture
 
 - All USS handlers live in `ussapi.c` / `ussapi.h`
-- UFS session lifecycle: use `uss_open_session()` helper at handler start, `ufsfree()` before return
-- ESTAE recovery: `uss_cleanup_callback()` auto-closes UFS handles on abend (via `session->ufs_cleanup`)
+- UFS session lifecycle: HTTPD-managed via `http_get_ufs()` — no `ufsnew()`/`ufsfree()` in mvsMF
+- ESTAE recovery for UFS: handled by HTTPD's worker ESTAE (not mvsMF)
 - Route pattern `{*filepath}` captures entire remaining path including `/` characters
 - PUT to /fs/ dispatches by Content-Type: application/json → USS utilities handler, else → file write
 - chtag utility: `list` returns "untagged" stub, `set`/`remove` are accepted no-ops
@@ -229,17 +228,16 @@ The `receive_raw_data()` function in `jobsapi.c` works around this by reading on
 
 ### UFS Session Pattern (use in EVERY handler)
 
-Use the `uss_open_session()` helper which handles ufsnew(), ACEE, and ESTAE registration:
+Use `uss_get_ufs()` which calls `http_get_ufs()` (HTTPD-managed, lazy init per connection) and sets the session owner via `ufs_setuser()` from the ACEE:
 
 ```c
 int ussXxxHandler(Session *session) {
-    UFS *ufs = uss_open_session(session);
+    UFS *ufs = uss_get_ufs(session);
     if (!ufs) return -1;  // 503 already sent
 
     /* ... handler logic ... */
 
-    ufsfree(&ufs);
-    session->ufs = NULL;  // clear ESTAE tracking
+    // NO ufsfree — HTTPD manages the UFS session lifecycle
     return rc;
 }
 ```

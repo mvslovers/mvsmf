@@ -62,7 +62,6 @@ include = [
 	"LOGMW",
 	"COMMON",
 	"JSON",
-	"XLATE",
 	"DSAPI",
 	"JOBSAPI",
 	"INFOAPI",

@@ -46,7 +46,7 @@ name = "'IBMUSER.HTTPD.V3R3M1D.LOAD'"
 
 [dependencies]
 "mvslovers/crent370" = ">=1.0.7"
-"mvslovers/httpd" = "=3.3.1-dev"
+"mvslovers/httpd" = "=4.0.0-dev"
 "mvslovers/ufsd" = "=1.0.0-dev"
 
 [link.module]

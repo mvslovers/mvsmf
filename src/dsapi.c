@@ -185,7 +185,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		/* Text mode: fgets + EBCDIC->ASCII + strlen for length */
 		while (fgets(buffer, lrecl + 2, fp) > 0) {
 			size_t len = strlen(buffer);
-			http_etoa((unsigned char *)buffer, len);
+			http_xlate((unsigned char *)buffer, len, httpx->xlate_cp037->etoa);
 			if ((rc = http_send(session->httpc,
 					(const UCHAR *)buffer, len)) < 0) {
 				break;
@@ -375,7 +375,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Copy to temporary buffer and convert to EBCDIC
             memcpy(ebcdic_buffer, record_buffer, record_length);
-            http_atoe((unsigned char *)ebcdic_buffer, record_length);
+            http_xlate((unsigned char *)ebcdic_buffer, record_length, httpx->xlate_cp037->atoe);
   
             // Write the converted record
             if (fwrite(ebcdic_buffer, 1, record_length, fp) != record_length) return -1;
@@ -884,7 +884,7 @@ int datasetPutHandler(Session *session)
             }
             
             // Convert chunk size from ASCII hex to EBCDIC hex
-            http_atoe((unsigned char *)chunk_size_str, strlen(chunk_size_str));
+            http_xlate((unsigned char *)chunk_size_str, strlen(chunk_size_str), httpx->xlate_cp037->atoe);
 
             // Convert chunk size from string to integer
             chunk_size = strtoul(chunk_size_str, NULL, 16);
@@ -1364,7 +1364,7 @@ int memberPutHandler(Session *session)
             }
             
             // Convert chunk size from ASCII hex to EBCDIC hex
-            http_atoe((unsigned char *)chunk_size_str, strlen(chunk_size_str));
+            http_xlate((unsigned char *)chunk_size_str, strlen(chunk_size_str), httpx->xlate_cp037->atoe);
 
             // Convert chunk size from string to integer
             chunk_size = strtoul(chunk_size_str, NULL, 16);
@@ -1716,7 +1716,7 @@ int datasetCreateHandler(Session *session)
 				chunk_hdr[i] = '\0';
 
 				/* Convert ASCII hex to EBCDIC for strtoul */
-				http_atoe((unsigned char *)chunk_hdr, strlen(chunk_hdr));
+				http_xlate((unsigned char *)chunk_hdr, strlen(chunk_hdr), httpx->xlate_cp037->atoe);
 				chunk_size = strtoul(chunk_hdr, NULL, 16);
 
 				if (chunk_size == 0) {
@@ -1765,8 +1765,8 @@ int datasetCreateHandler(Session *session)
 
 		local_body[body_size] = '\0';
 
-		/* Convert from ASCII to EBCDIC */
-		http_atoe((unsigned char *)local_body, body_size);
+		/* Convert from ASCII to EBCDIC (CP037 for dataset API) */
+		http_xlate((unsigned char *)local_body, body_size, httpx->xlate_cp037->atoe);
 		body = local_body;
 	} else {
 		body_size = strlen(body);

@@ -427,8 +427,8 @@ int jobSubmitHandler(Session *session)
 		}
 
 		if (is_json) {
-			/* convert ASCII request body to EBCDIC so strstr/strchr work */
-			http_atoe((unsigned char *)data, data_size);
+			/* convert ASCII request body to EBCDIC (CP037) so strstr/strchr work */
+			http_xlate((unsigned char *)data, data_size, httpx->xlate_cp037->atoe);
 
 			/* JSON body: extract file reference and submit from dataset */
 			{
@@ -1655,7 +1655,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     memcpy(ebcdic_content, content, content_length);
     ebcdic_content[content_length] = '\0';
 
-    http_atoe((unsigned char *)ebcdic_content, content_length);
+    http_xlate((unsigned char *)ebcdic_content, content_length, httpx->xlate_cp037->atoe);
 
     /* Allocate lines array + contiguous buffer */
     lines = (char **)calloc(capacity, sizeof(char *));

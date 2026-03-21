@@ -368,7 +368,7 @@ int ussGetHandler(Session *session)
 	// Stream file content in chunks
 	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
 		if (data_type == USS_DATA_TYPE_TEXT) {
-			http_etoa((unsigned char *)buf, n);
+			http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
 		}
 		rc = http_send(session->httpc, (const UCHAR *)buf, n);
 		if (rc < 0) {
@@ -473,8 +473,8 @@ uss_handle_utilities(Session *session, const char *filepath)
 		}
 		free_body = 1;
 
-		// Convert from ASCII to EBCDIC for JSON parsing
-		http_atoe((unsigned char *)body, (int)body_len);
+		// Convert from ASCII to EBCDIC (IBM-1047) for JSON parsing
+		http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
 	}
 
 	// Extract "request" field to determine which utility
@@ -553,9 +553,9 @@ int ussPutHandler(Session *session)
 		return -1;
 	}
 
-	// Text mode: ASCII→EBCDIC before writing
+	// Text mode: ASCII→EBCDIC (IBM-1047) before writing
 	if (data_type == USS_DATA_TYPE_TEXT) {
-		http_atoe((unsigned char *)body, (int)body_len);
+		http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
 	}
 
 	// Open UFS session
@@ -738,8 +738,8 @@ int ussCreateHandler(Session *session)
 		}
 		free_body = 1;
 
-		// Convert from ASCII to EBCDIC for JSON parsing
-		http_atoe((unsigned char *)body, (int)body_len);
+		// Convert from ASCII to EBCDIC (IBM-1047) for JSON parsing
+		http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
 	}
 
 	// Parse required "type" field

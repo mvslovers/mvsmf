@@ -199,15 +199,114 @@ int ussListHandler(Session *session)
 		return -1;
 	}
 
-	// Open directory
+	// Open directory — if this fails, path may be a file (stat query)
 	dd = ufs_diropen(ufs, path, NULL);
 	if (!dd) {
-		rc = sendErrorResponse(session, 404, 6, 8, 1,
-			"Path not found or is not a directory", NULL, 0);
-		return rc;
+		// Try parent directory to find the file entry
+		char parent[UFS_PATH_MAX];
+		char filename[60];
+		const char *slash;
+		size_t plen;
+
+		slash = strrchr(path, '/');
+		if (!slash || slash == path + strlen(path) - 1) {
+			// No slash or trailing slash — not a valid file path
+			return sendErrorResponse(session, 404, 6, 8, 1,
+				"Path not found", NULL, 0);
+		}
+
+		// Split into parent directory and filename
+		plen = (size_t)(slash - path);
+		if (plen == 0) {
+			// File in root directory: parent = "/"
+			parent[0] = '/';
+			parent[1] = '\0';
+		} else if (plen >= sizeof(parent)) {
+			return sendErrorResponse(session, 400, 2, 8, 1,
+				"Path too long", NULL, 0);
+		} else {
+			memcpy(parent, path, plen);
+			parent[plen] = '\0';
+		}
+
+		if (strlen(slash + 1) >= sizeof(filename)) {
+			return sendErrorResponse(session, 400, 2, 8, 1,
+				"Filename too long", NULL, 0);
+		}
+		strcpy(filename, slash + 1);
+
+		dd = ufs_diropen(ufs, parent, NULL);
+		if (!dd) {
+			return sendErrorResponse(session, 404, 6, 8, 1,
+				"Path not found", NULL, 0);
+		}
+
+		// Scan parent directory for matching entry
+		while ((entry = ufs_dirread(dd)) != NULL) {
+			if (strcmp(entry->name, filename) == 0) {
+				break;
+			}
+		}
+
+		if (!entry) {
+			ufs_dirclose(&dd);
+			return sendErrorResponse(session, 404, 6, 8, 1,
+				"File not found", NULL, 0);
+		}
+
+		// Found — return single-item response with full path
+		{
+			struct tm *tm_info;
+			char mtime_buf[32];
+
+			tm_info = mgmtime64(&entry->mtime);
+			if (tm_info) {
+				snprintf(mtime_buf, sizeof(mtime_buf),
+					"%04d-%02d-%02dT%02d:%02d:%02dZ",
+					tm_info->tm_year + 1900, tm_info->tm_mon + 1,
+					tm_info->tm_mday, tm_info->tm_hour,
+					tm_info->tm_min, tm_info->tm_sec);
+			} else {
+				snprintf(mtime_buf, sizeof(mtime_buf), "1970-01-01T00:00:00Z");
+			}
+
+			session->headers_sent = 1;
+			if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
+
+			rc = http_printf(session->httpc,
+				"{\n"
+				"  \"items\": [\n"
+				"    {\n"
+				"      \"name\": \"%s\",\n"
+				"      \"mode\": \"%s\",\n"
+				"      \"size\": %u,\n"
+				"      \"user\": \"%s\",\n"
+				"      \"group\": \"%s\",\n"
+				"      \"links\": %u,\n"
+				"      \"mtime\": \"%s\",\n"
+				"      \"inode\": %u\n"
+				"    }\n"
+				"  ],\n"
+				"  \"returnedRows\": 1,\n"
+				"  \"totalRows\": 1,\n"
+				"  \"moreRows\": false,\n"
+				"  \"JSONversion\": 1\n"
+				"}\n",
+				path, entry->attr, entry->filesize,
+				entry->owner, entry->group,
+				(unsigned) entry->nlink,
+				mtime_buf, entry->inode_number);
+
+			goto quit;
+		}
 	}
 
-	// Send response headers (streaming JSON like dsapi.c)
+	// Directory listing — send response headers (streaming JSON)
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;

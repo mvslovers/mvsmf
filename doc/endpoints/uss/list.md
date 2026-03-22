@@ -1,6 +1,8 @@
-# GET /zosmf/restfiles/fs — List Directory
+# GET /zosmf/restfiles/fs — List Directory / File Stat
 
-Lists files and directories at the specified USS path.
+Lists files and directories at the specified USS path. When the path points to
+a file instead of a directory, returns a single-item list with the file's
+attributes (stat-like query), matching z/OSMF behavior.
 
 ## Request
 
@@ -12,7 +14,7 @@ GET /zosmf/restfiles/fs?path=<filepath>
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `path`    | Yes      | Absolute path to the directory to list |
+| `path`    | Yes      | Absolute path to a directory or file |
 
 ### Headers
 
@@ -47,7 +49,7 @@ GET /zosmf/restfiles/fs?path=<filepath>
 
 | Field   | Source            | Type   | Description |
 |---------|-------------------|--------|-------------|
-| `name`  | UFSDLIST.name     | string | File or directory name |
+| `name`  | UFSDLIST.name     | string | File or directory name (full path for file stat queries) |
 | `mode`  | UFSDLIST.attr     | string | Unix permission string (e.g. `drwxr-xr-x`) |
 | `size`  | UFSDLIST.filesize | number | File size in bytes |
 | `user`  | UFSDLIST.owner    | string | Owner name |
@@ -68,7 +70,7 @@ When `X-IBM-Max-Items` is set and the directory contains more entries:
 | Status | Condition |
 |--------|-----------|
 | 400    | Missing `path` query parameter |
-| 404    | Path not found or not a directory |
+| 404    | Path not found |
 | 503    | UFSD subsystem not available |
 
 ## Examples
@@ -86,6 +88,32 @@ curl -u IBMUSER:sys1 \
 curl -u IBMUSER:sys1 \
   -H "X-IBM-Max-Items: 10" \
   "http://mvs:1080/zosmf/restfiles/fs?path=/home/ibmuser"
+```
+
+### Stat a single file (file path query)
+
+```bash
+curl -u IBMUSER:sys1 \
+  "http://mvs:1080/zosmf/restfiles/fs?path=/home/ibmuser/myfile.txt"
+```
+
+Returns a single-item list with the full path in the `name` field:
+
+```json
+{
+  "items": [
+    {
+      "name": "/home/ibmuser/myfile.txt",
+      "mode": "-rw-r--r--",
+      "size": 1234,
+      ...
+    }
+  ],
+  "returnedRows": 1,
+  "totalRows": 1,
+  "moreRows": false,
+  "JSONversion": 1
+}
 ```
 
 ### List with Zowe CLI

@@ -241,12 +241,29 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 assert_http_status "404" "$HTTP_CODE" "non-existent path returns 404"
 
 if [ -n "$TEST_FILE" ]; then
+	echo ""
+	echo "--- List file path (stat-like query) ---"
+
 	RESP=$(curl -s -w '\n%{http_code}' \
 		-u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_FILE}")
 	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
 
-	assert_http_status "404" "$HTTP_CODE" "list file path (not a directory) returns 404"
+	assert_http_status "200" "$HTTP_CODE" "list file path returns 200 (stat query)"
+
+	RETURNED=$(echo "$BODY" | grep -o '"returnedRows": *[0-9]*' | grep -o '[0-9]*')
+	if [ "$RETURNED" = "1" ]; then
+		pass "stat query: returnedRows is 1"
+	else
+		fail "stat query: returnedRows expected 1, got ${RETURNED}"
+	fi
+
+	if echo "$BODY" | grep -q "\"name\": \"${TEST_FILE}\""; then
+		pass "stat query: name contains full path"
+	else
+		fail "stat query: name does not contain full path ${TEST_FILE}"
+	fi
 fi
 
 # =========================================================================

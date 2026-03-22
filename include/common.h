@@ -31,6 +31,9 @@
 /** @brief EBCDIC line feed */
 #define EBCDIC_LF 0x25
 
+/** @brief EBCDIC newline (NEL) - used by CP037 A2E for ASCII LF (0x0A) */
+#define EBCDIC_NEL 0x15
+
 /** @brief HTTP status codes */
 #define HTTP_STATUS_OK 200                    /**< Success */
 #define HTTP_STATUS_CREATED 201               /**< Resource created */

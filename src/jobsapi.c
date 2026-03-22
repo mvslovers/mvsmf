@@ -1672,7 +1672,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         }
     }
 
-    char delimiter[2] = {EBCDIC_LF, '\0'}; // EBCDIC Line Feed
+    char delimiter[2] = {EBCDIC_NEL, '\0'}; // CP037 A2E maps ASCII LF to NEL (0x15)
     char *saveptr = NULL;
     char *line = tokenize(ebcdic_content, delimiter, &saveptr);
 

@@ -15,12 +15,18 @@
  * the Set-Cookie header from the 303 response, so the Sec-Token
  * cookie is set transparently.
  *
+ * Credentials for API calls (Basic Auth) are stored in sessionStorage.
+ * This survives page navigation but is cleared when the tab is closed.
+ * This is a temporary solution until token-based API auth is available
+ * in the HTTPD.
+ *
  * For the userid display we store the name in a lightweight
  * "mvsmf_user" cookie ourselves (Sec-Token may be HttpOnly).
  */
 const Auth = (function () {
 
   const USER_COOKIE = 'mvsmf_user';
+  const CRED_KEY    = 'mvsmf_cred';
 
   // ── Public API ─────────────────────────────────────────────────
 
@@ -65,6 +71,11 @@ const Auth = (function () {
     if (resp.type === 'opaqueredirect' || resp.status === 303) {
       // Store userid client-side for display (Sec-Token may be HttpOnly)
       _setCookie(USER_COOKIE, userid.toUpperCase(), 8); // 8 hours
+
+      // Persist credentials in sessionStorage for API calls across pages.
+      // Cleared on tab close or explicit logout.
+      sessionStorage.setItem(CRED_KEY, btoa(userid.toUpperCase() + ':' + password));
+
       // Navigate to the dashboard ourselves
       window.location.href = redirectUri || 'dashboard.html';
       return true;
@@ -76,11 +87,11 @@ const Auth = (function () {
 
   /**
    * Log the current user out.
-   * Calls /logout in the background (so the HTTPD drops the
-   * Sec-Token cookie) and then redirects to our landing page
-   * instead of showing the built-in HTTPD logout page.
+   * Clears all client-side state and calls /logout so the HTTPD
+   * drops the Sec-Token cookie. Then redirects to the landing page.
    */
   function logout() {
+    sessionStorage.removeItem(CRED_KEY);
     _deleteCookie(USER_COOKIE);
     fetch('/logout', {
       credentials: 'same-origin',
@@ -129,6 +140,24 @@ const Auth = (function () {
     }
   }
 
+  /**
+   * Returns the Basic Auth header value for API requests,
+   * or null if credentials are not available.
+   * @returns {string|null}  "Basic dXNlcjpwYXNz" or null
+   */
+  function getBasicAuth() {
+    var cred = sessionStorage.getItem(CRED_KEY);
+    return cred ? ('Basic ' + cred) : null;
+  }
+
+  /**
+   * Check whether credentials are available for API calls.
+   * @returns {boolean}
+   */
+  function hasCredentials() {
+    return sessionStorage.getItem(CRED_KEY) !== null;
+  }
+
   // ── Cookie Helpers ─────────────────────────────────────────────
 
   function _setCookie(name, value, hours) {
@@ -159,6 +188,8 @@ const Auth = (function () {
     logout,
     getUser,
     requireAuth,
+    getBasicAuth,
+    hasCredentials,
   };
 
 })();

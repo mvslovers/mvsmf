@@ -44,7 +44,7 @@
       </div>
       <div class="sidebar-section">
         <div class="sidebar-section-label">Data</div>
-        <a href="datasets.html" class="nav-item">
+        <a href="datasets.html" class="nav-item active">
           <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
@@ -88,23 +88,325 @@
     </nav>
 
     <!-- Main Content -->
-    <main class="main-content">
-      <div class="page-header">
+    <main class="main-content" style="display: flex; flex-direction: column; overflow: hidden;">
+
+      <div class="page-header" style="flex-shrink: 0;">
         <h1 class="headline-lg">Dataset Browser</h1>
-        <p class="body-md">This module is under development.</p>
+        <p class="body-md">Search and browse MVS datasets. Click a PDS to expand its members.</p>
       </div>
 
-      <div class="placeholder-page">
-        <svg class="placeholder-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-        <p class="headline-md" style="color: var(--on-surface-variant);">Dataset Browser</p>
-        <p class="body-md">This section will be available in a future release of mvsMF.</p>
+      <!-- Re-auth banner (shown when credentials are lost after refresh) -->
+      <div class="ds-reauth" id="reauthBanner" style="display: none; flex-shrink: 0;">
+        <span>Session credentials expired. Please sign in again to use the API.</span>
+        <a href="login.html?redirect=datasets.html" class="btn btn-primary" style="padding: var(--spacing-2) var(--spacing-5);">Sign In</a>
       </div>
+
+      <!-- Search toolbar -->
+      <div class="ds-toolbar" style="flex-shrink: 0;">
+        <input type="text" class="input-field" id="dsPattern"
+               placeholder="Dataset pattern, e.g. SYS1.**" maxlength="44"
+               value="">
+        <button class="btn btn-primary" id="btnSearch">Search</button>
+        <button class="btn btn-secondary" id="btnClear">Clear</button>
+      </div>
+
+      <!-- Result info -->
+      <div class="ds-result-info" id="resultInfo" style="display: none; flex-shrink: 0;"></div>
+
+      <!-- Results table (scrollable) -->
+      <div class="card" style="padding: 0; overflow-y: auto; flex: 1; min-height: 0;">
+        <div id="tableContainer">
+          <!-- Initial empty state -->
+          <div class="ds-empty" id="emptyState">
+            Enter a dataset pattern above and click Search.
+          </div>
+
+          <!-- Loading state (hidden) -->
+          <div class="ds-loading" id="loadingState" style="display: none;">
+            <div class="spinner"></div>
+            Searching datasets...
+          </div>
+
+          <!-- Error state (hidden) -->
+          <div class="ds-error" id="errorState" style="display: none;"></div>
+
+          <!-- Data table (hidden until results) -->
+          <table class="ds-table" id="dsTable" style="display: none;">
+            <thead>
+              <tr>
+                <th>Dataset Name</th>
+                <th>Volume</th>
+                <th>Dsorg</th>
+                <th>Recfm</th>
+                <th>Lrecl</th>
+                <th>Blksize</th>
+              </tr>
+            </thead>
+            <tbody id="dsTableBody">
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </main>
-
   </div>
 
   <script src="js/auth.js"></script>
+  <script src="js/api.js"></script>
   <script src="js/app.js"></script>
-  <script>App.init();</script>
+  <script>
+    App.init();
+
+    // ── State ──────────────────────────────────────────────────
+    var expandedDs = {};  // track which PDS rows are expanded
+
+    // ── DOM refs ───────────────────────────────────────────────
+    var patternInput = document.getElementById('dsPattern');
+    var btnSearch    = document.getElementById('btnSearch');
+    var btnClear     = document.getElementById('btnClear');
+    var resultInfo   = document.getElementById('resultInfo');
+    var emptyState   = document.getElementById('emptyState');
+    var loadingState = document.getElementById('loadingState');
+    var errorState   = document.getElementById('errorState');
+    var dsTable      = document.getElementById('dsTable');
+    var dsTableBody  = document.getElementById('dsTableBody');
+    var reauthBanner = document.getElementById('reauthBanner');
+
+    // ── Set default HLQ to current username ────────────────────
+    var user = Auth.getUser();
+    if (user && user.userid) {
+      patternInput.value = user.userid + '.**';
+    }
+
+    // ── Check credentials ──────────────────────────────────────
+    function updateReauthBanner() {
+      reauthBanner.style.display = Auth.hasCredentials() ? 'none' : 'flex';
+    }
+    updateReauthBanner();
+
+    // ── UI State helpers ───────────────────────────────────────
+    function showState(state) {
+      emptyState.style.display   = state === 'empty'   ? 'flex'  : 'none';
+      loadingState.style.display = state === 'loading' ? 'flex'  : 'none';
+      errorState.style.display   = state === 'error'   ? 'flex'  : 'none';
+      dsTable.style.display      = state === 'data'    ? 'table' : 'none';
+    }
+
+    // ── Search ─────────────────────────────────────────────────
+    async function doSearch() {
+      var pattern = patternInput.value.trim().toUpperCase();
+      if (!pattern) return;
+
+      patternInput.value = pattern;
+      expandedDs = {};
+      showState('loading');
+      resultInfo.style.display = 'none';
+
+      try {
+        var datasets = await API.listDatasets(pattern);
+
+        if (datasets.length === 0) {
+          showState('empty');
+          emptyState.textContent = 'No datasets found matching \u201C' + pattern + '\u201D.';
+          return;
+        }
+
+        renderDatasets(datasets, pattern);
+        showState('data');
+        updateReauthBanner();  // hide banner if search succeeded
+
+      } catch (err) {
+        showState('error');
+        errorState.textContent = err.message || 'Failed to load datasets.';
+      }
+    }
+
+    // ── Render dataset table ───────────────────────────────────
+    function renderDatasets(datasets, pattern) {
+      dsTableBody.innerHTML = '';
+
+      datasets.forEach(function (ds) {
+        var dsname = ds.dsname || ds.dsntp || '';
+        var dsorg  = (ds.dsorg || '').trim();
+        var isPDS  = dsorg === 'PO' || dsorg === 'PO-E';
+
+        var tr = document.createElement('tr');
+        if (isPDS) {
+          tr.className = 'ds-parent';
+          tr.dataset.dsname = dsname;
+        }
+
+        // Dataset name cell
+        var tdName = document.createElement('td');
+        tdName.className = 'dsname';
+        if (isPDS) {
+          var arrow = document.createElement('span');
+          arrow.className = 'ds-expand-icon';
+          arrow.textContent = '\u25B6';
+          tdName.appendChild(arrow);
+        }
+        tdName.appendChild(document.createTextNode(dsname));
+        tr.appendChild(tdName);
+
+        // Volume
+        var tdVol = document.createElement('td');
+        tdVol.textContent = ds.vol || ds.volser || '';
+        tr.appendChild(tdVol);
+
+        // Dsorg (with pill)
+        var tdOrg = document.createElement('td');
+        var orgPill = document.createElement('span');
+        orgPill.className = 'pill ' + (isPDS ? 'pill-primary' : 'pill-neutral');
+        orgPill.textContent = dsorg || '?';
+        tdOrg.appendChild(orgPill);
+        tr.appendChild(tdOrg);
+
+        // Recfm
+        var tdRecfm = document.createElement('td');
+        tdRecfm.textContent = ds.recfm || '';
+        tr.appendChild(tdRecfm);
+
+        // Lrecl
+        var tdLrecl = document.createElement('td');
+        tdLrecl.textContent = ds.lrecl != null ? ds.lrecl : '';
+        tr.appendChild(tdLrecl);
+
+        // Blksize
+        var tdBlk = document.createElement('td');
+        tdBlk.textContent = ds.blksz != null ? ds.blksz : '';
+        tr.appendChild(tdBlk);
+
+        dsTableBody.appendChild(tr);
+
+        // Click handler for PDS expansion
+        if (isPDS) {
+          tr.addEventListener('click', function () {
+            toggleMembers(this, dsname);
+          });
+        }
+      });
+
+      resultInfo.innerHTML = 'Showing <strong>' + datasets.length +
+        '</strong> dataset' + (datasets.length !== 1 ? 's' : '') +
+        ' matching <strong>' + _escHtml(pattern) + '</strong>';
+      resultInfo.style.display = 'block';
+    }
+
+    // ── Toggle PDS members ─────────────────────────────────────
+    async function toggleMembers(parentRow, dsname) {
+      // If already expanded: collapse
+      if (expandedDs[dsname]) {
+        parentRow.classList.remove('open');
+        var memberRows = dsTableBody.querySelectorAll(
+          'tr.ds-member[data-parent="' + dsname + '"]'
+        );
+        memberRows.forEach(function (r) { r.remove(); });
+        delete expandedDs[dsname];
+        return;
+      }
+
+      // Expand: fetch members from API
+      parentRow.classList.add('open');
+      expandedDs[dsname] = true;
+
+      // Temporary loading row
+      var loadRow = document.createElement('tr');
+      loadRow.className = 'ds-member visible';
+      loadRow.dataset.parent = dsname;
+      var loadTd = document.createElement('td');
+      loadTd.colSpan = 6;
+      loadTd.style.paddingLeft = 'calc(var(--spacing-4) + 1.75rem)';
+      loadTd.innerHTML = '<div class="spinner" style="display:inline-block;width:14px;height:14px;vertical-align:middle;margin-right:8px;"></div> Loading members\u2026';
+      loadTd.style.color = 'var(--on-surface-variant)';
+      loadTd.style.fontSize = '0.8125rem';
+      loadRow.appendChild(loadTd);
+      parentRow.after(loadRow);
+
+      try {
+        var members = await API.listMembers(dsname);
+        loadRow.remove();
+
+        if (members.length === 0) {
+          var emptyRow = document.createElement('tr');
+          emptyRow.className = 'ds-member visible';
+          emptyRow.dataset.parent = dsname;
+          var emptyTd = document.createElement('td');
+          emptyTd.colSpan = 6;
+          emptyTd.style.paddingLeft = 'calc(var(--spacing-4) + 1.75rem)';
+          emptyTd.textContent = '(empty dataset)';
+          emptyTd.style.color = 'var(--on-surface-variant)';
+          emptyTd.style.fontStyle = 'italic';
+          emptyRow.appendChild(emptyTd);
+          parentRow.after(emptyRow);
+          return;
+        }
+
+        // Insert member rows after the parent
+        var insertAfter = parentRow;
+        members.forEach(function (m, idx) {
+          var mr = document.createElement('tr');
+          mr.className = 'ds-member visible';
+          if (idx === members.length - 1) mr.classList.add('last-member');
+          mr.dataset.parent = dsname;
+
+          var tdMem = document.createElement('td');
+          tdMem.textContent = m.member || m.name || '';
+          mr.appendChild(tdMem);
+
+          var tdEmpty = document.createElement('td');
+          tdEmpty.colSpan = 5;
+          mr.appendChild(tdEmpty);
+
+          insertAfter.after(mr);
+          insertAfter = mr;
+        });
+
+      } catch (err) {
+        loadRow.remove();
+        var errRow = document.createElement('tr');
+        errRow.className = 'ds-member visible';
+        errRow.dataset.parent = dsname;
+        var errTd = document.createElement('td');
+        errTd.colSpan = 6;
+        errTd.style.paddingLeft = 'calc(var(--spacing-4) + 1.75rem)';
+        errTd.textContent = 'Failed to load members: ' + err.message;
+        errTd.style.color = 'var(--error)';
+        errRow.appendChild(errTd);
+        parentRow.after(errRow);
+      }
+    }
+
+    // ── Event handlers ─────────────────────────────────────────
+    btnSearch.addEventListener('click', doSearch);
+
+    patternInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doSearch();
+      }
+    });
+
+    btnClear.addEventListener('click', function () {
+      patternInput.value = '';
+      dsTableBody.innerHTML = '';
+      expandedDs = {};
+      resultInfo.style.display = 'none';
+      showState('empty');
+      emptyState.textContent = 'Enter a dataset pattern above and click Search.';
+      patternInput.focus();
+    });
+
+    // ── Helpers ────────────────────────────────────────────────
+    function _escHtml(s) {
+      var d = document.createElement('div');
+      d.appendChild(document.createTextNode(s));
+      return d.innerHTML;
+    }
+
+    // ── Auto-search on load ──────────────────────────────────
+    if (Auth.hasCredentials() && patternInput.value.trim()) {
+      doSearch();
+    }
+  </script>
 </body>
 </html>

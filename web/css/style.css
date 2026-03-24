@@ -466,7 +466,8 @@ a:hover {
   display: grid;
   grid-template-columns: 260px 1fr;
   grid-template-rows: auto 1fr;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 /* --- Top Bar --- */
@@ -785,6 +786,168 @@ a:hover {
 }
 .spool-bar-label span:last-child {
   color: var(--on-surface-variant);
+}
+
+/* ============================================================
+   Dataset Browser
+   ============================================================ */
+
+/* Toolbar */
+.ds-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-3);
+  margin-bottom: var(--spacing-6);
+}
+.ds-toolbar .input-field {
+  max-width: 400px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9375rem;
+  letter-spacing: 0.02em;
+}
+.ds-result-info {
+  font-size: 0.8125rem;
+  color: var(--on-surface-variant);
+  margin-bottom: var(--spacing-4);
+}
+
+/* Data Table */
+.ds-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.ds-table thead th {
+  text-align: left;
+  padding: var(--spacing-3) var(--spacing-4);
+  font-family: var(--font-body);
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+  background: var(--surface-container-low);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.ds-table tbody td {
+  padding: var(--spacing-3) var(--spacing-4);
+  vertical-align: middle;
+}
+.ds-table tbody tr {
+  transition: background var(--transition-fast);
+}
+.ds-table tbody tr:hover {
+  background: var(--surface-variant);
+}
+
+/* Dataset name styling */
+.dsname {
+  font-family: 'Courier New', monospace;
+  letter-spacing: 0.02em;
+}
+
+/* Expandable PDS parent row */
+.ds-parent {
+  cursor: pointer;
+}
+.ds-parent td:first-child {
+  font-weight: 600;
+}
+.ds-parent .ds-expand-icon {
+  display: inline-block;
+  width: 16px;
+  font-size: 0.625rem;
+  color: var(--on-surface-variant);
+  margin-right: var(--spacing-2);
+  transition: transform var(--transition-fast);
+}
+.ds-parent.open .ds-expand-icon {
+  transform: rotate(90deg);
+}
+
+/* Member rows (hidden by default) */
+.ds-member {
+  display: none;
+}
+.ds-member.visible {
+  display: table-row;
+}
+.ds-member td {
+  padding-top: var(--spacing-1);
+  padding-bottom: var(--spacing-1);
+}
+.ds-member td:first-child {
+  padding-left: calc(var(--spacing-4) + 1.75rem);
+  color: var(--on-surface-variant);
+  font-family: 'Courier New', monospace;
+  font-size: 0.8125rem;
+  position: relative;
+}
+/* Vertical connector line */
+.ds-member td:first-child::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--spacing-4) + 0.5rem);
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--outline-variant);
+}
+/* Horizontal branch */
+.ds-member td:first-child::after {
+  content: '';
+  position: absolute;
+  left: calc(var(--spacing-4) + 0.5rem);
+  top: 50%;
+  width: 0.625rem;
+  height: 1px;
+  background: var(--outline-variant);
+}
+/* Last member: cut the vertical line at the branch point */
+.ds-member.last-member td:first-child::before {
+  bottom: 50%;
+}
+
+/* Loading & empty states */
+.ds-loading, .ds-empty, .ds-error {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--spacing-10);
+  color: var(--on-surface-variant);
+  font-size: 0.875rem;
+  text-align: center;
+}
+.ds-error {
+  color: var(--error);
+}
+
+/* Spinner */
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--surface-container-high);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: var(--spacing-3);
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Re-login banner for credential loss */
+.ds-reauth {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-4) var(--spacing-5);
+  background: var(--primary-fixed);
+  border-radius: var(--rounded-lg);
+  margin-bottom: var(--spacing-6);
+  font-size: 0.875rem;
 }
 
 /* --- Placeholder / Coming Soon --- */

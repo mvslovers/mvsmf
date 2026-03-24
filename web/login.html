@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In – mvsMF</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <a href="index.html" class="label-sm" style="color: var(--on-surface-variant); display: inline-block; margin-bottom: var(--spacing-6);">&larr; Back</a>
+
+      <h1 class="headline-md">Sign In</h1>
+      <p class="body-md">Authenticate against MVS 3.8j to access the Management Facility.</p>
+
+      <form class="login-form" id="loginForm" autocomplete="off">
+        <div id="loginError" class="login-error">
+          Invalid credentials. Please try again.
+        </div>
+
+        <div class="input-group">
+          <label for="userid">TSO User ID</label>
+          <input type="text" id="userid" name="userid" class="input-field" placeholder="e.g. HERC01" maxlength="8" required autofocus>
+        </div>
+
+        <div class="input-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" class="input-field" placeholder="Password" maxlength="8" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg w-full">
+          Sign In
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    // Determine where to redirect after successful login.
+    // Default is dashboard.html; can be overridden via ?redirect= param.
+    var params = new URLSearchParams(window.location.search);
+    var redirectUri = params.get('redirect') || 'dashboard.html';
+
+    var form    = document.getElementById('loginForm');
+    var errorEl = document.getElementById('loginError');
+    var submitBtn = form.querySelector('button[type="submit"]');
+
+    form.addEventListener('submit', async function(e) {
+      e.preventDefault();
+
+      var userid   = document.getElementById('userid').value.trim();
+      var password = document.getElementById('password').value;
+
+      if (!userid || !password) return;
+
+      // Disable button while request is in flight
+      errorEl.classList.remove('visible');
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Signing in\u2026';
+
+      try {
+        // Auth.login() uses fetch() with redirect:'manual'.
+        // Returns true on 303 (success) or false on 200 (bad credentials).
+        var success = await Auth.login(userid, password, redirectUri);
+
+        if (!success) {
+          errorEl.textContent = 'Invalid userid or password.';
+          errorEl.classList.add('visible');
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Sign In';
+        }
+        // On success, Auth.login() navigates to the dashboard.
+      } catch (err) {
+        errorEl.textContent = 'Connection error. Is the system available?';
+        errorEl.classList.add('visible');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Sign In';
+      }
+    });
+  </script>
+</body>
+</html>

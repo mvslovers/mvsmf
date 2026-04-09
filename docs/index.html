@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mvslovers Ecosystem — Architecture Overview</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e14;
+  --bg-card: #111820;
+  --bg-card-hover: #161e28;
+  --border: #1e2a38;
+  --border-glow: #2a3a4e;
+  --text: #c5cdd8;
+  --text-dim: #6b7a8d;
+  --text-bright: #e8edf3;
+  --green: #41d97a;
+  --green-dim: #1a5c35;
+  --green-glow: rgba(65, 217, 122, 0.15);
+  --blue: #4da6ff;
+  --blue-dim: #1a3a5c;
+  --blue-glow: rgba(77, 166, 255, 0.12);
+  --orange: #f0a050;
+  --orange-dim: #5c3a1a;
+  --orange-glow: rgba(240, 160, 80, 0.12);
+  --purple: #a78bfa;
+  --purple-dim: #3a2a5c;
+  --purple-glow: rgba(167, 139, 250, 0.12);
+  --red: #f07070;
+  --yellow: #e8d44d;
+  --cyan: #56d4c8;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'IBM Plex Sans', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: repeating-linear-gradient(
+    transparent, transparent 2px,
+    rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 1000;
+}
+
+.container {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 40px 24px 80px;
+}
+
+/* Header */
+.header {
+  text-align: center;
+  margin-bottom: 56px;
+  animation: fadeIn 0.8s ease-out;
+}
+
+.header-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--green-glow);
+  border: 1px solid var(--green-dim);
+  border-radius: 20px;
+  padding: 6px 16px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--green);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+.header-badge::before {
+  content: '';
+  width: 6px; height: 6px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+h1 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 700;
+  color: var(--text-bright);
+  letter-spacing: -1px;
+  margin-bottom: 12px;
+}
+
+h1 span { color: var(--green); }
+
+.subtitle {
+  font-size: 17px;
+  color: var(--text-dim);
+  max-width: 640px;
+  margin: 0 auto;
+  line-height: 1.6;
+}
+
+/* The Big Picture */
+.big-picture {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+  margin-bottom: 48px;
+  animation: fadeSlideUp 0.8s ease-out 0.2s both;
+}
+
+.big-picture h2 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: var(--green);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+}
+
+.big-picture p {
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+}
+
+.big-picture strong { color: var(--text-bright); }
+
+/* Architecture Diagram */
+.arch-section {
+  margin-bottom: 48px;
+  animation: fadeSlideUp 0.8s ease-out 0.3s both;
+}
+
+.arch-section > h2 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+/* Layer rows */
+.layer {
+  position: relative;
+  margin-bottom: 2px;
+}
+
+.layer-label {
+  position: absolute;
+  left: -8px;
+  top: 50%;
+  transform: translateY(-50%) rotate(-90deg);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0.5;
+}
+
+/* Client layer */
+.clients-row {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.client-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.client-chip .icon { font-size: 14px; }
+
+/* Arrow connector */
+.connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin: 8px 0;
+  color: var(--text-dim);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+}
+
+.connector .arrow {
+  width: 1px;
+  height: 20px;
+  background: linear-gradient(to bottom, var(--border), var(--green-dim));
+  position: relative;
+}
+
+.connector .arrow::after {
+  content: '▼';
+  position: absolute;
+  bottom: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 8px;
+  color: var(--green-dim);
+}
+
+.connector .proto {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 10px;
+  font-size: 10px;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+
+/* Main boxes */
+.box-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 2px;
+}
+
+.box {
+  flex: 1;
+  border-radius: 10px;
+  padding: 20px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.box::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  border-radius: 10px 10px 0 0;
+}
+
+.box:hover { transform: translateY(-2px); }
+
+.box-green {
+  background: var(--bg-card);
+  border: 1px solid var(--green-dim);
+}
+.box-green::before { background: var(--green); }
+.box-green:hover { background: var(--bg-card-hover); box-shadow: 0 4px 24px var(--green-glow); }
+
+.box-blue {
+  background: var(--bg-card);
+  border: 1px solid var(--blue-dim);
+}
+.box-blue::before { background: var(--blue); }
+.box-blue:hover { background: var(--bg-card-hover); box-shadow: 0 4px 24px var(--blue-glow); }
+
+.box-orange {
+  background: var(--bg-card);
+  border: 1px solid var(--orange-dim);
+}
+.box-orange::before { background: var(--orange); }
+.box-orange:hover { background: var(--bg-card-hover); box-shadow: 0 4px 24px var(--orange-glow); }
+
+.box-purple {
+  background: var(--bg-card);
+  border: 1px solid var(--purple-dim);
+}
+.box-purple::before { background: var(--purple); }
+.box-purple:hover { background: var(--bg-card-hover); box-shadow: 0 4px 24px var(--purple-glow); }
+
+.box-cyan {
+  background: var(--bg-card);
+  border: 1px solid #1a4a5c;
+}
+.box-cyan::before { background: var(--cyan); }
+.box-cyan:hover { background: var(--bg-card-hover); box-shadow: 0 4px 24px rgba(86, 212, 200, 0.15); }
+
+.box-full { flex: 1 1 100%; }
+
+.box .tag {
+  display: inline-block;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+}
+
+.box-green .tag { color: var(--green); background: var(--green-glow); }
+.box-blue .tag { color: var(--blue); background: var(--blue-glow); }
+.box-orange .tag { color: var(--orange); background: var(--orange-glow); }
+.box-purple .tag { color: var(--purple); background: var(--purple-glow); }
+
+.box h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-bright);
+  margin-bottom: 6px;
+}
+
+.box .desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.box .repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.6;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.box .repo:hover { opacity: 1; color: var(--text); }
+
+/* Detail panel */
+.detail-panel {
+  display: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 28px;
+  margin: 16px 0;
+  animation: expandIn 0.3s ease-out;
+}
+
+.detail-panel.active { display: block; }
+
+.detail-panel h3 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 16px;
+  color: var(--text-bright);
+  margin-bottom: 12px;
+}
+
+.detail-panel p {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.detail-panel code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  background: rgba(255,255,255,0.05);
+  padding: 1px 6px;
+  border-radius: 3px;
+  color: var(--green);
+}
+
+.detail-panel .close-btn {
+  float: right;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+}
+
+.detail-panel .close-btn:hover { border-color: var(--text-dim); color: var(--text); }
+
+/* Shared foundation */
+.foundation {
+  margin-top: 12px;
+}
+
+/* SSI connector between UFSD and clients */
+.ssi-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.ssi-line {
+  height: 1px;
+  flex: 1;
+  max-width: 80px;
+  background: var(--border);
+}
+
+.ssi-label {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-dim);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 10px;
+}
+
+/* Why section */
+.why-section {
+  margin-top: 56px;
+  animation: fadeSlideUp 0.8s ease-out 0.5s both;
+}
+
+.why-section h2 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 14px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 20px;
+}
+
+.why-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.why-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+}
+
+.why-card .q {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 10px;
+}
+
+.why-card .a {
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+/* Footer */
+.footer {
+  margin-top: 64px;
+  text-align: center;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.4;
+}
+
+.footer a { color: var(--green); text-decoration: none; }
+
+/* Animations */
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fadeSlideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes expandIn { from { opacity: 0; transform: scaleY(0.95); } to { opacity: 1; transform: scaleY(1); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Responsive */
+@media (max-width: 640px) {
+  .box-row { flex-direction: column; }
+  .layer-label { display: none; }
+  .container { padding: 24px 16px 60px; }
+  [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-badge">mvslovers open source</div>
+    <h1><span>mvsMF</span> Ecosystem</h1>
+    <p class="subtitle">
+      A suite of open-source projects that bring modern development tooling
+      to IBM MVS 3.8j — the classic mainframe operating system from 1979.
+    </p>
+  </header>
+
+  <!-- Big Picture -->
+  <section class="big-picture">
+    <h2>The Big Picture</h2>
+    <p>
+      <strong>mvsMF</strong> started as a single project: a z/OSMF-compatible REST API
+      that lets you use <strong>Zowe Explorer</strong> (VSCode/JetBrains) and <strong>Zowe CLI</strong>
+      with MVS 3.8j. But mvsMF is just one piece of the puzzle — it needs a web server to run on,
+      a filesystem to serve files from, and it's growing a web frontend of its own. That's why we now
+      have <strong>multiple projects</strong> that work together as two parallel stacks:
+      one for HTTP (mvsMF + HTTPD) and one for FTP (FTPD) — both sharing the same
+      filesystem (UFSD) underneath. Click each box below to learn more.
+    </p>
+  </section>
+
+  <!-- Architecture -->
+  <section class="arch-section">
+    <h2>Architecture</h2>
+
+    <!-- Two-column architecture grid -->
+
+    <!-- Client layer — all centered -->
+    <div class="clients-row" style="justify-content: center; margin-bottom: 4px;">
+      <div class="client-chip"><span class="icon">🌐</span> Browser</div>
+      <div class="client-chip"><span class="icon">📂</span> FTP Client</div>
+      <div class="client-chip"><span class="icon">⌨️</span> curl</div>
+      <div class="client-chip"><span class="icon">💻</span> Zowe CLI / Explorer</div>
+    </div>
+
+    <!-- Protocol labels -->
+    <div class="connector">
+      <div class="proto">HTTP · REST · FTP</div>
+      <div class="arrow"></div>
+    </div>
+
+    <!-- Row 1: mvsMF REST API + mvsMF Web UI -->
+    <div class="box-row" style="margin-bottom: 8px;">
+      <div class="box box-green" onclick="toggleDetail('detail-mvsmf')">
+        <span class="tag">REST API</span>
+        <h3>mvsMF</h3>
+        <div class="desc">z/OSMF-compatible REST API for datasets, jobs, and USS files. Runs as a CGI module inside HTTPD.</div>
+        <a href="https://github.com/mvslovers/mvsmf" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/mvsmf</a>
+      </div>
+      <div class="box box-cyan" onclick="toggleDetail('detail-webui')" style="background: var(--bg-card); border: 1px solid #1a4a5c;">
+        <span class="tag" style="color: var(--cyan); background: rgba(86, 212, 200, 0.12);">Web Frontend · Planned</span>
+        <h3 style="font-size: 16px;">mvsMF Web UI</h3>
+        <div class="desc">Browser-based Dataset Explorer and JES2 Spool Viewer. A modern web app built on the mvsMF REST APIs.</div>
+      </div>
+    </div>
+
+    <!-- CGI connector (left half only) -->
+    <div style="display: flex; gap: 16px;">
+      <div style="flex: 1;">
+        <div class="ssi-row"><div class="ssi-line"></div><div class="ssi-label">CGI</div><div class="ssi-line"></div></div>
+      </div>
+      <div style="flex: 1;"></div>
+    </div>
+
+    <!-- Row 2: HTTPD + FTPD -->
+    <div class="box-row" style="margin-bottom: 2px;">
+      <div class="box box-blue" onclick="toggleDetail('detail-httpd')">
+        <span class="tag">Web Server</span>
+        <h3>HTTPD</h3>
+        <div class="desc">Lightweight HTTP/1.1 server for MVS 3.8j. Hosts mvsMF as CGI, serves the Web UI and static files from UFS.</div>
+        <a href="https://github.com/mvslovers/httpd" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/httpd</a>
+      </div>
+      <div class="box box-orange" onclick="toggleDetail('detail-ftpd')">
+        <span class="tag">FTP Server</span>
+        <h3>FTPD</h3>
+        <div class="desc">Standalone z/OS-compatible FTP server. Dataset access, JES spool, and UFS file transfers. Functionally complete — looking for testers.</div>
+        <a href="https://github.com/mvslovers/ftpd" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/ftpd</a>
+      </div>
+    </div>
+
+    <!-- Detail panels (full width) -->
+    <div id="detail-mvsmf" class="detail-panel">
+      <button class="close-btn" onclick="toggleDetail('detail-mvsmf')">close</button>
+      <h3>mvsMF — What it does</h3>
+      <p>mvsMF implements the <strong>IBM z/OSMF REST API</strong> on MVS 3.8j. This means you can use
+      modern tools like <code>Zowe Explorer</code> in VSCode to browse datasets, edit members,
+      submit JCL, and view job output — all on a 1979 mainframe.</p>
+      <p>It handles three API families: <code>/zosmf/restfiles/ds/*</code> (datasets),
+      <code>/zosmf/restjobs/*</code> (jobs), and <code>/zosmf/restfiles/fs/*</code> (USS files via UFSD).</p>
+      <p>mvsMF is a <strong>CGI module</strong> — it doesn't listen on a port itself. Instead, it plugs
+      into HTTPD, which handles all HTTP protocol work (TCP, Keep-Alive, TLS) and routes
+      <code>/zosmf/*</code> requests to mvsMF.</p>
+    </div>
+
+    <div id="detail-webui" class="detail-panel">
+      <button class="close-btn" onclick="toggleDetail('detail-webui')">close</button>
+      <h3>mvsMF Web UI — Planned</h3>
+      <p>The Web UI will be a <strong>browser-based frontend</strong> that gives you a visual interface for working
+      with your MVS system — no IDE or CLI required. Just open a browser and go.</p>
+      <p>It will include a <strong>Dataset Explorer</strong> for browsing, viewing, and editing MVS datasets and PDS members,
+      and a <strong>JES2 Spool Viewer</strong> for inspecting job output, JCL, and spool files.
+      Think of the classic HTTPD 3.3.x built-in JES browser and dataset pages, but redesigned
+      from scratch as a modern, responsive web app.</p>
+      <p>The key design principle: the Web UI will be a pure frontend that
+      consumes the <strong>mvsMF REST APIs</strong>. This means it benefits from all the work going into
+      mvsMF (codepage handling, error handling, authentication) without duplicating any logic.
+      HTTPD serves the Web UI's HTML/CSS/JS as static files from UFS.</p>
+    </div>
+
+    <div id="detail-httpd" class="detail-panel">
+      <button class="close-btn" onclick="toggleDetail('detail-httpd')">close</button>
+      <h3>HTTPD — What it does</h3>
+      <p>HTTPD is the <strong>web server</strong> that makes everything accessible over HTTP. Originally
+      Mike Rayborn's HTTPD 3.3.x, we're evolving it to <strong>4.0.0</strong> with a major cleanup:
+      removing legacy Lua config, embedded FTP, and MQTT telemetry.</p>
+      <p>Key responsibilities: TCP listener with worker thread pool, HTTP/1.1 protocol handling,
+      multi-codepage EBCDIC↔ASCII translation (<code>CP037</code> for MVS data, <code>IBM-1047</code> for USS files),
+      CGI routing to mvsMF, and serving the Web UI's static files from UFS.</p>
+      <p><strong>Why a separate repo?</strong> HTTPD is a general-purpose server — it can host any CGI module,
+      not just mvsMF. Keeping it separate means other projects can reuse it too.</p>
+    </div>
+
+    <div id="detail-ftpd" class="detail-panel">
+      <button class="close-btn" onclick="toggleDetail('detail-ftpd')">close</button>
+      <h3>FTPD — What it does</h3>
+      <p>A <strong>standalone FTP server</strong> for MVS 3.8j, compatible with z/OS FTP conventions.
+      Unlike mvsMF (which runs inside HTTPD), FTPD is its own Started Task (STC) with its own
+      TCP listener — completely independent from the HTTP stack.</p>
+      <p>Supports MVS dataset access (sequential + PDS), JES job submission and spool retrieval
+      via <code>SITE FILETYPE=JES</code>, and Unix file access via the UFSD client library.</p>
+      <p><em>Status: Functionally complete — the core feature set is implemented and the server
+      compiles and links. We're now in the testing and stabilization phase. If you have an
+      MVS 3.8j system and an FTP client, we'd love your help shaking out bugs.</em></p>
+    </div>
+
+    <!-- Shared layers (full width, below both columns) -->
+    <div class="ssi-row" style="margin-top: 12px;">
+      <div class="ssi-line"></div>
+      <div class="ssi-label">SSI / cross-address-space</div>
+      <div class="ssi-line"></div>
+    </div>
+
+    <!-- UFSD -->
+    <div class="box-row">
+      <div class="box box-purple box-full" onclick="toggleDetail('detail-ufsd')">
+        <span class="tag">Filesystem Server</span>
+        <h3>UFSD</h3>
+        <div class="desc">Cross-address-space Unix filesystem daemon. Provides POSIX-like file I/O (open, read, write, mkdir, stat) on MVS via a subsystem interface (SSI). Used by both the HTTP stack (HTTPD + mvsMF) and FTPD.</div>
+        <a href="https://github.com/mvslovers/ufsd" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/ufsd</a>
+      </div>
+    </div>
+
+    <div id="detail-ufsd" class="detail-panel">
+      <button class="close-btn" onclick="toggleDetail('detail-ufsd')">close</button>
+      <h3>UFSD — What it does</h3>
+      <p>MVS 3.8j has no Unix filesystem. UFSD adds one — a <strong>UFS370 filesystem server</strong>
+      that runs as a Started Task and provides file I/O to any address space on the system via
+      the MVS Subsystem Interface (SSI).</p>
+      <p>This is what makes <code>/zosmf/restfiles/fs/*</code> possible in mvsMF and what lets HTTPD
+      serve static HTML/CSS/JS files. FTPD also uses the UFSD client library for Unix file transfers.
+      Without UFSD, there's no place to store web content or USS files on MVS 3.8j.</p>
+      <p>Companion tool: <code>ufsd-utils</code> (Go) — creates, manipulates, and uploads UFS disk images
+      from your workstation.</p>
+    </div>
+
+    <!-- Foundation -->
+    <div class="ssi-row">
+      <div class="ssi-line"></div>
+      <div class="ssi-label">C runtime</div>
+      <div class="ssi-line"></div>
+    </div>
+
+    <div class="box-row foundation">
+      <div class="box box-full" style="background: var(--bg-card); border: 1px solid var(--border); cursor: default;">
+        <div style="text-align: center;">
+          <span class="tag" style="color: var(--text-dim); background: rgba(255,255,255,0.04);">Shared Foundation</span>
+          <h3 style="font-size: 15px; color: var(--text-dim);">crent370</h3>
+          <div class="desc" style="max-width: 500px; margin: 0 auto;">
+            Mike Rayborn's C runtime library for MVS 3.8j — provides TCP/IP sockets (DYN75), RACF authentication,
+            JES2 interfaces, VSAM, and 200+ standard C library functions. Every project above depends on it.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Why section -->
+  <section class="why-section">
+    <h2>FAQ</h2>
+    <div class="why-grid">
+      <div class="why-card">
+        <div class="q">Why so many repos?</div>
+        <div class="a">Each project has a distinct responsibility and can be used independently.
+          HTTPD can serve web pages without mvsMF. UFSD can provide files to any program, not just HTTPD.
+          FTPD is a completely standalone server with its own TCP listener. The Web UI is a pure
+          frontend that only talks to REST APIs. Separating them keeps each codebase focused and testable.</div>
+      </div>
+      <div class="why-card">
+        <div class="q">Do I need all of them?</div>
+        <div class="a">Depends on your use case. For Zowe/VSCode: you need HTTPD + mvsMF + UFSD.
+          For FTP access: just FTPD. For a simple web server: just HTTPD + UFSD.
+          All of them need crent370 as the C runtime.</div>
+      </div>
+      <div class="why-card">
+        <div class="q">What's the current focus?</div>
+        <div class="a">HTTPD 4.0.0 (major cleanup), UFSD beta readiness (AP-4a milestone),
+          FTPD testing and stabilization, and the mvsMF Web UI (Dataset Explorer + JES2 Spool Viewer).
+          The mvsMF REST API itself is stable — most active work is in the infrastructure it depends
+          on and the frontend it powers.</div>
+      </div>
+      <div class="why-card">
+        <div class="q">How do I get these programs?</div>
+        <div class="a">Right now, all projects are built from source using
+          <strong>mbt</strong> (MVS Build Tools) and require the <strong>crent370</strong> C runtime
+          on your MVS system. It's a hands-on process, but well-documented in each repo's README.
+          Looking ahead, the goal is to ship everything pre-built as part of the
+          <strong>MVS Turnkey distributions</strong> (TK5 and friends) and as packages for the
+          <strong>MVP package manager</strong> — so eventually it'll be a one-liner to install.</div>
+      </div>
+      <div class="why-card">
+        <div class="q">Can I contribute?</div>
+        <div class="a">Yes — and you don't need to be a C programmer. What we need most right now:
+          <strong>Testers</strong> who can run the software on their MVS systems and report what breaks.
+          <strong>Writers</strong> who can help with documentation, guides, and tutorials — English
+          isn't the maintainer's first language, so native speakers who can make the docs
+          clearer and more approachable are incredibly valuable.
+          And of course, C, HLASM, Go, and JCL developers are always welcome.
+          All repos are public on GitHub — check the Issues tab or ask in Discord.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <a href="https://github.com/mvslovers">github.com/mvslovers</a> · MVS 3.8j Open Source
+  </footer>
+
+</div>
+
+<script>
+function toggleDetail(id) {
+  const panel = document.getElementById(id);
+  const wasActive = panel.classList.contains('active');
+
+  // Close all panels
+  document.querySelectorAll('.detail-panel').forEach(p => p.classList.remove('active'));
+
+  // Toggle clicked panel
+  if (!wasActive) {
+    panel.classList.add('active');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+</script>
+
+</body>
+</html>

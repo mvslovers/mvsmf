@@ -45,14 +45,14 @@ naming = "fixed"
 name = "'IBMUSER.HTTPD.V3R3M1D.LOAD'"
 
 [dependencies]
-"mvslovers/crent370" = ">=1.0.7"
+"mvslovers/crent370" = ">=1.0.10"
 "mvslovers/httpd" = "=4.0.0-dev"
 "mvslovers/ufsd" = "=1.0.0-dev"
 
 [link.module]
 name = "MVSMF"
 entry = "@@CRT0"
-options = ["LIST", "MAP", "XREF", "RENT"]
+options = ["SIZE=(4000K,40K)", "LIST", "MAP", "XREF", "RENT"]
 include = [
 	"@@CRT1",
 	"CGXSTART",

@@ -38,6 +38,8 @@
 // Forward declarations
 static int handle_error(Session *session, int error_code, const char* message);
 static int send_standard_headers(Session *session, const char* content_type);
+static int process_rename(Session *session, const char *target_dsn,
+                          const char *target_member);
 
 // Helper functions for memory management
 static void cleanup_resources(char* buffer, FILE* fp) {
@@ -786,6 +788,16 @@ int datasetPutHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
     }
 
+    // z/OSMF control request (rename): Content-Type: application/json.
+    // Must be handled before the existence/PDS checks because the target
+    // data set (the URL name) does not exist yet.
+    {
+        const char *ct = getHeaderParam(session, "Content-Type");
+        if (ct && strstr(ct, "application/json") != NULL) {
+            return process_rename(session, dsname, NULL);
+        }
+    }
+
     // Reject PDS - this endpoint is for sequential datasets only
     if (is_pds(dsname)) {
         return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
@@ -1301,6 +1313,15 @@ int memberPutHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset and member names are required");
     }
 
+    // z/OSMF control request (rename): Content-Type: application/json.
+    // Must be handled before opening the (new) member for writing.
+    {
+        const char *ct = getHeaderParam(session, "Content-Type");
+        if (ct && strstr(ct, "application/json") != NULL) {
+            return process_rename(session, dsname, member);
+        }
+    }
+
     // Get headers
     content_length_str = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_CONTENT-LENGTH");
     transfer_encoding = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_TRANSFER-ENCODING");
@@ -1643,6 +1664,114 @@ extract_json_int(const char *json, const char *key, int *out)
 	if (*pos < '0' || *pos > '9') return -1;
 	*out = atoi(pos);
 	return 0;
+}
+
+// Handle a z/OSMF rename control request (Content-Type: application/json).
+//
+//   Member rename:  PUT /ds/{dsn}({newmember})
+//                   body {"request":"rename","from-dataset":{"dsn":"{dsn}","member":"{oldmember}"}}
+//                   -> target_member = newmember (URL), oldmember from body
+//   Dataset rename: PUT /ds/{newdsn}
+//                   body {"request":"rename","from-dataset":{"dsn":"{olddsn}"}}
+//                   -> target_member = NULL, target_dsn = newdsn (URL), olddsn from body
+//
+// PDS members are renamed with __renmem() (STOW change); cataloged data sets
+// with rename() (IDCAMS ALTER). Returns 204 on success.
+__asm__("\n&FUNC    SETC 'ds_rename'");
+static int
+process_rename(Session *session, const char *target_dsn,
+               const char *target_member)
+{
+	char	*body		= NULL;
+	size_t	body_len	= 0;
+	char	request[16]	= {0};
+	char	from_dsn[MAX_DATASET_NAME] = {0};
+	char	from_member[12]	= {0};
+	int	rc;
+
+	// Read and EBCDIC-translate the JSON control body
+	if (read_request_content(session, &body, &body_len) < 0) {
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+			ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+	}
+	http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
+
+	// Only "rename" is supported
+	if (extract_json_string(body, "request", request, sizeof(request)) < 0 ||
+	    strcmp(request, "rename") != 0) {
+		free(body);
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+			ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+	}
+
+	if (target_member) {
+		// Member rename: from-dataset.member is the OLD member name,
+		// the URL member is the NEW name, within the same PDS (target_dsn).
+		if (extract_json_string(body, "member", from_member,
+				sizeof(from_member)) < 0) {
+			free(body);
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+		}
+		free(body);
+
+		rc = __renmem(target_dsn, from_member, target_member);
+		if (rc == 0) {
+			return sendDefaultHeaders(session, 204, "application/json", 0);
+		}
+		if (rc == 8 || rc == -2) {	// old member / data set not found
+			return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+				CATEGORY_SERVICE, RC_ERROR, REASON_MEMBER_NOT_FOUND,
+				ERR_MSG_MEMBER_NOT_FOUND, NULL, 0);
+		}
+		if (rc == 4) {			// new member already exists
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_RENAME_TARGET_EXISTS,
+				ERR_MSG_RENAME_TARGET_EXISTS, NULL, 0);
+		}
+		wtof("MVSMF80E Member rename failed: %s(%s) -> (%s) rc=%d",
+			target_dsn, from_member, target_member, rc);
+		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_SERVICE, RC_ERROR, REASON_RENAME_FAILED,
+			ERR_MSG_RENAME_FAILED, NULL, 0);
+	} else {
+		// Data set rename: from-dataset.dsn is the OLD name, the URL
+		// data set (target_dsn) is the NEW name.
+		LOCWORK	locwork;
+		char	dsn44[44];
+
+		if (extract_json_string(body, "dsn", from_dsn,
+				sizeof(from_dsn)) < 0) {
+			free(body);
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+		}
+		free(body);
+
+		// Verify the source data set exists
+		memset(dsn44, ' ', sizeof(dsn44));
+		memcpy(dsn44, from_dsn, strlen(from_dsn));
+		memset(&locwork, 0, sizeof(locwork));
+		if (__locate(dsn44, &locwork) != 0) {
+			return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+				CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+				ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+		}
+
+		rc = rename(from_dsn, target_dsn);	// IDCAMS ALTER NEWNAME
+		if (rc == 0) {
+			return sendDefaultHeaders(session, 204, "application/json", 0);
+		}
+		wtof("MVSMF81E Dataset rename failed: %s -> %s rc=%d",
+			from_dsn, target_dsn, rc);
+		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_SERVICE, RC_ERROR, REASON_RENAME_FAILED,
+			ERR_MSG_RENAME_FAILED, NULL, 0);
+	}
 }
 
 __asm__("\n&FUNC    SETC 'DAPI0004'");

@@ -663,12 +663,9 @@ int ussPutHandler(Session *session)
 			"Failed to read request body", NULL, 0);
 		return -1;
 	}
-	if (body_len == 0) {
-		free(body);
-		sendErrorResponse(session, 400, 2, 8, 1,
-			"Empty request body", NULL, 0);
-		return -1;
-	}
+	// An empty body is valid: it truncates the file to zero length (e.g. Zowe
+	// saving an emptied file, or uploading a touch'd file). The dataset PUT
+	// handler allows this too, so do not reject body_len == 0 here.
 
 	// Text mode: ASCII→EBCDIC (IBM-1047) before writing
 	if (data_type == USS_DATA_TYPE_TEXT) {
@@ -701,8 +698,9 @@ int ussPutHandler(Session *session)
 		goto quit;
 	}
 
-	// Write body to file
-	written = ufs_fwrite(body, 1, (UINT32)body_len, fp);
+	// Write body to file (an empty body just truncates: the "w" open above
+	// already set the file to zero length, so skip the zero-length write)
+	written = body_len ? ufs_fwrite(body, 1, (UINT32)body_len, fp) : 0;
 	if (written != (UINT32)body_len) {
 		int urc = fp->error;
 		ufs_fclose(&fp);

@@ -297,6 +297,15 @@ read_request_content(Session *session, char **content, size_t *content_size)
 				int bytes_read = 0;
 
 				if (chunk_size == 0) {
+					// Drain the terminating CRLF of the chunked body (RFC 7230 4.1).
+					// Leaving it unread keeps 2 bytes in the socket; closing the
+					// connection with unread inbound data triggers a TCP RST that
+					// strict HTTP clients (Zowe/Node) report as ECONNRESET /
+					// "socket hang up". Best-effort: the body is already complete
+					// here, so do not fail on a short read. Trailers are not
+					// expected (Zowe sends none); mirrors dsapi.c.
+					char crlf[2];
+					(void)receive_raw_data(session->httpc, crlf, 2);
 					done = 1;
 					break;
 				}

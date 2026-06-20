@@ -34,6 +34,7 @@ MVS_USER=$(jq -r '.profiles.mvsmf.properties.user' "$CONFIG_FILE")
 
 # Test dataset names
 TEST_SEQ="${MVS_USER}.ZOWE.TESTSEQ"
+TEST_SEQ2="${MVS_USER}.ZOWE.TESTSEQ2"
 TEST_PDS="${MVS_USER}.ZOWE.TESTPDS"
 
 # --- state ---
@@ -129,6 +130,7 @@ assert_json_field_exists() {
 
 cleanup_datasets() {
 	zowe files delete ds "$TEST_SEQ" -f >/dev/null 2>&1 || true
+	zowe files delete ds "$TEST_SEQ2" -f >/dev/null 2>&1 || true
 	zowe files delete ds "$TEST_PDS" -f >/dev/null 2>&1 || true
 }
 
@@ -269,6 +271,23 @@ else
 	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
 fi
 
+# --- Rename sequential dataset ---
+echo ""
+echo "--- Rename Sequential Dataset ---"
+
+RC=0
+OUTPUT=$(run_zowe files rename ds "$TEST_SEQ" "$TEST_SEQ2") || RC=$?
+assert_rc 0 "$RC" "rename sequential dataset TESTSEQ -> TESTSEQ2"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "$TEST_SEQ2") || RC=$?
+assert_rc 0 "$RC" "list renamed dataset TESTSEQ2"
+
+# rename back so the delete test below operates on TESTSEQ
+RC=0
+OUTPUT=$(run_zowe files rename ds "$TEST_SEQ2" "$TEST_SEQ") || RC=$?
+assert_rc 0 "$RC" "rename sequential dataset TESTSEQ2 -> TESTSEQ (restore)"
+
 # --- Delete sequential dataset ---
 echo ""
 echo "--- Delete Sequential Dataset ---"
@@ -332,6 +351,32 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 	fi
 else
 	skip "read PDS member (no member written)"
+fi
+
+# --- Rename PDS member ---
+echo ""
+echo "--- Rename PDS Member ---"
+
+if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
+	RC=0
+	OUTPUT=$(run_zowe files rename dsm "$TEST_PDS" TESTMBR TESTMBR2) || RC=$?
+	assert_rc 0 "$RC" "rename PDS member TESTMBR -> TESTMBR2"
+
+	RC=0
+	OUTPUT=$(run_zowe files view ds "${TEST_PDS}(TESTMBR2)") || RC=$?
+	assert_rc 0 "$RC" "read renamed member TESTMBR2"
+	if echo "$OUTPUT" | grep -q "MEMBER TEST LINE 1"; then
+		pass "renamed member content preserved"
+	else
+		fail "renamed member content preserved" "expected 'MEMBER TEST LINE 1' in output"
+	fi
+
+	# rename back so the delete test below operates on TESTMBR
+	RC=0
+	OUTPUT=$(run_zowe files rename dsm "$TEST_PDS" TESTMBR2 TESTMBR) || RC=$?
+	assert_rc 0 "$RC" "rename PDS member TESTMBR2 -> TESTMBR (restore)"
+else
+	skip "rename PDS member (no member written)"
 fi
 
 # --- Delete PDS member ---

@@ -42,6 +42,7 @@ AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test dataset names
 TEST_SEQ="${MVSMF_USER}.CURL.TESTSEQ"
+TEST_SEQ2="${MVSMF_USER}.CURL.TESTSEQ2"
 TEST_PDS="${MVSMF_USER}.CURL.TESTPDS"
 
 # --- state ---
@@ -120,6 +121,7 @@ assert_json_field_exists() {
 
 cleanup_datasets() {
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
 }
 
@@ -487,6 +489,51 @@ else
 	skip "write member with volume prefix (could not determine volume)"
 fi
 
+# --- Rename PDS member ---
+echo ""
+echo "--- Rename PDS Member ---"
+
+# rename TESTMBR -> TESTMBR2 (z/OSMF control request)
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"TESTMBR\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR2)")
+assert_http_status "204" "$HTTP_CODE" "rename PDS member TESTMBR -> TESTMBR2"
+
+# new member is readable and keeps the original content
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR2)")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "read renamed member TESTMBR2"
+if echo "$CONTENT" | grep -q "MEMBER TEST LINE 1"; then
+	pass "renamed member content preserved"
+else
+	fail "renamed member content preserved" "expected 'MEMBER TEST LINE 1' in output"
+fi
+
+# old member no longer exists
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
+assert_http_status "404" "$HTTP_CODE" "old member TESTMBR is gone after rename"
+
+# rename a non-existent member -> 404
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"NOSUCH\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WHATEVER)")
+assert_http_status "404" "$HTTP_CODE" "rename non-existent member returns 404"
+
+# rename back so the remaining tests operate on TESTMBR
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"TESTMBR2\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
+assert_http_status "204" "$HTTP_CODE" "rename PDS member TESTMBR2 -> TESTMBR (restore)"
+
 # --- Delete PDS member ---
 echo ""
 echo "--- Delete PDS Member ---"
@@ -518,9 +565,51 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent member"
 
+# --- Rename sequential dataset ---
+echo ""
+echo "--- Rename Sequential Dataset ---"
+
+# self-contained: fresh source + clean target
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"  >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
+
+CREATE_BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-d "$CREATE_BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+
+if [ "$HTTP_CODE" = "201" ]; then
+	# rename TEST_SEQ -> TEST_SEQ2 (z/OSMF control request)
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" -H "Content-Type: application/json" \
+		--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_SEQ}\"}}" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}")
+	assert_http_status "204" "$HTTP_CODE" "rename sequential dataset TESTSEQ -> TESTSEQ2"
+
+	# the new name is cataloged
+	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_SEQ2}")
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+	assert_http_status "200" "$HTTP_CODE" "list renamed dataset"
+	assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ2" "renamed dataset present in catalog"
+
+	# rename a non-existent source -> 404
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" -H "Content-Type: application/json" \
+		--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_SEQ}.NOPE\"}}" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}.NOPE2")
+	assert_http_status "404" "$HTTP_CODE" "rename non-existent dataset returns 404"
+else
+	skip "rename sequential dataset (could not create source)"
+fi
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -u "$AUTH" \

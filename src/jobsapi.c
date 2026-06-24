@@ -1574,6 +1574,19 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                             }
                         }
 
+                        // Strip trailing blanks carried over from the fixed
+                        // 80-column input record. JCL ignores columns past the
+                        // last significant character; leaving the padding in
+                        // would overflow the 72-byte job card buffer below when
+                        // NOTIFY is not the final parameter (e.g. NOTIFY=&SYSUID
+                        // followed by REGION=).
+                        {
+                            size_t after_len = strlen(after);
+                            while (after_len > 0 && after[after_len - 1] == ' ') {
+                                after[--after_len] = '\0';
+                            }
+                        }
+
                         // Combine parts with actual user directly into lines[ii]
                         rc = snprintf(lines[ii], 72, "%sNOTIFY=%s%s",
                                     before, user, after);

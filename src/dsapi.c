@@ -22,6 +22,9 @@
 // Constants for better readability and maintainability
 #define MAX_BUFFER_SIZE 1024
 #define MAX_DATASET_NAME 44
+#define MAX_MEMBER_NAME 8
+// Qualified form DSN(MEMBER): 44 + '(' + 8 + ')' + NUL
+#define MAX_QUALIFIED_DSN (MAX_DATASET_NAME + 1 + MAX_MEMBER_NAME + 1 + 1)
 #define HTTP_OK 200
 #define DEFAULT_JOB_CLASS 'A'
 
@@ -1238,7 +1241,7 @@ int memberGetHandler(Session *session)
     char *member = NULL;
     const char *data_type_str = NULL;
     int data_type;
-    char dataset[MAX_DATASET_NAME] = {0};
+    char dataset[MAX_QUALIFIED_DSN] = {0};
     FILE *fp = NULL;
 
     // Validate parameters
@@ -1249,8 +1252,8 @@ int memberGetHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset and member names are required");
     }
 
-    // Check path length
-    if (strlen(dsname) + strlen(member) + 3 > MAX_DATASET_NAME) {
+    // Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
+    if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
         return handle_error(session, ERR_INVALID_PARAM, "Dataset or member name too long");
     }
 
@@ -1284,7 +1287,7 @@ int memberPutHandler(Session *session)
     int rc = 0;
     char *dsname = NULL;
     char *member = NULL;
-    char dataset[MAX_DATASET_NAME] = {0};
+    char dataset[MAX_QUALIFIED_DSN] = {0};
     FILE *fp = NULL;
     char buffer[MAX_BUFFER_SIZE];
     const char *content_length_str = NULL;
@@ -1320,6 +1323,11 @@ int memberPutHandler(Session *session)
         if (ct && strstr(ct, "application/json") != NULL) {
             return process_rename(session, dsname, member);
         }
+    }
+
+    // Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
+    if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
+        return handle_error(session, ERR_INVALID_PARAM, "Dataset or member name too long");
     }
 
     // Get headers
@@ -2001,7 +2009,7 @@ int memberDeleteHandler(Session *session)
 	int rc = 0;
 	char *dsname = NULL;
 	char *member = NULL;
-	char dataset[MAX_DATASET_NAME] = {0};
+	char dataset[MAX_QUALIFIED_DSN] = {0};
 	FILE *fp = NULL;
 
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
@@ -2013,7 +2021,8 @@ int memberDeleteHandler(Session *session)
 			"Dataset and member names are required");
 	}
 
-	if (strlen(dsname) + strlen(member) + 3 > MAX_DATASET_NAME) {
+	// Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
+	if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
 		return handle_error(session, ERR_INVALID_PARAM,
 			"Dataset or member name too long");
 	}

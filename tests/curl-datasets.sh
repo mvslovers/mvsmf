@@ -565,6 +565,52 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent member"
 
+# --- Long DSN(member) name validation (Issue #133) ---
+# DSN <=44 and member <=8 are individually valid even when combined they exceed 44.
+# A 36-char DSN + 8-char member = 36+1+8+1=46 chars qualified: previously false 400, now passes guard.
+echo ""
+echo "--- Long DSN(member): individually valid names, combined >44 chars ---"
+
+# GET: long qualified name — validation passes, 404 because dataset doesn't exist on this system
+LONGDSN="IBMUSER.REXX370.V1R0M0D.REF.LINKLIB"  # 36 chars — valid MVS DSN
+LONGMBR="IRXTSPRM"                               # 8 chars  — valid MVS member
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+if [ "$HTTP_CODE" = "400" ] && echo "$CONTENT" | grep -q "too long"; then
+	fail "long DSN(member) GET passes validation" "server still rejects valid name with 400 'too long' — guard not fixed"
+else
+	pass "long DSN(member) GET passes validation (got HTTP $HTTP_CODE, not false 400)"
+fi
+
+# DELETE: same long name — validation passes, 404 because dataset doesn't exist
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
+if [ "$HTTP_CODE" = "400" ]; then
+	BODY2=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
+	if echo "$BODY2" | grep -q "too long"; then
+		fail "long DSN(member) DELETE passes validation" "server still rejects valid name with 400 'too long'"
+	else
+		pass "long DSN(member) DELETE passes validation (got HTTP $HTTP_CODE)"
+	fi
+else
+	pass "long DSN(member) DELETE passes validation (got HTTP $HTTP_CODE, not false 400)"
+fi
+
+# GET: dsname > 44 chars — must still return 400 "too long" (dsname itself is invalid)
+# IBMUSER.REXX370.V1R0M0D.REF.LINKLIB.EXTRAS.XX = 45 chars (7+1+7+1+7+1+3+1+7+1+6+1+2)
+TOOLONG_DSN="IBMUSER.REXX370.V1R0M0D.REF.LINKLIB.EXTRAS.XX"  # 45 chars
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TOOLONG_DSN}(TESTMBR)")
+assert_http_status "400" "$HTTP_CODE" "GET with dsname >44 chars returns 400"
+
+# GET: member > 8 chars — must return 400 "too long" (member name itself is invalid)
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOLONGMEMBER)")
+assert_http_status "400" "$HTTP_CODE" "GET with member >8 chars returns 400"
+
 # --- Rename sequential dataset ---
 echo ""
 echo "--- Rename Sequential Dataset ---"

@@ -403,6 +403,24 @@ else
 	skip "delete PDS member (no member written)"
 fi
 
+# --- Long DSN(member) name validation (Issue #133) ---
+# DSN <=44 and member <=8 are individually valid even when combined they exceed 44.
+# A 36-char DSN + 8-char member (combined 46 chars) was a false 400 before the fix.
+echo ""
+echo "--- Long DSN(member): individually valid names, combined >44 chars ---"
+
+LONGDSN="IBMUSER.REXX370.V1R0M0D.REF.LINKLIB"  # 36 chars — valid MVS DSN
+LONGMBR="IRXTSPRM"                               # 8 chars  — valid MVS member
+
+# GET: validation should pass; 404 is expected since this dataset isn't on the test system
+RC=0
+OUTPUT=$(run_zowe files download ds "${LONGDSN}(${LONGMBR})" --binary --file /dev/null) || RC=$?
+if echo "$OUTPUT" | grep -q "too long"; then
+	fail "long DSN(member) GET passes validation" "server still rejects valid name with 'too long' — guard not fixed"
+else
+	pass "long DSN(member) GET passes validation (rc=$RC, no false 'too long' error)"
+fi
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

@@ -298,6 +298,44 @@ test_submit_inline_jcl_with_intrdr_headers() {
 	fi
 }
 
+test_submit_notify_sysuid_trailing_param() {
+	echo ""
+	echo "--- Submit Job: NOTIFY=&SYSUID followed by another parameter (issue #130) ---"
+
+	# Regression for #130: VS Code submits fixed RECFM=F LRECL=80 records, so each
+	# line is padded with trailing blanks to column 80. When NOTIFY=&SYSUID was NOT
+	# the last parameter on the job card, the &SYSUID->userid rebuild carried those
+	# trailing blanks into the 72-byte job card buffer and overflowed
+	# ("MVSMF22E Buffer overflow in snprintf" -> "Failed to analyze job card" -> 400).
+	# Build 80-column-padded lines with printf to reproduce the exact condition.
+	local jcl
+	jcl=$(printf '%-80s\n%-80s\n%-80s\n' \
+		'//RGNJOB   JOB CLASS=A,MSGCLASS=H,NOTIFY=&SYSUID,REGION=8M' \
+		'//STEP1    EXEC PGM=IEFBR14' \
+		'//')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		-H "X-IBM-Intrdr-Mode: TEXT" \
+		-H "X-IBM-Intrdr-Lrecl: 80" \
+		-H "X-IBM-Intrdr-Recfm: F" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit NOTIFY=&SYSUID with trailing REGION param"
+
+	# Purge this job to avoid clutter
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" != "null" ] && [ "$ji" != "null" ]; then
+		wait_for_output "$jn" "$ji" || true
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+	fi
+}
+
 test_submit_invalid_intrdr_header() {
 	echo ""
 	echo "--- Submit Job: invalid X-IBM-Intrdr-Mode header ---"
@@ -689,6 +727,7 @@ fi
 # Submit tests
 test_submit_inline_jcl
 test_submit_inline_jcl_with_intrdr_headers
+test_submit_notify_sysuid_trailing_param
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type
 test_submit_large_jcl

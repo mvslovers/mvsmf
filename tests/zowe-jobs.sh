@@ -242,6 +242,40 @@ test_submit_local_file() {
 	fi
 }
 
+test_submit_notify_sysuid_trailing_param() {
+	echo ""
+	echo "--- Submit Job: NOTIFY=&SYSUID followed by another parameter (issue #130) ---"
+
+	# Regression for #130: clients that submit fixed RECFM=F LRECL=80 records pad
+	# each line with trailing blanks to column 80. When NOTIFY=&SYSUID was NOT the
+	# last parameter on the job card, the &SYSUID->userid rebuild carried those
+	# trailing blanks into the 72-byte job card buffer and overflowed -> HTTP 400.
+	# Build an 80-column-padded local file to reproduce the exact condition.
+	local tmpfile
+	tmpfile=$(mktemp /tmp/mvsmf-notify-XXXXXX.jcl)
+	printf '%-80s\n%-80s\n%-80s\n' \
+		'//RGNJOB   JOB CLASS=A,MSGCLASS=H,NOTIFY=&SYSUID,REGION=8M' \
+		'//STEP1    EXEC PGM=IEFBR14' \
+		'//' > "$tmpfile"
+
+	local output rc=0
+	output=$(run_zowe_json jobs submit local-file "$tmpfile") || rc=$?
+	rm -f "$tmpfile"
+
+	assert_rc 0 "$rc" "submit NOTIFY=&SYSUID with trailing REGION param"
+
+	if [ $rc -eq 0 ]; then
+		assert_json_field_exists "$output" '.data.jobid' "trailing-param submit has jobid"
+
+		local jn ji
+		jn=$(echo "$output" | jq -r '.data.jobname')
+		ji=$(echo "$output" | jq -r '.data.jobid')
+		echo "  Submitted: ${jn}/${ji}"
+		wait_for_output "$ji" || true
+		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+	fi
+}
+
 test_submit_large_jcl() {
 	echo ""
 	echo "--- Submit Job: large JCL (>2500 lines, issue #39) ---"
@@ -460,6 +494,7 @@ fi
 
 # Submit tests
 test_submit_local_file
+test_submit_notify_sysuid_trailing_param
 test_submit_large_jcl
 test_submit_from_dataset
 

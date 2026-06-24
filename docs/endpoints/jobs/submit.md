@@ -48,7 +48,7 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
 
 ## Limitations
 - USER and PASSWORD are automatically injected into the job card from the authenticated user's credentials
-- The `NOTIFY` parameter in the job card is updated with the authenticated user's ID if `&SYSUID` is present
+- The `NOTIFY` parameter in the job card is updated with the authenticated user's ID if `&SYSUID` is present. `&SYSUID` may appear in any position on the job card (e.g. `NOTIFY=&SYSUID,REGION=0K`); parameters following it are preserved. Trailing blanks from fixed 80-column records are ignored during this rewrite.
 
 ## Examples
 

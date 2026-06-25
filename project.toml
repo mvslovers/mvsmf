@@ -1,79 +1,28 @@
 [project]
 name = "mvsmf"
 version = "1.0.0-dev"
-type = "module"
+type = "application"
 
 [build]
-cflags = []
-
-[mvs.build.datasets.source]
-suffix = "SOURCE"
-dsorg = "PO"
-recfm = "FB"
-lrecl = 80
-blksize = 19040
-space = ["TRK", 20, 10, 20]
-
-[mvs.build.datasets.punch]
-suffix = "OBJECT"
-dsorg = "PO"
-recfm = "FB"
-lrecl = 80
-blksize = 19040
-space = ["TRK", 20, 10, 15]
-
-[mvs.build.datasets.ncalib]
-suffix = "NCALIB"
-dsorg = "PO"
-recfm = "U"
-lrecl = 0
-blksize = 19069
-space = ["TRK", 10, 5, 15]
-
-[mvs.build.datasets.syslmod]
-suffix = "LOAD"
-dsorg = "PO"
-recfm = "U"
-lrecl = 0
-blksize = 15040
-space = ["TRK", 20, 10, 20]
-
-[mvs.install]
-naming = "fixed"
-
-[mvs.install.datasets.syslmod]
-name = "'IBMUSER.HTTPD.V3R3M1D.LOAD'"
+# infoapi.c reports the project version via a VERSION string macro. v1's mbt
+# injected -DVERSION automatically; v2 does not, so declare it explicitly.
+# $(PROJECT_VERSION) is the make variable mbtconfig emits from [project].version.
+cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 [dependencies]
-"mvslovers/crent370" = ">=1.0.10"
 "mvslovers/httpd" = "=4.0.0-dev"
 "mvslovers/ufsd" = "=1.0.0-dev"
 
-[link.module]
+# Single load module: a CGI program that runs under httpd.  It includes its
+# own request router + API handlers; the CGI launcher (cgistart, providing
+# @@START) is no longer carried as a local cgxstart.c copy -- it is autocalled
+# from httpd's client library (libhttpd.a), and the http_* API is reached at
+# runtime through the httpx callback table (httpcgi.h).
+[[module]]
 name = "MVSMF"
-entry = "@@CRT0"
-options = ["SIZE=(4000K,40K)", "LIST", "MAP", "XREF", "RENT"]
-include = [
-	"@@CRT1",
-	"CGXSTART",
-	"MVSMF",
-	"ROUTER",
-	"AUTHMW",
-	"LOGMW",
-	"COMMON",
-	"JSON",
-	"DSAPI",
-	"JOBSAPI",
-	"INFOAPI",
-	"USSAPI",
-	"TESTAPI",
-]
-
-[link.module.dep_includes]
-"mvslovers/ufsd" = "*"
+startup = "crt1"
+sources = ["src/*.c"]
+exclude = ["src/cgxstart.c"]
 
 [release]
 version_files = ["VERSION"]
-
-[artifacts]
-loads = true

@@ -25,7 +25,7 @@ or with explicit volume:
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) with the dataset content.
 
-- **Text mode**: Each record is sent as-is after EBCDIC-to-ASCII conversion
+- **Text mode**: Each record is sent after EBCDIC-to-ASCII conversion. For F/FB datasets, trailing space padding (added by MVS to fill each record to LRECL) is stripped so the output matches VB-style line endings.
 - **Binary mode**: Raw record data without conversion. For FB datasets, the exact record count is calculated from VTOC (DSCB1/DSCB4) to avoid reading past logical end-of-data.
 - **Record mode**: Each record is preceded by a 4-byte big-endian length prefix
 

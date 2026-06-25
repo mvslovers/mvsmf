@@ -187,10 +187,21 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 	}
 
 	if (data_type == DATA_TYPE_TEXT) {
-		/* Text mode: fgets + EBCDIC->ASCII + strlen for length */
+		/* Text mode: fgets + EBCDIC->ASCII + strlen for length.
+		   F/FB records are padded with spaces to LRECL; strip them so
+		   the download matches VB-style output (newline right after text). */
+		int is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
+		int is_fixed = !is_undefined && !(fp->recfm & VARIABLE);
 		while (fgets(buffer, lrecl + 2, fp) > 0) {
 			size_t len = strlen(buffer);
 			http_xlate((unsigned char *)buffer, len, httpx->xlate_cp037->etoa);
+			if (is_fixed && len > 0) {
+				size_t end = len;
+				if (end > 0 && buffer[end - 1] == '\n') end--;
+				while (end > 0 && buffer[end - 1] == ' ') end--;
+				buffer[end] = '\n';
+				len = end + 1;
+			}
 			if ((rc = http_send(session->httpc,
 					(const UCHAR *)buffer, len)) < 0) {
 				break;

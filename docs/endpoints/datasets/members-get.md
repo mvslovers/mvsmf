@@ -24,7 +24,7 @@ or with explicit volume:
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
 
 ## Response
-On successful completion, this request returns HTTP status code 200 (OK) with the member content.
+On successful completion, this request returns HTTP status code 200 (OK) with the member content. In text mode, trailing space padding on F/FB records is stripped so the output matches VB-style line endings.
 
 ## Error Responses
 - HTTP 500 (Internal Server Error)

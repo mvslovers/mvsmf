@@ -178,6 +178,13 @@ else
 	fail "read content matches" "expected 'LINE 1 TEST DATA' in output"
 fi
 
+# FB datasets pad records to LRECL with spaces; verify they are stripped on download
+if echo "$CONTENT" | grep -q "LINE 1 TEST DATA  "; then
+	fail "FB dataset strips trailing spaces" "trailing space padding found in text output"
+else
+	pass "FB dataset strips trailing spaces"
+fi
+
 # --- List datasets (two-level prefix) ---
 echo ""
 echo "--- List Datasets (two-level prefix) ---"

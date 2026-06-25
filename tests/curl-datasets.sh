@@ -185,6 +185,20 @@ else
 	pass "FB dataset strips trailing spaces"
 fi
 
+# Regression for #138: trailing-space stripping must not leak a raw control
+# byte into the (already ASCII) output. The earlier fix re-added the newline
+# after EBCDIC->ASCII translation, writing the compiler's EBCDIC '\n' (X'15')
+# straight into the stream, which surfaced as a stray ^U (0x15) on every line
+# but the first. Download to a file and check the raw bytes.
+RAW_FILE=$(mktemp)
+curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" > "$RAW_FILE"
+if LC_ALL=C grep -q $'\025' "$RAW_FILE"; then
+	fail "FB download has no stray control bytes" "found 0x15 (NEL/^U) in text output"
+else
+	pass "FB download has no stray control bytes"
+fi
+rm -f "$RAW_FILE"
+
 # --- List datasets (two-level prefix) ---
 echo ""
 echo "--- List Datasets (two-level prefix) ---"

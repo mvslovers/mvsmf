@@ -13,6 +13,7 @@
 #include "infoapi.h"
 #include "jobsapi.h"
 #include "ussapi.h"
+#include "consapi.h"
 #include "testapi.h"
 #include "router.h"
 
@@ -90,6 +91,8 @@ int main(int argc, char **argv)
 	add_route(&router, DELETE, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})", memberDeleteHandler);
 
 	add_route(&router, GET, "/zosmf/restfiles/fs", ussListHandler);
+	add_route(&router, PUT, "/zosmf/restconsoles/consoles/{console-name}", consoleIssueHandler);
+
 	add_route(&router, GET, "/zosmf/restfiles/fs/{*filepath}", ussGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/fs/{*filepath}", ussPutHandler);
 	add_route(&router, POST, "/zosmf/restfiles/fs/{*filepath}", ussCreateHandler);

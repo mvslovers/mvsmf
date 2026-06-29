@@ -136,12 +136,74 @@ addJsonString(JsonBuilder *builder, const char *key, const char *value)
     }
     
     builder->is_first = 0;
-    
+
     return 0;
 }
 
-int 
-addJsonNumber(JsonBuilder *builder, const char *key, int value) 
+int
+addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value)
+{
+    const char *p;
+    char one[2];
+
+    if (!builder || !key) {
+        return -1;
+    }
+
+    if (!builder->is_first) {
+        if (append_string(builder, ",") < 0) return -1;
+    }
+    if (append_string(builder, "\"") < 0) return -1;
+    if (append_string(builder, key) < 0) return -1;
+    if (append_string(builder, "\":") < 0) return -1;
+
+    if (!value) {
+        if (append_string(builder, "null") < 0) return -1;
+        builder->is_first = 0;
+        return 0;
+    }
+
+    /* append one piece at a time (no fixed temp buffer) with the JSON-required
+     * escaping of quote / backslash / control characters */
+    if (append_string(builder, "\"") < 0) return -1;
+    one[1] = '\0';
+    for (p = value; *p; p++) {
+        int rc;
+        switch (*p) {
+        case '"':  rc = append_string(builder, "\\\""); break;
+        case '\\': rc = append_string(builder, "\\\\"); break;
+        case '\r': rc = append_string(builder, "\\r");  break;
+        case '\n': rc = append_string(builder, "\\n");  break;
+        case '\t': rc = append_string(builder, "\\t");  break;
+        default:   one[0] = *p; rc = append_string(builder, one); break;
+        }
+        if (rc < 0) return -1;
+    }
+    if (append_string(builder, "\"") < 0) return -1;
+
+    builder->is_first = 0;
+    return 0;
+}
+
+int
+addJsonBool(JsonBuilder *builder, const char *key, int value)
+{
+    if (!builder || !key) {
+        return -1;
+    }
+    if (!builder->is_first) {
+        if (append_string(builder, ",") < 0) return -1;
+    }
+    if (append_string(builder, "\"") < 0) return -1;
+    if (append_string(builder, key) < 0) return -1;
+    if (append_string(builder, "\":") < 0) return -1;
+    if (append_string(builder, value ? "true" : "false") < 0) return -1;
+    builder->is_first = 0;
+    return 0;
+}
+
+int
+addJsonNumber(JsonBuilder *builder, const char *key, int value)
 {
     char temp[JSON_TEMP_BUFFER_SIZE];
 

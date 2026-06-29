@@ -30,7 +30,7 @@
  * Offsets are first-cut and tuned against live data.                         */
 #define MTT_SRC_OFF    15         /* jobtype+number field ("STC  320")        */
 #define MTT_SRC_LEN    8
-#define MTT_MSG_OFF    25         /* message text start                       */
+#define MTT_MSG_OFF    24         /* message text start                       */
 
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
@@ -216,54 +216,60 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 				MTENTRY *e = arr[i];
 				int len = e ? (int)e->mtentlen : 0;
 				const char *dat = e ? e->mtentdat : "";
-				int mlen;
-				int mine = 0;
+				const char *msg;
+				int msglen, k;
+				int has_src, blank_src, cont;
 
 				if (!e) continue;
 
-				/* same originator as the echo (single-line response) */
-				if (len >= MTT_SRC_OFF + MTT_SRC_LEN &&
-				    memcmp(&dat[MTT_SRC_OFF], src, MTT_SRC_LEN) == 0)
-					mine = 1;
+				/* classify the line relative to our command's block */
+				has_src = (len >= MTT_SRC_OFF + MTT_SRC_LEN &&
+				           memcmp(&dat[MTT_SRC_OFF], src, MTT_SRC_LEN) == 0);
 
-				/* MLWTO continuation: line begins with the message number */
-				if (!mine && have_num) {
-					int k = 0;
+				blank_src = (len >= MTT_SRC_OFF + MTT_SRC_LEN);
+				for (k = MTT_SRC_OFF; blank_src && k < MTT_SRC_OFF + MTT_SRC_LEN; k++)
+					if (dat[k] != ' ') blank_src = 0;
+
+				cont = 0;
+				if (have_num) {
+					k = 0;
 					while (k < len && dat[k] == ' ') k++;
 					if (len - k >= (int)strlen(num) &&
 					    memcmp(&dat[k], num, strlen(num)) == 0)
-						mine = 1;
+						cont = 1;
 				}
 
-				if (!mine) {
-					/* unrelated originator -> response block ended */
+				/* a different, attributed originator ends our block */
+				if (!has_src && !blank_src && !cont) {
 					if (used > 0) break;
 					else continue;
 				}
 
-				/* message text: from MTT_MSG_OFF for prefixed lines,
-				 * else the whole (continuation) line */
-				if (len > MTT_MSG_OFF &&
-				    memcmp(&dat[MTT_SRC_OFF], src, MTT_SRC_LEN) == 0) {
-					mlen = rstrip_len(&dat[MTT_MSG_OFF], len - MTT_MSG_OFF);
-					if (mlen > 0 && used + (size_t)mlen + 1 < outsz) {
-						memcpy(&out[used], &dat[MTT_MSG_OFF], mlen);
-						used += mlen;
-						out[used++] = '\r';
-						captured++;
-					}
-					/* pick up an MLWTO number for the continuations */
-					if (mlwto_num(&dat[MTT_MSG_OFF], len - MTT_MSG_OFF,
-					              num, sizeof(num)))
-						have_num = 1;
+				if (cont && !has_src && !blank_src) {
+					/* raw MLWTO continuation: drop leading blanks + number */
+					k = 0;
+					while (k < len && dat[k] == ' ') k++;
+					k += (int)strlen(num);
+					while (k < len && dat[k] == ' ') k++;
+					msg = &dat[k];
+					msglen = rstrip_len(msg, len - k);
 				} else {
-					mlen = rstrip_len(dat, len);
-					if (mlen > 0 && used + (size_t)mlen + 1 < outsz) {
-						memcpy(&out[used], dat, mlen);
-						used += mlen;
-						out[used++] = '\r';
-						captured++;
-					}
+					/* prefixed line (echo originator or blank-src MLWTO
+					 * header): take the message after the fixed prefix */
+					if (len <= MTT_MSG_OFF) continue;
+					msg = &dat[MTT_MSG_OFF];
+					msglen = rstrip_len(msg, len - MTT_MSG_OFF);
+					/* a trailing number marks an MLWTO; its continuations
+					 * follow, prefixed with that number */
+					if (mlwto_num(msg, msglen, num, sizeof(num)))
+						have_num = 1;
+				}
+
+				if (msglen > 0 && used + (size_t)msglen + 1 < outsz) {
+					memcpy(&out[used], msg, msglen);
+					used += msglen;
+					out[used++] = '\r';
+					captured++;
 				}
 			}
 		}
@@ -412,7 +418,7 @@ int consoleIssueHandler(Session *session)
 
 	if (startJsonObject(b) < 0) { rc = -1; goto quit; }
 	if (!is_async) {
-		if (addJsonString(b, "cmd-response", resp) < 0) { rc = -1; goto quit; }
+		if (addJsonStringEsc(b, "cmd-response", resp) < 0) { rc = -1; goto quit; }
 	}
 	if (addJsonString(b, "cmd-response-key", key) < 0 ||
 	    addJsonString(b, "cmd-response-url", url) < 0 ||
@@ -420,8 +426,7 @@ int consoleIssueHandler(Session *session)
 		rc = -1; goto quit;
 	}
 	if (!is_async && solkey[0]) {
-		if (addJsonString(b, "sol-key-detected",
-		                  sol_detected ? "true" : "false") < 0) {
+		if (addJsonBool(b, "sol-key-detected", sol_detected) < 0) {
 			rc = -1; goto quit;
 		}
 	}

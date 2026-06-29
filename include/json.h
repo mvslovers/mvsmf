@@ -90,6 +90,18 @@ int addJsonNumber(JsonBuilder *builder, const char *key, int value) 		asm("JSON0
 int addJsonNull(JsonBuilder *builder, const char *key)						asm("JSON004");
 
 /**
+ * @brief Adds a string value, JSON-escaping it (quote, backslash, control
+ *        characters) and handling arbitrary length. Use for values that may
+ *        contain control characters such as console command responses.
+ */
+int addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value) asm("JSON00A");
+
+/**
+ * @brief Adds a JSON boolean (true/false) with the specified key.
+ */
+int addJsonBool(JsonBuilder *builder, const char *key, int value)			asm("JSON00B");
+
+/**
  * @brief Starts a new JSON object
  *
  * Adds an opening brace and prepares for object members.

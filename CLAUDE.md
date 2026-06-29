@@ -153,8 +153,8 @@ Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, 
 
 Test suites live in `tests/`:
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`
-- **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`
+- **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
 - **test.sh**: Top-level runner
 
 Both curl and Zowe suites should cover every endpoint with all relevant variations (query parameters, headers, error cases). When touching a handler, verify the corresponding tests are complete and up to date.

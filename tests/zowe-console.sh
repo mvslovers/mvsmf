@@ -94,6 +94,23 @@ assert_rc 0 "$RC" "issue D T with sol-key"
 assert_json_field "$OUTPUT" '.data.keywordDetected' "true" "sol-key DATE detected"
 
 # =========================================================================
+# 4. Collect terminates (issue -> key -> collect sync-responses)
+# =========================================================================
+echo ""
+echo "--- collect ---"
+run_zowe_json zos-console issue command "D T"
+KEY=$(echo "$OUTPUT" | jq -r '.data.lastResponseKey' 2>/dev/null)
+if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
+	# this drives the collect poll loop; a broken cursor would never empty
+	# and hang here, so reaching rc 0 proves the loop terminates
+	run_zowe_json zos-console collect sync-responses "$KEY"
+	assert_rc 0 "$RC" "collect sync-responses terminates"
+	assert_json_field "$OUTPUT" '.success' "true" "collect: success"
+else
+	fail "issue returned no lastResponseKey"
+fi
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""

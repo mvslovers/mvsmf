@@ -24,5 +24,10 @@ startup = "crt1"
 sources = ["src/*.c"]
 exclude = ["src/cgxstart.c"]
 
+# Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
+[[test]]
+name = "TSTNTST"
+sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
+
 [release]
 version_files = ["VERSION"]

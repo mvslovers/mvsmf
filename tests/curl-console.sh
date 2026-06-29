@@ -150,7 +150,45 @@ BODY=$(echo "$RESP" | sed '$d')
 assert_json_field "$BODY" '.["sol-key-detected"]' "false" "sol-key ZZNOMATCH not detected"
 
 # =========================================================================
-# 5. Error cases
+# 5. Collect (async issue -> poll deltas -> empty when done)
+# =========================================================================
+echo ""
+echo "--- collect ---"
+
+# async issue D A,L (no cmd-response in the issue reply); grab the key
+RESP=$(issue '{"cmd":"D A,L","async":"Y"}')
+BODY=$(echo "$RESP" | sed '$d')
+KEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
+
+if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
+	sleep 5   # let the multi-line response land in the trace table
+	# first collect: the full response block
+	RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
+	assert_http_status "200" "$CODE" "collect #1"
+	assert_contains "$CBODY" '.["cmd-response"]' "IEE102I" "collect #1: returns the response"
+	# second collect: empty (cursor advanced -> done)
+	CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	assert_json_field "$CBODY" '.["cmd-response"]' "" "collect #2: empty (done)"
+else
+	fail "async issue returned no cmd-response-key"
+fi
+
+# sync issue already delivered its response -> its first collect is empty
+RESP=$(issue '{"cmd":"D T"}')
+BODY=$(echo "$RESP" | sed '$d')
+KEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
+CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+assert_json_field "$CBODY" '.["cmd-response"]' "" "collect after sync issue: empty"
+
+# unknown / stale key -> empty, HTTP 200 (not an error)
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/solmsgs/DEADBEEFCAFE0000")
+CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
+assert_http_status "200" "$CODE" "collect bogus key"
+assert_json_field "$CBODY" '.["cmd-response"]' "" "collect bogus: empty"
+
+# =========================================================================
+# 6. Error cases
 # =========================================================================
 echo ""
 echo "--- errors ---"

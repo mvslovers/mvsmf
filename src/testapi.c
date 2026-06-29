@@ -1,115 +1,369 @@
+#include <clibary.h>
+#include <clibdscb.h>
+#include <clibgrt.h>
+#include <clibjes2.h>
+#include <cliblist.h>
+#include <clibmtt.h>
+#include <clibwto.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <clibwto.h>
-#include <cliblist.h>
-#include <clibdscb.h>
-#include <clibary.h>
 
-#include "testapi.h"
 #include "common.h"
 #include "httpcgi.h"
+#include "testapi.h"
 
-int testHandler(Session *session)
-{
-	int rc = 0;
-	char *fn = NULL;
+/* --- fn=syslog diagnostic ----------------------------------------------
+ * Probe whether we can read the system log (SYSLOG) off the JES2 spool from
+ * inside the httpd address space, reusing the same clibjes2 path jobsapi.c
+ * uses for ordinary job spool.  Read-only.
+ */
+/* NOTE: MVSMF is link-edited RENT (loaded into read-only storage), so this
+ * module must carry NO writable static/global data -- any write to one S0C4s
+ * (protection).  The jesprint callback therefore keeps no counter; it just
+ * streams each line, exactly like jobsapi.c's do_print_sysout_line().      */
+__asm__("\n&FUNC	SETC 'print_syslog_line'");
+static int print_syslog_line(const char *line, unsigned linelen) {
+  int rc = 0;
 
-	fn = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_FN");
-	if (!fn) fn = "help";
+/* this callback has no Session in scope; reach httpc via the GRT anchors,
+ * exactly like jobsapi.c's do_print_sysout_line() */
+#undef httpx
+#define httpx http_get_httpx(httpd)
 
-	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
-	if ((rc = http_printf(session->httpc,
-		"Content-Type: application/json\r\n\r\n")) < 0) goto quit;
+  CLIBGRT *grt = __grtget();
+  HTTPD *httpd = grt->grtapp1;
+  HTTPC *httpc = grt->grtapp2;
 
-	/* --- fn=listds ------------------------------------------------ */
-	if (strcmp(fn, "listds") == 0) {
-		char *level  = (char *) http_get_env(session->httpc,
-			(const UCHAR *) "QUERY_LEVEL");
-		char *filter = (char *) http_get_env(session->httpc,
-			(const UCHAR *) "QUERY_FILTER");
-		DSLIST **dslist = NULL;
-		unsigned i, count;
+  rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
 
-		if (!level) level = "SYS1";
+#undef httpx
+#define httpx http_get_httpx(session->httpd)
 
-		dslist = __listds(level, "NONVSAM VOLUME", filter);
-
-		rc = http_printf(session->httpc,
-			"{ \"fn\": \"listds\", \"level\": \"%s\", \"filter\": \"%s\",\n",
-			level, filter ? filter : "(null)");
-		if (rc < 0) goto quit;
-
-		rc = http_printf(session->httpc, "  \"items\": [\n");
-		if (rc < 0) goto quit;
-
-		count = dslist ? array_count(&dslist) : 0;
-		for (i = 0; i < count; i++) {
-			DSLIST *ds = dslist[i];
-			if (!ds) continue;
-			rc = http_printf(session->httpc,
-				"    %s{ \"dsn\": \"%s\", \"vol\": \"%.6s\","
-				" \"dsorg\": \"%.4s\", \"recfm\": \"%.4s\","
-				" \"lrecl\": %d, \"blksize\": %d }\n",
-				i > 0 ? "," : " ",
-				ds->dsn, ds->volser, ds->dsorg, ds->recfm,
-				ds->lrecl, ds->blksize);
-			if (rc < 0) goto quit;
-		}
-
-		rc = http_printf(session->httpc,
-			"  ], \"count\": %u }\n", count);
-
-		if (dslist) __freeds(&dslist);
-
-	/* --- fn=locate ------------------------------------------------ */
-	} else if (strcmp(fn, "locate") == 0) {
-		char *dsn = (char *) http_get_env(session->httpc,
-			(const UCHAR *) "QUERY_DSN");
-		LOCWORK locwork = {0};
-		int loc_rc;
-
-		if (!dsn) dsn = "SYS1.MACLIB";
-
-		loc_rc = __locate(dsn, &locwork);
-
-		rc = http_printf(session->httpc,
-			"{ \"fn\": \"locate\", \"dsn\": \"%s\","
-			" \"rc\": %d, \"volser\": \"%.6s\" }\n",
-			dsn, loc_rc, locwork.volser);
-
-	/* --- fn=help (default) ---------------------------------------- */
-	} else {
-		rc = http_printf(session->httpc,
-			"{ \"fn\": \"help\", \"usage\": ["
-			" \"?fn=listds&level=HLQ&filter=HLQ.X*\","
-			" \"?fn=locate&dsn=SYS1.MACLIB\""
-			" ] }\n");
-	}
-
-quit:
-	return rc;
+  return rc;
 }
 
-int testWildcardHandler(Session *session)
-{
-	int rc = 0;
-	char *filepath = NULL;
+int testHandler(Session *session) {
+  int rc = 0;
+  char *fn = NULL;
 
-	filepath = (char *) http_get_env(session->httpc,
-		(const UCHAR *) "HTTP_filepath");
-	if (!filepath) filepath = "(null)";
+  fn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_FN");
+  if (!fn)
+    fn = "help";
 
-	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit2;
-	if ((rc = http_printf(session->httpc,
-		"Content-Type: application/json\r\n\r\n")) < 0) goto quit2;
+  session->headers_sent = 1;
+  if ((rc = http_resp(session->httpc, 200)) < 0)
+    goto quit;
+  if ((rc = http_printf(session->httpc,
+                        "Content-Type: application/json\r\n\r\n")) < 0)
+    goto quit;
 
-	rc = http_printf(session->httpc,
-		"{ \"handler\": \"testWildcard\", \"filepath\": \"%s\" }\n",
-		filepath);
+  /* --- fn=listds ------------------------------------------------ */
+  if (strcmp(fn, "listds") == 0) {
+    char *level =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_LEVEL");
+    char *filter =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_FILTER");
+    DSLIST **dslist = NULL;
+    unsigned i, count;
+
+    if (!level)
+      level = "SYS1";
+
+    dslist = __listds(level, "NONVSAM VOLUME", filter);
+
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"listds\", \"level\": \"%s\", \"filter\": \"%s\",\n", level,
+        filter ? filter : "(null)");
+    if (rc < 0)
+      goto quit;
+
+    rc = http_printf(session->httpc, "  \"items\": [\n");
+    if (rc < 0)
+      goto quit;
+
+    count = dslist ? array_count(&dslist) : 0;
+    for (i = 0; i < count; i++) {
+      DSLIST *ds = dslist[i];
+      if (!ds)
+        continue;
+      rc = http_printf(session->httpc,
+                       "    %s{ \"dsn\": \"%s\", \"vol\": \"%.6s\","
+                       " \"dsorg\": \"%.4s\", \"recfm\": \"%.4s\","
+                       " \"lrecl\": %d, \"blksize\": %d }\n",
+                       i > 0 ? "," : " ", ds->dsn, ds->volser, ds->dsorg,
+                       ds->recfm, ds->lrecl, ds->blksize);
+      if (rc < 0)
+        goto quit;
+    }
+
+    rc = http_printf(session->httpc, "  ], \"count\": %u }\n", count);
+
+    if (dslist)
+      __freeds(&dslist);
+
+    /* --- fn=locate ------------------------------------------------ */
+  } else if (strcmp(fn, "locate") == 0) {
+    char *dsn =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
+    LOCWORK locwork = {0};
+    int loc_rc;
+
+    if (!dsn)
+      dsn = "SYS1.MACLIB";
+
+    loc_rc = __locate(dsn, &locwork);
+
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"locate\", \"dsn\": \"%s\","
+                     " \"rc\": %d, \"volser\": \"%.6s\" }\n",
+                     dsn, loc_rc, locwork.volser);
+
+    /* --- fn=syslog (stepped probe) -------------------------------- */
+    /* Bisect via &step=N.  Each step that returns normally flushes its
+     * output; the highest step still producing output is the last that
+     * worked, the next (empty body) is the call that abends.            */
+  } else if (strcmp(fn, "syslog") == 0) {
+    char *stepv =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_STEP");
+    int step = stepv ? atoi(stepv) : 0;
+    JES *jes = NULL;
+    JESJOB **jobs = NULL;
+    unsigned jc = 0;
+
+    http_printf(session->httpc, "syslog probe step=%d: START\r\n", step);
+
+    if (step >= 1) {
+      jes = jesopen();
+      http_printf(session->httpc, "step1 jesopen -> %s\r\n",
+                  jes ? "OK" : "NULL");
+    }
+
+    if (step >= 2 && jes) {
+      jobs = jesjob(jes, "SYSLOG", FILTER_JOBNAME, 1);
+      jc = jobs ? array_count(&jobs) : 0;
+      http_printf(session->httpc, "step2 jesjob -> %s count=%u\r\n",
+                  jobs ? "OK" : "NULL", jc);
+    }
+
+    if (step >= 3 && jobs) {
+      unsigned ji;
+      for (ji = 0; ji < jc; ji++) {
+        JESJOB *job = jobs[ji];
+        http_printf(session->httpc, "step3 entry %u jobid=%-8.8s jesdd=%s\r\n",
+                    ji, job ? (char *)job->jobid : "(null)",
+                    (job && job->jesdd) ? "set" : "NULL");
+      }
+    }
+
+    if (step >= 4 && jobs) {
+      unsigned ji, di;
+      for (ji = 0; ji < jc; ji++) {
+        JESJOB *job = jobs[ji];
+        unsigned dc;
+        if (!job || !job->jesdd)
+          continue;
+        dc = array_count(&job->jesdd);
+        for (di = 0; di < dc; di++) {
+          JESDD *dd = job->jesdd[di];
+          if (!dd)
+            continue;
+          http_printf(session->httpc,
+                      "step4 entry %u dd %u dsid=%u mttr=%u records=%u\r\n", ji,
+                      di, dd->dsid, dd->mttr, dd->records);
+        }
+      }
+    }
+
+    if (step >= 5 && jobs) {
+      unsigned ji, di;
+      for (ji = 0; ji < jc; ji++) {
+        JESJOB *job = jobs[ji];
+        unsigned dc;
+        if (!job || !job->jesdd)
+          continue;
+        dc = array_count(&job->jesdd);
+        for (di = 0; di < dc; di++) {
+          JESDD *dd = job->jesdd[di];
+          if (!dd || !dd->mttr)
+            continue;
+          http_printf(session->httpc,
+                      "----- jobid=%-8.8s dd=%-8.8s dsid=%u -----\r\n",
+                      (char *)job->jobid, (char *)dd->ddname, dd->dsid);
+          jesprint(jes, job, dd->dsid, print_syslog_line);
+        }
+      }
+    }
+
+    if (jobs)
+      jesjobfr(&jobs);
+    if (jes)
+      jesclose(&jes);
+
+    rc = http_printf(session->httpc, "DONE step=%d\r\n", step);
+
+    /* --- fn=mtt (master trace table = LIVE console data) ---------- */
+    /* The real source for the console feature: clibmtt snapshots the
+     * Master Trace Table (live WTOs + commands) -- no spin needed.     */
+  } else if (strcmp(fn, "mtt") == 0) {
+    char *stepv =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_STEP");
+    int step = stepv ? atoi(stepv) : 3;
+    CMTT *cmtt = NULL;
+    MTENTRY **arr = NULL;
+    unsigned n = 0, i;
+
+    http_printf(session->httpc, "mtt probe step=%d START\r\n", step);
+
+    if (step >= 1) {
+      cmtt = cmtt_new();
+      http_printf(session->httpc, "step1 cmtt_new -> %s\r\n",
+                  cmtt ? "OK" : "NULL");
+    }
+
+    if (step >= 2 && cmtt) {
+      arr = cmtt_get_array(cmtt);
+      n = arr ? array_count(&arr) : 0;
+      http_printf(session->httpc, "step2 get_array -> %s count=%u\r\n",
+                  arr ? "OK" : "NULL", n);
+    }
+
+    if (step >= 3 && arr) {
+      for (i = 0; i < n; i++) {
+        MTENTRY *e = arr[i];
+        if (!e)
+          continue;
+        http_printf(session->httpc, "%-*.*s\r\n", (int)e->mtentlen,
+                    (int)e->mtentlen, e->mtentdat);
+      }
+    }
+
+    if (cmtt)
+      cmtt_free(&cmtt);
+
+    rc = http_printf(session->httpc, "DONE step=%d\r\n", step);
+
+    /* --- fn=cmd (round-trip: issue MVS command + find it in MTT) -- */
+    /* Issues an operator command via SVC 34 (MGCR, like brexx R_console),
+     * then polls the MTT until the echo shows up, and dumps the tail so
+     * we can see the command + its responses.  Default 'D T' (harmless). */
+  } else if (strcmp(fn, "cmd") == 0) {
+    char *cmdtext =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_CMD");
+    unsigned char cmdbuf[128];
+    unsigned char *cmdp = cmdbuf;
+    unsigned cmdlen, i, n = 0, from;
+    int tries;
+    CMTT *cmtt = NULL;
+    MTENTRY **arr = NULL;
+
+    if (!cmdtext)
+      cmdtext = "D T";
+    cmdlen = strlen(cmdtext);
+    if (cmdlen > 100)
+      cmdlen = 100;
+
+    http_printf(session->httpc, "cmd probe: issuing '%s' via SVC 34 (MGCR)\r\n",
+                cmdtext);
+
+    /* build SVC 34 command buffer (IEECDCM dcminlgn/mcsfl/dcminput) */
+    memset(cmdbuf, 0, sizeof(cmdbuf));
+    cmdbuf[1] = 104;
+    memset(&cmdbuf[4], ' ', 124);
+    memcpy(&cmdbuf[4], cmdtext, cmdlen);
+
+    /* issue: supervisor/key0 -> SVC 34 -> back to problem/key8 */
+    __asm__("MODESET MODE=SUP,KEY=ZERO");
+    __asm__ volatile("  L   1,%0\n"
+                     "  SLR 0,0\n"
+                     "  SVC 34"
+                     :
+                     : "m"(cmdp)
+                     : "0", "1", "14", "15");
+    __asm__("MODESET MODE=PROB,KEY=NZERO");
+
+    /* poll the MTT until our command echo appears (each cmtt_new()
+     * re-snapshots and gives the responses time to land) */
+    for (tries = 0; tries < 15; tries++) {
+      int hit = 0;
+      if (cmtt)
+        cmtt_free(&cmtt);
+      cmtt = cmtt_new();
+      arr = cmtt ? cmtt_get_array(cmtt) : NULL;
+      n = arr ? array_count(&arr) : 0;
+      for (i = (n > 40 ? n - 40 : 0); i < n; i++) {
+        MTENTRY *e = arr[i];
+        char tmp[128];
+        int len = e ? (int)e->mtentlen : 0;
+        if (!e)
+          continue;
+        if (len > 127)
+          len = 127;
+        memcpy(tmp, e->mtentdat, len);
+        tmp[len] = '\0';
+        if (strstr(tmp, cmdtext)) {
+          hit = 1;
+          break;
+        }
+      }
+      if (hit)
+        break;
+    }
+
+    http_printf(session->httpc, "MTT count=%u after %d poll(s), tail:\r\n", n,
+                tries + 1);
+    from = (n > 50) ? n - 50 : 0;
+    for (i = from; i < n; i++) {
+      MTENTRY *e = arr[i];
+      if (!e)
+        continue;
+      http_printf(session->httpc, "%-*.*s\r\n", (int)e->mtentlen,
+                  (int)e->mtentlen, e->mtentdat);
+    }
+
+    if (cmtt)
+      cmtt_free(&cmtt);
+
+    rc = http_printf(session->httpc, "DONE\r\n");
+
+    /* --- fn=help (default) ---------------------------------------- */
+  } else {
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"help\", \"usage\": ["
+        " \"?fn=listds&level=HLQ&filter=HLQ.X*\","
+        " \"?fn=locate&dsn=SYS1.MACLIB\","
+        " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
+        " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
+        " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\""
+        " ] }\n");
+  }
+
+quit:
+  return rc;
+}
+
+int testWildcardHandler(Session *session) {
+  int rc = 0;
+  char *filepath = NULL;
+
+  filepath =
+      (char *)http_get_env(session->httpc, (const UCHAR *)"HTTP_filepath");
+  if (!filepath)
+    filepath = "(null)";
+
+  session->headers_sent = 1;
+  if ((rc = http_resp(session->httpc, 200)) < 0)
+    goto quit2;
+  if ((rc = http_printf(session->httpc,
+                        "Content-Type: application/json\r\n\r\n")) < 0)
+    goto quit2;
+
+  rc = http_printf(session->httpc,
+                   "{ \"handler\": \"testWildcard\", \"filepath\": \"%s\" }\n",
+                   filepath);
 
 quit2:
-	return rc;
+  return rc;
 }

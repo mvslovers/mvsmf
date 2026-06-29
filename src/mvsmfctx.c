@@ -2,24 +2,41 @@
 #include "ntstore.h"
 #include "mvssupa.h"    /* __getm */
 #include "cliblock.h"   /* lock / unlock, LOCK_EXC */
+#include "httpcgi.h"    /* HTTPD, HTTPX, http_get_httpx, http_cgictx_get */
 
 /*
  * Per-CGI persistent mvsMF context + lazy cursor store.
  *
- * TODO(#143): mvsmf_ctx_get() must call httpd's http_cgictx_get() once it ships:
- *
- *     #include "httpcgi.h"
- *     return http_cgictx_get((HTTPD *)httpd, MVSMF_CTX_EYE, sizeof(MVSMF_CTX));
- *
- * Until then it returns NULL, so mvsmf_kvstore() returns NULL, the cursor store
- * is unavailable, and console collect degrades to an empty (OK) response.
+ * mvsmf_ctx_get() returns the one persistent context block httpd keeps per CGI
+ * for the "MVSMFCTX" eyecatcher (created on first use). If httpd's cgictx
+ * service is unavailable it returns NULL, so mvsmf_kvstore() returns NULL, the
+ * cursor store is unavailable, and console collect degrades to an empty (OK)
+ * response.
  */
 
 __asm__("\n&FUNC	SETC 'mvsmf_ctx_get'");
 MVSMF_CTX *mvsmf_ctx_get(void *httpd)
 {
-	(void)httpd;
-	return (MVSMF_CTX *)0;          /* TODO(#143): http_cgictx_get(...) */
+	HTTPD *hd = (HTTPD *)httpd;
+
+	if (!hd) {
+		return (MVSMF_CTX *)0;
+	}
+
+#ifdef http_cgictx_get
+	{
+		/* httpx is needed because http_cgictx_get() routes through the httpd
+		 * httpx vector (httpcgi.h macro). */
+		HTTPX *httpx = http_get_httpx(hd);
+		return (MVSMF_CTX *)http_cgictx_get(hd, MVSMF_CTX_EYE,
+		                                    sizeof(MVSMF_CTX));
+	}
+#else
+	/* httpd dependency predates the cgictx service: the store is unavailable
+	 * and console collect degrades to an empty (OK) response. Activates
+	 * automatically once the httpd dep provides http_cgictx_get. */
+	return (MVSMF_CTX *)0;
+#endif
 }
 
 __asm__("\n&FUNC	SETC 'mvsmf_kvstore'");

@@ -25,4 +25,16 @@
  */
 int consoleIssueHandler(Session *session) asm("CAPI0001");
 
+/**
+ * @brief Collect (poll) the response of a previously issued command.
+ *
+ * GET /zosmf/restconsoles/consoles/{console-name}/solmsgs/{cmd-response-key}
+ * Returns the response lines new since the previous poll; an empty response
+ * signals "done". Unknown / evicted keys also return empty.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ */
+int consoleCollectHandler(Session *session) asm("CAPI0002");
+
 #endif // CONSAPI_H

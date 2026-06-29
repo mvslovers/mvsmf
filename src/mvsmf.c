@@ -92,6 +92,7 @@ int main(int argc, char **argv)
 
 	add_route(&router, GET, "/zosmf/restfiles/fs", ussListHandler);
 	add_route(&router, PUT, "/zosmf/restconsoles/consoles/{console-name}", consoleIssueHandler);
+	add_route(&router, GET, "/zosmf/restconsoles/consoles/{console-name}/solmsgs/{cmd-response-key}", consoleCollectHandler);
 
 	add_route(&router, GET, "/zosmf/restfiles/fs/{*filepath}", ussGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/fs/{*filepath}", ussPutHandler);

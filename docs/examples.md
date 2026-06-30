@@ -344,12 +344,18 @@ curl -s -u $USER:$PASS \
 ### Get messages from the hardcopy log
 `GET /zosmf/restconsoles/v1/log`
 
-*(No standard Zowe CLI command — curl only.)*
-
 ```bash
 curl -s -u $USER:$PASS "$BASE/zosmf/restconsoles/v1/log?timeRange=10m"
-# anchor + direction:  ?timestamp=1782787296000&timeRange=5m&direction=backward
+# anchor + direction:  ?time=2026-06-30T03:32:00Z&timeRange=5m&direction=forward
 ```
+```bash
+zowe zos-logs list logs --range 10m
+zowe zos-logs list logs --start-time 2026-06-30T03:32:00Z --range 5m --direction forward
+```
+
+> mvsMF reads the log from the in-memory Master Trace Table, so timestamps are
+> the system's **local** wall clock (labelled `Z`). Anchor a `--start-time` on
+> a value you copied from a previous response and it round-trips.
 
 ---
 

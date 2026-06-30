@@ -881,7 +881,7 @@ int consoleLogHandler(Session *session)
 	const char *qdir   = qparam(session, "direction", "DIRECTION");
 
 	int range, fwd = 0, tz_min, total = 0, i, days_back, prev_hms;
-	time_t now, anchor, lo, hi;
+	time_t now, now_f, anchor, lo, hi;
 	struct tm base, gt;
 	const unsigned char *sid;
 	char sysname[9], numbuf[24];
@@ -918,11 +918,14 @@ int consoleLogHandler(Session *session)
 	if (tz_min > 720)  tz_min -= 1440;
 	if (tz_min < -720) tz_min += 1440;
 
-	/* ---- anchor: timestamp (ms) overrides time (ISO UTC); default now ----
-	 * The default anchor runs through mktime(localtime(now)) -- the SAME path
-	 * the per-entry esecs take -- so the window and the entries share a frame
-	 * even if mktime/localtime are not a perfect inverse on this box. */
-	{ struct tm tmp = base; anchor = mktime(&tmp); }
+	/* ---- anchor: timestamp (ms) overrides time; default now ----
+	 * On 3.8j mktime() does NOT re-apply the TZ offset, so every entry's esecs
+	 * (and the emitted timestamps) are the LOCAL wall clock numerically. Keep
+	 * the anchor in that same frame: "now" via mktime(localtime(now)), and
+	 * time/timestamp anchors taken as-is -- the client got its timestamps from
+	 * this same field, so they round-trip without a TZ correction. */
+	{ struct tm tmp = base; now_f = mktime(&tmp); }
+	anchor = now_f;
 	if (qts && *qts) {
 		int l = (int)strlen(qts), k;
 		char t[16];
@@ -947,12 +950,12 @@ int consoleLogHandler(Session *session)
 		memset(&it, 0, sizeof(it));
 		it.tm_year = yy - 1900; it.tm_mon = mo - 1; it.tm_mday = dd;
 		it.tm_hour = hh; it.tm_min = mm; it.tm_sec = ss; it.tm_isdst = -1;
-		anchor = mktime(&it) + tz_min * 60;        /* it is UTC -> timegm */
+		anchor = mktime(&it);          /* same (local wall clock) frame as esecs */
 	}
 
 	/* future-time error applies only to an explicitly supplied anchor; the
 	 * default anchor is "now" and can never be in the future. */
-	if (((qts && *qts) || (qtime && *qtime)) && anchor > now)
+	if (((qts && *qts) || (qtime && *qtime)) && anchor > now_f)
 		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 23,
 		    "The time or timestamp specified is in the future.");
 

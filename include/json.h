@@ -102,6 +102,18 @@ int addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value) a
 int addJsonBool(JsonBuilder *builder, const char *key, int value)			asm("JSON00B");
 
 /**
+ * @brief Adds "key": <raw> with the value emitted verbatim (no quoting).
+ * For numbers too large for addJsonNumber's int (e.g. a UNIX ms timestamp).
+ */
+int addJsonRaw(JsonBuilder *builder, const char *key, const char *raw)		asm("JSON00C");
+
+/**
+ * @brief Opens a keyed array ("key":[) and primes the builder so the first
+ * element gets no leading comma. Close with endArray().
+ */
+int startJsonArrayKey(JsonBuilder *builder, const char *key)				asm("JSON00D");
+
+/**
  * @brief Starts a new JSON object
  *
  * Adds an opening brace and prepares for object members.

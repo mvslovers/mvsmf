@@ -48,4 +48,17 @@ int consoleCollectHandler(Session *session) asm("CAPI0002");
  */
 int consoleDetectHandler(Session *session) asm("CAPI0003");
 
+/**
+ * @brief Get messages from the hardcopy log.
+ *
+ * GET /zosmf/restconsoles/v1/log[?timeRange=&time=&timestamp=&hardcopy=&sysName=&direction=]
+ * Returns { timezone, totalItems, nextTimestamp, source, items[] } drawn from
+ * the Master Trace Table (3.8j has no OPERLOG and the active SYSLOG on spool
+ * is not browsable). Coverage is the MTT window (recent), not a deep archive.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ */
+int consoleLogHandler(Session *session) asm("CAPI0004");
+
 #endif // CONSAPI_H

@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <time.h>
 #include <clibwto.h>
 #include <clibgrt.h>
 #include <clibmtt.h>
 #include <clibary.h>
+#include <clibsmf.h>
 #include <mvssupa.h>
 
 #include "consapi.h"
@@ -773,4 +775,282 @@ int consoleDetectHandler(Session *session)
 	rc = sendJSONResponse(session, HTTP_STATUS_OK, b);
 	freeJsonBuilder(b);
 	return rc;
+}
+
+/* ================================================================== */
+/* endpoint 4: hardcopy log                                            */
+/* ================================================================== */
+
+/* case-insensitive equality (EBCDIC-aware via toupper). */
+__asm__("\n&FUNC	SETC 'ci_eq'");
+static int ci_eq(const char *a, const char *b)
+{
+	if (!a || !b) return 0;
+	while (*a && *b) {
+		if (toupper((unsigned char)*a) != toupper((unsigned char)*b)) return 0;
+		a++; b++;
+	}
+	return *a == *b;
+}
+
+/* seconds-of-day from the "hh.mm.ss" field of a formatted MTT line
+ * (right after the 4-char flags field); -1 if it does not parse. */
+__asm__("\n&FUNC	SETC 'mtt_secs_of_day'");
+static int mtt_secs_of_day(const char *dat, int len)
+{
+	int i = 4, h = 0, nd = 0, m, s;
+
+	while (i < len && dat[i] == ' ') i++;
+	while (i < len && dat[i] >= '0' && dat[i] <= '9') {
+		h = h * 10 + (dat[i] - '0'); i++; nd++;
+	}
+	if (nd == 0 || nd > 2 || i + 5 >= len) return -1;     /* need ".mm.ss" */
+	if (dat[i] != '.' || dat[i + 3] != '.') return -1;
+	if (dat[i+1] < '0' || dat[i+1] > '9' || dat[i+2] < '0' || dat[i+2] > '9') return -1;
+	if (dat[i+4] < '0' || dat[i+4] > '9' || dat[i+5] < '0' || dat[i+5] > '9') return -1;
+	m = (dat[i+1] - '0') * 10 + (dat[i+2] - '0');
+	s = (dat[i+4] - '0') * 10 + (dat[i+5] - '0');
+	if (h > 23 || m > 59 || s > 59) return -1;
+	return h * 3600 + m * 60 + s;
+}
+
+/* parse "nnnu" (u in s/m/h, nnn 1-999) -> seconds; default 600; -1 bad. */
+__asm__("\n&FUNC	SETC 'parse_time_range'");
+static int parse_time_range(const char *p)
+{
+	int n = 0, nd = 0;
+
+	if (!p || !*p) return 600;
+	while (*p >= '0' && *p <= '9') { n = n * 10 + (*p - '0'); p++; nd++; }
+	if (nd == 0 || nd > 3 || n < 1 || n > 999) return -1;
+	switch (*p) {
+	case 's': case 'S':            break;
+	case 'm': case 'M': n *= 60;   break;
+	case 'h': case 'H': n *= 3600; break;
+	default: return -1;
+	}
+	return p[1] ? -1 : n;
+}
+
+/* format a UNIX time as "Wkd Mon DD HH:MM:SS GMT YYYY" (z/OSMF style). */
+__asm__("\n&FUNC	SETC 'fmt_gmt_time'");
+static void fmt_gmt_time(char *out, size_t osz, time_t secs)
+{
+	const char *wd[7]  = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+	const char *mo[12] = {"Jan","Feb","Mar","Apr","May","Jun",
+	                      "Jul","Aug","Sep","Oct","Nov","Dec"};
+	struct tm g;
+	int wi, mi;
+
+	gmtime_r(&secs, &g);
+	wi = (g.tm_wday >= 0 && g.tm_wday < 7)  ? g.tm_wday : 0;
+	mi = (g.tm_mon  >= 0 && g.tm_mon  < 12) ? g.tm_mon  : 0;
+	snprintf(out, osz, "%s %s %02d %02d:%02d:%02d GMT %d",
+	         wd[wi], mo[mi], g.tm_mday, g.tm_hour, g.tm_min, g.tm_sec,
+	         g.tm_year + 1900);
+}
+
+/* ------------------------------------------------------------------ */
+/* GET /zosmf/restconsoles/v1/log -- hardcopy log (endpoint 4)         */
+/*                                                                      */
+/* 3.8j has no OPERLOG and the active SYSLOG on spool is not browsable  */
+/* (records=0), so the source is the Master Trace Table -- the in-      */
+/* memory tail of the hardcopy log.  MVP: a timeRange window backward   */
+/* (or forward) from now / time / timestamp.  The MTT carries only      */
+/* hh.mm.ss, so dates are reconstructed by walking newest->oldest and   */
+/* rolling the date back at each midnight crossing.                     */
+/* See docs/endpoints/console/hardcopy-log.md.                          */
+/* ------------------------------------------------------------------ */
+int consoleLogHandler(Session *session)
+{
+	const char *qrange = getQueryParam(session, "timeRange");
+	const char *qtime  = getQueryParam(session, "time");
+	const char *qts    = getQueryParam(session, "timestamp");
+	const char *qhard  = getQueryParam(session, "hardcopy");
+	const char *qsys   = getQueryParam(session, "sysName");
+	const char *qdir   = getQueryParam(session, "direction");
+
+	int range, fwd = 0, tz_min, total = 0, i, days_back, prev_hms;
+	time_t now, anchor, lo, hi;
+	struct tm base, gt;
+	const unsigned char *sid;
+	char sysname[9], numbuf[24];
+	CMTT *cmtt;
+	MTENTRY **arr;
+	unsigned n;
+	time_t *esecs = NULL;
+	JsonBuilder *b = NULL;
+	int rc;
+
+	/* ---- validate query params ---- */
+	range = parse_time_range(qrange);
+	if (range < 0)
+		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 22,
+		    "The parameter timeRange is invalid. Example: 10m.");
+
+	if (qdir && *qdir) {
+		if (ci_eq(qdir, "forward")) fwd = 1;
+		else if (ci_eq(qdir, "backward")) fwd = 0;
+		else return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 22,
+		    "The parameter direction is invalid. Use backward or forward.");
+	}
+	if (qhard && *qhard && !ci_eq(qhard, "operlog") && !ci_eq(qhard, "syslog"))
+		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 22,
+		    "The parameter hardcopy is invalid. Use operlog or syslog.");
+	if (qsys && strlen(qsys) > 8)
+		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 24,
+		    "The sysName cannot exceed 8 characters.");
+
+	now = time((time_t *)0);
+	localtime_r(&now, &base);
+	gmtime_r(&now, &gt);
+	tz_min = (base.tm_hour * 60 + base.tm_min) - (gt.tm_hour * 60 + gt.tm_min);
+	if (tz_min > 720)  tz_min -= 1440;
+	if (tz_min < -720) tz_min += 1440;
+
+	/* ---- anchor: timestamp (ms) overrides time (ISO UTC); default now ---- */
+	anchor = now;
+	if (qts && *qts) {
+		int l = (int)strlen(qts), k;
+		char t[16];
+		for (k = 0; k < l; k++)
+			if (qts[k] < '0' || qts[k] > '9')
+				return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 22,
+				    "The parameter timestamp is invalid.");
+		if (l <= 3) {
+			anchor = 0;
+		} else {
+			int c = l - 3;                  /* ms -> s by dropping 3 digits */
+			if (c > 15) c = 15;
+			memcpy(t, qts, c); t[c] = '\0';
+			anchor = (time_t)strtoul(t, (char **)0, 10);
+		}
+	} else if (qtime && *qtime) {
+		struct tm it;
+		int yy = 0, mo = 0, dd = 0, hh = 0, mm = 0, ss = 0;
+		if (sscanf(qtime, "%d-%d-%dT%d:%d:%d", &yy, &mo, &dd, &hh, &mm, &ss) < 5)
+			return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 22,
+			    "The parameter time is invalid. Example: 2021-05-25T07:00Z.");
+		memset(&it, 0, sizeof(it));
+		it.tm_year = yy - 1900; it.tm_mon = mo - 1; it.tm_mday = dd;
+		it.tm_hour = hh; it.tm_min = mm; it.tm_sec = ss; it.tm_isdst = -1;
+		anchor = mktime(&it) + tz_min * 60;        /* it is UTC -> timegm */
+	}
+
+	if (anchor > now)
+		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 23,
+		    "The time or timestamp specified is in the future.");
+
+	if (fwd) { lo = anchor; hi = anchor + range; }
+	else     { hi = anchor; lo = (anchor > (time_t)range) ? anchor - range : 0; }
+
+	/* local system id (SMF SID) */
+	sid = __smfid();
+	if (sid) { memcpy(sysname, sid, 4); sysname[4] = '\0'; }
+	else sysname[0] = '\0';
+	{ int k = (int)strlen(sysname); while (k > 0 && sysname[k-1] == ' ') sysname[--k] = '\0'; }
+
+	/* ---- snapshot the MTT, reconstruct each entry's UNIX time ---- */
+	cmtt = cmtt_new();
+	arr  = cmtt ? cmtt_get_array(cmtt) : (MTENTRY **)0;
+	n    = arr ? array_count(&arr) : 0;
+
+	if (n) {
+		esecs = (time_t *)malloc(n * sizeof(time_t));
+		if (!esecs) {
+			if (cmtt) cmtt_free(&cmtt);
+			return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			    8, 1, "An error occurred during the retrieval of the hardcopy log.");
+		}
+	}
+
+	days_back = 0;
+	prev_hms  = base.tm_hour * 3600 + base.tm_min * 60 + base.tm_sec;
+	for (i = (int)n - 1; i >= 0; i--) {                /* newest -> oldest */
+		MTENTRY *e = arr[i];
+		int sod = e ? mtt_secs_of_day((const char *)e->mtentdat, (int)e->mtentlen) : -1;
+		struct tm etm;
+		if (sod < 0) { esecs[i] = (time_t)0; continue; }
+		if (sod > prev_hms + 43200) days_back++;       /* midnight crossing */
+		prev_hms = sod;
+		etm = base;
+		etm.tm_mday -= days_back;
+		etm.tm_hour  = sod / 3600;
+		etm.tm_min   = (sod % 3600) / 60;
+		etm.tm_sec   = sod % 60;
+		etm.tm_isdst = -1;
+		esecs[i] = mktime(&etm);
+	}
+
+	/* ---- build the response ---- */
+	b = createJsonBuilder();
+	if (!b) {
+		free(esecs);
+		if (cmtt) cmtt_free(&cmtt);
+		sendDefaultHeaders(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		                   HTTP_CONTENT_TYPE_NONE, 0);
+		return -1;
+	}
+
+	if (startJsonObject(b) < 0) goto fail;
+	if (addJsonNumber(b, "timezone", tz_min / 60) < 0) goto fail;
+	if (addJsonString(b, "source", "SYSLOG") < 0) goto fail;
+	if (startJsonArrayKey(b, "items") < 0) goto fail;
+
+	for (i = 0; i < (int)n && total < 10000; i++) {    /* oldest -> newest */
+		MTENTRY *e = arr[i];
+		const char *dat;
+		int len, off, mlen, jl;
+		char msg[256], jn[16], ts[40];
+
+		if (!e || esecs[i] == 0 || esecs[i] < lo || esecs[i] > hi) continue;
+
+		dat = (const char *)e->mtentdat;
+		len = (int)e->mtentlen;
+
+		off = (len > MTT_MSG_OFF) ? MTT_MSG_OFF : 0;
+		while (off < len && dat[off] == ' ') off++;
+		mlen = rstrip_len(dat + off, len - off);
+		if (mlen > (int)sizeof(msg) - 1) mlen = (int)sizeof(msg) - 1;
+		if (mlen < 0) mlen = 0;
+		memcpy(msg, dat + off, mlen); msg[mlen] = '\0';
+
+		jl = MTT_SRC_LEN;
+		if (MTT_SRC_OFF + jl > len) jl = len - MTT_SRC_OFF;
+		if (jl < 0) jl = 0;
+		if (jl > (int)sizeof(jn) - 1) jl = (int)sizeof(jn) - 1;
+		memcpy(jn, dat + MTT_SRC_OFF, jl); jn[jl] = '\0';
+		while (jl > 0 && jn[jl-1] == ' ') jn[--jl] = '\0';
+
+		fmt_gmt_time(ts, sizeof(ts), esecs[i]);
+		snprintf(numbuf, sizeof(numbuf), "%lu000", (unsigned long)esecs[i]);
+
+		if (startJsonObject(b) < 0) goto fail;
+		if (addJsonStringEsc(b, "message", msg) < 0) goto fail;
+		if (addJsonString(b, "jobName", jn) < 0) goto fail;
+		if (addJsonString(b, "system", sysname) < 0) goto fail;
+		if (addJsonString(b, "type", "HARDCOPY") < 0) goto fail;
+		if (addJsonString(b, "time", ts) < 0) goto fail;
+		if (addJsonRaw(b, "timestamp", numbuf) < 0) goto fail;
+		if (endJsonObject(b) < 0) goto fail;
+		total++;
+	}
+	if (endArray(b) < 0) goto fail;
+
+	if (addJsonNumber(b, "totalItems", total) < 0) goto fail;
+	snprintf(numbuf, sizeof(numbuf), "%lu000", (unsigned long)(fwd ? hi : lo));
+	if (addJsonRaw(b, "nextTimestamp", numbuf) < 0) goto fail;
+	if (endJsonObject(b) < 0) goto fail;
+
+	free(esecs);
+	if (cmtt) cmtt_free(&cmtt);
+	rc = sendJSONResponse(session, HTTP_STATUS_OK, b);
+	freeJsonBuilder(b);
+	return rc;
+
+fail:
+	free(esecs);
+	if (cmtt) cmtt_free(&cmtt);
+	freeJsonBuilder(b);
+	return -1;
 }

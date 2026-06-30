@@ -88,14 +88,72 @@ startArray(JsonBuilder *builder)
     return append_string(builder, "[");
 }
 
-int 
-endArray(JsonBuilder *builder) 
+int
+endArray(JsonBuilder *builder)
 {
     if (!builder) {
 		return -1;
 	}
 
-    return append_string(builder, "]");
+    if (append_string(builder, "]") < 0) {
+        return -1;
+    }
+
+    /* a value following a closed array needs a separating comma */
+    builder->is_first = 0;
+
+    return 0;
+}
+
+/* Add "key": <raw> where raw is emitted verbatim (no quoting/escaping).
+ * Used for numeric values that do not fit addJsonNumber's int, e.g. a
+ * pre-formatted 64-bit UNIX millisecond timestamp. */
+int
+addJsonRaw(JsonBuilder *builder, const char *key, const char *raw)
+{
+    if (!builder || !key || !raw) {
+        return -1;
+    }
+
+    if (!builder->is_first) {
+        if (append_string(builder, ",") < 0) {
+            return -1;
+        }
+    }
+
+    if (append_string(builder, "\"") < 0) return -1;
+    if (append_string(builder, key) < 0) return -1;
+    if (append_string(builder, "\":") < 0) return -1;
+    if (append_string(builder, raw) < 0) return -1;
+
+    builder->is_first = 0;
+
+    return 0;
+}
+
+/* Open a keyed array: emits "key":[ and primes is_first so the first array
+ * element (typically startJsonObject) does not get a leading comma. Close it
+ * with endArray(). */
+int
+startJsonArrayKey(JsonBuilder *builder, const char *key)
+{
+    if (!builder || !key) {
+        return -1;
+    }
+
+    if (!builder->is_first) {
+        if (append_string(builder, ",") < 0) {
+            return -1;
+        }
+    }
+
+    if (append_string(builder, "\"") < 0) return -1;
+    if (append_string(builder, key) < 0) return -1;
+    if (append_string(builder, "\":[") < 0) return -1;
+
+    builder->is_first = 1;
+
+    return 0;
 }
 
 int 

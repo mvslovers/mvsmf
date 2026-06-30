@@ -18,12 +18,12 @@ Implications:
 - VLAs are still forbidden (stack constraints)
 - All variable declarations should still prefer top-of-block for readability
 
-Cross-compiled for MVS/370 using the `c2asm370` compiler (GCC 3.2.3 fork). All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
+Cross-compiled for MVS/370 with the **cc370** toolchain (a GCC 3.4.6 fork: `cc370`/`as370`/`ar370`/`ld370`). The whole build runs **on the host**; MVS is only touched by `make deploy`. All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
 
 ## Development Workflow
 
 1. Every bug fix or feature requires a **GitHub Issue**. If none exists, create one first.
-2. **Plan and analyze first** using the Opus 4.6 model. Implementation follows using Sonnet 4.6.
+2. **Plan and analyze first** (use the strongest reasoning model available); implementation can follow with a faster model.
 3. Develop each fix/feature on a **feature branch**.
 4. When done, merge via **Pull Request** and close the issue with a short comment.
 5. **Never reference AI or Claude** in commit messages, comments, PR descriptions, or anywhere else in the project.
@@ -69,38 +69,51 @@ The authoritative specification for all USS-related work is `docs/uss-spec.md`. 
 - Encoding rules and I/O patterns
 - Implementation plan with task dependencies
 
-## Build System (mbt)
+## Build System (mbt v2)
 
-mvsMF uses [mbt](https://github.com/mvslovers/mbt) as its build tool (Git submodule in `mbt/`). Clone with `--recursive` or run `git submodule update --init`.
+mvsMF uses [mbt](https://github.com/mvslovers/mbt) **v2** as its build tool (Git submodule in `mbt/`). Clone with `--recursive` or run `git submodule update --init`.
 
 ### Build Commands
 
+The whole build runs **on the host** with the cc370 toolchain (`cc370` → `.o`, `as370`, `ar370`, `ld370`). MVS is only touched by `make deploy`.
+
 ```bash
-make doctor        # verify environment (MVS connectivity, tools)
-make bootstrap     # resolve dependencies, allocate MVS datasets
-make build         # cross-compile C → ASM, assemble on MVS, NCAL link
-make link          # final linkedit into load module
-make install       # copy load module to install dataset
+make doctor        # verify the toolchain + MVS connectivity
+make deps          # resolve + stage declared dependencies into .mbt/deps
+make               # cross-compile + link the MVSMF load module (host only)
+make deploy        # pack -> XMIT -> upload -> RECEIVE into the LINKLIB (touches MVS)
+make test          # build the test load modules
+make test-mvs      # deploy + run the test suite on MVS
 make compiledb     # generate compile_commands.json for clangd
-make clean         # remove .s, .o files, build stamps
-make distclean     # deep clean (also removes contrib/ and .mbt/)
+make clean         # remove build/ and dist/
+make distclean     # clean + remove all of .mbt/ (incl. staged deps)
+make help          # list all targets
 ```
 
-The build chain is: C source → assembly via c2asm370 → upload to SOURCE PDS → IFOX00 assemble + IEWL NCAL link on MVS. Final linkedit produces the MVSMF load module.
+The build chain is: C source → `.o` via cc370 on the host → `as370` for the
+hand-written assembler → `ld370` link, with the C runtime and dependencies
+resolved by **autocall** from `.a` archives. `make deploy` packs the load
+library to XMIT, uploads it, and RECEIVEs it into the httpd LINKLIB.
 
 ### Dependencies (from project.toml)
 
 ```toml
 [dependencies]
-"mvslovers/crent370" = ">=1.0.6"
-"mvslovers/httpd" = "=3.3.1-dev"
+"mvslovers/httpd" = "=4.0.0-dev"
+"mvslovers/ufsd" = "=1.0.0-dev"
 ```
 
-`make bootstrap` resolves these from GitHub Releases, downloads headers into `contrib/`, and provisions NCALIB/MACLIB datasets on MVS.
+`make deps` resolves these from GitHub Releases, stages each under
+`.mbt/deps/<repo>/` (`include/` + `lib/`), and writes **`mbt.lock`** (commit it).
+The build wires them in automatically (`-I .mbt/deps/*/include` on compile,
+`.mbt/deps/*/lib/*.a` autocalled on link). **libc370** is the cc370 sysroot
+(`-lc`), not a declared dependency. The console services need the `cgictx` API
+from httpd `4.0.0-dev`. To build against an unreleased dependency, use a
+gitignored `.mbt/deps.local.toml` `[override]`.
 
 ### Configuration
 
-Local settings go in `.env` (gitignored). See `.env.example` for the template. Key variables: `MBT_MVS_HOST`, `MBT_MVS_PORT`, `MBT_MVS_USER`, `MBT_MVS_PASS`, `MBT_MVS_HLQ`.
+Local settings go in `.env` (gitignored). See `.env.example` for the template. Key variables: `MBT_MVS_HOST`, `MBT_MVS_PORT`, `MBT_MVS_USER`, `MBT_MVS_PASS`, `MBT_MVS_HLQ`, `MBT_MVS_DEPS_HLQ`.
 
 clangd provides IDE diagnostics (configured in `.clangd`).
 
@@ -109,10 +122,10 @@ clangd provides IDE diagnostics (configured in `.clangd`).
 ### Request Processing Pipeline
 
 ```
-HTTP Request → cgxstart.c (CGI init) → mvsmf.c (router setup)
+HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsmf.c (router setup)
   → router.c (URL decode, method parse, route match, path var extraction)
-    → Middleware chain (authmw.c, logmw.c)
-      → API handler (dsapi.c, jobsapi.c, infoapi.c)
+    → Middleware chain (authmw.c; logmw.c present but disabled)
+      → API handler (dsapi.c, jobsapi.c, ussapi.c, consapi.c, infoapi.c)
         → JSON response (json.c)
 ```
 
@@ -123,28 +136,31 @@ HTTP Request → cgxstart.c (CGI init) → mvsmf.c (router setup)
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
+- **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).
+- **ntstore.c**: Small persistent key/value store (LRU + TTL) used by the console cursors/detections; lives in the httpd per-CGI context.
+- **mvsmfctx.c**: Wires the per-CGI context (`MVSMF_CTX`) to httpd's `http_cgictx_get`, lazy-initialising the kv-store.
 - **infoapi.c**: `/zosmf/info` endpoint (no auth required).
 - **authmw.c**: Basic Auth middleware using RACF/ACEE for security context.
-- **json.c**: JSON response builder with dynamic buffer management.
+- **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
 - **xlate.c**: EBCDIC/ASCII character translation tables.
-- **cgxstart.c**: CGI startup/initialization code bridging HTTPD and the application.
-- **testapi.c**: Internal test endpoint for verifying crent370 library functions in isolation.
+- **testapi.c**: Internal `/zosmf/test` endpoint for exercising libc370 functions in isolation (`fn=version`, `fn=mtt`, `fn=cmd`, catalog/DSCB probes, …). The CGI launcher (`cgistart`, providing `@@START`) is autocalled from httpd's `libhttpd.a` — the old local `cgxstart.c` is excluded from the build.
 
 ### REST API Structure
 
 All endpoints are under `/zosmf/`:
 
 - `/zosmf/info` — system info (unauthenticated)
-- `/zosmf/restfiles/ds/...` — dataset operations (16 routes)
-- `/zosmf/restjobs/jobs/...` — job operations (6 routes)
-- `/zosmf/restfiles/fs/...` — USS file operations (5 routes)
+- `/zosmf/restfiles/ds/...` — dataset + PDS member operations
+- `/zosmf/restjobs/jobs/...` — job operations
+- `/zosmf/restfiles/fs/...` — USS file operations
+- `/zosmf/restconsoles/...` — console services (issue, collect, detections, hardcopy log)
 
-Endpoint documentation lives in `docs/endpoints/`.
+Endpoint documentation lives in `docs/endpoints/` (with a curl & Zowe cookbook in `docs/examples.md`).
 
 ### Keeping Docs and Tests in Sync
 
-Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, or `infoapi.c`):
+Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, `consapi.c`, or `infoapi.c`):
 
 - **Review and update the endpoint documentation** in `docs/endpoints/` to match the current behavior.
 - **Review and update the integration tests** in `tests/` to cover the current behavior.
@@ -174,7 +190,7 @@ Both curl and Zowe suites should cover every endpoint with all relevant variatio
 
 ### Test Endpoint
 
-`/zosmf/test` (`src/testapi.c`) is an internal endpoint for testing crent370 library functions in isolation. Useful for verifying catalog lookups, DSCB reads, and other low-level MVS operations directly via curl.
+`/zosmf/test` (`src/testapi.c`) is an internal endpoint for testing libc370 functions in isolation. Useful for verifying catalog lookups, DSCB reads, the Master Trace Table, the deployed build id (`fn=version`), and other low-level MVS operations directly via curl.
 
 ```bash
 curl -u U:P 'http://host:port/zosmf/test?fn=listds&level=SYS1&filter=SYS1.MAC*'
@@ -341,3 +357,46 @@ static int recursive_delete(UFS *ufs, const char *path) {
 - Every handler needs matching curl test in tests/curl-uss.sh
 - Every handler needs matching Zowe CLI test in tests/zowe-uss.sh
 - Error paths MUST be tested (UFSD not running → 503, non-existent → 404, etc.)
+
+## Console Services (z/OSMF restconsoles)
+
+> **Docs:** `docs/endpoints/console/` (issue-command, collect, detections, hardcopy-log).
+> **Status:** all four endpoints implemented (Issues #142–#145).
+
+### Architecture
+
+- All handlers live in `consapi.c` / `consapi.h`.
+- **Data source is the Master Trace Table (MTT)**, read via libc370 `clibmtt`
+  (`cmtt_new()` snapshot → `cmtt_get_array()`). MVS 3.8j has no EMCS consoles,
+  no OPERLOG, and the active SYSLOG on the JES2 spool is **not browsable**
+  (records=0) — the MTT is the in-memory tail of the hardcopy log.
+- Commands are issued with **SVC 34 (MGCR)** under the caller's ACEE.
+- Console error body is `{return-code, reason-code, reason}` (different from
+  restfiles' `category`/`rc`/`message`) — use `send_console_error()`.
+
+### RENT constraint (CRITICAL)
+
+MVSMF is link-edited **RENT** (read-only static storage). Writing to any
+writable `static`/global data ABENDs S0C4. Keep all mutable state on the stack
+or in `__getm`'d storage. The console cursors/detections live in a `__getm`'d
+key/value store (`ntstore.c`) anchored in the httpd per-CGI context
+(`mvsmfctx.c` → `http_cgictx_get`), never in statics.
+
+### Handler ASM labels
+
+```
+consoleIssueHandler    PUT  /restconsoles/consoles/{name}                   asm("CAPI0001")
+consoleCollectHandler  GET  /restconsoles/consoles/{name}/solmsgs/{key}     asm("CAPI0002")
+consoleDetectHandler   GET  /restconsoles/consoles/{name}/detections/{key}  asm("CAPI0003")
+consoleLogHandler      GET  /restconsoles/v1/log                            asm("CAPI0004")
+```
+
+### Notes
+
+- MTT lines carry only `hh.mm.ss` (no date); the hardcopy log reconstructs the
+  date by walking newest→oldest and rolling back one day at each midnight crossing.
+- `mktime()` on 3.8j does **not** re-apply the TZ offset — keep the window anchor
+  and the per-entry timestamps in the same (local-wall-clock) frame.
+- The Zowe `zos-logs` SDK reads `resp.totalitems` (lower-case) — match it.
+- Reading the real SYSLOG spool is a separate libc370/clibjes2 task (`jesprint`
+  breaks on the SYSLOG block validation; see libc370#4).

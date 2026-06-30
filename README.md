@@ -45,9 +45,9 @@ released XMIT manually:
    RECEIVE INDATASET('your.xmit.dataset')
    ```
 2. Copy the `MVSMF` load module into the `LINKLIB` your httpd server loads from.
-3. Map the CGI in your httpd configuration:
+3. Map the CGI in your httpd parmlib member:
    ```text
-   cgi.MVSMF="/zosmf/*"
+   MOD=MVSMF /zosmf/*
    ```
 4. Restart the httpd server.
 

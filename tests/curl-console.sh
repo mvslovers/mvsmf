@@ -193,20 +193,24 @@ assert_json_field "$CBODY" '.["cmd-response"]' "" "collect bogus: empty"
 echo ""
 echo "--- detection ---"
 
-# async: watch for IEE136I (which D T produces) -> detection-key + detected
+# async DETECTED: snapshot the baseline, THEN emit a fresh IEE136I from a
+# separate command so the match count grows past the baseline.  Issuing the
+# key together with D T does NOT detect -- the command's own IEE136I lands
+# before the baseline snapshot; detection is for *unsolicited* messages that
+# arrive after the trigger.
 RESP=$(issue '{"cmd":"D T","unsol-key":"IEE136I"}')
 BODY=$(echo "$RESP" | sed '$d')
 DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
 assert_json_exists "$BODY" '.["detection-key"]' "async detect: detection-key present"
 assert_json_exists "$BODY" '.["detection-url"]' "async detect: detection-url present"
 if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
-	sleep 3
+	issue '{"cmd":"D T"}' >/dev/null         # fresh IEE136I, after the baseline
 	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
-	assert_json_field "$RESP" '.status' "detected" "detection: detected"
+	assert_json_field "$RESP" '.status' "detected" "detection: detected after new IEE136I"
 	assert_contains   "$RESP" '.msg' "IEE136I" "detection: msg has IEE136I"
 fi
 
-# waiting: a keyword that will not appear, long window
+# async WAITING: a keyword that will not appear, long window
 RESP=$(issue '{"cmd":"D T","unsol-key":"ZZNOMATCH99","detect-time":"60"}')
 BODY=$(echo "$RESP" | sed '$d')
 DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
@@ -215,17 +219,57 @@ if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
 	assert_json_field "$RESP" '.status' "waiting" "detection: waiting (no match yet)"
 fi
 
+# async EXPIRED: short window, keyword never appears -> expired after the window
+RESP=$(issue '{"cmd":"D T","unsol-key":"ZZNOMATCH99","detect-time":"1"}')
+BODY=$(echo "$RESP" | sed '$d')
+DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
+if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
+	sleep 3
+	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	assert_json_field "$RESP" '.status' "expired" "detection: expired after window"
+fi
+
 # unknown detection key -> 500 / 5 / 9
 RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/detections/DBADBAD0")
 CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
 assert_http_status "500" "$CODE" "detection unknown key"
 assert_json_field  "$CBODY" '.["reason-code"]' "9" "unknown detection: reason-code 9"
 
-# sync: issue + wait inline for IEE136I
-RESP=$(issue '{"cmd":"D T","unsol-key":"IEE136I","unsol-detect-sync":"Y","unsol-detect-timeout":"10"}')
+# sync TIMEOUT: keyword never appears -> blocks for the timeout, status=timeout
+RESP=$(issue '{"cmd":"D T","unsol-key":"ZZNOMATCH99","unsol-detect-sync":"Y","unsol-detect-timeout":"3"}')
 BODY=$(echo "$RESP" | sed '$d')
-assert_json_field "$BODY" '.status' "detected" "sync detect: detected"
-assert_contains   "$BODY" '.msg' "IEE136I" "sync detect: msg has IEE136I"
+assert_json_field "$BODY" '.status' "timeout" "sync detect: timeout (no match)"
+
+# regex unsol-key not supported -> 400 / 1 / 25
+RESP=$(issue '{"cmd":"D T","unsol-key":"IEE.*","unsolKeyReg":"Y"}')
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "400" "$CODE" "unsol regex rejected"
+assert_json_field  "$BODY" '.["reason-code"]' "25" "unsol regex: reason-code 25"
+
+# Real UNSOLICITED detection via a started task.  Opt-in: it STOPS then STARTS
+# FTPD (the P/S pair leaves it running), so it briefly disrupts the FTP service.
+# Set RUN_FTPD_TESTS=1 to enable; off by default.
+if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
+	echo "--- detection: real unsolicited (P/S FTPD) ---"
+	# P FTPD -> async detect "FTPD" -> $HASP395 FTPD ENDED (unsolicited)
+	RESP=$(issue '{"cmd":"P FTPD","unsol-key":"FTPD"}')
+	BODY=$(echo "$RESP" | sed '$d')
+	DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
+	if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
+		sleep 3
+		RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+		assert_json_field "$RESP" '.status' "detected" "P FTPD: ENDED detected (async)"
+		assert_contains   "$RESP" '.msg' "FTPD" "P FTPD: msg mentions FTPD"
+	fi
+	# S FTPD -> sync detect "FTPD" -> startup message; also restarts FTPD.
+	# This is the "start and wait until ready" pattern in one call.
+	RESP=$(issue '{"cmd":"S FTPD","unsol-key":"FTPD","unsol-detect-sync":"Y","unsol-detect-timeout":"20"}')
+	BODY=$(echo "$RESP" | sed '$d')
+	assert_json_field "$BODY" '.status' "detected" "S FTPD: startup detected (sync)"
+	assert_contains   "$BODY" '.msg' "FTPD" "S FTPD: msg mentions FTPD"
+else
+	echo "  (skipped P/S FTPD detection; set RUN_FTPD_TESTS=1 to enable)"
+fi
 
 # =========================================================================
 # 7. Error cases

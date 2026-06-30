@@ -47,6 +47,14 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | POST | [`/zosmf/restfiles/fs/{filepath}`](uss/create.md) | Create file or directory |
 | DELETE | [`/zosmf/restfiles/fs/{filepath}`](uss/delete.md) | Delete file or directory |
 
+## Console Services (`/zosmf/restconsoles`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| PUT | [`/zosmf/restconsoles/consoles/{name}`](console/issue-command.md) | Issue operator command (SVC 34 → MTT) |
+| GET | [`/zosmf/restconsoles/consoles/{name}/solmsgs/{key}`](console/collect.md) | Collect command response (deltas) |
+| GET | [`/zosmf/restconsoles/consoles/{name}/detections/{key}`](console/detections.md) | Detect keyword in unsolicited messages |
+
 ## Common Headers
 
 | Header | Used By | Description |

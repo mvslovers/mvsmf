@@ -582,7 +582,12 @@ int consoleIssueHandler(Session *session)
 	} else if (has_unsol) {
 		/* async: store the detection request; client polls /detections/{key} */
 		NT_STORE *store = mvsmf_kvstore(session->httpd);
-		snprintf(dkey, sizeof(dkey), "D%07X", (unsigned)(tod_hi() & 0xFFFFFFF));
+		/* derive the handle from the STCK (issue_tod), not tod_hi(): tod_hi()
+		 * only advances ~1.05 s, so two detections issued in the same second
+		 * would collide on the same key (and overwrite each other in the
+		 * store). issue_tod is microsecond-unique, like the cmd-response key. */
+		snprintf(dkey, sizeof(dkey), "D%07X",
+		         (unsigned)((issue_tod >> 12) & 0xFFFFFFF));
 		if (store) {
 			SOL_DETECTION det;
 			char dname[MVSMF_KVS_NAMELEN];

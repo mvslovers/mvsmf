@@ -33,7 +33,7 @@
  *   "0000  9.24.38 STC  320  IEE136I ..."
  *    flags^   time^    jobtype+num^    message^
  * Offsets are first-cut and tuned against live data.                         */
-#define MTT_SRC_OFF    15         /* jobtype+number field ("STC  320")        */
+#define MTT_SRC_OFF    14         /* jobtype+number field ("STC  320")        */
 #define MTT_SRC_LEN    8
 #define MTT_MSG_OFF    24         /* message text start                       */
 

@@ -54,6 +54,7 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | PUT | [`/zosmf/restconsoles/consoles/{name}`](console/issue-command.md) | Issue operator command (SVC 34 → MTT) |
 | GET | [`/zosmf/restconsoles/consoles/{name}/solmsgs/{key}`](console/collect.md) | Collect command response (deltas) |
 | GET | [`/zosmf/restconsoles/consoles/{name}/detections/{key}`](console/detections.md) | Detect keyword in unsolicited messages |
+| GET | [`/zosmf/restconsoles/v1/log`](console/hardcopy-log.md) | Get messages from the hardcopy log |
 
 ## Common Headers
 

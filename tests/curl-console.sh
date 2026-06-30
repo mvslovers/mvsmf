@@ -272,7 +272,65 @@ else
 fi
 
 # =========================================================================
-# 7. Error cases
+# 7. Hardcopy log (GET /restconsoles/v1/log)
+# =========================================================================
+echo ""
+echo "--- hardcopy log ---"
+
+LOG="${BASE_URL}/zosmf/restconsoles/v1/log"
+
+# default-ish window -> 200 with the expected envelope
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=5m")
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "200" "$CODE" "log 5m"
+assert_json_field  "$BODY" '.source' "SYSLOG" "log: source SYSLOG"
+assert_json_exists "$BODY" '.timezone'      "log: timezone present"
+assert_json_exists "$BODY" '.totalItems'    "log: totalItems present"
+assert_json_exists "$BODY" '.nextTimestamp' "log: nextTimestamp present"
+assert_json_exists "$BODY" '.items'         "log: items present"
+
+# the window actually moves: 600m must return >= the 5m count
+N5=$(curl -s -u "$AUTH" "$LOG?timeRange=5m"   | jq -r '.totalItems' 2>/dev/null)
+N600=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -r '.totalItems' 2>/dev/null)
+if [ -n "$N5" ] && [ -n "$N600" ] && [ "$N600" -ge "$N5" ] 2>/dev/null; then
+	pass "log: wider window returns >= items (5m=$N5 600m=$N600)"
+else
+	fail "log: window not honoured (5m=$N5 600m=$N600)"
+fi
+
+# items carry the expected per-message fields
+FIRST=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -c '.items[0]' 2>/dev/null)
+if [ -n "$FIRST" ] && [ "$FIRST" != "null" ]; then
+	assert_json_exists "$FIRST" '.message'   "log item: message"
+	assert_json_exists "$FIRST" '.time'      "log item: time"
+	assert_json_exists "$FIRST" '.timestamp' "log item: timestamp"
+	assert_json_field  "$FIRST" '.type' "HARDCOPY" "log item: type HARDCOPY"
+fi
+
+# hardcopy=operlog falls back to SYSLOG (no OPERLOG on 3.8j)
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=2m&hardcopy=operlog")
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "200" "$CODE" "log hardcopy=operlog"
+assert_json_field  "$BODY" '.source' "SYSLOG" "log operlog: falls back to SYSLOG"
+
+# invalid params
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=xyz")
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "400" "$CODE" "log bad timeRange"
+assert_json_field  "$BODY" '.["reason-code"]' "22" "log bad timeRange: reason 22"
+
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?sysName=TOOLONGNAME")
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "400" "$CODE" "log sysName too long"
+assert_json_field  "$BODY" '.["reason-code"]' "24" "log sysName: reason 24"
+
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?direction=sideways")
+CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "400" "$CODE" "log bad direction"
+assert_json_field  "$BODY" '.["reason-code"]' "22" "log bad direction: reason 22"
+
+# =========================================================================
+# 8. Error cases
 # =========================================================================
 echo ""
 echo "--- errors ---"

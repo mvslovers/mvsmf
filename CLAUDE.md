@@ -35,13 +35,13 @@ Cross-compiled for MVS/370 using the `c2asm370` compiler (GCC 3.2.3 fork). All o
 Autonomous workflow for resolving a GitHub issue end-to-end:
 
 1. **Read the issue** — `gh issue view <number> --repo mvslovers/mvsmf`
-2. **Check for spec** — If the issue has label `uss-phase1`, read `doc/uss-spec.md` first
+2. **Check for spec** — If the issue has label `uss-phase1`, read `docs/uss-spec.md` first
 3. **Create a feature branch** — `git checkout -b issue-<number>-<short-description>`
 4. **Analyze** — Identify affected files, understand the existing patterns in nearby code
 5. **Implement** — Write code following the conventions in this CLAUDE.md
 6. **Verify syntax** — Run `make compiledb` and check clangd diagnostics (no errors)
 7. **Update tests** — Add/update tests in `tests/` matching the change
-8. **Update docs** — If touching an endpoint handler, update `doc/endpoints/`
+8. **Update docs** — If touching an endpoint handler, update `docs/endpoints/`
 9. **Commit** — Descriptive message, no AI references. Reference the issue: `Fixes #<number>`
 10. **Push and create PR** — `gh pr create --title "..." --body "Fixes #<number>"`
 11. **Summary** — Report what was done, what to verify on the live MVS system
@@ -53,7 +53,7 @@ If any step fails, stop and report the issue rather than guessing.
 Synchronize endpoint documentation with current implementation:
 
 1. Scan all `add_route()` calls in `src/mvsmf.c`
-2. For each route, check if matching doc exists in `doc/endpoints/`
+2. For each route, check if matching doc exists in `docs/endpoints/`
 3. Report missing or outdated documentation
 4. Optionally generate stubs for undocumented endpoints
 
@@ -61,7 +61,7 @@ Synchronize endpoint documentation with current implementation:
 
 ### USS/UFS Feature Pack
 
-The authoritative specification for all USS-related work is `doc/uss-spec.md`. **Read it before working on any issue labeled `uss-phase1`.** It contains:
+The authoritative specification for all USS-related work is `docs/uss-spec.md`. **Read it before working on any issue labeled `uss-phase1`.** It contains:
 
 - Gap analysis: z/OSMF USS API vs. libufs capabilities
 - Architecture decisions (router wildcard, session lifecycle, MBT integration)
@@ -140,13 +140,13 @@ All endpoints are under `/zosmf/`:
 - `/zosmf/restjobs/jobs/...` — job operations (6 routes)
 - `/zosmf/restfiles/fs/...` — USS file operations (5 routes)
 
-Endpoint documentation lives in `doc/endpoints/`.
+Endpoint documentation lives in `docs/endpoints/`.
 
 ### Keeping Docs and Tests in Sync
 
 Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, or `infoapi.c`):
 
-- **Review and update the endpoint documentation** in `doc/endpoints/` to match the current behavior.
+- **Review and update the endpoint documentation** in `docs/endpoints/` to match the current behavior.
 - **Review and update the integration tests** in `tests/` to cover the current behavior.
 
 ### Integration Tests
@@ -196,7 +196,7 @@ The `receive_raw_data()` function in `jobsapi.c` works around this by reading on
 
 ## USS/UFS Endpoints
 
-> **Spec:** `doc/uss-spec.md` — the authoritative architecture and design document.
+> **Spec:** `docs/uss-spec.md` — the authoritative architecture and design document.
 > **Status:** Phase 1 complete (Issues #77–#89). chtag utility implemented (#106).
 
 ### Architecture

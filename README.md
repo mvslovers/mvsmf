@@ -1,117 +1,148 @@
 
 # mvsMF
 
-**mvsMF** is a implementation of the z/OSMF REST API for the classic MVS 3.8j. The project provides essential functionality of z/OSMF, focusing on key endpoints for dataset and job handling. This allows users to use modern clients such as the Zowe Explorer for Visual Studio Code (or JetBrains IDEs) and Zowe CLI to interact with their host datasets, submit jobs, and view job outputs on MVS 3.8j.
+**mvsMF** is an implementation of the z/OSMF REST API for the classic **MVS 3.8j**.
+It lets modern clients — the **Zowe Explorer** for VS Code and JetBrains IDEs, and
+the **Zowe CLI** — work with datasets, PDS members, jobs, USS files and the system
+console on a classic MVS host through the standard z/OSMF endpoints.
 
-This project is implemented as a **CGI module** for Mike Rayborn's HTTPD server and relies on his **CRENT370 libraries** for efficient system interaction. A huge thanks goes to Mike Rayborn for his invaluable contributions to the MVS community.
+mvsMF runs as a **CGI module** under the **httpd** web server and is built on the
+**libc370** C runtime (the maintained successor to CRENT370). A huge thanks goes
+to **Mike Rayborn**, whose HTTPD server and original CRENT370 libraries this work
+builds on.
 
 ## Features
 
-- **Dataset Handling**: Access, create, update, and delete datasets.
-- **Job Management**: Submit jobs, check their status, and retrieve their output.
+- **Datasets** — list, read, write, create, delete (sequential + volume-qualified)
+- **PDS members** — list, read, write, delete
+- **Jobs** — submit (inline JCL or dataset), status, spool files, spool records, purge
+- **USS files** — list, read, write, create, delete
+- **Console services** — issue operator commands, collect responses, detect
+  unsolicited messages, read the hardcopy log
+
+See **[docs/endpoints/](docs/endpoints/README.md)** for the full endpoint
+reference and **[docs/examples.md](docs/examples.md)** for copy‑paste curl & Zowe
+CLI examples for every endpoint.
 
 ## Installation
 
-> **Note**: This project is currently a **Work in Progress** and is not intended for production use.
+> **Note:** mvsMF is **Work in Progress** and not intended for production use.
 
 ### Prerequisites
 
-- MVS 3.8j system
-- Mike Rayborn's HTTPD version >= 3.3.0 installed and configured
+- An MVS 3.8j system (TK4‑, TK5, MVSCE, or local Hercules)
+- **httpd** ≥ `4.0.0-dev` installed and configured — the console services need
+  the `cgictx` API introduced in the httpd 4.x line
 
-### Steps
+### Install
 
-1. Transfer the provided **XMIT file** to your MVS system.
-2. Restore the XMIT file to create the necessary load module:
+The simplest path is `make deploy` (see *Building* below): it uploads and
+RECEIVEs the load library into your httpd LINKLIB automatically. To install a
+released XMIT manually:
 
-   ```bash
-   RECEIVE INDATASET('your.xmit.dataset') 
+1. Transfer the **XMIT** file to your MVS system and restore it:
+   ```text
+   RECEIVE INDATASET('your.xmit.dataset')
    ```
-
-3. Copy the the load module from the received dataset into the `LINKLIB` dataset used by your HTTPD server.
-4. Update your HTTPD configuration file to include the following entry:
-
-   ```bash
+2. Copy the `MVSMF` load module into the `LINKLIB` your httpd server loads from.
+3. Map the CGI in your httpd configuration:
+   ```text
    cgi.MVSMF="/zosmf/*"
    ```
-
-5. Restart the HTTPD server.
+4. Restart the httpd server.
 
 ## Building mvsMF
 
-mvsMF uses [mbt](https://github.com/mvslovers/mbt) (MVS Build Tools) for
-cross-compilation, assembly, and linking on MVS.
+mvsMF uses **[mbt](https://github.com/mvslovers/mbt) v2** (MVS Build Tools). The
+whole build runs **on your host** with the **cc370** toolchain (`cc370`, `as370`,
+`ar370`, `ld370`) — MVS is only touched by `make deploy`.
 
 ### Prerequisites
 
-- An MVS 3.8j system reachable via IP (TK4-, TK5, MVSCE, or similar)
-- The [c2asm370](https://github.com/mvslovers/c2asm370) cross-compiler
-- Python 3.12+
+- The **[cc370](https://github.com/mvslovers/cc370)** host toolchain (a GCC 3.4.6 fork)
+- **Python 3.12+**
+- An MVS 3.8j system reachable over IP (for `make deploy` / `make doctor`)
 
 ### Quick Start
 
 ```bash
 git clone --recursive https://github.com/mvslovers/mvsmf.git
 cd mvsmf
-cp .env.example .env    # edit with your MVS connection details
-make bootstrap          # resolve dependencies, allocate datasets
-make build              # cross-compile and assemble on MVS
-make link               # link-edit into load module
+cp .env.example .env     # edit with your MVS connection details
+make deps                # resolve + stage dependencies (httpd, ufsd)
+make                     # cross-compile + link the MVSMF load module (on the host)
+make deploy              # XMIT + upload + RECEIVE into the httpd LINKLIB (touches MVS)
 ```
 
 ### Make Targets
 
 | Target | Description |
 |--------|-------------|
-| `make bootstrap` | Resolve dependencies, allocate MVS datasets |
-| `make build` | Cross-compile C sources and assemble on MVS |
-| `make link` | Link-edit all modules into a load module on MVS |
-| `make install` | Copy load module into the target LINKLIB on MVS *(not yet implemented)* |
-| `make package` | TRANSMIT load library to XMIT format and download |
+| `make` | Build the `MVSMF` load module (host only) |
+| `make deps` | Resolve + stage declared dependencies into `.mbt/deps` |
+| `make deploy` | Pack → XMIT → upload → RECEIVE into the LINKLIB (touches MVS) |
+| `make test` / `make test-mvs` | Build (and run on MVS) the test suites |
+| `make doctor` | Check the toolchain + MVS connectivity |
 | `make compiledb` | Generate `compile_commands.json` for clangd |
-| `make clean` | Remove generated `.s` and `.o` files |
-| `make distclean` | Full clean including mbt cache and stamps |
+| `make package` | Build the release artifacts in `dist/` |
+| `make clean` / `make distclean` | Remove build outputs / everything incl. staged deps |
+| `make help` | List all targets |
+
+### Dependencies
+
+Declared in `project.toml` and pinned in `mbt.lock` (committed):
+
+| Dependency | Purpose |
+|------------|---------|
+| `mvslovers/httpd` | Web server + client library (the CGI host and `http_*` API) |
+| `mvslovers/ufsd` | Unix‑like filesystem server (the USS endpoints) |
+| `libc370` | C runtime (the cc370 sysroot, `-lc`) |
+
+`make deps` resolves `httpd`/`ufsd` from their GitHub Releases and writes
+`mbt.lock`. To develop against an unreleased dependency, use a gitignored
+`.mbt/deps.local.toml` override.
 
 ### Configuration
 
-Project structure is defined in `project.toml`. Local MVS connection
-settings go in `.env` (never committed). Copy `.env.example` to get started.
-
-Key variables:
+`project.toml` defines the project; local MVS connection settings go in `.env`
+(never committed — copy `.env.example`).
 
 | Variable | Description |
 |----------|-------------|
 | `MBT_MVS_HOST` | IP or hostname of the MVS system |
 | `MBT_MVS_PORT` | mvsMF API port |
-| `MBT_MVS_USER` | MVS userid |
-| `MBT_MVS_PASS` | MVS password |
-| `MBT_MVS_DEPS_VOLUME` | Volume for RECEIVE (see note below) |
+| `MBT_MVS_USER` / `MBT_MVS_PASS` | MVS userid / password |
+| `MBT_MVS_HLQ` | HLQ for build/deploy datasets |
+| `MBT_MVS_DEPS_HLQ` | HLQ for staged dependency datasets |
+| `MBT_JES_JOBCLASS` / `MBT_JES_MSGCLASS` | JES job / message class for deploy jobs |
 
 See `.env.example` for the full list.
 
-> **MVS/CE users:** MVS/CE systems typically have no public volumes available
-> for TSO RECEIVE. Set `MBT_MVS_DEPS_VOLUME` in your `.env` to a work volume
-> (e.g. `PUB000`) so that dependency datasets are placed on a known volume.
-
 ## Usage
 
-Once installed, you can use tools like [Zowe CLI](https://docs.zowe.org/stable/user-guide/cli-installcli.html) or IDE plugins like Zowe Explorer to connect to your MVS 3.8j instance. You'll be able to:
+Point [Zowe CLI](https://docs.zowe.org/) or an IDE plugin (Zowe Explorer) at your
+MVS 3.8j host — note that mvsMF speaks **plain HTTP** (`--protocol http`). You can
+then list and edit datasets and PDS members, submit and monitor jobs, browse USS
+files, and issue console commands or read the hardcopy log.
 
-- List datasets
-- Submit and monitor jobs
-- Retrieve and view job outputs
+Ready‑to‑run curl and Zowe commands for every endpoint are in
+**[docs/examples.md](docs/examples.md)**.
 
 ## Acknowledgments
 
-This project wouldn't have been possible without the incredible work and support of **Mike Rayborn**. His HTTPD server and CRENT370 libraries are at the core of this implementation. A huge thank you for your contributions to the MVS community!
+This project builds on the incredible work of **Mike Rayborn** — his HTTPD server
+and the original CRENT370 libraries (continued as **libc370**) are at the core of
+this implementation. A huge thank you for your contributions to the MVS community!
 
 ## Contributing
 
-Contributions are welcome! If you're interested in helping with development, testing, or documentation, feel free to open an issue or submit a pull request.
+Contributions are welcome! If you're interested in helping with development,
+testing, or documentation, feel free to open an issue or submit a pull request.
 
 ## License
 
 This project is licensed under the [MIT License](LICENSE)
+
 ---
 
 **Disclaimer**: This project is still under active development and is not ready for production use. Use it at your own risk and report any issues or feedback to help improve it.

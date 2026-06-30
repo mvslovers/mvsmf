@@ -32,7 +32,11 @@ Body (JSON):
 | `system` | no | if set and != local system (`CVTSNAME`) → **400** |
 | `sol-key` | no | plain substring; sets `sol-key-detected` if found in the response |
 | `solKeyReg=Y` | no | **400** (rc 1 / reason 25) — regex not supported (MVP) |
-| `unsol-key`, `detect-time`, `unsol-detect-sync`, `unsol-detect-timeout`, `unsolKeyReg` | no | **deferred to endpoint 3** (unsolicited) — ignored here |
+| `unsol-key` | no | arm **unsolicited-message detection** for this keyword (plain substring, uppercased) — see [Detections](restconsoles-detections.md) |
+| `unsol-detect-sync` | no | `Y` → block inline (up to `unsol-detect-timeout`) and return `status`/`msg`; else async (returns `detection-*`) |
+| `unsol-detect-timeout` | no | sync poll bound in seconds (default 20, max 60) |
+| `detect-time` | no | async detection window in seconds (default 30) |
+| `unsolKeyReg=Y` | no | **400** (rc 1 / reason 25) — regex not supported |
 | `auth`, `routcode`, `mscope`, `storage`, `auto` | no | EMCS OPERPARM — **ignored** (no EMCS on 3.8j) |
 
 `{console-name}`: validated as 2–8 alphanumeric (first char alpha or `# $ @`),
@@ -72,7 +76,22 @@ Returns immediately, without `cmd-response`:
 
 **MVP cut:** the `consoleAuth/Routcde/Mscope/Storage/Auto` and `ipcmsgqbytes`
 "first-time" informational fields are omitted (no persistent console state).
-`detection-*` fields (unsolicited) belong to endpoint 3.
+
+### With `unsol-key` (unsolicited detection)
+
+When `unsol-key` is supplied, the issue also arms detection (see
+[Detections](restconsoles-detections.md) for the model). The response gains
+fields on top of the `cmd-response*` keys above:
+
+- **async** (default): `detection-key`, `detection-url`, `detection-uri` — poll
+  the URL (endpoint 3) for `waiting` / `detected` / `expired`.
+- **sync** (`unsol-detect-sync=Y`): blocks up to `unsol-detect-timeout`, then
+  returns `status` (`detected` / `timeout`) and `msg` (the matching message
+  text, or `""`).
+
+Detection fires on a **count delta**: the baseline match count is snapshotted
+right after the command is issued, so it catches messages arriving *after* the
+trigger, not the command's own (solicited) response.
 
 ### cmd-response-key
 

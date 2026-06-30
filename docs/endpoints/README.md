@@ -2,6 +2,9 @@
 
 z/OSMF-compatible REST API for MVS 3.8j. All endpoints require Basic Auth unless noted otherwise.
 
+> **Copy-paste examples** (curl & Zowe CLI) for every endpoint:
+> [examples.md](../examples.md).
+
 ## System Information
 
 | Method | Path | Description |

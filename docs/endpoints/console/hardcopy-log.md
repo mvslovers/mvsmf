@@ -37,7 +37,7 @@ On successful completion, this request returns HTTP status code 200 (OK):
       "timestamp": 1782787296000
     }
   ],
-  "totalItems": 1,
+  "totalitems": 1,
   "nextTimestamp": 1782787181000
 }
 ```

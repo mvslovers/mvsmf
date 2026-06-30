@@ -285,13 +285,13 @@ CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$CODE" "log 5m"
 assert_json_field  "$BODY" '.source' "SYSLOG" "log: source SYSLOG"
 assert_json_exists "$BODY" '.timezone'      "log: timezone present"
-assert_json_exists "$BODY" '.totalItems'    "log: totalItems present"
+assert_json_exists "$BODY" '.totalitems'    "log: totalitems present"
 assert_json_exists "$BODY" '.nextTimestamp' "log: nextTimestamp present"
 assert_json_exists "$BODY" '.items'         "log: items present"
 
 # the window actually moves: 600m must return >= the 5m count
-N5=$(curl -s -u "$AUTH" "$LOG?timeRange=5m"   | jq -r '.totalItems' 2>/dev/null)
-N600=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -r '.totalItems' 2>/dev/null)
+N5=$(curl -s -u "$AUTH" "$LOG?timeRange=5m"   | jq -r '.totalitems' 2>/dev/null)
+N600=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -r '.totalitems' 2>/dev/null)
 if [ -n "$N5" ] && [ -n "$N600" ] && [ "$N600" -ge "$N5" ] 2>/dev/null; then
 	pass "log: wider window returns >= items (5m=$N5 600m=$N600)"
 else

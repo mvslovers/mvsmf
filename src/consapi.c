@@ -1055,7 +1055,9 @@ int consoleLogHandler(Session *session)
 	}
 	if (endArray(b) < 0) goto fail;
 
-	if (addJsonNumber(b, "totalItems", total) < 0) goto fail;
+	/* "totalitems" (lower-case) -- the Zowe zos-logs SDK reads resp.totalitems
+	 * for its summary line; camelCase leaves the %s placeholders unfilled. */
+	if (addJsonNumber(b, "totalitems", total) < 0) goto fail;
 	snprintf(numbuf, sizeof(numbuf), "%lu000", (unsigned long)(fwd ? hi : lo));
 	if (addJsonRaw(b, "nextTimestamp", numbuf) < 0) goto fail;
 	if (endJsonObject(b) < 0) goto fail;

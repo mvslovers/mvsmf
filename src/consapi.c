@@ -372,9 +372,15 @@ static int detect_count(Session *session, const char *keyword_upper,
 		if (strstr(up, keyword_upper)) {
 			count++;
 			if (latest && lsz) {
-				int mlen = rstrip_len(e->mtentdat, len);
+				/* return just the message text, not the raw MTT line:
+				 * skip the flags+time+jobtype/num prefix (cols 0..23)
+				 * and any leading blanks, then rstrip. */
+				int off = (len > MTT_MSG_OFF) ? MTT_MSG_OFF : 0;
+				int mlen;
+				while (off < len && e->mtentdat[off] == ' ') off++;
+				mlen = rstrip_len(e->mtentdat + off, len - off);
 				if (mlen > (int)lsz - 1) mlen = (int)lsz - 1;
-				memcpy(latest, e->mtentdat, mlen);
+				memcpy(latest, e->mtentdat + off, mlen);
 				latest[mlen] = '\0';
 			}
 		}

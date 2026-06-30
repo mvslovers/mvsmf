@@ -332,6 +332,58 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 	return (int)total;
 }
 
+/* Unsolicited-keyword detection request, stored opaquely in the kv-store keyed
+ * by the "D..." detection key. Detection fires when the number of MTT entries
+ * matching the keyword grows past base_count (robust against pre-existing
+ * occurrences; no per-entry timestamp comparison needed). anchor_hi is the TOD
+ * high word at issue (each tick ~= 1.05 s) -> 64-bit-math-free window check. */
+typedef struct sol_detection {
+	unsigned        anchor_hi;    /* tod_hi() at issue (~1.05 s ticks)    */
+	unsigned        detect_secs;  /* detect-time window (seconds)         */
+	unsigned        base_count;   /* matches present at issue             */
+	unsigned char   keylen;
+	char            key[126];     /* uppercased unsol-key                 */
+} SOL_DETECTION;
+
+/* Count MTT entries whose (uppercased) text contains keyword_upper; record the
+ * newest matching line into latest (rstripped, NUL-terminated). */
+__asm__("\n&FUNC	SETC 'detect_count'");
+static int detect_count(Session *session, const char *keyword_upper,
+                        char *latest, size_t lsz)
+{
+	CMTT *cmtt = cmtt_new();
+	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
+	unsigned n = arr ? array_count(&arr) : 0;
+	unsigned i;
+	int count = 0;
+
+	if (latest && lsz) latest[0] = '\0';
+
+	for (i = 0; i < n; i++) {
+		MTENTRY *e = arr[i];
+		char up[200];
+		int len = e ? (int)e->mtentlen : 0;
+		int k;
+		if (!e) continue;
+		if (len > (int)sizeof(up) - 1) len = sizeof(up) - 1;
+		for (k = 0; k < len; k++)
+			up[k] = (char)toupper((unsigned char)e->mtentdat[k]);
+		up[len] = '\0';
+		if (strstr(up, keyword_upper)) {
+			count++;
+			if (latest && lsz) {
+				int mlen = rstrip_len(e->mtentdat, len);
+				if (mlen > (int)lsz - 1) mlen = (int)lsz - 1;
+				memcpy(latest, e->mtentdat, mlen);
+				latest[mlen] = '\0';
+			}
+		}
+	}
+
+	if (cmtt) cmtt_free(&cmtt);
+	return count;
+}
+
 /* ------------------------------------------------------------------ */
 /* PUT /zosmf/restconsoles/consoles/{console-name}                     */
 /* ------------------------------------------------------------------ */
@@ -360,6 +412,18 @@ int consoleIssueHandler(Session *session)
 	int cmdlen, cnlen, i, is_async, sol_detected = 0;
 	unsigned delivered = 0;
 	unsigned long long issue_tod;
+
+	/* unsolicited-message detection (endpoint 3) */
+	char unsolkey[64] = {0};
+	char unsolreg[4] = {0};
+	char unsoldsync[4] = {0};
+	char detecttime[8] = {0};
+	char unsoltimeout[8] = {0};
+	char unsol_upper[66] = {0};
+	char dkey[16] = {0};
+	char det_status[16] = {0};
+	char det_msg[200] = {0};
+	int has_unsol = 0, unsol_sync = 0, unsol_base = 0, detect_secs = 30;
 
 	/* Content-Type must be application/json */
 	if (!ct || !strstr(ct, "application/json")) {
@@ -413,6 +477,24 @@ int consoleIssueHandler(Session *session)
 		goto quit;
 	}
 
+	/* unsolicited-keyword detection fields */
+	json_get_str(body, "unsol-key", unsolkey, sizeof(unsolkey));
+	json_get_str(body, "unsolKeyReg", unsolreg, sizeof(unsolreg));
+	json_get_str(body, "unsol-detect-sync", unsoldsync, sizeof(unsoldsync));
+	json_get_str(body, "detect-time", detecttime, sizeof(detecttime));
+	json_get_str(body, "unsol-detect-timeout", unsoltimeout, sizeof(unsoltimeout));
+
+	if (unsolreg[0] == 'Y' && unsolkey[0]) {
+		send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 25,
+		    "Invalid value for unsol-key: regular expressions are not supported.");
+		rc = -1;
+		goto quit;
+	}
+	has_unsol  = (unsolkey[0] != '\0');
+	unsol_sync = (unsoldsync[0] == 'Y' || unsoldsync[0] == 'y');
+	if (detecttime[0]) detect_secs = atoi(detecttime);
+	if (detect_secs <= 0) detect_secs = 30;
+
 	/* system routing: only the local system is supported (TODO: CVTSNAME) */
 	if (system[0]) {
 		send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 5,
@@ -430,6 +512,16 @@ int consoleIssueHandler(Session *session)
 
 	/* issue under the authenticated user's ACEE (set by authmw) */
 	issue_command(cmd_upper, (unsigned)cmdlen);
+
+	/* unsol-key: uppercase it and snapshot the baseline match count *before*
+	 * the awaited (unsolicited) message can arrive */
+	if (has_unsol) {
+		int j;
+		for (j = 0; unsolkey[j] && j < (int)sizeof(unsol_upper) - 1; j++)
+			unsol_upper[j] = (char)toupper((unsigned char)unsolkey[j]);
+		unsol_upper[j] = '\0';
+		unsol_base = detect_count(session, unsol_upper, (char *)0, 0);
+	}
 
 	/* opaque 16-byte response key (a unique handle; the correlation context
 	 * lives in the stored cursor, not in the key) */
@@ -469,6 +561,42 @@ int consoleIssueHandler(Session *session)
 		}
 	}
 
+	/* unsolicited-keyword detection */
+	if (has_unsol && unsol_sync) {
+		/* block up to unsol-detect-timeout, polling the MTT for a new match.
+		 * NOTE: a tight poll (each detect_count re-snapshots the MTT); the
+		 * async path is preferred for long waits. */
+		unsigned to = unsoltimeout[0] ? (unsigned)atoi(unsoltimeout) : 20;
+		unsigned start = tod_hi();
+		if (to == 0 || to > 60) to = 20;            /* sane bound */
+		strcpy(det_status, "timeout");
+		for (;;) {
+			if (detect_count(session, unsol_upper, det_msg, sizeof(det_msg))
+			    > unsol_base) {
+				strcpy(det_status, "detected");
+				break;
+			}
+			if (tod_hi() - start >= to) break;
+		}
+		if (strcmp(det_status, "detected") != 0) det_msg[0] = '\0';
+	} else if (has_unsol) {
+		/* async: store the detection request; client polls /detections/{key} */
+		NT_STORE *store = mvsmf_kvstore(session->httpd);
+		snprintf(dkey, sizeof(dkey), "D%07X", (unsigned)(tod_hi() & 0xFFFFFFF));
+		if (store) {
+			SOL_DETECTION det;
+			char dname[MVSMF_KVS_NAMELEN];
+			memset(&det, 0, sizeof(det));
+			det.anchor_hi   = tod_hi();
+			det.detect_secs = (unsigned)detect_secs;
+			det.base_count  = (unsigned)unsol_base;
+			det.keylen      = (unsigned char)strlen(unsol_upper);
+			strncpy(det.key, unsol_upper, sizeof(det.key) - 1);
+			key_to_name(dkey, dname);
+			nt_set(store, dname, &det, sizeof(det));
+		}
+	}
+
 	/* build the response */
 	b = createJsonBuilder();
 	if (!b) { rc = -1; goto quit; }
@@ -484,6 +612,22 @@ int consoleIssueHandler(Session *session)
 	}
 	if (!is_async && solkey[0]) {
 		if (addJsonBool(b, "sol-key-detected", sol_detected) < 0) {
+			rc = -1; goto quit;
+		}
+	}
+	if (has_unsol && unsol_sync) {
+		if (addJsonString(b, "status", det_status) < 0 ||
+		    addJsonStringEsc(b, "msg", det_msg) < 0) {
+			rc = -1; goto quit;
+		}
+	} else if (has_unsol) {
+		char duri[200], durl[256];
+		snprintf(duri, sizeof(duri),
+		         "/zosmf/restconsoles/consoles/%s/detections/%s", cn, dkey);
+		snprintf(durl, sizeof(durl), "http://%s%s", host ? host : "localhost", duri);
+		if (addJsonString(b, "detection-key", dkey) < 0 ||
+		    addJsonString(b, "detection-url", durl) < 0 ||
+		    addJsonString(b, "detection-uri", duri) < 0) {
 			rc = -1; goto quit;
 		}
 	}
@@ -561,5 +705,61 @@ int consoleCollectHandler(Session *session)
 
 	rc = send_collect(session, resp);
 	free(resp);
+	return rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* GET /zosmf/restconsoles/consoles/{console-name}/detections/{key}    */
+/* Reports whether the unsol-key has appeared in the (unsolicited)      */
+/* message stream since the command was issued: detected / waiting /    */
+/* expired (after detect-time).                                         */
+/* ------------------------------------------------------------------ */
+int consoleDetectHandler(Session *session)
+{
+	const char *dkey = getPathParam(session, "detection-key");
+	char name[MVSMF_KVS_NAMELEN];
+	NT_STORE *store;
+	SOL_DETECTION det;
+	unsigned dlen = 0;
+	char msg[200];
+	const char *status;
+	JsonBuilder *b;
+	int rc;
+
+	store = mvsmf_kvstore(session->httpd);
+	if (!dkey || !store ||
+	    nt_get(store, (key_to_name(dkey, name), name), &det, sizeof(det),
+	           &dlen) != 0 ||
+	    dlen < sizeof(det)) {
+		return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		    5, 9, "Cannot find the result for the specified detection ID.");
+	}
+
+	msg[0] = '\0';
+	if (detect_count(session, det.key, msg, sizeof(msg)) > (int)det.base_count) {
+		status = "detected";
+	} else if (tod_hi() - det.anchor_hi > det.detect_secs) {
+		status = "expired";
+		msg[0] = '\0';
+	} else {
+		status = "waiting";
+		msg[0] = '\0';
+	}
+
+	b = createJsonBuilder();
+	if (!b) {
+		sendDefaultHeaders(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		                   HTTP_CONTENT_TYPE_NONE, 0);
+		return -1;
+	}
+	if (startJsonObject(b) < 0 ||
+	    addJsonString(b, "status", status) < 0 ||
+	    addJsonStringEsc(b, "msg", msg) < 0 ||
+	    endJsonObject(b) < 0) {
+		freeJsonBuilder(b);
+		return -1;
+	}
+	rc = sendJSONResponse(session, HTTP_STATUS_OK, b);
+	freeJsonBuilder(b);
 	return rc;
 }

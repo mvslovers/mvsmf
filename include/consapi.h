@@ -37,4 +37,15 @@ int consoleIssueHandler(Session *session) asm("CAPI0001");
  */
 int consoleCollectHandler(Session *session) asm("CAPI0002");
 
+/**
+ * @brief Get the unsolicited-keyword detection result.
+ *
+ * GET /zosmf/restconsoles/consoles/{console-name}/detections/{detection-key}
+ * Returns { "status": detected|waiting|expired, "msg": "..." }.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ */
+int consoleDetectHandler(Session *session) asm("CAPI0003");
+
 #endif // CONSAPI_H

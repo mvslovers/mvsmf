@@ -188,7 +188,47 @@ assert_http_status "200" "$CODE" "collect bogus key"
 assert_json_field "$CBODY" '.["cmd-response"]' "" "collect bogus: empty"
 
 # =========================================================================
-# 6. Error cases
+# 6. Unsolicited keyword detection
+# =========================================================================
+echo ""
+echo "--- detection ---"
+
+# async: watch for IEE136I (which D T produces) -> detection-key + detected
+RESP=$(issue '{"cmd":"D T","unsol-key":"IEE136I"}')
+BODY=$(echo "$RESP" | sed '$d')
+DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
+assert_json_exists "$BODY" '.["detection-key"]' "async detect: detection-key present"
+assert_json_exists "$BODY" '.["detection-url"]' "async detect: detection-url present"
+if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
+	sleep 3
+	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	assert_json_field "$RESP" '.status' "detected" "detection: detected"
+	assert_contains   "$RESP" '.msg' "IEE136I" "detection: msg has IEE136I"
+fi
+
+# waiting: a keyword that will not appear, long window
+RESP=$(issue '{"cmd":"D T","unsol-key":"ZZNOMATCH99","detect-time":"60"}')
+BODY=$(echo "$RESP" | sed '$d')
+DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
+if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
+	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	assert_json_field "$RESP" '.status' "waiting" "detection: waiting (no match yet)"
+fi
+
+# unknown detection key -> 500 / 5 / 9
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/detections/DBADBAD0")
+CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
+assert_http_status "500" "$CODE" "detection unknown key"
+assert_json_field  "$CBODY" '.["reason-code"]' "9" "unknown detection: reason-code 9"
+
+# sync: issue + wait inline for IEE136I
+RESP=$(issue '{"cmd":"D T","unsol-key":"IEE136I","unsol-detect-sync":"Y","unsol-detect-timeout":"10"}')
+BODY=$(echo "$RESP" | sed '$d')
+assert_json_field "$BODY" '.status' "detected" "sync detect: detected"
+assert_contains   "$BODY" '.msg' "IEE136I" "sync detect: msg has IEE136I"
+
+# =========================================================================
+# 7. Error cases
 # =========================================================================
 echo ""
 echo "--- errors ---"

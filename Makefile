@@ -1,6 +1,18 @@
 MBT_ROOT := mbt
 include $(MBT_ROOT)/mk/mbt.mk
 
+# --- Build identity (always fresh) ------------------------------------
+# Regenerate include/buildid.h with the current git short hash on every
+# make.  Rewrite the file ONLY when the hash actually changed, so its mtime
+# is preserved otherwise and mbt's -MMD header tracking recompiles the
+# marker TU exactly when the build identity moved -- never spuriously.
+# Done at parse time so the header always exists before the first compile.
+BUILD_ID := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+$(shell printf '#ifndef MVSMF_BUILDID_H\n#define MVSMF_BUILDID_H\n#define BUILD_ID "%s"\n#endif\n' '$(BUILD_ID)' > include/buildid.h.tmp; \
+        cmp -s include/buildid.h.tmp include/buildid.h 2>/dev/null \
+        || mv include/buildid.h.tmp include/buildid.h; \
+        rm -f include/buildid.h.tmp)
+
 # --- Docker infrastructure (project-specific) ---
 
 DOCKER_NETWORK ?= mvs-net

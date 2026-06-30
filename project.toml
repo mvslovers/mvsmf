@@ -7,7 +7,7 @@ type = "application"
 # infoapi.c reports the project version via a VERSION string macro. v1's mbt
 # injected -DVERSION automatically; v2 does not, so declare it explicitly.
 # $(PROJECT_VERSION) is the make variable mbtconfig emits from [project].version.
-cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"', '-DBUILD_ID=\"$(shell git rev-parse --short HEAD)\"']
+cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 [dependencies]
 "mvslovers/httpd" = "=4.0.0-dev"

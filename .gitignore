@@ -79,3 +79,6 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+# generated build-identity header
+include/buildid.h

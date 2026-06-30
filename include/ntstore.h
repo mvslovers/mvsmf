@@ -11,7 +11,7 @@
  * store-internal last-access TOD. RENT-safe (no writable static; the block is
  * GETMAINed and anchored in MVSMF_CTX).
  *
- * See doc/endpoints/restconsoles-issue-command.md and issue #143.
+ * See docs/endpoints/console/collect.md and issue #143.
  */
 
 #define MVSMF_KVS_EYE     "MVSMFKVS"     /* 8 bytes                              */

@@ -19,7 +19,7 @@
 
 /*
  * z/OSMF Console services -- Issue command (endpoint 1).
- * See doc/endpoints/restconsoles-issue-command.md.
+ * See docs/endpoints/console/ (issue-command, collect, detections, hardcopy-log).
  *
  * NOTE: MVSMF is link-edited RENT (read-only static storage) -- this module
  * keeps NO writable static/global data; all state is on the stack or heap.

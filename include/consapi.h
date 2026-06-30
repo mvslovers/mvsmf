@@ -9,7 +9,7 @@
  * SVC 34 (MGCR) under the authenticated user's ACEE; responses are captured
  * from the Master Trace Table via libc370 clibmtt.
  *
- * See doc/endpoints/restconsoles-issue-command.md.
+ * See docs/endpoints/console/ (issue-command, collect, detections, hardcopy-log).
  */
 
 #include "router.h"

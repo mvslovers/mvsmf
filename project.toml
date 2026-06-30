@@ -7,7 +7,7 @@ type = "application"
 # infoapi.c reports the project version via a VERSION string macro. v1's mbt
 # injected -DVERSION automatically; v2 does not, so declare it explicitly.
 # $(PROJECT_VERSION) is the make variable mbtconfig emits from [project].version.
-cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
+cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"', '-DBUILD_ID=\"$(shell git rev-parse --short HEAD)\"']
 
 [dependencies]
 "mvslovers/httpd" = "=4.0.0-dev"
@@ -25,9 +25,12 @@ sources = ["src/*.c"]
 exclude = ["src/cgxstart.c"]
 
 # Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
+# norent: mbtcheck.h keeps file-static counters; a standalone test needs them
+# in writable storage, so drop the module's RENT attribute.
 [[test]]
 name = "TSTNTST"
 sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
+norent = true
 
 [release]
 version_files = ["VERSION"]

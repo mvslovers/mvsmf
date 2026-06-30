@@ -13,6 +13,10 @@
 #include "httpcgi.h"
 #include "testapi.h"
 
+#ifndef BUILD_ID
+#define BUILD_ID "unknown"     /* git short hash, injected via project.toml */
+#endif
+
 /* --- fn=syslog diagnostic ----------------------------------------------
  * Probe whether we can read the system log (SYSLOG) off the JES2 spool from
  * inside the httpd address space, reusing the same clibjes2 path jobsapi.c
@@ -327,11 +331,19 @@ int testHandler(Session *session) {
 
     rc = http_printf(session->httpc, "DONE\r\n");
 
+    /* --- fn=version (deployed build marker) ----------------------- */
+  } else if (strcmp(fn, "version") == 0) {
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"version\", \"version\": \"%s\", \"build\": \"%s\" }\n",
+        VERSION, BUILD_ID);
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
         session->httpc,
         "{ \"fn\": \"help\", \"usage\": ["
+        " \"?fn=version             (deployed version + git build id)\","
         " \"?fn=listds&level=HLQ&filter=HLQ.X*\","
         " \"?fn=locate&dsn=SYS1.MACLIB\","
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","

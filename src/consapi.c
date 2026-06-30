@@ -850,6 +850,16 @@ static void fmt_gmt_time(char *out, size_t osz, time_t secs)
 	         g.tm_year + 1900);
 }
 
+/* Query parameter lookup tolerant of the CGI env name case: try the name as
+ * the client sent it (e.g. "timeRange"), then the upper-cased form, since it
+ * is unclear whether httpd preserves or upper-cases the query var name. */
+__asm__("\n&FUNC	SETC 'qparam'");
+static const char *qparam(Session *s, const char *name, const char *upper)
+{
+	const char *v = getQueryParam(s, name);
+	return v ? v : getQueryParam(s, upper);
+}
+
 /* ------------------------------------------------------------------ */
 /* GET /zosmf/restconsoles/v1/log -- hardcopy log (endpoint 4)         */
 /*                                                                      */
@@ -863,12 +873,12 @@ static void fmt_gmt_time(char *out, size_t osz, time_t secs)
 /* ------------------------------------------------------------------ */
 int consoleLogHandler(Session *session)
 {
-	const char *qrange = getQueryParam(session, "timeRange");
-	const char *qtime  = getQueryParam(session, "time");
-	const char *qts    = getQueryParam(session, "timestamp");
-	const char *qhard  = getQueryParam(session, "hardcopy");
-	const char *qsys   = getQueryParam(session, "sysName");
-	const char *qdir   = getQueryParam(session, "direction");
+	const char *qrange = qparam(session, "timeRange", "TIMERANGE");
+	const char *qtime  = qparam(session, "time", "TIME");
+	const char *qts    = qparam(session, "timestamp", "TIMESTAMP");
+	const char *qhard  = qparam(session, "hardcopy", "HARDCOPY");
+	const char *qsys   = qparam(session, "sysName", "SYSNAME");
+	const char *qdir   = qparam(session, "direction", "DIRECTION");
 
 	int range, fwd = 0, tz_min, total = 0, i, days_back, prev_hms;
 	time_t now, anchor, lo, hi;
@@ -908,8 +918,11 @@ int consoleLogHandler(Session *session)
 	if (tz_min > 720)  tz_min -= 1440;
 	if (tz_min < -720) tz_min += 1440;
 
-	/* ---- anchor: timestamp (ms) overrides time (ISO UTC); default now ---- */
-	anchor = now;
+	/* ---- anchor: timestamp (ms) overrides time (ISO UTC); default now ----
+	 * The default anchor runs through mktime(localtime(now)) -- the SAME path
+	 * the per-entry esecs take -- so the window and the entries share a frame
+	 * even if mktime/localtime are not a perfect inverse on this box. */
+	{ struct tm tmp = base; anchor = mktime(&tmp); }
 	if (qts && *qts) {
 		int l = (int)strlen(qts), k;
 		char t[16];
@@ -937,7 +950,9 @@ int consoleLogHandler(Session *session)
 		anchor = mktime(&it) + tz_min * 60;        /* it is UTC -> timegm */
 	}
 
-	if (anchor > now)
+	/* future-time error applies only to an explicitly supplied anchor; the
+	 * default anchor is "now" and can never be in the future. */
+	if (((qts && *qts) || (qtime && *qtime)) && anchor > now)
 		return send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 23,
 		    "The time or timestamp specified is in the future.");
 

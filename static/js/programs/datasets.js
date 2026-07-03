@@ -480,6 +480,10 @@ Programs.register({
       });
       ["input", "click", "keyup", "select", "focus"].forEach(evName =>
         ta.addEventListener(evName, updateCaret));
+      // key-repeat (held arrow keys) fires only keydown — the selection
+      // moves AFTER the event, so read it on the next animation frame;
+      // this keeps the block cursor visible on every repeat step
+      ta.addEventListener("keydown", () => requestAnimationFrame(updateCaret));
       ta.addEventListener("blur", () => { caret.style.display = "none"; });
       // keep highlight layer and gutter aligned with the textarea scroll
       ta.addEventListener("scroll", () => {

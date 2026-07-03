@@ -53,6 +53,11 @@ Programs.register({
     return el;
   },
 
+  /* --- confirmClose: optional veto before the window closes ---
+     Return false to keep the window open (e.g. unsaved changes).
+     Called before destroy(); omit it if the program has no dirty state. */
+  confirmClose(ctx) { return true; },
+
   /* --- destroy: clean up timers / listeners (optional) --- */
   destroy(ctx) { /* ... */ }
 });

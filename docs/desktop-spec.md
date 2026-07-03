@@ -34,11 +34,18 @@ static/
 │   ├── startmenu.js        # start menu + systems submenu
 │   ├── login.js            # login screen + auth flow
 │   ├── systems.js          # SystemRegistry, checkSystem, SafeStore
+│   ├── prism-jcl.js        # custom Prism grammars (JCL, HLASM, REXX —
+│   ├── prism-hlasm.js      #   REXX has no upstream Prism component)
+│   ├── prism-rexx.js
 │   └── programs/
 │       ├── _template.js    # documented program template
 │       ├── welcome.js
 │       ├── sysinfo.js      # fetches /zosmf/info via ctx.system.apiFetch
-│       └── systems.js      # systems manager program
+│       ├── systems.js      # systems manager program
+│       └── datasets.js     # dataset browser (Phase 2.1)
+├── vendor/
+│   ├── prism.js            # Prism 1.29.0 core+clike+c (pinned, air-gap safe)
+│   └── prism.css           # Prism default theme
 └── (img/ optional — Tabler icons come from CDN)
 ```
 
@@ -189,6 +196,9 @@ Programs.register({
     // ctx.system: { name, host, port, baseUrl, user, demo, apiFetch(path, opts) }
     const el = document.createElement("div");
     return el;
+  },
+  confirmClose(ctx) {         // OPTIONAL: return false to veto the close
+    return true;              // (e.g. unsaved editor state; added in 2.1)
   },
   destroy(ctx) { /* cleanup timers, listeners */ }
 });

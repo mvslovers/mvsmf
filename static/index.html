@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>mvsMF Desktop</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="vendor/prism.css">
 <link rel="stylesheet" href="css/desktop.css">
 </head>
 <body>
@@ -99,6 +100,13 @@
   </div>
 </div>
 <div id="sys-submenu"></div>
+
+<!-- Prism (vendored, air-gap safe) + custom grammars — classic scripts,
+     loaded before the shell; data-manual disables auto-highlighting -->
+<script src="vendor/prism.js" data-manual></script>
+<script src="js/prism-jcl.js"></script>
+<script src="js/prism-hlasm.js"></script>
+<script src="js/prism-rexx.js"></script>
 
 <!-- ES modules: the whole shell boots from shell.js -->
 <script type="module" src="js/shell.js"></script>

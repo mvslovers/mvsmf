@@ -168,6 +168,13 @@ export const WM = (() => {
   function close(id) {
     const w = windows.get(id);
     if (!w) return;
+    // Optional veto hook (additive): a program with unsaved state may
+    // return false from confirmClose(ctx) to keep the window open.
+    if (w.program.confirmClose) {
+      let ok = true;
+      try { ok = w.program.confirmClose(w.ctx); } catch (e) {}
+      if (!ok) return;
+    }
     try { w.program.destroy && w.program.destroy(w.ctx); } catch (e) {}
     w.el.remove();
     windows.delete(id);

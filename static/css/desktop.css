@@ -417,3 +417,59 @@ html, body {
   font-family: var(--wps-font-mono); font-size: 11px; outline: none;
 }
 .sys-add .in-name { width: 80px; } .sys-add .in-host { flex: 1; } .sys-add .in-port { width: 56px; }
+
+/* ---------- Dataset browser program ---------- */
+.dsb-root { display: flex; flex-direction: column; height: 100%; }
+.dsb-bar input, .dsb-bar select {
+  border: var(--wps-bezel-in); padding: 2px 5px; outline: none;
+  font-family: var(--wps-font-mono); font-size: 11px;
+  color: var(--wps-text-mid); background: var(--wps-input-bg);
+}
+.dsb-bar input:focus { background: var(--wps-input-focus-bg); }
+.dsb-bar .dsb-dsn { flex: 1; min-width: 80px; text-transform: uppercase; }
+.dsb-bar label { font-size: 11px; color: var(--wps-text-dim); }
+.dsb-bar .tb-btn.disabled { opacity: 0.45; pointer-events: none; }
+.dsb-split { flex: 1; display: flex; min-height: 0; }
+.dsb-tree {
+  width: 250px; flex: 0 0 auto; overflow: auto;
+  border-right: 1px solid var(--wps-border-mid);
+  background: var(--wps-content-bg); padding: 4px 0;
+  font-family: var(--wps-font-mono); font-size: 11px; line-height: 1.7;
+}
+.dsb-node {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 6px; cursor: pointer; white-space: nowrap;
+  color: var(--wps-text-mid);
+}
+.dsb-node:hover { background: var(--wps-code-bg); }
+.dsb-node.selected { background: var(--wps-accent); color: var(--wps-title-text); }
+.dsb-node.selected .dsb-ico, .dsb-node.selected .dsb-chev { color: var(--wps-title-text); }
+.dsb-node .dsb-chev { width: 10px; text-align: center; font-size: 9px; color: var(--wps-text-muted); flex: 0 0 auto; }
+.dsb-node .dsb-ico { font-size: 12px; flex: 0 0 auto; color: var(--wps-text-dim); }
+.dsb-empty {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  color: var(--wps-text-muted); font-size: 12px;
+}
+/* viewer / editor: identical metrics on <pre><code> and the textarea
+   overlay so the caret aligns with the highlighted text underneath */
+.dsb-view { flex: 1; position: relative; min-width: 0; background: var(--wps-content-bg); }
+.dsb-view pre[class*="language-"], .dsb-view pre.dsb-code {
+  position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0;
+  background: var(--wps-content-bg);
+  overflow: auto; padding: 8px 10px;
+}
+.dsb-view pre.dsb-under { overflow: hidden; }
+.dsb-view pre code, .dsb-view textarea {
+  font-family: var(--wps-font-mono) !important; font-size: 12px !important;
+  line-height: 1.45 !important; tab-size: 8;
+  white-space: pre !important; word-break: normal; overflow-wrap: normal;
+}
+.dsb-view .token { font-weight: normal !important; font-style: normal !important; }
+.dsb-view code[class*="language-"] { text-shadow: none; }
+.dsb-view textarea {
+  position: absolute; inset: 0; padding: 8px 10px;
+  border: 0; outline: none; resize: none; overflow: auto;
+  background: transparent; color: transparent;
+  caret-color: var(--wps-text); user-select: text;
+}
+.dsb-view pre code { user-select: text; }

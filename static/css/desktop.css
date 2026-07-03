@@ -419,6 +419,36 @@ html, body {
 }
 .sys-add .in-name { width: 80px; } .sys-add .in-host { flex: 1; } .sys-add .in-port { width: 56px; }
 
+/* ---------- JES spool browser program ---------- */
+.spl-in { width: 80px; text-transform: uppercase; }
+.spl-auto { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--wps-text-dim); cursor: pointer; }
+.spl-tree { width: 250px; }
+.spl-jobname { font-weight: 500; }
+.spl-rc { margin-left: auto; font-size: 10px; padding-left: 8px; }
+.spl-rc-ok  { color: var(--wps-status-ok-fg); }
+.spl-rc-bad { color: var(--wps-status-bad-fg); font-weight: 500; }
+.spl-rc-dim { color: var(--wps-text-muted); }
+.spl-active { color: var(--wps-led-green); font-size: 12px; }
+.dsb-node.selected .spl-rc-ok, .dsb-node.selected .spl-rc-bad,
+.dsb-node.selected .spl-rc-dim { color: var(--wps-title-text); }
+.spl-step { font-size: 9px; color: var(--wps-text-muted); margin-left: 4px; }
+.dsb-node.selected .spl-step { color: var(--wps-title-system); }
+/* spool output: monospace, columns preserved — never wrap or trim
+   (ASA carriage control in col 1; listings are column-significant) */
+pre.spl-out {
+  position: absolute; inset: 0; margin: 0; overflow: auto;
+  padding: 8px 10px; background: var(--wps-content-bg);
+}
+pre.spl-out code {
+  font-family: var(--wps-font-mono); font-size: 12px; line-height: 18px;
+  white-space: pre; tab-size: 8; user-select: text;
+}
+.spl-more {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: center; padding: 4px;
+  background: var(--wps-chrome-dark); border-top: 1px solid var(--wps-border-mid);
+}
+
 /* ---------- Modal dialogs (OS/2 style, replace native popups) ---------- */
 .dlg-layer {
   position: fixed; inset: 0; z-index: 10500;

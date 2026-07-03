@@ -31,8 +31,9 @@ function registerStub(id, name, icon, iconBg, iconColor) {
 
 // datasets (Dataset browser) graduated to a real program in Phase 2.1 —
 // see programs/datasets.js
+// spool (JES spool browser) graduated to a real program in Phase 2.2 —
+// see programs/spool.js
 registerStub("ussfiles",  "USS file manager", "ti-folder",     "#4d8de8", "#fff");
-registerStub("spool",     "JES spool browser","ti-list",       "#4db84d", "#fff");
 registerStub("console",   "MVS console",      "ti-terminal-2", "#1a1a1a", "#33ff33");
 registerStub("rexx",      "REXX workbench",   "ti-code",       "#b84d4d", "#fff");
 registerStub("jobsubmit", "Job submit",       "ti-upload",     "#8855bb", "#fff");

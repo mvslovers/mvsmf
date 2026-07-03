@@ -328,8 +328,10 @@ Programs.register({
         if (isPO) { select({ type: "po", dsn, meta: node.ds }, row); toggle(); return; }
         select({ type: "ps", dsn, meta: node.ds }, row);   // PS: load content
       });
-      // auto-expand qualifier levels so datasets are visible immediately
-      if (isQual) toggle();
+      // auto-expand only the top-level qualifier (HLQ) — deeper levels
+      // start collapsed and open on click (a Settings toggle may make
+      // this configurable later)
+      if (isQual && depth === 0) toggle();
       return frag;
     }
 

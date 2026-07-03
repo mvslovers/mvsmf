@@ -53,6 +53,12 @@ Programs.register({
     return el;
   },
 
+  /* --- confirmClose: optional veto before the window closes ---
+     Return false — or a Promise resolving to false (e.g. from
+     Dialog.confirm) — to keep the window open. Called before
+     destroy(); omit it if the program has no dirty state. */
+  confirmClose(ctx) { return true; },
+
   /* --- destroy: clean up timers / listeners (optional) --- */
   destroy(ctx) { /* ... */ }
 });

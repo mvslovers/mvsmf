@@ -65,6 +65,7 @@
   --wps-logo-ghost: rgba(255,255,255,0.15);
 
   /* --- shadows / overlays --- */
+  --wps-scrim: rgba(0,0,0,0.35);
   --wps-shadow: 3px 3px 8px rgba(0,0,0,0.4);
   --wps-shadow-strong: 4px 4px 12px rgba(0,0,0,0.5);
   --wps-emboss: 1px 1px 0 rgba(0,0,0,0.2);
@@ -417,3 +418,119 @@ html, body {
   font-family: var(--wps-font-mono); font-size: 11px; outline: none;
 }
 .sys-add .in-name { width: 80px; } .sys-add .in-host { flex: 1; } .sys-add .in-port { width: 56px; }
+
+/* ---------- Modal dialogs (OS/2 style, replace native popups) ---------- */
+.dlg-layer {
+  position: fixed; inset: 0; z-index: 10500;
+  background: var(--wps-scrim);
+  display: flex; align-items: center; justify-content: center;
+}
+.dlg-box {
+  width: 340px; background: var(--wps-chrome);
+  border: var(--wps-bezel-out); box-shadow: var(--wps-shadow-strong);
+}
+.dlg-title {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--wps-title-active); height: 22px; padding: 0 4px;
+}
+.dlg-title .ticon {
+  width: 14px; height: 14px; background: var(--wps-chrome);
+  border: var(--wps-bezel-out-1);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: var(--wps-accent);
+}
+.dlg-title .t { font-size: 12px; font-weight: 500; color: var(--wps-title-text); }
+.dlg-body { padding: 14px 16px 12px; }
+.dlg-msg { font-size: 12px; color: var(--wps-text-mid); margin-bottom: 10px; line-height: 1.5; }
+.dlg-field { margin-bottom: 10px; }
+.dlg-field label { display: block; font-size: 11px; color: var(--wps-text-dim); margin-bottom: 3px; }
+.dlg-field input {
+  width: 100%; padding: 5px 6px; font-size: 12px;
+  font-family: var(--wps-font-mono); color: var(--wps-text-mid);
+  border: var(--wps-bezel-in); background: var(--wps-input-bg); outline: none;
+}
+.dlg-field input:focus { background: var(--wps-input-focus-bg); }
+.dlg-field input.dlg-upper { text-transform: uppercase; }
+.dlg-buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 12px; }
+.lb-btn.danger { background: var(--wps-remove); border-color: var(--wps-status-bad-border); color: var(--wps-title-text); }
+
+/* ---------- Dataset browser program ---------- */
+.dsb-root { display: flex; flex-direction: column; height: 100%; }
+.dsb-bar input, .dsb-bar select {
+  border: var(--wps-bezel-in); padding: 2px 5px; outline: none;
+  font-family: var(--wps-font-mono); font-size: 11px;
+  color: var(--wps-text-mid); background: var(--wps-input-bg);
+}
+.dsb-bar input:focus { background: var(--wps-input-focus-bg); }
+.dsb-bar .dsb-dsn { flex: 1; min-width: 80px; text-transform: uppercase; }
+.dsb-bar label { font-size: 11px; color: var(--wps-text-dim); }
+.dsb-bar .tb-btn.disabled { opacity: 0.45; pointer-events: none; }
+.dsb-split { flex: 1; display: flex; min-height: 0; }
+.dsb-tree {
+  width: 250px; flex: 0 0 auto; overflow: auto;
+  border-right: 1px solid var(--wps-border-mid);
+  background: var(--wps-content-bg); padding: 4px 0;
+  font-family: var(--wps-font-mono); font-size: 11px; line-height: 1.7;
+}
+.dsb-node {
+  display: flex; align-items: center; gap: 4px;
+  padding: 0 6px; cursor: pointer; white-space: nowrap;
+  color: var(--wps-text-mid);
+}
+.dsb-node:hover { background: var(--wps-code-bg); }
+.dsb-node.selected { background: var(--wps-accent); color: var(--wps-title-text); }
+.dsb-node.selected .dsb-ico, .dsb-node.selected .dsb-chev { color: var(--wps-title-text); }
+.dsb-node .dsb-chev { width: 10px; text-align: center; font-size: 9px; color: var(--wps-text-muted); flex: 0 0 auto; }
+.dsb-node .dsb-ico { font-size: 12px; flex: 0 0 auto; color: var(--wps-text-dim); }
+.dsb-empty {
+  display: flex; align-items: center; justify-content: center; height: 100%;
+  color: var(--wps-text-muted); font-size: 12px;
+}
+/* viewer / editor: line-number gutter + code pane. The textarea overlay
+   and the highlighted <pre><code> underneath must have IDENTICAL metrics —
+   integer line-height and forced tab-size kill subpixel caret drift. */
+.dsb-view { flex: 1; position: relative; min-width: 0; background: var(--wps-content-bg); }
+.dsb-pane { position: absolute; inset: 0; display: flex; }
+.dsb-gutter {
+  flex: 0 0 auto; overflow: hidden; user-select: none;
+  background: var(--wps-panel-bg); border-right: 1px solid var(--wps-hairline);
+  color: var(--wps-text-muted); text-align: right;
+}
+.dsb-gutter-in {
+  padding: 8px 6px 8px 10px; min-width: 4ch;
+  font-family: var(--wps-font-mono); font-size: 12px;
+  line-height: 18px; white-space: pre;
+}
+.dsb-codewrap { flex: 1; position: relative; min-width: 0; }
+.dsb-codewrap pre[class*="language-"], .dsb-codewrap pre.dsb-code {
+  position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0;
+  background: var(--wps-content-bg);
+  overflow: auto; padding: 8px 10px;
+}
+.dsb-codewrap pre.dsb-under { overflow: hidden; }
+.dsb-codewrap pre code, .dsb-codewrap textarea {
+  font-family: var(--wps-font-mono) !important; font-size: 12px !important;
+  line-height: 18px !important; tab-size: 8 !important;
+  letter-spacing: 0 !important;
+  white-space: pre !important; word-break: normal; overflow-wrap: normal;
+}
+.dsb-view .token { font-weight: normal !important; font-style: normal !important; }
+.dsb-view code[class*="language-"] { text-shadow: none; }
+.dsb-codewrap textarea {
+  position: absolute; inset: 0; padding: 8px 10px;
+  border: 0; outline: none; resize: none; overflow: auto;
+  background: transparent; color: transparent;
+  caret-color: transparent;   /* replaced by the block cursor */
+  user-select: text;
+}
+.dsb-codewrap textarea::selection { background: var(--wps-icon-selected); }
+.dsb-codewrap pre code { user-select: text; }
+/* 3270-style block cursor, drawn in the highlight layer so it is
+   pixel-exact on the line by construction */
+.dsb-caret {
+  position: absolute; height: 18px;
+  background: var(--wps-accent); opacity: 0.4;
+  pointer-events: none;
+  animation: dsb-blink 1.06s step-end infinite;
+}
+@keyframes dsb-blink { 0% { opacity: 0.4; } 50% { opacity: 0; } }

@@ -29,7 +29,8 @@ function registerStub(id, name, icon, iconBg, iconColor) {
   });
 }
 
-registerStub("datasets",  "Dataset browser",  "ti-database",   "#e8d44d", "#5a4e00");
+// datasets (Dataset browser) graduated to a real program in Phase 2.1 —
+// see programs/datasets.js
 registerStub("ussfiles",  "USS file manager", "ti-folder",     "#4d8de8", "#fff");
 registerStub("spool",     "JES spool browser","ti-list",       "#4db84d", "#fff");
 registerStub("console",   "MVS console",      "ti-terminal-2", "#1a1a1a", "#33ff33");

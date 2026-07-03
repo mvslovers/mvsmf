@@ -16,17 +16,19 @@ Programs.register({
     d.className = "prog-pad";
     d.innerHTML = `
       <h1>Welcome to mvsMF Desktop</h1>
-      <p>This is the <b>Phase 1 shell prototype</b>: window manager,
-      taskbar, start menu, login and the program plugin API.</p>
+      <p>A browser desktop for MVS 3.8j: window manager, taskbar,
+      start menu, login — and the first real program, the
+      <b>Dataset browser</b>.</p>
       <p>Try it out:</p>
-      <p>• Drag windows by their title bar<br>
-         • Resize from any edge or corner<br>
-         • Double-click the title bar to maximize<br>
-         • Minimize to the taskbar and bring windows back<br>
-         • Open several windows and watch the z-order</p>
+      <p>• Open the <b>Dataset browser</b> and list your datasets<br>
+         • Browse the qualifier tree, open a member — JCL, HLASM,
+           C and REXX are syntax-highlighted<br>
+         • Edit a member: line numbers, block cursor, save via PUT<br>
+         • Drag, resize, maximize and minimize windows as you like</p>
       <p>Programs are plugins — each one registers with
       <code>Programs.register({...})</code> and receives a system context
-      with an authenticated <code>apiFetch()</code>.</p>
+      with an authenticated <code>apiFetch()</code>. More programs
+      (spool browser, console, REXX workbench) follow in Phase 2.</p>
       <p style="color:var(--wps-text-faint);">Connected to <code>${ctx.system.name}</code>
       as <code>${ctx.system.user || "demo"}</code>.</p>`;
     return d;

@@ -168,6 +168,24 @@ export const WM = (() => {
   function close(id) {
     const w = windows.get(id);
     if (!w) return;
+    // Optional veto hook (additive): a program with unsaved state may
+    // return false — or a Promise resolving to false (in-app confirm
+    // dialog) — from confirmClose(ctx) to keep the window open.
+    if (w.program.confirmClose) {
+      let ok = true;
+      try { ok = w.program.confirmClose(w.ctx); } catch (e) {}
+      if (ok && typeof ok.then === "function") {
+        ok.then(really => { if (really) forceClose(id); });
+        return;   // decision deferred to the dialog
+      }
+      if (!ok) return;
+    }
+    forceClose(id);
+  }
+
+  function forceClose(id) {
+    const w = windows.get(id);
+    if (!w) return;
     try { w.program.destroy && w.program.destroy(w.ctx); } catch (e) {}
     w.el.remove();
     windows.delete(id);

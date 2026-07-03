@@ -1,0 +1,419 @@
+/* ============================================================
+   mvsMF Desktop — OS/2 Workplace Shell theme
+   All chrome colours and bezel styles live in --wps-* custom
+   properties so a future theme (data-theme on <html>) can swap
+   both the colours AND the 3D bezel style. Only the default
+   "os2" theme ships in Phase 1.
+   Program icon colours (iconBg / iconColor) belong to the
+   program definition, NOT the theme, so they stay in JS.
+   ============================================================ */
+:root,
+:root[data-theme="os2"] {
+  /* --- desktop / chrome --- */
+  --wps-desktop-bg: linear-gradient(145deg, #1a3a5c 0%, #0d2137 60%, #1a2a3c 100%);
+  --wps-title-active: linear-gradient(90deg, #00007b 0%, #1084d0 100%);
+  --wps-title-inactive: linear-gradient(90deg, #555 0%, #888 100%);
+  --wps-title-text: #ffffff;
+  --wps-title-system: #aac8ff;
+  --wps-chrome: #d4d4d4;
+  --wps-chrome-dark: #c8c8c8;
+  --wps-chrome-darker: #b0b0b0;
+  --wps-border-light: #e8e8e8;
+  --wps-border-mid: #aaaaaa;
+  --wps-border-dark: #999999;
+
+  /* --- text --- */
+  --wps-text: #1a1a1a;
+  --wps-text-dim: #555555;
+  --wps-text-mid: #333333;
+  --wps-text-soft: #666666;
+  --wps-text-faint: #777777;
+  --wps-text-muted: #888888;
+  --wps-text-disabled: #999999;
+  --wps-text-user: #444444;
+  --wps-text-strong: #222222;
+
+  /* --- accents / LEDs --- */
+  --wps-accent: #00007b;
+  --wps-accent-border: #3333aa;
+  --wps-led-green: #33cc33;
+  --wps-led-red: #cc3333;
+  --wps-led-yellow: #cccc33;
+  --wps-led-off: #999999;
+  --wps-led-ring: rgba(0,0,0,0.35);
+  --wps-led-ring-soft: rgba(0,0,0,0.30);
+  --wps-remove: #aa3333;
+  --wps-hostinfo-hover: #ccddff;
+
+  /* --- console (used by Phase 2 programs) --- */
+  --wps-console-bg: #1a1a1a;
+  --wps-console-fg: #33ff33;
+
+  /* --- surfaces / hairlines --- */
+  --wps-content-bg: #ffffff;
+  --wps-input-bg: #ffffff;
+  --wps-input-focus-bg: #fffef0;
+  --wps-tray-bg: #c0c0c0;
+  --wps-code-bg: #f0f0f0;
+  --wps-panel-bg: #f4f4f4;
+  --wps-hairline: #dddddd;
+  --wps-hairline-soft: #e4e4e4;
+
+  /* --- logo (blue square, used in login / start menu / about) --- */
+  --wps-logo-gradient: linear-gradient(135deg, #1084d0, #00007b);
+  --wps-logo-accent: #1084d0;
+  --wps-logo-ghost: rgba(255,255,255,0.15);
+
+  /* --- shadows / overlays --- */
+  --wps-shadow: 3px 3px 8px rgba(0,0,0,0.4);
+  --wps-shadow-strong: 4px 4px 12px rgba(0,0,0,0.5);
+  --wps-emboss: 1px 1px 0 rgba(0,0,0,0.2);
+  --wps-emboss-strong: 1px 1px 0 rgba(0,0,0,0.25);
+  --wps-grid-line: #ffffff;
+  --wps-icon-hover: rgba(255,255,255,0.08);
+  --wps-icon-selected: rgba(16,132,208,0.35);
+  --wps-icon-outline: rgba(255,255,255,0.5);
+  --wps-label-shadow: #000000;
+  --wps-version-fg: rgba(255,255,255,0.25);
+
+  /* --- login status tints --- */
+  --wps-status-ok-bg: #c8e6c8;   --wps-status-ok-border: #8aba8a;   --wps-status-ok-fg: #2a5a2a;
+  --wps-status-bad-bg: #e6c8c8;  --wps-status-bad-border: #ba8a8a;  --wps-status-bad-fg: #5a2a2a;
+  --wps-status-warn-bg: #e6e0c0; --wps-status-warn-border: #bab08a; --wps-status-warn-fg: #5a512a;
+  --wps-status-wait-bg: #d8d8d8; --wps-status-wait-border: #aaaaaa; --wps-status-wait-fg: #555555;
+
+  /* --- bezels (style + colour) so a flat theme can override the *style* --- */
+  --wps-bezel-out: 2px outset var(--wps-border-light);
+  --wps-bezel-out-1: 1px outset var(--wps-border-light);
+  --wps-bezel-in: 1px inset var(--wps-border-mid);
+  --wps-bezel-in-2: 2px inset var(--wps-border-mid);
+
+  /* --- fonts --- */
+  --wps-font-ui: "Segoe UI", system-ui, sans-serif;
+  --wps-font-mono: "Cascadia Mono", "Consolas", "Menlo", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--wps-font-ui);
+  font-size: 12px;
+  color: var(--wps-text);
+  user-select: none;
+}
+
+/* ---------- Desktop ---------- */
+#desktop {
+  position: fixed;
+  inset: 0 0 28px 0;   /* leave room for taskbar */
+  background: var(--wps-desktop-bg);
+  overflow: hidden;
+}
+#desktop::before {
+  /* subtle grid overlay */
+  content: "";
+  position: absolute; inset: 0;
+  opacity: 0.03;
+  background-image:
+    repeating-linear-gradient(0deg, var(--wps-grid-line) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, var(--wps-grid-line) 0 1px, transparent 1px 40px);
+  pointer-events: none;
+}
+
+/* ---------- Desktop icons ---------- */
+#desktop-icons {
+  position: absolute;
+  top: 16px; right: 16px;
+  display: flex; flex-direction: column; gap: 16px;
+  z-index: 1;
+}
+.desk-icon {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 74px; cursor: pointer; padding: 4px; border-radius: 3px;
+}
+.desk-icon:hover { background: var(--wps-icon-hover); }
+.desk-icon.selected { background: var(--wps-icon-selected); outline: 1px dotted var(--wps-icon-outline); }
+.desk-icon .box {
+  width: 38px; height: 38px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: var(--wps-emboss-strong);
+  font-size: 20px;
+}
+.desk-icon .label {
+  font-size: 10.5px; color: var(--wps-title-text); text-align: center; line-height: 1.2;
+  text-shadow: 1px 1px 2px var(--wps-label-shadow);
+}
+
+/* ---------- Windows ---------- */
+.wps-window {
+  position: absolute;
+  background: var(--wps-chrome);
+  border: var(--wps-bezel-out);
+  box-shadow: var(--wps-shadow);
+  display: flex; flex-direction: column;
+  min-width: 200px; min-height: 120px;
+}
+.wps-window.maximized { border-width: 0; box-shadow: none; }
+.wps-window.minimized { display: none; }
+
+.wps-titlebar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--wps-title-inactive);
+  height: 22px; padding: 0 3px; flex: 0 0 auto;
+  cursor: default;
+}
+.wps-window.focused .wps-titlebar { background: var(--wps-title-active); }
+.wps-titlebar .tleft { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.wps-titlebar .ticon {
+  width: 14px; height: 14px; flex: 0 0 auto;
+  background: var(--wps-chrome); border: var(--wps-bezel-out-1);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: var(--wps-accent);
+}
+.wps-titlebar .ttext {
+  font-size: 12px; font-weight: 500; color: var(--wps-title-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wps-titlebar .tsys { font-size: 10px; color: var(--wps-title-system); margin-left: 4px; }
+.wps-titlebar .tbtns { display: flex; gap: 2px; flex: 0 0 auto; }
+.wps-titlebar .tbtn {
+  width: 15px; height: 15px;
+  background: var(--wps-chrome); border: var(--wps-bezel-out-1);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1; color: var(--wps-text-mid); cursor: pointer;
+  font-family: var(--wps-font-ui);
+}
+.wps-titlebar .tbtn:active { border-style: inset; }
+
+.wps-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 3px 4px; background: var(--wps-chrome-dark);
+  border-bottom: 1px solid var(--wps-border-mid); flex: 0 0 auto;
+}
+.wps-toolbar .tb-btn {
+  font-size: 11px; color: var(--wps-text-mid); padding: 2px 8px;
+  border: var(--wps-bezel-out-1); background: var(--wps-chrome); cursor: pointer;
+  display: flex; align-items: center; gap: 4px;
+}
+.wps-toolbar .tb-btn:active { border-style: inset; background: var(--wps-chrome-darker); }
+.wps-toolbar .tb-spacer { flex: 1; }
+
+.wps-content {
+  flex: 1; overflow: auto; background: var(--wps-content-bg); position: relative;
+}
+
+.wps-statusbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 6px; background: var(--wps-chrome-dark);
+  border-top: 1px solid var(--wps-border-mid); flex: 0 0 auto;
+  font-size: 10px; color: var(--wps-text-dim);
+}
+
+/* Resize handles — invisible strips around the window edge */
+.rs { position: absolute; z-index: 5; }
+.rs-n  { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
+.rs-s  { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
+.rs-e  { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
+.rs-w  { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
+.rs-ne { top: -3px; right: -3px; width: 10px; height: 10px; cursor: ne-resize; }
+.rs-nw { top: -3px; left: -3px; width: 10px; height: 10px; cursor: nw-resize; }
+.rs-se { bottom: -3px; right: -3px; width: 10px; height: 10px; cursor: se-resize; }
+.rs-sw { bottom: -3px; left: -3px; width: 10px; height: 10px; cursor: sw-resize; }
+
+/* ---------- Taskbar ---------- */
+#taskbar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 28px;
+  background: var(--wps-chrome-dark);
+  border-top: var(--wps-bezel-out);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 4px; z-index: 9000;
+}
+#taskbar .tb-left { display: flex; align-items: center; gap: 3px; overflow: hidden; }
+#start-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 10px 2px 6px; font-size: 11px; font-weight: 500;
+  color: var(--wps-accent); cursor: pointer;
+  border: var(--wps-bezel-out-1); background: var(--wps-chrome);
+}
+#start-btn.open, #start-btn:active { border-style: inset; background: var(--wps-chrome-darker); }
+#start-btn .logo {
+  width: 14px; height: 14px; border-radius: 2px;
+  background: var(--wps-logo-gradient);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 500; color: var(--wps-title-text);
+}
+.tb-sep { width: 1px; height: 20px; background: var(--wps-border-mid); margin: 0 3px; flex: 0 0 auto; }
+.task-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 10px; font-size: 11px; color: var(--wps-text-mid); cursor: pointer;
+  border: var(--wps-bezel-out-1); background: var(--wps-chrome);
+  max-width: 160px; white-space: nowrap; overflow: hidden;
+}
+.task-btn span { overflow: hidden; text-overflow: ellipsis; }
+.task-btn.active {
+  border-style: inset; background: var(--wps-chrome-darker);
+  color: var(--wps-accent); font-weight: 500;
+}
+#tray {
+  display: flex; align-items: center; gap: 6px;
+  border: var(--wps-bezel-in); background: var(--wps-tray-bg);
+  padding: 1px 8px; height: 22px; flex: 0 0 auto;
+}
+#tray .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--wps-led-ring); }
+#tray .sysname {
+  font-family: var(--wps-font-mono); font-size: 11px; font-weight: 500;
+  color: var(--wps-accent); cursor: pointer; border-bottom: 1px dotted var(--wps-accent);
+}
+#tray .dim { color: var(--wps-text-disabled); font-size: 10px; }
+#tray .user, #tray .clock { font-family: var(--wps-font-mono); font-size: 10px; color: var(--wps-text-user); }
+#tray .clock { color: var(--wps-text-strong); }
+
+/* ---------- Start menu ---------- */
+#startmenu {
+  position: fixed; left: 2px; bottom: 30px; width: 224px;
+  background: var(--wps-chrome); border: var(--wps-bezel-out);
+  box-shadow: var(--wps-shadow); z-index: 9999; display: none;
+}
+#startmenu.open { display: block; }
+#startmenu .sm-head {
+  background: var(--wps-title-active); padding: 7px 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+#startmenu .sm-head .logo {
+  width: 28px; height: 28px; border-radius: 3px; background: var(--wps-logo-ghost);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 500; color: var(--wps-title-text);
+}
+#startmenu .sm-head .t1 { font-size: 12px; font-weight: 500; color: var(--wps-title-text); }
+#startmenu .sm-head .t2 { font-size: 10px; color: var(--wps-title-system); }
+.sm-section { padding: 4px 0; }
+.sm-section + .sm-section { border-top: 1px solid var(--wps-border-mid); }
+.sm-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; cursor: pointer; font-size: 12px; color: var(--wps-text-mid);
+}
+.sm-item:hover { background: var(--wps-accent); color: var(--wps-title-text); }
+.sm-item .pico {
+  width: 20px; height: 20px; border-radius: 2px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.sm-item .gico { width: 20px; text-align: center; font-size: 15px; color: var(--wps-text-dim); }
+.sm-item:hover .gico { color: var(--wps-title-text); }
+.sm-item .chev { margin-left: auto; font-size: 12px; color: var(--wps-text-disabled); }
+.sm-item:hover .chev { color: var(--wps-title-text); }
+
+/* Systems submenu */
+#sys-submenu {
+  position: fixed; width: 220px;
+  background: var(--wps-chrome); border: var(--wps-bezel-out);
+  box-shadow: var(--wps-shadow); z-index: 10001; display: none;
+}
+#sys-submenu.open { display: block; }
+#sys-submenu .sm-item { padding: 4px 10px; }
+#sys-submenu .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--wps-led-ring); flex: 0 0 auto; }
+#sys-submenu .mono { font-family: var(--wps-font-mono); font-size: 11px; }
+#sys-submenu .hostinfo { margin-left: auto; font-size: 9px; color: var(--wps-text-muted); }
+#sys-submenu .sm-item:hover .hostinfo { color: var(--wps-hostinfo-hover); }
+
+/* ---------- Login ---------- */
+#login-layer {
+  position: fixed; inset: 0; z-index: 10000;
+  background: var(--wps-desktop-bg);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-layer::before {
+  content: ""; position: absolute; inset: 0; opacity: 0.03;
+  background-image:
+    repeating-linear-gradient(0deg, var(--wps-grid-line) 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, var(--wps-grid-line) 0 1px, transparent 1px 40px);
+}
+#login-box {
+  width: 330px; background: var(--wps-chrome);
+  border: var(--wps-bezel-out);
+  box-shadow: var(--wps-shadow-strong); position: relative;
+}
+#login-box .lb-title {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--wps-title-active); height: 22px; padding: 0 4px;
+}
+#login-box .lb-title .ticon {
+  width: 14px; height: 14px; background: var(--wps-chrome); border: var(--wps-bezel-out-1);
+  display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--wps-accent);
+}
+#login-box .lb-title .t { font-size: 12px; font-weight: 500; color: var(--wps-title-text); }
+#login-box .lb-body { padding: 18px 24px 16px; }
+.lb-logo { display: flex; justify-content: center; margin-bottom: 16px; }
+.lb-logo .inner { display: flex; align-items: center; gap: 8px; }
+.lb-logo .sq {
+  width: 36px; height: 36px; border-radius: 4px;
+  background: var(--wps-logo-gradient);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 500; color: var(--wps-title-text);
+  box-shadow: var(--wps-emboss);
+}
+.lb-logo .t1 { font-size: 16px; font-weight: 500; letter-spacing: -0.3px; }
+.lb-logo .t2 { font-size: 10px; color: var(--wps-text-faint); }
+.lb-field { margin-bottom: 10px; }
+.lb-field label { display: block; font-size: 11px; color: var(--wps-text-dim); margin-bottom: 3px; }
+.lb-field input, .lb-field select {
+  width: 100%; padding: 5px 6px; font-size: 12px;
+  font-family: var(--wps-font-mono); color: var(--wps-text-mid);
+  border: var(--wps-bezel-in); background: var(--wps-input-bg); outline: none;
+}
+.lb-field input:focus, .lb-field select:focus { background: var(--wps-input-focus-bg); }
+#login-status {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; margin-bottom: 12px; font-size: 11px;
+  border: 1px solid transparent;
+}
+#login-status .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--wps-led-ring-soft); flex: 0 0 auto; }
+#login-status.ok    { background: var(--wps-status-ok-bg);   border-color: var(--wps-status-ok-border);   color: var(--wps-status-ok-fg); }
+#login-status.bad   { background: var(--wps-status-bad-bg);  border-color: var(--wps-status-bad-border);  color: var(--wps-status-bad-fg); }
+#login-status.warn  { background: var(--wps-status-warn-bg); border-color: var(--wps-status-warn-border); color: var(--wps-status-warn-fg); }
+#login-status.wait  { background: var(--wps-status-wait-bg); border-color: var(--wps-status-wait-border); color: var(--wps-status-wait-fg); }
+.lb-buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
+.lb-btn {
+  padding: 4px 16px; font-size: 12px; cursor: pointer;
+  border: var(--wps-bezel-out-1); background: var(--wps-chrome); color: var(--wps-text-mid);
+  font-family: var(--wps-font-ui);
+}
+.lb-btn:active { border-style: inset; }
+.lb-btn.primary { background: var(--wps-accent); color: var(--wps-title-text); border-color: var(--wps-accent-border); font-weight: 500; }
+.lb-links { text-align: center; margin-top: 12px; display: flex; justify-content: center; gap: 16px; }
+.lb-link { font-size: 10px; color: var(--wps-accent); cursor: pointer; border-bottom: 1px dotted var(--wps-accent); }
+#login-version {
+  position: absolute; bottom: 8px; right: 12px;
+  font-size: 10px; color: var(--wps-version-fg); font-family: var(--wps-font-mono);
+}
+
+/* ---------- Program content helpers ---------- */
+.prog-pad { padding: 14px 16px; font-size: 12px; line-height: 1.6; user-select: text; }
+.prog-pad h1 { font-size: 15px; font-weight: 500; margin-bottom: 8px; }
+.prog-pad p { margin-bottom: 8px; }
+.prog-pad code {
+  font-family: var(--wps-font-mono); font-size: 11px;
+  background: var(--wps-code-bg); padding: 0 3px; border: 1px solid var(--wps-hairline);
+}
+.prog-err { color: var(--wps-remove); }
+.prog-mono {
+  font-family: var(--wps-font-mono); font-size: 11px; line-height: 1.6;
+  white-space: pre-wrap; user-select: text; padding: 10px 12px;
+}
+.sys-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid var(--wps-hairline-soft); font-size: 12px;
+}
+.sys-row .led { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--wps-led-ring-soft); flex: 0 0 auto; }
+.sys-row .name { font-family: var(--wps-font-mono); font-weight: 500; width: 90px; }
+.sys-row .name .tag { color: var(--wps-text-muted); font-size: 9px; }
+.sys-row .host { font-family: var(--wps-font-mono); color: var(--wps-text-soft); flex: 1; font-size: 11px; }
+.sys-row .stat { font-size: 10px; color: var(--wps-text-muted); width: 90px; }
+.sys-row .rm { color: var(--wps-remove); cursor: pointer; font-size: 13px; }
+.sys-add { display: flex; gap: 6px; padding: 10px; background: var(--wps-panel-bg); border-top: 1px solid var(--wps-hairline); }
+.sys-add input {
+  border: var(--wps-bezel-in); padding: 3px 6px;
+  font-family: var(--wps-font-mono); font-size: 11px; outline: none;
+}
+.sys-add .in-name { width: 80px; } .sys-add .in-host { flex: 1; } .sys-add .in-port { width: 56px; }

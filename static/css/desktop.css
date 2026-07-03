@@ -450,26 +450,51 @@ html, body {
   display: flex; align-items: center; justify-content: center; height: 100%;
   color: var(--wps-text-muted); font-size: 12px;
 }
-/* viewer / editor: identical metrics on <pre><code> and the textarea
-   overlay so the caret aligns with the highlighted text underneath */
+/* viewer / editor: line-number gutter + code pane. The textarea overlay
+   and the highlighted <pre><code> underneath must have IDENTICAL metrics —
+   integer line-height and forced tab-size kill subpixel caret drift. */
 .dsb-view { flex: 1; position: relative; min-width: 0; background: var(--wps-content-bg); }
-.dsb-view pre[class*="language-"], .dsb-view pre.dsb-code {
+.dsb-pane { position: absolute; inset: 0; display: flex; }
+.dsb-gutter {
+  flex: 0 0 auto; overflow: hidden; user-select: none;
+  background: var(--wps-panel-bg); border-right: 1px solid var(--wps-hairline);
+  color: var(--wps-text-muted); text-align: right;
+}
+.dsb-gutter-in {
+  padding: 8px 6px 8px 10px; min-width: 4ch;
+  font-family: var(--wps-font-mono); font-size: 12px;
+  line-height: 18px; white-space: pre;
+}
+.dsb-codewrap { flex: 1; position: relative; min-width: 0; }
+.dsb-codewrap pre[class*="language-"], .dsb-codewrap pre.dsb-code {
   position: absolute; inset: 0; margin: 0; border: 0; border-radius: 0;
   background: var(--wps-content-bg);
   overflow: auto; padding: 8px 10px;
 }
-.dsb-view pre.dsb-under { overflow: hidden; }
-.dsb-view pre code, .dsb-view textarea {
+.dsb-codewrap pre.dsb-under { overflow: hidden; }
+.dsb-codewrap pre code, .dsb-codewrap textarea {
   font-family: var(--wps-font-mono) !important; font-size: 12px !important;
-  line-height: 1.45 !important; tab-size: 8;
+  line-height: 18px !important; tab-size: 8 !important;
+  letter-spacing: 0 !important;
   white-space: pre !important; word-break: normal; overflow-wrap: normal;
 }
 .dsb-view .token { font-weight: normal !important; font-style: normal !important; }
 .dsb-view code[class*="language-"] { text-shadow: none; }
-.dsb-view textarea {
+.dsb-codewrap textarea {
   position: absolute; inset: 0; padding: 8px 10px;
   border: 0; outline: none; resize: none; overflow: auto;
   background: transparent; color: transparent;
-  caret-color: var(--wps-text); user-select: text;
+  caret-color: transparent;   /* replaced by the block cursor */
+  user-select: text;
 }
-.dsb-view pre code { user-select: text; }
+.dsb-codewrap textarea::selection { background: var(--wps-icon-selected); }
+.dsb-codewrap pre code { user-select: text; }
+/* 3270-style block cursor, drawn in the highlight layer so it is
+   pixel-exact on the line by construction */
+.dsb-caret {
+  position: absolute; height: 18px;
+  background: var(--wps-accent); opacity: 0.4;
+  pointer-events: none;
+  animation: dsb-blink 1.06s step-end infinite;
+}
+@keyframes dsb-blink { 0% { opacity: 0.4; } 50% { opacity: 0; } }

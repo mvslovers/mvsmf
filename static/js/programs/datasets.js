@@ -390,38 +390,108 @@ Programs.register({
     }
     function renderLoading() { renderEmpty("Loading…"); }
 
-    function renderView() {
+    /* shared pane: line-number gutter + code area (view and edit) */
+    function buildPane(editable) {
       viewEl.innerHTML = "";
-      const pre = el("pre", "dsb-code");
+      const pane = el("div", "dsb-pane");
+      const gutter = el("div", "dsb-gutter");
+      const gutterIn = el("div", "dsb-gutter-in");
+      gutter.appendChild(gutterIn);
+      const wrap = el("div", "dsb-codewrap");
+      const pre = el("pre", "dsb-code" + (editable ? " dsb-under" : ""));
       const code = el("code");
       pre.appendChild(code);
-      viewEl.appendChild(pre);
-      highlightInto(code, st.text);
+      wrap.appendChild(pre);
+      pane.append(gutter, wrap);
+      viewEl.appendChild(pane);
+      return { gutterIn, wrap, pre, code };
+    }
+    function setGutter(gutterIn, text) {
+      const lines = text.split("\n").length;
+      if (gutterIn._lines === lines) return;
+      gutterIn._lines = lines;
+      let s = "";
+      for (let i = 1; i <= lines; i++) s += i + "\n";
+      gutterIn.textContent = s;
+    }
+    function syncGutter(gutterIn, scroller) {
+      gutterIn.style.transform = "translateY(" + (-scroller.scrollTop) + "px)";
+    }
+
+    function renderView() {
+      const p = buildPane(false);
+      highlightInto(p.code, st.text);
+      setGutter(p.gutterIn, st.text);
+      p.pre.addEventListener("scroll", () => syncGutter(p.gutterIn, p.pre));
     }
 
     function renderEditor() {
-      viewEl.innerHTML = "";
-      const pre = el("pre", "dsb-code dsb-under");
-      const code = el("code");
-      pre.appendChild(code);
+      const p = buildPane(true);
       const ta = document.createElement("textarea");
       ta.spellcheck = false;
       ta.value = st.text;
-      viewEl.append(pre, ta);
-      highlightInto(code, ta.value);
+      p.wrap.appendChild(ta);
+      highlightInto(p.code, ta.value);
+      setGutter(p.gutterIn, ta.value);
+
+      // 3270-style block cursor: the native caret is hidden and a block is
+      // drawn in the highlight layer, so it sits exactly on the line
+      const caret = el("div", "dsb-caret");
+      p.pre.appendChild(caret);
+      const preCS = getComputedStyle(p.pre);
+      const padT = parseFloat(preCS.paddingTop);
+      const padL = parseFloat(preCS.paddingLeft);
+      const lineH = parseFloat(getComputedStyle(ta).lineHeight);
+      // measure the monospace cell width in the actual rendered font
+      const meter = el("span");
+      meter.style.cssText = "position:absolute;visibility:hidden;white-space:pre;letter-spacing:0;";
+      meter.style.font = getComputedStyle(ta).font;
+      meter.textContent = "M".repeat(100);
+      p.pre.appendChild(meter);
+      const charW = meter.getBoundingClientRect().width / 100;
+      meter.remove();
+
+      function updateCaret() {
+        if (document.activeElement !== ta || ta.selectionStart !== ta.selectionEnd) {
+          caret.style.display = "none";
+          return;
+        }
+        const before = ta.value.slice(0, ta.selectionStart);
+        const line = (before.match(/\n/g) || []).length;
+        const lineText = before.slice(before.lastIndexOf("\n") + 1);
+        let col = 0;   // expand tabs at tab-size 8, matching the CSS
+        for (let i = 0; i < lineText.length; i++)
+          col = lineText[i] === "\t" ? (Math.floor(col / 8) + 1) * 8 : col + 1;
+        caret.style.display = "";
+        caret.style.width = charW + "px";
+        caret.style.left = (padL + col * charW) + "px";
+        caret.style.top = (padT + line * lineH) + "px";
+        // restart the blink so the cursor is solid right after moving
+        caret.style.animation = "none";
+        void caret.offsetWidth;
+        caret.style.animation = "";
+      }
+
       ta.addEventListener("input", () => {
         st.dirty = true;
-        highlightInto(code, ta.value);
+        highlightInto(p.code, ta.value);
+        setGutter(p.gutterIn, ta.value);
         updateButtons();
       });
-      // keep the highlight layer aligned with the textarea scroll position
+      ["input", "click", "keyup", "select", "focus"].forEach(evName =>
+        ta.addEventListener(evName, updateCaret));
+      ta.addEventListener("blur", () => { caret.style.display = "none"; });
+      // keep highlight layer and gutter aligned with the textarea scroll
       ta.addEventListener("scroll", () => {
-        pre.scrollTop = ta.scrollTop;
-        pre.scrollLeft = ta.scrollLeft;
+        p.pre.scrollTop = ta.scrollTop;
+        p.pre.scrollLeft = ta.scrollLeft;
+        syncGutter(p.gutterIn, ta);
       });
+
       ta.focus();
+      updateCaret();
       st._ta = ta;
-      st._rehighlight = () => highlightInto(code, ta.value);
+      st._rehighlight = () => highlightInto(p.code, ta.value);
     }
 
     /* ---------------- toolbar actions ---------------- */

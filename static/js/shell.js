@@ -24,6 +24,7 @@ import "./programs/sysinfo.js";
 import "./programs/systems.js";
 import "./programs/about.js";
 import "./programs/datasets.js";
+import "./programs/spool.js";
 import "./programs/stubs.js";
 
 /* ---------- Desktop icons ---------- */

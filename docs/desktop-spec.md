@@ -43,7 +43,8 @@ static/
 │       ├── welcome.js
 │       ├── sysinfo.js      # fetches /zosmf/info via ctx.system.apiFetch
 │       ├── systems.js      # systems manager program
-│       └── datasets.js     # dataset browser (Phase 2.1)
+│       ├── datasets.js     # dataset browser (Phase 2.1)
+│       └── spool.js        # JES spool browser (Phase 2.2)
 ├── vendor/
 │   ├── prism.js            # Prism 1.29.0 core+clike+c (pinned, air-gap safe)
 │   └── prism.css           # Prism default theme

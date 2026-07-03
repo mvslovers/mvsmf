@@ -8,6 +8,7 @@
 import { Session, SystemRegistry, checkSystem } from "./systems.js";
 import { WM } from "./wm.js";
 import { Programs } from "./programs/registry.js";
+import { Dialog } from "./dialog.js";
 
 export const Login = (() => {
   const layer = () => document.getElementById("login-layer");
@@ -124,15 +125,19 @@ export const Login = (() => {
       document.getElementById("login-pass").value = "";
     });
     document.getElementById("login-demo").addEventListener("click", demoLogin);
-    document.getElementById("login-manage").addEventListener("click", () => {
-      // Phase 1: quick inline prompt-based add; the Systems program
-      // offers full management once logged in.
-      const name = prompt("System name (e.g. MVSD):");
-      if (!name) return;
-      const host = prompt("Host or IP:");
-      if (!host) return;
-      const port = parseInt(prompt("Port:", "1080") || "1080", 10);
-      SystemRegistry.add({ name: name.toUpperCase(), host, port });
+    document.getElementById("login-manage").addEventListener("click", async () => {
+      // quick add from the login screen; the Systems program offers
+      // full management once logged in
+      const r = await Dialog.show({
+        title: "Add system", icon: "ti-server", okLabel: "Add",
+        fields: [
+          { key: "name", label: "System name", maxLength: 8, upper: true, placeholder: "MVSD" },
+          { key: "host", label: "Host or IP", placeholder: "mvs.example.lan" },
+          { key: "port", label: "Port", value: "1080", maxLength: 5 }
+        ]
+      });
+      if (!r || !r.name || !r.host) return;
+      SystemRegistry.add({ name: r.name, host: r.host, port: parseInt(r.port || "1080", 10) });
       refreshSystems();
       checkSelected();
     });

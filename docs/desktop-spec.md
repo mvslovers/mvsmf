@@ -33,6 +33,7 @@ static/
 │   ├── taskbar.js          # taskbar component
 │   ├── startmenu.js        # start menu + systems submenu
 │   ├── login.js            # login screen + auth flow
+│   ├── dialog.js           # OS/2-style modal dialogs (no native popups)
 │   ├── systems.js          # SystemRegistry, checkSystem, SafeStore
 │   ├── prism-jcl.js        # custom Prism grammars (JCL, HLASM, REXX —
 │   ├── prism-hlasm.js      #   REXX has no upstream Prism component)
@@ -197,9 +198,9 @@ Programs.register({
     const el = document.createElement("div");
     return el;
   },
-  confirmClose(ctx) {         // OPTIONAL: return false to veto the close
-    return true;              // (e.g. unsaved editor state; added in 2.1)
-  },
+  confirmClose(ctx) {         // OPTIONAL: return false — or a Promise
+    return true;              // resolving to false (Dialog.confirm) — to
+  },                          // veto the close (added in 2.1)
   destroy(ctx) { /* cleanup timers, listeners */ }
 });
 ```

@@ -21,6 +21,7 @@
    Demo mode: canned datasets/members (pattern: sysinfo program).
    ============================================================ */
 import { Programs } from "./registry.js";
+import { Dialog } from "../dialog.js";
 
 /* ---------- demo-mode canned data ---------- */
 const DEMO_DATASETS = [
@@ -99,10 +100,17 @@ Programs.register({
   desktopIcon: true,
   statusBar: true,
 
-  /* veto window close while the editor has unsaved changes */
+  /* veto window close while the editor has unsaved changes; returns a
+     Promise — the window manager defers the close until it resolves */
   confirmClose(ctx) {
     const st = ctx._dsb;
-    if (st && st.dirty) return confirm("Discard unsaved changes?");
+    if (st && st.dirty) {
+      return Dialog.confirm("Unsaved changes", "Discard unsaved changes?",
+        { okLabel: "Discard", danger: true }).then(ok => {
+          if (!ok && st._ta) st._ta.focus();
+          return ok;
+        });
+    }
     return true;
   },
 
@@ -347,8 +355,18 @@ Programs.register({
     }
 
     /* ---------------- selection / content ---------------- */
+    // dirty guard used by member switch, Refresh and Cancel; keeps the
+    // editor focused (block cursor visible) when the user declines
+    async function confirmDiscard() {
+      if (!st.dirty) return true;
+      const ok = await Dialog.confirm("Unsaved changes", "Discard unsaved changes?",
+        { okLabel: "Discard", danger: true });
+      if (!ok && st._ta) st._ta.focus();
+      return ok;
+    }
+
     async function select(sel, row) {
-      if (st.dirty && !confirm("Discard unsaved changes?")) return;
+      if (!(await confirmDiscard())) return;
       st.dirty = false; st.editing = false;
       st.sel = sel;
       markSelected(row);
@@ -529,8 +547,8 @@ Programs.register({
       }
     }
 
-    function doRefresh() {
-      if (st.dirty && !confirm("Discard unsaved changes?")) return;
+    async function doRefresh() {
+      if (!(await confirmDiscard())) return;
       st.dirty = false; st.editing = false;
       st.mcache.clear();
       doList();
@@ -559,9 +577,9 @@ Programs.register({
       }
     }
 
-    function doCancel() {
+    async function doCancel() {
       if (!st.editing) return;
-      if (st.dirty && !confirm("Discard unsaved changes?")) return;
+      if (!(await confirmDiscard())) return;
       st.dirty = false; st.editing = false;
       renderView();
       updateButtons();
@@ -571,9 +589,10 @@ Programs.register({
       const dsn = st.sel && (st.sel.type === "po" ? st.sel.dsn
                 : st.sel.type === "member" ? st.sel.dsn : null);
       if (!dsn) return;
-      let name = prompt("New member name (1-8 chars):");
+      const name = await Dialog.prompt("New member", "Member name (1-8 characters)",
+        { icon: "ti-file-plus", okLabel: "Create",
+          field: { maxLength: 8, upper: true, placeholder: "MEMBER" } });
       if (!name) return;
-      name = name.trim().toUpperCase();
       if (!/^[A-Z@#$][A-Z0-9@#$]{0,7}$/.test(name)) {
         ctx.setStatus("Invalid member name: " + name);
         return;
@@ -602,7 +621,8 @@ Programs.register({
     async function doDelete() {
       if (!st.sel || st.sel.type !== "member") return;
       const { dsn, member } = st.sel;
-      if (!confirm(`Delete ${dsn}(${member})?`)) return;
+      if (!(await Dialog.confirm("Delete member", `Delete ${dsn}(${member})?`,
+        { okLabel: "Delete", danger: true, icon: "ti-trash" }))) return;
       try {
         await deleteMember(dsn, member);
         st.mcache.delete(dsn);

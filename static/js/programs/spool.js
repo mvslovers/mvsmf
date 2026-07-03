@@ -209,7 +209,12 @@ Programs.register({
       q.set("owner", st.owner || "*");
       if (st.status !== "*") q.set("status", st.status);
       const resp = await api("/zosmf/restjobs/jobs?" + q.toString());
-      return resp.json();   // plain JSON array
+      let jobs = await resp.json();   // plain JSON array
+      // jobListHandler currently ignores the status parameter (#157) —
+      // filter client-side; the param stays so the server-side filter
+      // is picked up automatically once implemented
+      if (st.status !== "*") jobs = jobs.filter(j => j.status === st.status);
+      return jobs;
     }
     async function listFiles(job) {
       const key = jobKey(job);
@@ -311,8 +316,16 @@ Programs.register({
           const row = el("div", "dsb-node spl-dd");
           row.style.paddingLeft = "26px";
           row.dataset.dd = jobKey(job) + "/" + dd.id;
-          const where = dd.stepname ? ` <span class="spl-step">${dd.stepname}${dd.procstep ? "." + dd.procstep : ""} · ${dd["record-count"]} recs</span>` : "";
-          row.innerHTML = `<span class="dsb-chev"></span><i class="dsb-ico ti ti-file-text"></i><span>${dd.ddname}</span>${where}`;
+          // DDNAME is a fixed 8-char field — pad it so the stepname
+          // column lines up (tree font is monospace); record count is
+          // right-aligned at the row end like the RC badge on job rows
+          const name = el("span", "spl-ddname", (dd.ddname || "").padEnd(8));
+          const step = el("span", "spl-step",
+            dd.stepname ? dd.stepname + (dd.procstep ? "." + dd.procstep : "") : "");
+          const recs = el("span", "spl-recs",
+            dd["record-count"] != null ? dd["record-count"] + " recs" : "");
+          row.append(el("span", "dsb-chev", ""),
+                     el("i", "dsb-ico ti ti-file-text"), name, step, recs);
           row.addEventListener("click", ev => {
             ev.stopPropagation();
             openDD(job, dd, row);

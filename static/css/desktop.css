@@ -431,8 +431,13 @@ html, body {
 .spl-active { color: var(--wps-led-green); font-size: 12px; }
 .dsb-node.selected .spl-rc-ok, .dsb-node.selected .spl-rc-bad,
 .dsb-node.selected .spl-rc-dim { color: var(--wps-title-text); }
-.spl-step { font-size: 9px; color: var(--wps-text-muted); margin-left: 4px; }
-.dsb-node.selected .spl-step { color: var(--wps-title-system); }
+.spl-ddname { white-space: pre; }
+.spl-step {
+  font-size: 9px; color: var(--wps-text-muted); margin-left: 6px;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.spl-recs { margin-left: auto; padding-left: 8px; font-size: 9px; color: var(--wps-text-muted); flex: 0 0 auto; }
+.dsb-node.selected .spl-step, .dsb-node.selected .spl-recs { color: var(--wps-title-system); }
 /* spool output: monospace, columns preserved — never wrap or trim
    (ASA carriage control in col 1; listings are column-significant) */
 pre.spl-out {

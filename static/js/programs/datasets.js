@@ -185,7 +185,10 @@ Programs.register({
       } else {
         const resp = await api("/zosmf/restfiles/ds/" + dsn + "/member");
         const json = await resp.json();
-        names = (json.items || []).map(i => i.member).sort();
+        // dsapi pads member names to 8 chars (z/OSMF returns them
+        // unpadded) — trim defensively so keys and URLs stay clean
+        names = (json.items || []).map(i => (i.member || "").trim())
+          .filter(Boolean).sort();
       }
       st.mcache.set(dsn, names);
       return names;

@@ -1,0 +1,1396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mvsMF Desktop</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<style>
+/* ============================================================
+   mvsMF Desktop — OS/2 Workplace Shell theme
+   All theme colors as CSS custom properties so a future
+   theme switcher can swap them.
+   ============================================================ */
+:root {
+  --wps-desktop-bg: linear-gradient(145deg, #1a3a5c 0%, #0d2137 60%, #1a2a3c 100%);
+  --wps-title-active: linear-gradient(90deg, #00007b 0%, #1084d0 100%);
+  --wps-title-inactive: linear-gradient(90deg, #555 0%, #888 100%);
+  --wps-title-text: #ffffff;
+  --wps-title-system: #aac8ff;
+  --wps-chrome: #d4d4d4;
+  --wps-chrome-dark: #c8c8c8;
+  --wps-chrome-darker: #b0b0b0;
+  --wps-border-light: #e8e8e8;
+  --wps-border-mid: #aaaaaa;
+  --wps-border-dark: #999999;
+  --wps-text: #1a1a1a;
+  --wps-text-dim: #555555;
+  --wps-accent: #00007b;
+  --wps-led-green: #33cc33;
+  --wps-led-red: #cc3333;
+  --wps-led-yellow: #cccc33;
+  --wps-console-bg: #1a1a1a;
+  --wps-console-fg: #33ff33;
+  --wps-shadow: 3px 3px 8px rgba(0,0,0,0.4);
+  --wps-font-ui: "Segoe UI", system-ui, sans-serif;
+  --wps-font-mono: "Cascadia Mono", "Consolas", "Menlo", monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--wps-font-ui);
+  font-size: 12px;
+  color: var(--wps-text);
+  user-select: none;
+}
+
+/* ---------- Desktop ---------- */
+#desktop {
+  position: fixed;
+  inset: 0 0 28px 0;   /* leave room for taskbar */
+  background: var(--wps-desktop-bg);
+  overflow: hidden;
+}
+#desktop::before {
+  /* subtle grid overlay */
+  content: "";
+  position: absolute; inset: 0;
+  opacity: 0.03;
+  background-image:
+    repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 40px);
+  pointer-events: none;
+}
+
+/* ---------- Desktop icons ---------- */
+#desktop-icons {
+  position: absolute;
+  top: 16px; right: 16px;
+  display: flex; flex-direction: column; gap: 16px;
+  z-index: 1;
+}
+.desk-icon {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 74px; cursor: pointer; padding: 4px; border-radius: 3px;
+}
+.desk-icon:hover { background: rgba(255,255,255,0.08); }
+.desk-icon.selected { background: rgba(16,132,208,0.35); outline: 1px dotted #fff8; }
+.desk-icon .box {
+  width: 38px; height: 38px; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.25);
+  font-size: 20px;
+}
+.desk-icon .label {
+  font-size: 10.5px; color: #fff; text-align: center; line-height: 1.2;
+  text-shadow: 1px 1px 2px #000;
+}
+
+/* ---------- Windows ---------- */
+.wps-window {
+  position: absolute;
+  background: var(--wps-chrome);
+  border: 2px outset var(--wps-border-light);
+  box-shadow: var(--wps-shadow);
+  display: flex; flex-direction: column;
+  min-width: 200px; min-height: 120px;
+}
+.wps-window.maximized { border-width: 0; box-shadow: none; }
+.wps-window.minimized { display: none; }
+
+.wps-titlebar {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--wps-title-inactive);
+  height: 22px; padding: 0 3px; flex: 0 0 auto;
+  cursor: default;
+}
+.wps-window.focused .wps-titlebar { background: var(--wps-title-active); }
+.wps-titlebar .tleft { display: flex; align-items: center; gap: 6px; overflow: hidden; }
+.wps-titlebar .ticon {
+  width: 14px; height: 14px; flex: 0 0 auto;
+  background: var(--wps-chrome); border: 1px outset #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; color: var(--wps-accent);
+}
+.wps-titlebar .ttext {
+  font-size: 12px; font-weight: 500; color: var(--wps-title-text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.wps-titlebar .tsys { font-size: 10px; color: var(--wps-title-system); margin-left: 4px; }
+.wps-titlebar .tbtns { display: flex; gap: 2px; flex: 0 0 auto; }
+.wps-titlebar .tbtn {
+  width: 15px; height: 15px;
+  background: var(--wps-chrome); border: 1px outset #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; line-height: 1; color: #333; cursor: pointer;
+  font-family: var(--wps-font-ui);
+}
+.wps-titlebar .tbtn:active { border-style: inset; }
+
+.wps-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  padding: 3px 4px; background: var(--wps-chrome-dark);
+  border-bottom: 1px solid var(--wps-border-mid); flex: 0 0 auto;
+}
+.wps-toolbar .tb-btn {
+  font-size: 11px; color: #333; padding: 2px 8px;
+  border: 1px outset #ddd; background: var(--wps-chrome); cursor: pointer;
+  display: flex; align-items: center; gap: 4px;
+}
+.wps-toolbar .tb-btn:active { border-style: inset; background: var(--wps-chrome-darker); }
+.wps-toolbar .tb-spacer { flex: 1; }
+
+.wps-content {
+  flex: 1; overflow: auto; background: #fff; position: relative;
+}
+
+.wps-statusbar {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 6px; background: var(--wps-chrome-dark);
+  border-top: 1px solid var(--wps-border-mid); flex: 0 0 auto;
+  font-size: 10px; color: var(--wps-text-dim);
+}
+
+/* Resize handles — invisible strips around the window edge */
+.rs { position: absolute; z-index: 5; }
+.rs-n  { top: -3px; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
+.rs-s  { bottom: -3px; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
+.rs-e  { right: -3px; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
+.rs-w  { left: -3px; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
+.rs-ne { top: -3px; right: -3px; width: 10px; height: 10px; cursor: ne-resize; }
+.rs-nw { top: -3px; left: -3px; width: 10px; height: 10px; cursor: nw-resize; }
+.rs-se { bottom: -3px; right: -3px; width: 10px; height: 10px; cursor: se-resize; }
+.rs-sw { bottom: -3px; left: -3px; width: 10px; height: 10px; cursor: sw-resize; }
+
+/* ---------- Taskbar ---------- */
+#taskbar {
+  position: fixed; left: 0; right: 0; bottom: 0; height: 28px;
+  background: var(--wps-chrome-dark);
+  border-top: 2px outset var(--wps-border-light);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 4px; z-index: 9000;
+}
+#taskbar .tb-left { display: flex; align-items: center; gap: 3px; overflow: hidden; }
+#start-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 10px 2px 6px; font-size: 11px; font-weight: 500;
+  color: var(--wps-accent); cursor: pointer;
+  border: 1px outset var(--wps-border-light); background: var(--wps-chrome);
+}
+#start-btn.open, #start-btn:active { border-style: inset; background: var(--wps-chrome-darker); }
+#start-btn .logo {
+  width: 14px; height: 14px; border-radius: 2px;
+  background: linear-gradient(135deg, #1084d0, #00007b);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 500; color: #fff;
+}
+.tb-sep { width: 1px; height: 20px; background: var(--wps-border-mid); margin: 0 3px; flex: 0 0 auto; }
+.task-btn {
+  display: flex; align-items: center; gap: 5px;
+  padding: 2px 10px; font-size: 11px; color: #333; cursor: pointer;
+  border: 1px outset var(--wps-border-light); background: var(--wps-chrome);
+  max-width: 160px; white-space: nowrap; overflow: hidden;
+}
+.task-btn span { overflow: hidden; text-overflow: ellipsis; }
+.task-btn.active {
+  border-style: inset; background: var(--wps-chrome-darker);
+  color: var(--wps-accent); font-weight: 500;
+}
+#tray {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px inset var(--wps-border-mid); background: #c0c0c0;
+  padding: 1px 8px; height: 22px; flex: 0 0 auto;
+}
+#tray .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.35); }
+#tray .sysname {
+  font-family: var(--wps-font-mono); font-size: 11px; font-weight: 500;
+  color: var(--wps-accent); cursor: pointer; border-bottom: 1px dotted var(--wps-accent);
+}
+#tray .dim { color: #999; font-size: 10px; }
+#tray .user, #tray .clock { font-family: var(--wps-font-mono); font-size: 10px; color: #444; }
+#tray .clock { color: #222; }
+
+/* ---------- Start menu ---------- */
+#startmenu {
+  position: fixed; left: 2px; bottom: 30px; width: 224px;
+  background: var(--wps-chrome); border: 2px outset var(--wps-border-light);
+  box-shadow: var(--wps-shadow); z-index: 9999; display: none;
+}
+#startmenu.open { display: block; }
+#startmenu .sm-head {
+  background: var(--wps-title-active); padding: 7px 10px;
+  display: flex; align-items: center; gap: 8px;
+}
+#startmenu .sm-head .logo {
+  width: 28px; height: 28px; border-radius: 3px; background: rgba(255,255,255,0.15);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; font-weight: 500; color: #fff;
+}
+#startmenu .sm-head .t1 { font-size: 12px; font-weight: 500; color: #fff; }
+#startmenu .sm-head .t2 { font-size: 10px; color: var(--wps-title-system); }
+.sm-section { padding: 4px 0; }
+.sm-section + .sm-section { border-top: 1px solid var(--wps-border-mid); }
+.sm-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 12px; cursor: pointer; font-size: 12px; color: #333;
+}
+.sm-item:hover { background: var(--wps-accent); color: #fff; }
+.sm-item .pico {
+  width: 20px; height: 20px; border-radius: 2px; flex: 0 0 auto;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+}
+.sm-item .gico { width: 20px; text-align: center; font-size: 15px; color: #555; }
+.sm-item:hover .gico { color: #fff; }
+.sm-item .chev { margin-left: auto; font-size: 12px; color: #999; }
+.sm-item:hover .chev { color: #fff; }
+
+/* Systems submenu */
+#sys-submenu {
+  position: fixed; width: 220px;
+  background: var(--wps-chrome); border: 2px outset var(--wps-border-light);
+  box-shadow: var(--wps-shadow); z-index: 10001; display: none;
+}
+#sys-submenu.open { display: block; }
+#sys-submenu .sm-item { padding: 4px 10px; }
+#sys-submenu .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.35); flex: 0 0 auto; }
+#sys-submenu .mono { font-family: var(--wps-font-mono); font-size: 11px; }
+#sys-submenu .hostinfo { margin-left: auto; font-size: 9px; color: #888; }
+#sys-submenu .sm-item:hover .hostinfo { color: #cdf; }
+
+/* ---------- Login ---------- */
+#login-layer {
+  position: fixed; inset: 0; z-index: 10000;
+  background: var(--wps-desktop-bg);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-layer::before {
+  content: ""; position: absolute; inset: 0; opacity: 0.03;
+  background-image:
+    repeating-linear-gradient(0deg, #fff 0 1px, transparent 1px 40px),
+    repeating-linear-gradient(90deg, #fff 0 1px, transparent 1px 40px);
+}
+#login-box {
+  width: 330px; background: var(--wps-chrome);
+  border: 2px outset var(--wps-border-light);
+  box-shadow: 4px 4px 12px rgba(0,0,0,0.5); position: relative;
+}
+#login-box .lb-title {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--wps-title-active); height: 22px; padding: 0 4px;
+}
+#login-box .lb-title .ticon {
+  width: 14px; height: 14px; background: var(--wps-chrome); border: 1px outset #fff;
+  display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--wps-accent);
+}
+#login-box .lb-title .t { font-size: 12px; font-weight: 500; color: #fff; }
+#login-box .lb-body { padding: 18px 24px 16px; }
+.lb-logo { display: flex; justify-content: center; margin-bottom: 16px; }
+.lb-logo .inner { display: flex; align-items: center; gap: 8px; }
+.lb-logo .sq {
+  width: 36px; height: 36px; border-radius: 4px;
+  background: linear-gradient(135deg, #1084d0, #00007b);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; font-weight: 500; color: #fff;
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.2);
+}
+.lb-logo .t1 { font-size: 16px; font-weight: 500; letter-spacing: -0.3px; }
+.lb-logo .t2 { font-size: 10px; color: #777; }
+.lb-field { margin-bottom: 10px; }
+.lb-field label { display: block; font-size: 11px; color: var(--wps-text-dim); margin-bottom: 3px; }
+.lb-field input, .lb-field select {
+  width: 100%; padding: 5px 6px; font-size: 12px;
+  font-family: var(--wps-font-mono); color: #333;
+  border: 1px inset var(--wps-border-mid); background: #fff; outline: none;
+}
+.lb-field input:focus, .lb-field select:focus { background: #fffef0; }
+#login-status {
+  display: flex; align-items: center; gap: 6px;
+  padding: 4px 8px; margin-bottom: 12px; font-size: 11px;
+  border: 1px solid transparent;
+}
+#login-status .led { width: 7px; height: 7px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); flex: 0 0 auto; }
+#login-status.ok    { background: #c8e6c8; border-color: #8aba8a; color: #2a5a2a; }
+#login-status.bad   { background: #e6c8c8; border-color: #ba8a8a; color: #5a2a2a; }
+#login-status.warn  { background: #e6e0c0; border-color: #bab08a; color: #5a512a; }
+#login-status.wait  { background: #d8d8d8; border-color: #aaa; color: #555; }
+.lb-buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 14px; }
+.lb-btn {
+  padding: 4px 16px; font-size: 12px; cursor: pointer;
+  border: 1px outset #ddd; background: var(--wps-chrome); color: #333;
+  font-family: var(--wps-font-ui);
+}
+.lb-btn:active { border-style: inset; }
+.lb-btn.primary { background: var(--wps-accent); color: #fff; border-color: #3333aa; font-weight: 500; }
+.lb-links { text-align: center; margin-top: 12px; display: flex; justify-content: center; gap: 16px; }
+.lb-link { font-size: 10px; color: var(--wps-accent); cursor: pointer; border-bottom: 1px dotted var(--wps-accent); }
+#login-version {
+  position: absolute; bottom: 8px; right: 12px;
+  font-size: 10px; color: rgba(255,255,255,0.25); font-family: var(--wps-font-mono);
+}
+
+/* ---------- Program content helpers ---------- */
+.prog-pad { padding: 14px 16px; font-size: 12px; line-height: 1.6; user-select: text; }
+.prog-pad h1 { font-size: 15px; font-weight: 500; margin-bottom: 8px; }
+.prog-pad p { margin-bottom: 8px; }
+.prog-pad code {
+  font-family: var(--wps-font-mono); font-size: 11px;
+  background: #f0f0f0; padding: 0 3px; border: 1px solid #ddd;
+}
+.prog-mono {
+  font-family: var(--wps-font-mono); font-size: 11px; line-height: 1.6;
+  white-space: pre-wrap; user-select: text; padding: 10px 12px;
+}
+.sys-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px; border-bottom: 1px solid #e4e4e4; font-size: 12px;
+}
+.sys-row .led { width: 8px; height: 8px; border-radius: 50%; border: 1px solid rgba(0,0,0,0.3); flex: 0 0 auto; }
+.sys-row .name { font-family: var(--wps-font-mono); font-weight: 500; width: 90px; }
+.sys-row .host { font-family: var(--wps-font-mono); color: #666; flex: 1; font-size: 11px; }
+.sys-row .stat { font-size: 10px; color: #888; width: 90px; }
+.sys-row .rm { color: #a33; cursor: pointer; font-size: 13px; }
+.sys-add { display: flex; gap: 6px; padding: 10px; background: #f4f4f4; border-top: 1px solid #ddd; }
+.sys-add input {
+  border: 1px inset var(--wps-border-mid); padding: 3px 6px;
+  font-family: var(--wps-font-mono); font-size: 11px; outline: none;
+}
+.sys-add .in-name { width: 80px; } .sys-add .in-host { flex: 1; } .sys-add .in-port { width: 56px; }
+</style>
+</head>
+<body>
+
+<!-- ================= Login layer ================= -->
+<div id="login-layer">
+  <div id="login-box">
+    <div class="lb-title">
+      <div class="ticon"><i class="ti ti-lock"></i></div>
+      <span class="t">mvsMF Desktop — Login</span>
+    </div>
+    <div class="lb-body">
+      <div class="lb-logo">
+        <div class="inner">
+          <div class="sq">M</div>
+          <div><div class="t1">mvs<span style="color:#1084d0;">MF</span> Desktop</div>
+               <div class="t2">MVS management facility</div></div>
+        </div>
+      </div>
+      <div class="lb-field">
+        <label for="login-system">System</label>
+        <select id="login-system"></select>
+      </div>
+      <div id="login-status" class="wait">
+        <span class="led" style="background:#999;"></span>
+        <span id="login-status-text">Checking connection…</span>
+      </div>
+      <div class="lb-field">
+        <label for="login-user">Username</label>
+        <input id="login-user" autocomplete="username" spellcheck="false">
+      </div>
+      <div class="lb-field">
+        <label for="login-pass">Password</label>
+        <input id="login-pass" type="password" autocomplete="current-password">
+      </div>
+      <div class="lb-buttons">
+        <button class="lb-btn" id="login-cancel">Cancel</button>
+        <button class="lb-btn primary" id="login-submit">Login</button>
+      </div>
+      <div class="lb-links">
+        <span class="lb-link" id="login-manage">Manage systems…</span>
+        <span class="lb-link" id="login-demo">Demo mode</span>
+      </div>
+    </div>
+  </div>
+  <div id="login-version">mvsMF Desktop v2.0.0-alpha1</div>
+</div>
+
+<!-- ================= Desktop ================= -->
+<div id="desktop" style="display:none;">
+  <div id="desktop-icons"></div>
+</div>
+
+<!-- ================= Taskbar ================= -->
+<div id="taskbar" style="display:none;">
+  <div class="tb-left">
+    <div id="start-btn"><span class="logo">M</span>Start</div>
+    <div class="tb-sep"></div>
+    <div id="task-buttons" style="display:flex;gap:3px;overflow:hidden;"></div>
+  </div>
+  <div id="tray">
+    <span class="led" id="tray-led" style="background:var(--wps-led-green);"></span>
+    <span class="sysname" id="tray-sys">—</span>
+    <span class="dim">|</span>
+    <span class="user" id="tray-user">—</span>
+    <span class="dim">|</span>
+    <span class="clock" id="tray-clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- ================= Start menu ================= -->
+<div id="startmenu">
+  <div class="sm-head">
+    <div class="logo">M</div>
+    <div><div class="t1">mvsMF Desktop</div><div class="t2">v2.0.0-alpha1</div></div>
+  </div>
+  <div class="sm-section" id="sm-programs"></div>
+  <div class="sm-section">
+    <div class="sm-item" id="sm-systems">
+      <span class="gico"><i class="ti ti-server"></i></span>Systems
+      <span class="chev"><i class="ti ti-chevron-right"></i></span>
+    </div>
+    <div class="sm-item" id="sm-settings">
+      <span class="gico"><i class="ti ti-settings"></i></span>Settings
+    </div>
+    <div class="sm-item" id="sm-about">
+      <span class="gico"><i class="ti ti-info-circle"></i></span>About
+    </div>
+    <div class="sm-item" id="sm-logout">
+      <span class="gico"><i class="ti ti-logout"></i></span>Logout
+    </div>
+  </div>
+</div>
+<div id="sys-submenu"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   mvsMF Desktop — Phase 1 prototype (single file)
+   Sections: SafeStore, SystemRegistry, Session, WindowManager,
+   Taskbar, StartMenu, ProgramRegistry, demo programs, Login.
+   ============================================================ */
+
+/* ---------- SafeStore: localStorage with in-memory fallback ----------
+   Sandboxed previews may block localStorage; a real deployment
+   on the HTTPD UFS uses it normally. */
+const SafeStore = (() => {
+  let mem = {};
+  let ok = false;
+  try { localStorage.setItem("__t", "1"); localStorage.removeItem("__t"); ok = true; } catch (e) { ok = false; }
+  return {
+    get(key, fallback) {
+      try {
+        const raw = ok ? localStorage.getItem(key) : mem[key];
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (e) { return fallback; }
+    },
+    set(key, value) {
+      const raw = JSON.stringify(value);
+      if (ok) { try { localStorage.setItem(key, raw); } catch (e) {} }
+      mem[key] = raw;
+    }
+  };
+})();
+
+/* ---------- System registry ---------- */
+const SystemRegistry = {
+  KEY: "mvsmf.systems",
+  defaults: { systems: [], defaultSystem: null },
+  load() { return SafeStore.get(this.KEY, this.defaults); },
+  save(data) { SafeStore.set(this.KEY, data); },
+  list() { return this.load().systems; },
+  get(name) { return this.list().find(s => s.name === name); },
+  add(sys) {
+    const d = this.load();
+    d.systems = d.systems.filter(s => s.name !== sys.name);
+    d.systems.push(sys);
+    this.save(d);
+  },
+  remove(name) {
+    const d = this.load();
+    d.systems = d.systems.filter(s => s.name !== name);
+    this.save(d);
+  },
+  baseUrl(sys) {
+    // local system follows the page protocol (works behind a TLS proxy);
+    // remote MVS 3.8j systems are plain http
+    const proto = sys.local ? location.protocol : "http:";
+    return `${proto}//${sys.host}:${sys.port}`;
+  },
+  /* Derive the "local" system from the URL this page was served from.
+     When the desktop is deployed on the HTTPD UFS, that host IS the
+     default mvsMF system — no manual configuration needed. */
+  ensureLocal() {
+    if (!/^https?:$/.test(location.protocol) || !location.hostname) return null;
+    const host = location.hostname;
+    const port = location.port ? parseInt(location.port, 10)
+                               : (location.protocol === "https:" ? 443 : 80);
+    const d = this.load();
+    let sys = d.systems.find(s => s.host === host && s.port === port);
+    if (!sys) {
+      // derive a system name from the first hostname label,
+      // e.g. MVSDEV from mvsdev.lan (max 8 chars, mainframe style)
+      let name = host.split(".")[0].toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "LOCAL";
+      if (d.systems.some(s => s.name === name)) name = "LOCAL";
+      sys = { name, host, port, local: true };
+      d.systems.unshift(sys);
+    } else {
+      sys.local = true;
+    }
+    d.systems.forEach(s => { if (s !== sys) delete s.local; });
+    d.defaultSystem = sys.name;
+    this.save(d);
+    return sys;
+  }
+};
+
+/* ---------- Connection check via /zosmf/info ---------- */
+async function checkSystem(sys, auth) {
+  // auth: optional {user, pass} to verify credentials
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 4000);
+  try {
+    // Anonymous probe stays a "simple request" (no custom headers) so it
+    // avoids a CORS preflight; authenticated checks send the full headers.
+    const headers = {};
+    if (auth) {
+      headers["Authorization"] = "Basic " + btoa(auth.user + ":" + auth.pass);
+      headers["X-CSRF-ZOSMF-HEADER"] = "true";
+    }
+    const resp = await fetch(SystemRegistry.baseUrl(sys) + "/zosmf/info", { headers, signal: ctl.signal });
+    clearTimeout(timer);
+    if (resp.ok) {
+      let info = null;
+      try { info = await resp.json(); } catch (e) {}
+      return { status: "connected", info };
+    }
+    if (resp.status === 401 || resp.status === 403) return { status: "auth_failed" };
+    return { status: "error", code: resp.status };
+  } catch (e) {
+    clearTimeout(timer);
+    // Fetch failed — either the host is down or the browser blocked the
+    // response (missing CORS headers on a cross-origin request). An
+    // opaque no-cors probe still resolves when the host is reachable.
+    try {
+      const ctl2 = new AbortController();
+      const t2 = setTimeout(() => ctl2.abort(), 4000);
+      await fetch(SystemRegistry.baseUrl(sys) + "/zosmf/info", { mode: "no-cors", signal: ctl2.signal });
+      clearTimeout(t2);
+      return { status: "cors_blocked" };
+    } catch (e2) {
+      return { status: "unreachable" };
+    }
+  }
+}
+
+/* ---------- Session (current login) ---------- */
+const Session = {
+  system: null,     // system object from registry
+  user: null,
+  pass: null,
+  demo: false,
+  /* Build a system context handed to every program window. */
+  contextFor(systemName) {
+    const sys = systemName ? SystemRegistry.get(systemName) : this.system;
+    const self = this;
+    return {
+      name: sys ? sys.name : (self.demo ? "DEMO" : "?"),
+      host: sys ? sys.host : "demo.local",
+      port: sys ? sys.port : 0,
+      baseUrl: sys ? SystemRegistry.baseUrl(sys) : "",
+      user: self.user,
+      demo: self.demo,
+      async apiFetch(path, options = {}) {
+        if (self.demo) throw new Error("demo mode: no backend");
+        options.headers = Object.assign({
+          "Authorization": "Basic " + btoa(self.user + ":" + self.pass),
+          "X-CSRF-ZOSMF-HEADER": "true"
+        }, options.headers || {});
+        return fetch(this.baseUrl + path, options);
+      }
+    };
+  }
+};
+
+/* ---------- Window manager ---------- */
+const WM = (() => {
+  const windows = new Map();   // id -> win record
+  let zTop = 10;
+  let seq = 0;
+  let cascade = 0;
+  const desktop = () => document.getElementById("desktop");
+
+  function focus(id) {
+    const w = windows.get(id);
+    if (!w) return;
+    zTop += 1;
+    w.el.style.zIndex = zTop;
+    windows.forEach(x => x.el.classList.toggle("focused", x.id === id));
+    Taskbar.setActive(id);
+  }
+
+  function focusTopmost() {
+    let best = null;
+    windows.forEach(w => {
+      if (w.state === "minimized") return;
+      const z = parseInt(w.el.style.zIndex || "0", 10);
+      if (!best || z > best.z) best = { id: w.id, z };
+    });
+    if (best) focus(best.id); else Taskbar.setActive(null);
+  }
+
+  function open(program, systemName) {
+    const id = "win_" + (++seq);
+    const ctx = Session.contextFor(systemName);
+    const dsk = desktop().getBoundingClientRect();
+
+    const width = Math.min(program.defaultWidth || 500, dsk.width - 40);
+    const height = Math.min(program.defaultHeight || 380, dsk.height - 40);
+    cascade = (cascade + 1) % 8;
+    const x = 60 + cascade * 26;
+    const y = 30 + cascade * 24;
+
+    const el = document.createElement("div");
+    el.className = "wps-window focused";
+    el.style.cssText = `left:${x}px; top:${y}px; width:${width}px; height:${height}px; z-index:${++zTop};`;
+
+    // Title bar
+    const tb = document.createElement("div");
+    tb.className = "wps-titlebar";
+    tb.innerHTML = `
+      <div class="tleft">
+        <div class="ticon"><i class="ti ${program.icon}"></i></div>
+        <span class="ttext">${program.name}<span class="tsys">— ${ctx.name}</span></span>
+      </div>
+      <div class="tbtns">
+        <div class="tbtn" data-act="min">_</div>
+        <div class="tbtn" data-act="max">□</div>
+        <div class="tbtn" data-act="close" style="font-weight:500;">×</div>
+      </div>`;
+    el.appendChild(tb);
+
+    // Optional toolbar
+    if (program.toolbar && program.toolbar.length) {
+      const bar = document.createElement("div");
+      bar.className = "wps-toolbar";
+      program.toolbar.forEach(item => {
+        const b = document.createElement("div");
+        b.className = "tb-btn";
+        b.innerHTML = (item.icon ? `<i class="ti ${item.icon}" style="font-size:13px;"></i>` : "") + item.label;
+        b.addEventListener("click", () => item.onClick && item.onClick(winCtx));
+        bar.appendChild(b);
+      });
+      el.appendChild(bar);
+    }
+
+    // Content
+    const content = document.createElement("div");
+    content.className = "wps-content";
+    el.appendChild(content);
+
+    // Optional status bar
+    let statusEl = null;
+    if (program.statusBar) {
+      statusEl = document.createElement("div");
+      statusEl.className = "wps-statusbar";
+      statusEl.innerHTML = `<span class="sb-l"></span><span class="sb-r">${ctx.name} — ${ctx.user || ""}</span>`;
+      el.appendChild(statusEl);
+    }
+
+    // Resize handles
+    ["n","s","e","w","ne","nw","se","sw"].forEach(dir => {
+      const h = document.createElement("div");
+      h.className = "rs rs-" + dir;
+      h.dataset.dir = dir;
+      el.appendChild(h);
+    });
+
+    desktop().appendChild(el);
+
+    const win = {
+      id, program, el, content, statusEl,
+      state: "normal",
+      prevRect: null,
+      title: program.name,
+      systemName: ctx.name
+    };
+    windows.set(id, win);
+
+    // Context object handed to the program instance
+    const winCtx = {
+      windowId: id,
+      system: ctx,
+      contentEl: content,
+      setTitle(t) {
+        win.title = t;
+        tb.querySelector(".ttext").innerHTML = `${t}<span class="tsys">— ${ctx.name}</span>`;
+        Taskbar.rename(id, t);
+      },
+      setStatus(text) { if (statusEl) statusEl.querySelector(".sb-l").textContent = text; },
+      close() { close(id); }
+    };
+    win.ctx = winCtx;
+
+    // Mount program content
+    try {
+      const node = program.create(winCtx);
+      if (node) content.appendChild(node);
+    } catch (e) {
+      content.innerHTML = `<div class="prog-pad" style="color:#a33;">Program error: ${e.message}</div>`;
+    }
+
+    // --- events ---
+    el.addEventListener("pointerdown", () => focus(id));
+
+    tb.addEventListener("pointerdown", ev => {
+      if (ev.target.closest(".tbtn")) return;
+      startDrag(win, ev);
+    });
+    tb.addEventListener("dblclick", ev => {
+      if (ev.target.closest(".tbtn")) return;
+      toggleMax(id);
+    });
+    tb.querySelectorAll(".tbtn").forEach(btn => {
+      btn.addEventListener("click", ev => {
+        ev.stopPropagation();
+        const act = btn.dataset.act;
+        if (act === "close") close(id);
+        else if (act === "min") minimize(id);
+        else if (act === "max") toggleMax(id);
+      });
+    });
+
+    el.querySelectorAll(".rs").forEach(h => {
+      h.addEventListener("pointerdown", ev => startResize(win, ev, h.dataset.dir));
+    });
+
+    Taskbar.add(id, program, win.title);
+    focus(id);
+    return id;
+  }
+
+  function close(id) {
+    const w = windows.get(id);
+    if (!w) return;
+    try { w.program.destroy && w.program.destroy(w.ctx); } catch (e) {}
+    w.el.remove();
+    windows.delete(id);
+    Taskbar.remove(id);
+    focusTopmost();
+  }
+
+  function minimize(id) {
+    const w = windows.get(id);
+    if (!w) return;
+    w.state = "minimized";
+    w.el.classList.add("minimized");
+    Taskbar.setActive(null);
+    focusTopmost();
+  }
+
+  function restore(id) {
+    const w = windows.get(id);
+    if (!w) return;
+    w.state = w.prevRect ? "maximized" : "normal";
+    w.el.classList.remove("minimized");
+    focus(id);
+  }
+
+  function toggleMax(id) {
+    const w = windows.get(id);
+    if (!w) return;
+    const dsk = desktop().getBoundingClientRect();
+    if (w.state !== "maximized") {
+      w.prevRect = {
+        left: w.el.style.left, top: w.el.style.top,
+        width: w.el.style.width, height: w.el.style.height
+      };
+      w.el.style.left = "0px"; w.el.style.top = "0px";
+      w.el.style.width = dsk.width + "px"; w.el.style.height = dsk.height + "px";
+      w.el.classList.add("maximized");
+      w.state = "maximized";
+    } else {
+      const p = w.prevRect || { left: "60px", top: "40px", width: "500px", height: "380px" };
+      w.el.style.left = p.left; w.el.style.top = p.top;
+      w.el.style.width = p.width; w.el.style.height = p.height;
+      w.el.classList.remove("maximized");
+      w.state = "normal";
+      w.prevRect = null;
+    }
+  }
+
+  /* Dragging via pointer events; keeps the title bar reachable. */
+  function startDrag(win, ev) {
+    if (win.state === "maximized") return;
+    ev.preventDefault();
+    focus(win.id);
+    const startX = ev.clientX, startY = ev.clientY;
+    const rect = win.el.getBoundingClientRect();
+    const dsk = desktop().getBoundingClientRect();
+    const offX = startX - rect.left, offY = startY - rect.top;
+
+    function move(e) {
+      let nx = e.clientX - offX;
+      let ny = e.clientY - offY;
+      // constraints: keep >= 60px of window on screen, titlebar never above top
+      nx = Math.max(-(rect.width - 60), Math.min(nx, dsk.width - 60));
+      ny = Math.max(0, Math.min(ny, dsk.height - 24));
+      win.el.style.left = nx + "px";
+      win.el.style.top = ny + "px";
+    }
+    function up() {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  }
+
+  /* Resizing from any edge/corner; respects program min sizes. */
+  function startResize(win, ev, dir) {
+    if (win.state === "maximized") return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    focus(win.id);
+    const rect = win.el.getBoundingClientRect();
+    const dskRect = desktop().getBoundingClientRect();
+    const startX = ev.clientX, startY = ev.clientY;
+    const minW = win.program.minWidth || 240;
+    const minH = win.program.minHeight || 140;
+    const orig = { left: rect.left - dskRect.left, top: rect.top - dskRect.top, w: rect.width, h: rect.height };
+
+    function move(e) {
+      const dx = e.clientX - startX, dy = e.clientY - startY;
+      let { left, top, w, h } = orig;
+      if (dir.includes("e")) w = Math.max(minW, orig.w + dx);
+      if (dir.includes("s")) h = Math.max(minH, orig.h + dy);
+      if (dir.includes("w")) { w = Math.max(minW, orig.w - dx); left = orig.left + (orig.w - w); }
+      if (dir.includes("n")) { h = Math.max(minH, orig.h - dy); top = Math.max(0, orig.top + (orig.h - h)); h = orig.h + (orig.top - top); }
+      win.el.style.left = left + "px";
+      win.el.style.top = top + "px";
+      win.el.style.width = w + "px";
+      win.el.style.height = h + "px";
+    }
+    function up() {
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+    }
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+  }
+
+  function isMinimized(id) {
+    const w = windows.get(id);
+    return w ? w.state === "minimized" : false;
+  }
+  function isFocused(id) {
+    const w = windows.get(id);
+    return w ? w.el.classList.contains("focused") : false;
+  }
+
+  return { open, close, minimize, restore, focus, isMinimized, isFocused };
+})();
+
+/* ---------- Taskbar ---------- */
+const Taskbar = (() => {
+  const container = () => document.getElementById("task-buttons");
+  const buttons = new Map();
+
+  function add(id, program, title) {
+    const b = document.createElement("div");
+    b.className = "task-btn active";
+    b.innerHTML = `<i class="ti ${program.icon}" style="font-size:12px;flex:0 0 auto;"></i><span>${title}</span>`;
+    b.addEventListener("click", () => {
+      if (WM.isMinimized(id)) WM.restore(id);
+      else if (WM.isFocused(id)) WM.minimize(id);
+      else WM.focus(id);
+    });
+    container().appendChild(b);
+    buttons.set(id, b);
+  }
+  function remove(id) {
+    const b = buttons.get(id);
+    if (b) b.remove();
+    buttons.delete(id);
+  }
+  function rename(id, title) {
+    const b = buttons.get(id);
+    if (b) b.querySelector("span").textContent = title;
+  }
+  function setActive(id) {
+    buttons.forEach((b, key) => b.classList.toggle("active", key === id));
+  }
+  return { add, remove, rename, setActive };
+})();
+
+/* ---------- Clock ---------- */
+setInterval(() => {
+  const el = document.getElementById("tray-clock");
+  if (el) el.textContent = new Date().toTimeString().slice(0, 8);
+}, 1000);
+
+/* ---------- Program registry ---------- */
+const Programs = (() => {
+  const list = [];
+  function register(p) { list.push(p); }
+  function get(id) { return list.find(p => p.id === id); }
+  function all() { return list.slice(); }
+  return { register, get, all };
+})();
+
+/* ============================================================
+   Demo programs — prove the window manager & plugin API work.
+   Real programs (Dataset browser, Spool browser, …) follow in
+   Phase 2 and use exactly this interface.
+   ============================================================ */
+
+/* Welcome */
+Programs.register({
+  id: "welcome",
+  name: "Welcome",
+  icon: "ti-home",
+  iconBg: "#1084d0", iconColor: "#fff",
+  defaultWidth: 460, defaultHeight: 330,
+  desktopIcon: true,
+  create(ctx) {
+    const d = document.createElement("div");
+    d.className = "prog-pad";
+    d.innerHTML = `
+      <h1>Welcome to mvsMF Desktop</h1>
+      <p>This is the <b>Phase 1 shell prototype</b>: window manager,
+      taskbar, start menu, login and the program plugin API.</p>
+      <p>Try it out:</p>
+      <p>• Drag windows by their title bar<br>
+         • Resize from any edge or corner<br>
+         • Double-click the title bar to maximize<br>
+         • Minimize to the taskbar and bring windows back<br>
+         • Open several windows and watch the z-order</p>
+      <p>Programs are plugins — each one registers with
+      <code>Programs.register({...})</code> and receives a system context
+      with an authenticated <code>apiFetch()</code>.</p>
+      <p style="color:#777;">Connected to <code>${ctx.system.name}</code>
+      as <code>${ctx.system.user || "demo"}</code>.</p>`;
+    return d;
+  }
+});
+
+/* System info — first program that actually talks to mvsMF */
+Programs.register({
+  id: "sysinfo",
+  name: "System info",
+  icon: "ti-info-circle",
+  iconBg: "#4db84d", iconColor: "#fff",
+  defaultWidth: 480, defaultHeight: 340,
+  desktopIcon: true,
+  statusBar: true,
+  toolbar: [
+    { label: "Refresh", icon: "ti-refresh", onClick(ctx) { ctx._load && ctx._load(); } }
+  ],
+  create(ctx) {
+    const d = document.createElement("div");
+    d.className = "prog-mono";
+    d.textContent = "Loading /zosmf/info …";
+
+    ctx._load = async () => {
+      ctx.setStatus("GET /zosmf/info …");
+      if (ctx.system.demo) {
+        // canned response so the shell can be explored without a backend
+        d.textContent = JSON.stringify({
+          zosmf_saf_realm: "SAFRealm",
+          zosmf_port: "1080",
+          zosmf_full_version: "2.0.0",
+          api_version: "1",
+          zos_version: "MVS 3.8j",
+          zosmf_hostname: "demo.local",
+          note: "demo mode — canned data, no backend call"
+        }, null, 2);
+        ctx.setStatus("Demo mode — canned data");
+        return;
+      }
+      try {
+        const resp = await ctx.system.apiFetch("/zosmf/info");
+        const body = await resp.text();
+        try { d.textContent = JSON.stringify(JSON.parse(body), null, 2); }
+        catch (e) { d.textContent = body; }
+        ctx.setStatus(`HTTP ${resp.status} — ${ctx.system.baseUrl}/zosmf/info`);
+      } catch (e) {
+        d.textContent = "Request failed: " + e.message;
+        ctx.setStatus("Request failed");
+      }
+    };
+    ctx._load();
+    return d;
+  }
+});
+
+/* Systems manager */
+Programs.register({
+  id: "systems",
+  name: "Systems",
+  icon: "ti-server",
+  iconBg: "#888880", iconColor: "#fff",
+  defaultWidth: 460, defaultHeight: 320,
+  desktopIcon: false,
+  statusBar: true,
+  create(ctx) {
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "display:flex;flex-direction:column;height:100%;";
+    const listEl = document.createElement("div");
+    listEl.style.cssText = "flex:1;overflow:auto;";
+    wrap.appendChild(listEl);
+
+    const addBar = document.createElement("div");
+    addBar.className = "sys-add";
+    addBar.innerHTML = `
+      <input class="in-name" placeholder="NAME" maxlength="8">
+      <input class="in-host" placeholder="host / IP">
+      <input class="in-port" placeholder="1080" maxlength="5">
+      <button class="lb-btn" style="padding:2px 10px;">Add</button>`;
+    wrap.appendChild(addBar);
+
+    async function render() {
+      const systems = SystemRegistry.list();
+      listEl.innerHTML = "";
+      ctx.setStatus(`${systems.length} system(s) configured`);
+      for (const s of systems) {
+        const row = document.createElement("div");
+        row.className = "sys-row";
+        row.innerHTML = `
+          <span class="led" style="background:#999;"></span>
+          <span class="name">${s.name}${s.local ? ' <span style="color:#888;font-size:9px;">(local)</span>' : ""}</span>
+          <span class="host">${s.host}:${s.port}</span>
+          <span class="stat">checking…</span>
+          ${s.local ? "" : '<span class="rm" title="Remove"><i class="ti ti-trash"></i></span>'}`;
+        const rm = row.querySelector(".rm");
+        if (rm) rm.addEventListener("click", () => {
+          SystemRegistry.remove(s.name);
+          render();
+        });
+        listEl.appendChild(row);
+        // async status check per system
+        checkSystem(s).then(res => {
+          const led = row.querySelector(".led");
+          const stat = row.querySelector(".stat");
+          if (res.status === "connected") { led.style.background = "var(--wps-led-green)"; stat.textContent = "connected"; }
+          else if (res.status === "auth_failed") { led.style.background = "var(--wps-led-yellow)"; stat.textContent = "auth required"; }
+          else if (res.status === "cors_blocked") { led.style.background = "var(--wps-led-yellow)"; stat.textContent = "cors blocked"; }
+          else { led.style.background = "var(--wps-led-red)"; stat.textContent = res.status; }
+        });
+      }
+    }
+
+    addBar.querySelector("button").addEventListener("click", () => {
+      const name = addBar.querySelector(".in-name").value.trim().toUpperCase();
+      const host = addBar.querySelector(".in-host").value.trim();
+      const port = parseInt(addBar.querySelector(".in-port").value.trim() || "1080", 10);
+      if (!name || !host) return;
+      SystemRegistry.add({ name, host, port });
+      addBar.querySelectorAll("input").forEach(i => i.value = "");
+      render();
+      Login.refreshSystems();   // keep login dropdown in sync
+      StartMenu.refreshSystems();
+    });
+
+    render();
+    return wrap;
+  }
+});
+
+/* About */
+Programs.register({
+  id: "about",
+  name: "About",
+  icon: "ti-info-circle",
+  iconBg: "#666", iconColor: "#fff",
+  defaultWidth: 380, defaultHeight: 260,
+  desktopIcon: false,
+  create() {
+    const d = document.createElement("div");
+    d.className = "prog-pad";
+    d.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <div style="width:40px;height:40px;border-radius:4px;background:linear-gradient(135deg,#1084d0,#00007b);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:500;color:#fff;">M</div>
+        <div><div style="font-size:15px;font-weight:500;">mvsMF Desktop</div>
+        <div style="color:#777;font-size:11px;">Version 2.0.0-alpha1 — Phase 1 shell</div></div>
+      </div>
+      <p>A browser desktop for MVS 3.8j, inspired by the OS/2 Workplace Shell.</p>
+      <p>Backend: <code>mvsMF</code> (z/OSMF-compatible REST API),
+      <code>httprexx</code>, <code>httpjes</code> on <code>HTTPD</code>.</p>
+      <p style="color:#777;">mvslovers — running modern APIs on 1981 iron.</p>`;
+    return d;
+  }
+});
+
+/* Stub for the Phase 2 programs — proves multiple instances & cascade */
+function registerStub(id, name, icon, iconBg, iconColor) {
+  Programs.register({
+    id, name, icon, iconBg, iconColor,
+    defaultWidth: 400, defaultHeight: 220,
+    desktopIcon: true,
+    stub: true,
+    create() {
+      const d = document.createElement("div");
+      d.className = "prog-pad";
+      d.innerHTML = `
+        <h1>${name}</h1>
+        <p>This program arrives in <b>Phase 2</b>.</p>
+        <p>The window you are looking at is served by the plugin API —
+        the real implementation will use the same interface and the
+        system context's <code>apiFetch()</code>.</p>`;
+      return d;
+    }
+  });
+}
+registerStub("datasets",  "Dataset browser",  "ti-database",   "#e8d44d", "#5a4e00");
+registerStub("ussfiles",  "USS file manager", "ti-folder",     "#4d8de8", "#fff");
+registerStub("spool",     "JES spool browser","ti-list",       "#4db84d", "#fff");
+registerStub("console",   "MVS console",      "ti-terminal-2", "#1a1a1a", "#33ff33");
+registerStub("rexx",      "REXX workbench",   "ti-code",       "#b84d4d", "#fff");
+registerStub("jobsubmit", "Job submit",       "ti-upload",     "#8855bb", "#fff");
+registerStub("localfiles","Local files",      "ti-files",      "#dd8833", "#fff");
+
+/* ---------- Desktop icons ---------- */
+function buildDesktopIcons() {
+  const host = document.getElementById("desktop-icons");
+  host.innerHTML = "";
+  Programs.all().filter(p => p.desktopIcon).forEach(p => {
+    const ic = document.createElement("div");
+    ic.className = "desk-icon";
+    ic.innerHTML = `
+      <div class="box" style="background:${p.iconBg};">
+        <i class="ti ${p.icon}" style="color:${p.iconColor};"></i>
+      </div>
+      <span class="label">${p.name}</span>`;
+    ic.addEventListener("click", () => {
+      document.querySelectorAll(".desk-icon.selected").forEach(x => x.classList.remove("selected"));
+      ic.classList.add("selected");
+    });
+    ic.addEventListener("dblclick", () => WM.open(p));
+    host.appendChild(ic);
+  });
+  // click on empty desktop clears selection
+  document.getElementById("desktop").addEventListener("pointerdown", ev => {
+    if (ev.target.id === "desktop")
+      document.querySelectorAll(".desk-icon.selected").forEach(x => x.classList.remove("selected"));
+  });
+}
+
+/* ---------- Start menu ---------- */
+const StartMenu = (() => {
+  const menu = () => document.getElementById("startmenu");
+  const btn = () => document.getElementById("start-btn");
+  const submenu = () => document.getElementById("sys-submenu");
+
+  function build() {
+    const host = document.getElementById("sm-programs");
+    host.innerHTML = "";
+    Programs.all().filter(p => p.id !== "about").forEach(p => {
+      const item = document.createElement("div");
+      item.className = "sm-item";
+      item.innerHTML = `
+        <span class="pico" style="background:${p.iconBg};">
+          <i class="ti ${p.icon}" style="color:${p.iconColor};"></i>
+        </span>${p.name}`;
+      item.addEventListener("click", () => { hide(); WM.open(p); });
+      host.appendChild(item);
+    });
+
+    document.getElementById("sm-systems").addEventListener("click", ev => {
+      ev.stopPropagation();
+      toggleSubmenu();
+    });
+    document.getElementById("sm-settings").addEventListener("click", () => {
+      hide();
+      WM.open(Programs.get("systems"));   // settings = systems manager for now
+    });
+    document.getElementById("sm-about").addEventListener("click", () => {
+      hide(); WM.open(Programs.get("about"));
+    });
+    document.getElementById("sm-logout").addEventListener("click", () => {
+      hide(); Login.logout();
+    });
+
+    btn().addEventListener("click", ev => { ev.stopPropagation(); toggle(); });
+    document.addEventListener("pointerdown", ev => {
+      if (!menu().contains(ev.target) && !btn().contains(ev.target) && !submenu().contains(ev.target)) hide();
+    });
+  }
+
+  function refreshSystems() {
+    const sm = submenu();
+    sm.innerHTML = "";
+    SystemRegistry.list().forEach(s => {
+      const item = document.createElement("div");
+      item.className = "sm-item";
+      item.innerHTML = `
+        <span class="led" style="background:#999;"></span>
+        <span class="mono">${s.name}</span>
+        <span class="hostinfo">${s.host}:${s.port}</span>`;
+      item.addEventListener("click", () => {
+        hideSubmenu(); hide();
+        // Phase 1: open the systems manager focused on that system
+        WM.open(Programs.get("systems"));
+      });
+      sm.appendChild(item);
+      checkSystem(s).then(res => {
+        item.querySelector(".led").style.background =
+          res.status === "connected" ? "var(--wps-led-green)" :
+          (res.status === "auth_failed" || res.status === "cors_blocked") ? "var(--wps-led-yellow)" : "var(--wps-led-red)";
+      });
+    });
+    const manage = document.createElement("div");
+    manage.className = "sm-item";
+    manage.innerHTML = `<span class="gico"><i class="ti ti-settings"></i></span>Manage systems…`;
+    manage.addEventListener("click", () => { hideSubmenu(); hide(); WM.open(Programs.get("systems")); });
+    sm.appendChild(manage);
+  }
+
+  function toggleSubmenu() {
+    const sm = submenu();
+    if (sm.classList.contains("open")) { hideSubmenu(); return; }
+    refreshSystems();
+    const anchor = document.getElementById("sm-systems").getBoundingClientRect();
+    sm.style.left = (anchor.right + 2) + "px";
+    sm.style.top = Math.max(4, anchor.top - 4) + "px";
+    sm.style.bottom = "auto";
+    sm.classList.add("open");
+  }
+  function hideSubmenu() { submenu().classList.remove("open"); }
+  function show() { menu().classList.add("open"); btn().classList.add("open"); }
+  function hide() { menu().classList.remove("open"); btn().classList.remove("open"); hideSubmenu(); }
+  function toggle() { menu().classList.contains("open") ? hide() : show(); }
+
+  return { build, refreshSystems, hide };
+})();
+
+/* ---------- Login ---------- */
+const Login = (() => {
+  const layer = () => document.getElementById("login-layer");
+  const sel = () => document.getElementById("login-system");
+  let checkSeq = 0;
+
+  function refreshSystems() {
+    const s = sel();
+    const current = s.value;
+    s.innerHTML = "";
+    SystemRegistry.list().forEach(sys => {
+      const o = document.createElement("option");
+      o.value = sys.name;
+      o.textContent = `${sys.name} — ${sys.host}:${sys.port}` + (sys.local ? " (local)" : "");
+      s.appendChild(o);
+    });
+    const def = SystemRegistry.load().defaultSystem;
+    s.value = current && [...s.options].some(o => o.value === current) ? current : def;
+  }
+
+  function setStatus(cls, ledColor, text) {
+    const st = document.getElementById("login-status");
+    st.className = cls;
+    st.querySelector(".led").style.background = ledColor;
+    document.getElementById("login-status-text").textContent = text;
+  }
+
+  async function checkSelected() {
+    const mySeq = ++checkSeq;
+    const sys = SystemRegistry.get(sel().value);
+    if (!sys) { setStatus("warn", "var(--wps-led-yellow)", "No systems configured — use Manage systems…"); return; }
+    setStatus("wait", "#999", `Checking ${sys.name} …`);
+    const res = await checkSystem(sys);
+    if (mySeq !== checkSeq) return;   // stale response, selection changed
+    if (res.status === "connected") {
+      const ver = res.info && (res.info.zos_version || res.info.zosmf_full_version);
+      setStatus("ok", "var(--wps-led-green)", `Connected${ver ? " — " + ver : ""}`);
+    } else if (res.status === "auth_failed") {
+      setStatus("warn", "var(--wps-led-yellow)", "Reachable — authentication required");
+    } else if (res.status === "cors_blocked") {
+      setStatus("warn", "var(--wps-led-yellow)", "Reachable — response blocked by CORS (serve this page from the HTTPD)");
+    } else {
+      setStatus("bad", "var(--wps-led-red)", "Unreachable — check host and port");
+    }
+  }
+
+  async function submit() {
+    const sys = SystemRegistry.get(sel().value);
+    const user = document.getElementById("login-user").value.trim();
+    const pass = document.getElementById("login-pass").value;
+    if (!sys) return;
+    if (!user) { setStatus("warn", "var(--wps-led-yellow)", "Enter a username"); return; }
+
+    setStatus("wait", "#999", "Authenticating …");
+    const res = await checkSystem(sys, { user, pass });
+    if (res.status === "connected") {
+      Session.system = sys;
+      Session.user = user.toUpperCase();
+      Session.pass = pass;
+      Session.demo = false;
+      const d = SystemRegistry.load();
+      d.defaultSystem = sys.name;
+      SystemRegistry.save(d);
+      enterDesktop();
+    } else if (res.status === "auth_failed") {
+      setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
+    } else if (res.status === "cors_blocked") {
+      setStatus("warn", "var(--wps-led-yellow)", "Blocked by CORS — serve this page from the HTTPD or use demo mode");
+    } else {
+      setStatus("bad", "var(--wps-led-red)", "System unreachable");
+    }
+  }
+
+  function demoLogin() {
+    Session.system = null;
+    Session.user = "DEMO";
+    Session.pass = "";
+    Session.demo = true;
+    enterDesktop();
+  }
+
+  function enterDesktop() {
+    layer().style.display = "none";
+    document.getElementById("desktop").style.display = "block";
+    document.getElementById("taskbar").style.display = "flex";
+    document.getElementById("tray-sys").textContent = Session.demo ? "DEMO" : Session.system.name;
+    document.getElementById("tray-user").textContent = Session.user;
+    document.getElementById("tray-led").style.background =
+      Session.demo ? "var(--wps-led-yellow)" : "var(--wps-led-green)";
+    // greet with the welcome window on first entry
+    WM.open(Programs.get("welcome"));
+  }
+
+  function logout() {
+    // close everything by reloading state — simplest clean slate
+    location.reload();
+  }
+
+  function init() {
+    refreshSystems();
+    checkSelected();
+    sel().addEventListener("change", checkSelected);
+    document.getElementById("login-submit").addEventListener("click", submit);
+    document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
+    document.getElementById("login-user").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("login-pass").focus(); });
+    document.getElementById("login-cancel").addEventListener("click", () => {
+      document.getElementById("login-user").value = "";
+      document.getElementById("login-pass").value = "";
+    });
+    document.getElementById("login-demo").addEventListener("click", demoLogin);
+    document.getElementById("login-manage").addEventListener("click", () => {
+      // Phase 1: quick inline prompt-based add; the Systems program
+      // offers full management once logged in.
+      const name = prompt("System name (e.g. MVSD):");
+      if (!name) return;
+      const host = prompt("Host or IP:");
+      if (!host) return;
+      const port = parseInt(prompt("Port:", "1080") || "1080", 10);
+      SystemRegistry.add({ name: name.toUpperCase(), host, port });
+      refreshSystems();
+      checkSelected();
+    });
+  }
+
+  return { init, refreshSystems, logout };
+})();
+
+/* ---------- Tray system name → open systems manager ---------- */
+document.getElementById("tray-sys").addEventListener("click", () => {
+  WM.open(Programs.get("systems"));
+});
+
+/* ---------- Boot ---------- */
+SystemRegistry.ensureLocal();   // page origin = default system when served from the HTTPD
+buildDesktopIcons();
+StartMenu.build();
+Login.init();
+</script>
+</body>
+</html>

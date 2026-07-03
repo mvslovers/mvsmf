@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="os2">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mvsMF Desktop</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="stylesheet" href="css/desktop.css">
+</head>
+<body>
+
+<!-- ================= Login layer ================= -->
+<div id="login-layer">
+  <div id="login-box">
+    <div class="lb-title">
+      <div class="ticon"><i class="ti ti-lock"></i></div>
+      <span class="t">mvsMF Desktop — Login</span>
+    </div>
+    <div class="lb-body">
+      <div class="lb-logo">
+        <div class="inner">
+          <div class="sq">M</div>
+          <div><div class="t1">mvs<span style="color:var(--wps-logo-accent);">MF</span> Desktop</div>
+               <div class="t2">MVS management facility</div></div>
+        </div>
+      </div>
+      <div class="lb-field">
+        <label for="login-system">System</label>
+        <select id="login-system"></select>
+      </div>
+      <div id="login-status" class="wait">
+        <span class="led" style="background:var(--wps-led-off);"></span>
+        <span id="login-status-text">Checking connection…</span>
+      </div>
+      <div class="lb-field">
+        <label for="login-user">Username</label>
+        <input id="login-user" autocomplete="username" spellcheck="false">
+      </div>
+      <div class="lb-field">
+        <label for="login-pass">Password</label>
+        <input id="login-pass" type="password" autocomplete="current-password">
+      </div>
+      <div class="lb-buttons">
+        <button class="lb-btn" id="login-cancel">Cancel</button>
+        <button class="lb-btn primary" id="login-submit">Login</button>
+      </div>
+      <div class="lb-links">
+        <span class="lb-link" id="login-manage">Manage systems…</span>
+        <span class="lb-link" id="login-demo">Demo mode</span>
+      </div>
+    </div>
+  </div>
+  <div id="login-version">mvsMF Desktop v2.0.0-alpha1</div>
+</div>
+
+<!-- ================= Desktop ================= -->
+<div id="desktop" style="display:none;">
+  <div id="desktop-icons"></div>
+</div>
+
+<!-- ================= Taskbar ================= -->
+<div id="taskbar" style="display:none;">
+  <div class="tb-left">
+    <div id="start-btn"><span class="logo">M</span>Start</div>
+    <div class="tb-sep"></div>
+    <div id="task-buttons" style="display:flex;gap:3px;overflow:hidden;"></div>
+  </div>
+  <div id="tray">
+    <span class="led" id="tray-led" style="background:var(--wps-led-green);"></span>
+    <span class="sysname" id="tray-sys">—</span>
+    <span class="dim">|</span>
+    <span class="user" id="tray-user">—</span>
+    <span class="dim">|</span>
+    <span class="clock" id="tray-clock">--:--:--</span>
+  </div>
+</div>
+
+<!-- ================= Start menu ================= -->
+<div id="startmenu">
+  <div class="sm-head">
+    <div class="logo">M</div>
+    <div><div class="t1">mvsMF Desktop</div><div class="t2">v2.0.0-alpha1</div></div>
+  </div>
+  <div class="sm-section" id="sm-programs"></div>
+  <div class="sm-section">
+    <div class="sm-item" id="sm-systems">
+      <span class="gico"><i class="ti ti-server"></i></span>Systems
+      <span class="chev"><i class="ti ti-chevron-right"></i></span>
+    </div>
+    <div class="sm-item" id="sm-settings">
+      <span class="gico"><i class="ti ti-settings"></i></span>Settings
+    </div>
+    <div class="sm-item" id="sm-about">
+      <span class="gico"><i class="ti ti-info-circle"></i></span>About
+    </div>
+    <div class="sm-item" id="sm-logout">
+      <span class="gico"><i class="ti ti-logout"></i></span>Logout
+    </div>
+  </div>
+</div>
+<div id="sys-submenu"></div>
+
+<!-- ES modules: the whole shell boots from shell.js -->
+<script type="module" src="js/shell.js"></script>
+</body>
+</html>

@@ -51,3 +51,18 @@ stop-mvs:
 		echo "$(MVS_CONTAINER) does not exist"; \
 	fi
 .PHONY: stop-mvs
+
+# --- Desktop frontend deploy (project-specific) ---
+# Upload static/ (the mvsMF Desktop) to the HTTPD UFS via our own USS REST
+# API, dogfooding it. Default matches the HTTPD's default DOCROOT (/www),
+# so the desktop is served at /mvsmf/. Override for a custom DOCROOT,
+# e.g.  make deploy-desktop DESKTOP_UFS_DIR=/wwwroot/mvsmf
+DESKTOP_UFS_DIR ?= /www/mvsmf
+
+deploy-desktop:
+	@DESKTOP_UFS_DIR='$(DESKTOP_UFS_DIR)' tools/deploy-desktop.sh
+.PHONY: deploy-desktop
+
+deploy-desktop-dry:
+	@DESKTOP_UFS_DIR='$(DESKTOP_UFS_DIR)' tools/deploy-desktop.sh --dry-run
+.PHONY: deploy-desktop-dry

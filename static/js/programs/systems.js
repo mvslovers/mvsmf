@@ -52,14 +52,18 @@ Programs.register({
           render();
         });
         listEl.appendChild(row);
-        // async status check per system
+        // async status check per system — green whenever reachable at all,
+        // red only when unreachable; the text keeps the distinct detail
         checkSystem(s).then(res => {
           const led = row.querySelector(".led");
           const stat = row.querySelector(".stat");
-          if (res.status === "connected") { led.style.background = "var(--wps-led-green)"; stat.textContent = "connected"; }
-          else if (res.status === "auth_failed") { led.style.background = "var(--wps-led-yellow)"; stat.textContent = "auth required"; }
-          else if (res.status === "cors_blocked") { led.style.background = "var(--wps-led-yellow)"; stat.textContent = "cors blocked"; }
-          else { led.style.background = "var(--wps-led-red)"; stat.textContent = res.status; }
+          led.style.background = res.status === "unreachable"
+            ? "var(--wps-led-red)" : "var(--wps-led-green)";
+          if (res.status === "connected") stat.textContent = "connected";
+          else if (res.status === "auth_failed") stat.textContent = "login required";
+          else if (res.status === "cors_blocked") stat.textContent = "cross-origin";
+          else if (res.status === "unreachable") stat.textContent = "unreachable";
+          else stat.textContent = "HTTP " + (res.code || "?");
         });
       }
     }

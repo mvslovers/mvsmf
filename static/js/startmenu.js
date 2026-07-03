@@ -66,9 +66,9 @@ export const StartMenu = (() => {
       });
       sm.appendChild(item);
       checkSystem(s).then(res => {
+        // green whenever reachable at all; red only when unreachable
         item.querySelector(".led").style.background =
-          res.status === "connected" ? "var(--wps-led-green)" :
-          (res.status === "auth_failed" || res.status === "cors_blocked") ? "var(--wps-led-yellow)" : "var(--wps-led-red)";
+          res.status === "unreachable" ? "var(--wps-led-red)" : "var(--wps-led-green)";
       });
     });
     const manage = document.createElement("div");

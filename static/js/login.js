@@ -42,15 +42,20 @@ export const Login = (() => {
     setStatus("wait", "var(--wps-led-off)", `Checking ${sys.name} …`);
     const res = await checkSystem(sys);
     if (mySeq !== checkSeq) return;   // stale response, selection changed
+    // Green whenever the endpoint is reachable at all; only "unreachable"
+    // is red. The distinct texts keep the detail the LED no longer encodes.
     if (res.status === "connected") {
       const ver = res.info && (res.info.zos_version || res.info.zosmf_full_version);
       setStatus("ok", "var(--wps-led-green)", `Connected${ver ? " — " + ver : ""}`);
     } else if (res.status === "auth_failed") {
-      setStatus("warn", "var(--wps-led-yellow)", "Reachable — authentication required");
+      setStatus("ok", "var(--wps-led-green)", "Connected — login required");
     } else if (res.status === "cors_blocked") {
-      setStatus("warn", "var(--wps-led-yellow)", "Reachable — response blocked by CORS (serve this page from the HTTPD)");
-    } else {
+      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending)");
+    } else if (res.status === "unreachable") {
       setStatus("bad", "var(--wps-led-red)", "Unreachable — check host and port");
+    } else {
+      // reachable, but /zosmf/info returned an unexpected HTTP status
+      setStatus("ok", "var(--wps-led-green)", `Reachable — HTTP ${res.code || "?"}`);
     }
   }
 
@@ -75,7 +80,8 @@ export const Login = (() => {
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
     } else if (res.status === "cors_blocked") {
-      setStatus("warn", "var(--wps-led-yellow)", "Blocked by CORS — serve this page from the HTTPD or use demo mode");
+      // reachable, but cross-origin blocks reading the auth response
+      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending); serve from the HTTPD or use demo mode");
     } else {
       setStatus("bad", "var(--wps-led-red)", "System unreachable");
     }

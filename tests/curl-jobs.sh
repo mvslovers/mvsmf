@@ -655,6 +655,59 @@ test_spool_records() {
 	fi
 }
 
+test_spool_records_exact_count() {
+	echo ""
+	echo "--- Spool File Records: exact record count (issue #158) ---"
+
+	if [ -z "$SUBMIT_JOBNAME" ] || [ -z "$SUBMIT_JOBID" ]; then
+		skip "spool records exact count (no submitted job)"
+		return
+	fi
+
+	# JESJCLIN is a SYSIN dataset: its PDDB record count is final, and the
+	# JES2 pre-built deletion line sits in the chain right behind it.
+	local files_resp
+	files_resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${SUBMIT_JOBNAME}/${SUBMIT_JOBID}/files")
+	split_response "$files_resp"
+
+	local ddid reccount
+	ddid=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("JESJCLIN"))][0].id' 2>/dev/null)
+	reccount=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("JESJCLIN"))][0]["record-count"]' 2>/dev/null)
+
+	if [ -z "$ddid" ] || [ "$ddid" = "null" ]; then
+		skip "spool records exact count (no JESJCLIN)"
+		return
+	fi
+
+	local resp
+	resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${SUBMIT_JOBNAME}/${SUBMIT_JOBID}/files/${ddid}/records")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "read JESJCLIN records"
+
+	local lines
+	lines=$(printf '%s' "$BODY" | grep -c '' 2>/dev/null)
+	if [ "$lines" = "$reccount" ]; then
+		pass "JESJCLIN line count equals record-count ($reccount)"
+	else
+		fail "JESJCLIN line count equals record-count" "expected $reccount, got $lines"
+	fi
+
+	if printf '%s' "$BODY" | grep -q 'JOB DELETED BY JES2'; then
+		fail "no JES2 deletion tombstone in output" "tombstone line present"
+	else
+		pass "no JES2 deletion tombstone in output"
+	fi
+
+	if printf '%s' "$BODY" | grep -q '^- - - - '; then
+		fail "no trailing dashed separator" "separator line present"
+	else
+		pass "no trailing dashed separator"
+	fi
+}
+
 test_spool_records_invalid_ddid() {
 	echo ""
 	echo "--- Spool File Records: invalid DDID ---"
@@ -753,6 +806,7 @@ test_spool_files_not_found
 
 # Spool records tests
 test_spool_records
+test_spool_records_exact_count
 test_spool_records_invalid_ddid
 
 # Purge tests (last, since it removes the test job)

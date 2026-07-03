@@ -480,9 +480,28 @@ quit:
 // private functions
 //
 
+/*
+ * Line cap for SYSIN spool datasets (issue #158): JES2 pre-formats the
+ * "JOB DELETED BY JES2 OR CANCELLED BY OPERATOR BEFORE EXECUTION" line
+ * into the JCLIN spool chain behind the real records - it is only meant
+ * to be printed when a job dies before execution. jesprint() walks the
+ * block chain to the EOB marker, so without a cap that line leaks into
+ * every response. SYSIN record counts are final after input processing,
+ * so capping at the PDDB count is exact; SYSOUT datasets stay uncapped
+ * (their counts may lag while a job is active). The cap travels to the
+ * per-line callback through the per-task GRT (grtapp3) - RENT-safe and
+ * private to this worker thread.
+ */
+typedef struct spool_cap {
+	unsigned	limit;		/* stop after this many lines (0 = no cap) */
+	unsigned	count;		/* lines printed so far                    */
+} SPOOL_CAP;
+
+#define RC_SPOOL_CAP	(-77)	/* sentinel: cap reached, normal end */
+
 __asm__("\n&FUNC	SETC 'do_print_sysout_line'");
-static int 
-do_print_sysout_line(const char *line, unsigned linelen) 
+static int
+do_print_sysout_line(const char *line, unsigned linelen)
 {
 	int rc = 0;
 
@@ -494,8 +513,18 @@ do_print_sysout_line(const char *line, unsigned linelen)
 	CLIBGRT *grt = __grtget();
 	HTTPD *httpd = grt->grtapp1;
 	HTTPC *httpc = grt->grtapp2;
+	SPOOL_CAP *cap = (SPOOL_CAP *) grt->grtapp3;
+
+	/* logical end of the dataset reached - stop jesprint */
+	if (cap && cap->limit && cap->count >= cap->limit) {
+		return RC_SPOOL_CAP;
+	}
 
 	rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
+
+	if (rc >= 0 && cap) {
+		cap->count++;
+	}
 
 // switch back to httpr
 #undef httpx
@@ -517,6 +546,10 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 		goto quit;
 	}
 
+	CLIBGRT *grt = __grtget();
+	SPOOL_CAP cap;
+	unsigned printed = 0;
+
 	unsigned ii = 0;
 	for (ii = 0; ii < array_count(&job->jesdd); ii++) {
 		JESDD *dd = job->jesdd[ii];
@@ -533,23 +566,38 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 		if (!dd->mttr) {
 			continue;
 		}
-				
+
 		if ((dd->flag & FLAG_SYSIN) && !dsid) {
 			continue;
 		}
 
+		/* dashed separator between multiple DDs - never trailing */
+		if (printed) {
+			rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
+											"- - - - - - - - - - - - - - - - - - - - "
+											"- - - - - - - - - - - - - - - - - - - - "
+											"- - - - - -\r\n");
+			if (rc < 0) {
+				goto quit;
+			}
+		}
+
+		/* cap SYSIN datasets at their (final) PDDB record count so the
+		   pre-built JES2 deletion line behind the records stays hidden */
+		cap.limit = ((dd->flag & FLAG_SYSIN) && dd->records) ? dd->records : 0;
+		cap.count = 0;
+		grt->grtapp3 = &cap;
 		rc = jesprint(jes, job, dd->dsid, do_print_sysout_line);
+		grt->grtapp3 = NULL;
+
+		if (rc == RC_SPOOL_CAP) {
+			rc = 0;		/* cap reached - normal end of dataset */
+		}
 		if (rc < 0) {
 			goto quit;
 		}
 
-		rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
-										"- - - - - - - - - - - - - - - - - - - - "
-										"- - - - - - - - - - - - - - - - - - - - "
-										"- - - - - -\r\n");
-		if (rc < 0) {
-			goto quit;
-		}
+		printed++;
 	}
 
 quit:

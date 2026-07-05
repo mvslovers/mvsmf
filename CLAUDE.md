@@ -124,14 +124,14 @@ clangd provides IDE diagnostics (configured in `.clangd`).
 ```
 HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsmf.c (router setup)
   → router.c (URL decode, method parse, route match, path var extraction)
-    → Middleware chain (authmw.c; logmw.c present but disabled)
+    → Middleware chain (identity_middleware in mvsmf.c; logmw.c present but disabled)
       → API handler (dsapi.c, jobsapi.c, ussapi.c, consapi.c, infoapi.c)
         → JSON response (json.c)
 ```
 
 ### Key Source Files
 
-- **mvsmf.c**: Entry point. Registers all routes and middleware, initializes the router and HTTPD session.
+- **mvsmf.c**: Entry point. Registers all routes and middleware, initializes the router and HTTPD session. `identity_middleware` reads the client identity httpd already resolved (Basic/token) via the HTTPX auth export (`http_get_acee`) and sets the task ACEE — no per-request RACF login.
 - **router.c**: HTTP routing framework. Pattern-based URL matching with `{param-name}` path parameters, percent-decoding, middleware chain execution.
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
@@ -140,7 +140,6 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **ntstore.c**: Small persistent key/value store (LRU + TTL) used by the console cursors/detections; lives in the httpd per-CGI context.
 - **mvsmfctx.c**: Wires the per-CGI context (`MVSMF_CTX`) to httpd's `http_cgictx_get`, lazy-initialising the kv-store.
 - **infoapi.c**: `/zosmf/info` endpoint (no auth required).
-- **authmw.c**: Basic Auth middleware using RACF/ACEE for security context.
 - **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
 - **xlate.c**: EBCDIC/ASCII character translation tables.

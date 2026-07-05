@@ -64,8 +64,7 @@ static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
 static char* tokenize(char *str, const char *delim, char **saveptr);
 static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                           const char *user, const char *password);
-static int get_basic_auth_credentials(Session *session, char *user, size_t user_len,
-                                      char *password, size_t password_len);
+static int get_basic_auth_password(Session *session, char *password, size_t password_len);
 
 static const unsigned char ASCII_CRLF[] = {CR, LF};
 
@@ -1194,11 +1193,11 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 
 	/* process jobcard: inject USER/PASSWORD */
 	{
-		char user[64] = {0};
+		UCHAR user[64] = {0};
 		char password[256] = {0};
 
-		if (get_basic_auth_credentials(session, user, sizeof(user),
-									   password, sizeof(password)) < 0) {
+		if (!http_get_userid(session->httpc, user, sizeof(user)) ||
+		    get_basic_auth_password(session, password, sizeof(password)) < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
 							"Job submission requires Basic authentication credentials", NULL, 0);
@@ -1206,7 +1205,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 			goto quit;
 		}
 
-		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
+		rc = process_jobcard(lines, num_lines, jobname, jobclass, (char *)user, password);
 		if (rc < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
@@ -1539,11 +1538,15 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
  * only works while job submission authenticates with Basic Auth on every
  * call; it has no answer for a token-authenticated session. See issue
  * #164 for the open architecture question.
+ *
+ * The userid for USER= comes from http_get_userid() instead (the RACF-
+ * verified, canonically-cased form from the ACEE httpd already resolved)
+ * -- not from re-decoding this header -- so it doesn't depend on however
+ * the client happened to case it on the wire.
  */
-__asm__("\n&FUNC    SETC 'get_basic_auth_credentials'");
+__asm__("\n&FUNC    SETC 'get_basic_auth_password'");
 static int
-get_basic_auth_credentials(Session *session, char *user, size_t user_len,
-                          char *password, size_t password_len)
+get_basic_auth_password(Session *session, char *password, size_t password_len)
 {
 	const char *authhdr = getHeaderParam(session, "Authorization");
 	UCHAR *decoded = NULL;
@@ -1553,12 +1556,6 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 	size_t n;
 	int rc = -1;
 
-	/* TEMPORARY diagnostic for issue #164/#165 follow-up: lengths only,
-	 * never the header content (it carries the password). Remove once
-	 * the Authorization truncation root cause is confirmed. */
-	wtof("MVSMF97D get_basic_auth_credentials: authhdr=%s len=%d",
-	    authhdr ? "present" : "absent", authhdr ? (int)strlen(authhdr) : -1);
-
 	if (!authhdr || strncmp(authhdr, "Basic ", 6) != 0) {
 		return -1;
 	}
@@ -1567,8 +1564,6 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 	if (!decoded) {
 		return -1;
 	}
-
-	wtof("MVSMF97D get_basic_auth_credentials: decoded_len=%d", (int)decoded_len);
 
 	n = decoded_len;
 	if (n >= sizeof(creds)) n = sizeof(creds) - 1;
@@ -1581,9 +1576,6 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 
 	colon = strchr(creds, ':');
 	if (colon) {
-		*colon = '\0';
-		strncpy(user, creds, user_len - 1);
-		user[user_len - 1] = '\0';
 		strncpy(password, colon + 1, password_len - 1);
 		password[password_len - 1] = '\0';
 		rc = 0;
@@ -1852,11 +1844,11 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     }
 
     /* Analyze and potentially modify job card */
-    char user[64] = {0};
+    UCHAR user[64] = {0};
     char password[256] = {0};
 
-    if (get_basic_auth_credentials(session, user, sizeof(user),
-                                   password, sizeof(password)) < 0) {
+    if (!http_get_userid(session->httpc, user, sizeof(user)) ||
+        get_basic_auth_password(session, password, sizeof(password)) < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,
@@ -1865,7 +1857,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         goto quit;
     }
 
-    rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
+    rc = process_jobcard(lines, num_lines, jobname, jobclass, (char *)user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,

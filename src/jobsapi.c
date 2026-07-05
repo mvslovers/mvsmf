@@ -1,4 +1,5 @@
 #include <clibary.h>
+#include <clibb64.h>
 #include <clibio.h>
 #include <clibstr.h>
 #include <stddef.h>
@@ -61,8 +62,10 @@ static const char *extract_file_value(char *json, size_t len);
 static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
                        char *jobname, char *jobid, char *jobclass);
 static char* tokenize(char *str, const char *delim, char **saveptr);
-static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass, 
+static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                           const char *user, const char *password);
+static int get_basic_auth_credentials(Session *session, char *user, size_t user_len,
+                                      char *password, size_t password_len);
 
 static const unsigned char ASCII_CRLF[] = {CR, LF};
 
@@ -100,12 +103,15 @@ jobListHandler(Session *session)
 	const char *host = getHeaderParam(session, "HOST");
 	const char *owner = getQueryParam(session, "owner");
 	const unsigned max_jobs = get_max_jobs(session);
+	UCHAR ownerid[64];
 
 	if (owner == NULL) {
-		owner = getHeaderParam(session, "CURRENT_USER");
+		/* z/OSMF default: jobs owned by the caller, from the identity
+		 * httpd already resolved (mvslovers/httpd#99), not env vars. */
+		owner = (const char *)http_get_userid(session->httpc, ownerid, sizeof(ownerid));
 	}
 
-	if (owner[0] == '*') {
+	if (owner && owner[0] == '*') {
 		owner = NULL;
 	}
 
@@ -1188,8 +1194,17 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 
 	/* process jobcard: inject USER/PASSWORD */
 	{
-		const char *user = getHeaderParam(session, "CURRENT_USER");
-		const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
+		char user[64] = {0};
+		char password[256] = {0};
+
+		if (get_basic_auth_credentials(session, user, sizeof(user),
+									   password, sizeof(password)) < 0) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+							RC_ERROR, REASON_INVALID_REQUEST,
+							"Job submission requires Basic authentication credentials", NULL, 0);
+			rc = -1;
+			goto quit;
+		}
 
 		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
 		if (rc < 0) {
@@ -1514,6 +1529,62 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
     }
 }
 
+/*
+ * INTRDR job submission runs under the caller's RACF identity via classic
+ * USER=/PASSWORD= job-card injection below -- on this JES2 setup, setting
+ * the submitting task's ACEE alone does not propagate to the submitted
+ * job. httpd's credential resolver deliberately never hands the decrypted
+ * password back to the CGI (mvslovers/httpd#96/#97/#99), so recover it
+ * here directly from this request's own Authorization: Basic header. This
+ * only works while job submission authenticates with Basic Auth on every
+ * call; it has no answer for a token-authenticated session. See issue
+ * #164 for the open architecture question.
+ */
+__asm__("\n&FUNC    SETC 'get_basic_auth_credentials'");
+static int
+get_basic_auth_credentials(Session *session, char *user, size_t user_len,
+                          char *password, size_t password_len)
+{
+	const char *authhdr = getHeaderParam(session, "Authorization");
+	UCHAR *decoded = NULL;
+	size_t decoded_len = 0;
+	char creds[256];
+	char *colon;
+	size_t n;
+	int rc = -1;
+
+	if (!authhdr || strncmp(authhdr, "Basic ", 6) != 0) {
+		return -1;
+	}
+
+	decoded = base64_decode((const UCHAR *)(authhdr + 6), strlen(authhdr + 6), &decoded_len);
+	if (!decoded) {
+		return -1;
+	}
+
+	n = decoded_len;
+	if (n >= sizeof(creds)) n = sizeof(creds) - 1;
+	memcpy(creds, decoded, n);
+	creds[n] = '\0';
+	free(decoded);
+
+	/* the decoded user:pass is ASCII on the wire -> translate to EBCDIC */
+	http_atoe((UCHAR *)creds, (int)n);
+
+	colon = strchr(creds, ':');
+	if (colon) {
+		*colon = '\0';
+		strncpy(user, creds, user_len - 1);
+		user[user_len - 1] = '\0';
+		strncpy(password, colon + 1, password_len - 1);
+		password[password_len - 1] = '\0';
+		rc = 0;
+	}
+
+	memset(creds, 0, sizeof(creds));   /* scrub the password */
+	return rc;
+}
+
 __asm__("\n&FUNC    SETC 'process_jobcard'");
 static int
 process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass, 
@@ -1773,8 +1844,18 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     }
 
     /* Analyze and potentially modify job card */
-    const char *user = getHeaderParam(session, "CURRENT_USER");
-    const char *password = getHeaderParam(session, "CURRENT_PASSWORD");
+    char user[64] = {0};
+    char password[256] = {0};
+
+    if (get_basic_auth_credentials(session, user, sizeof(user),
+                                   password, sizeof(password)) < 0) {
+        wtof("MVSMF22E Failed to analyze job card");
+        sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+                        RC_ERROR, REASON_INVALID_REQUEST,
+                        "Job submission requires Basic authentication credentials", NULL, 0);
+        rc = -1;
+        goto quit;
+    }
 
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {

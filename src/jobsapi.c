@@ -2,6 +2,7 @@
 #include <clibb64.h>
 #include <clibio.h>
 #include <clibstr.h>
+#include <ctype.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,7 +65,8 @@ static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
 static char* tokenize(char *str, const char *delim, char **saveptr);
 static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                           const char *user, const char *password);
-static int get_basic_auth_password(Session *session, char *password, size_t password_len);
+static int get_basic_auth_credentials(Session *session, char *user, size_t user_len,
+                                      char *password, size_t password_len);
 
 static const unsigned char ASCII_CRLF[] = {CR, LF};
 
@@ -1193,11 +1195,11 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 
 	/* process jobcard: inject USER/PASSWORD */
 	{
-		UCHAR user[64] = {0};
+		char user[64] = {0};
 		char password[256] = {0};
 
-		if (!http_get_userid(session->httpc, user, sizeof(user)) ||
-		    get_basic_auth_password(session, password, sizeof(password)) < 0) {
+		if (get_basic_auth_credentials(session, user, sizeof(user),
+									   password, sizeof(password)) < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
 							"Job submission requires Basic authentication credentials", NULL, 0);
@@ -1205,7 +1207,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 			goto quit;
 		}
 
-		rc = process_jobcard(lines, num_lines, jobname, jobclass, (char *)user, password);
+		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
 		if (rc < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
@@ -1533,20 +1535,23 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
  * USER=/PASSWORD= job-card injection below -- on this JES2 setup, setting
  * the submitting task's ACEE alone does not propagate to the submitted
  * job. httpd's credential resolver deliberately never hands the decrypted
- * password back to the CGI (mvslovers/httpd#96/#97/#99), so recover it
+ * password back to the CGI (mvslovers/httpd#96/#97/#99), so recover both
  * here directly from this request's own Authorization: Basic header. This
  * only works while job submission authenticates with Basic Auth on every
  * call; it has no answer for a token-authenticated session. See issue
  * #164 for the open architecture question.
  *
- * The userid for USER= comes from http_get_userid() instead (the RACF-
- * verified, canonically-cased form from the ACEE httpd already resolved)
- * -- not from re-decoding this header -- so it doesn't depend on however
- * the client happened to case it on the wire.
+ * (http_get_userid() was tried here instead of re-decoding the header for
+ * the userid, to get the RACF-canonical case -- it returned garbage in
+ * live testing against the latest httpd, unrelated to this decode path.
+ * Reverted to the known-working raw decode; the JCL-case requirement is
+ * handled by uppercasing locally instead. See #164 for the httpd-side
+ * follow-up on http_get_userid.)
  */
-__asm__("\n&FUNC    SETC 'get_basic_auth_password'");
+__asm__("\n&FUNC    SETC 'get_basic_auth_credentials'");
 static int
-get_basic_auth_password(Session *session, char *password, size_t password_len)
+get_basic_auth_credentials(Session *session, char *user, size_t user_len,
+                          char *password, size_t password_len)
 {
 	const char *authhdr = getHeaderParam(session, "Authorization");
 	UCHAR *decoded = NULL;
@@ -1576,6 +1581,17 @@ get_basic_auth_password(Session *session, char *password, size_t password_len)
 
 	colon = strchr(creds, ':');
 	if (colon) {
+		size_t i;
+
+		*colon = '\0';
+		strncpy(user, creds, user_len - 1);
+		user[user_len - 1] = '\0';
+		/* JCL keyword values must be uppercase or JES2 rejects the JOB
+		 * card ("UNDEFINED OR ILLEGAL CHARACTERS IN THE USER FIELD") */
+		for (i = 0; user[i]; i++) {
+			user[i] = (char)toupper((unsigned char)user[i]);
+		}
+
 		strncpy(password, colon + 1, password_len - 1);
 		password[password_len - 1] = '\0';
 		rc = 0;
@@ -1750,6 +1766,11 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         return -1;
     }
 
+    /* TEMPORARY diagnostic for issue #164 follow-up: length only, never
+     * the password itself. Remove once the PASSWORD= empty-on-card
+     * mystery is confirmed as either a real bug or a display artifact. */
+    wtof("MVSMF97D process_jobcard: password strlen=%d", (int)strlen(password));
+
     rc = snprintf(lines[end_idx + 2], 72, "//         PASSWORD=%s", password);
     if (rc < 0 || rc >= 72) {
         wtof("MVSMF24E Buffer overflow in snprintf");
@@ -1844,11 +1865,11 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     }
 
     /* Analyze and potentially modify job card */
-    UCHAR user[64] = {0};
+    char user[64] = {0};
     char password[256] = {0};
 
-    if (!http_get_userid(session->httpc, user, sizeof(user)) ||
-        get_basic_auth_password(session, password, sizeof(password)) < 0) {
+    if (get_basic_auth_credentials(session, user, sizeof(user),
+                                   password, sizeof(password)) < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,
@@ -1857,7 +1878,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         goto quit;
     }
 
-    rc = process_jobcard(lines, num_lines, jobname, jobclass, (char *)user, password);
+    rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,

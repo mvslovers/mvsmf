@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <clibgrt.h>
 #include <clibppa.h>
 #include <clibcrt.h>
@@ -28,6 +29,15 @@ static
 int identity_middleware(Session *session)
 {
 	ACEE *acee = http_get_acee(session->httpc);
+
+	/* TEMPORARY diagnostic for issue #164/#165 follow-up: lengths only,
+	 * never the header content (it carries the password). Remove once
+	 * the Authorization truncation root cause is confirmed. */
+	{
+		const char *authhdr = getHeaderParam(session, "Authorization");
+		wtof("MVSMF97D identity_middleware: authhdr=%s len=%d",
+		    authhdr ? "present" : "absent", authhdr ? (int)strlen(authhdr) : -1);
+	}
 
 	if (!acee) {
 		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);

@@ -1553,6 +1553,12 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 	size_t n;
 	int rc = -1;
 
+	/* TEMPORARY diagnostic for issue #164/#165 follow-up: lengths only,
+	 * never the header content (it carries the password). Remove once
+	 * the Authorization truncation root cause is confirmed. */
+	wtof("MVSMF97D get_basic_auth_credentials: authhdr=%s len=%d",
+	    authhdr ? "present" : "absent", authhdr ? (int)strlen(authhdr) : -1);
+
 	if (!authhdr || strncmp(authhdr, "Basic ", 6) != 0) {
 		return -1;
 	}
@@ -1561,6 +1567,8 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 	if (!decoded) {
 		return -1;
 	}
+
+	wtof("MVSMF97D get_basic_auth_credentials: decoded_len=%d", (int)decoded_len);
 
 	n = decoded_len;
 	if (n >= sizeof(creds)) n = sizeof(creds) - 1;

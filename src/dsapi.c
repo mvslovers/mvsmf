@@ -61,13 +61,7 @@ static char* allocate_buffer(FILE* fp, int* rc) {
         *rc = ERR_INVALID_PARAM;
         return NULL;
     }
-    
-    // Check for integer overflow
-    if (fp->lrecl > (SIZE_MAX - 2)) {
-        *rc = ERR_INVALID_PARAM;
-        return NULL;
-    }
-    
+
     char* buffer = calloc(1, fp->lrecl + 2);
     if (!buffer) {
         *rc = ERR_MEMORY;

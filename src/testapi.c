@@ -375,6 +375,36 @@ int testHandler(Session *session) {
         acee ? "non-null" : "NULL", direct, ret ? "non-null" : "NULL",
         (int)strlen((char *)buf), hex);
 
+    /* --- fn=password (exercise http_get_password()) ---------------- */
+    /* Verifies httpd's HTTPX http_get_password() export (mvslovers/httpd#111),
+     * which decrypts the caller's password from the session credential -- the
+     * value job submission puts on the JOB card. The plaintext is a secret, so
+     * it is shown only with &reveal=1; otherwise it is masked. Auth-gated: a
+     * caller only ever sees their own password (which they already know). */
+  } else if (strcmp(fn, "password") == 0) {
+    UCHAR buf[64] = {0};
+    UCHAR *ret;
+    char *reveal =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_REVEAL");
+    int len;
+    char masked[64] = {0};
+    int i;
+
+    ret = http_get_password(session->httpc, buf, sizeof(buf));
+    len = (int)strlen((char *)buf);
+
+    for (i = 0; i < len && i < (int)sizeof(masked) - 1; i++) {
+      masked[i] = '*';
+    }
+
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"password\","
+        " \"http_get_password_ret\": \"%s\", \"strlen\": %d,"
+        " \"value\": \"%s\" }\n",
+        ret ? "non-null" : "NULL", len,
+        (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -386,7 +416,8 @@ int testHandler(Session *session) {
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
         " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
         " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","
-        " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\""
+        " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
+        " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\""
         " ] }\n");
   }
 

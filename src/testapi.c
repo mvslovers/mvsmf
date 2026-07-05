@@ -339,6 +339,42 @@ int testHandler(Session *session) {
         "{ \"fn\": \"version\", \"version\": \"%s\", \"build\": \"%s\" }\n",
         VERSION, BUILD_ID);
 
+    /* --- fn=userid (diagnose http_get_userid() vs. direct ACEE decode) */
+    /* Cross-checks httpd's HTTPX http_get_userid() export against a manual
+     * ACEE decode -- the same length-prefixed aceeuser field ussapi.c
+     * already reads successfully for UFS ownership -- to isolate the
+     * garbage-userid behavior seen from http_get_userid() during #164
+     * job-submission testing. No secrets here: just a userid either way. */
+  } else if (strcmp(fn, "userid") == 0) {
+    ACEE *acee = http_get_acee(session->httpc);
+    UCHAR buf[64] = {0};
+    UCHAR *ret;
+    char direct[9] = {0};
+    char hex[64 * 2 + 1] = {0};
+    unsigned i;
+
+    ret = http_get_userid(session->httpc, buf, sizeof(buf));
+
+    if (acee) {
+      unsigned char ulen = (unsigned char)acee->aceeuser[0];
+      if (ulen > 8)
+        ulen = 8;
+      memcpy(direct, acee->aceeuser + 1, ulen);
+    }
+
+    for (i = 0; i < sizeof(buf); i++) {
+      sprintf(&hex[i * 2], "%02X", buf[i]);
+    }
+
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"userid\", \"acee\": \"%s\","
+        " \"direct_from_acee\": \"%s\","
+        " \"http_get_userid_ret\": \"%s\", \"strlen\": %d,"
+        " \"hex\": \"%s\" }\n",
+        acee ? "non-null" : "NULL", direct, ret ? "non-null" : "NULL",
+        (int)strlen((char *)buf), hex);
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -349,7 +385,8 @@ int testHandler(Session *session) {
         " \"?fn=locate&dsn=SYS1.MACLIB\","
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
         " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
-        " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\""
+        " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","
+        " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\""
         " ] }\n");
   }
 

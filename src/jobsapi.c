@@ -65,8 +65,8 @@ static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
 static char* tokenize(char *str, const char *delim, char **saveptr);
 static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                           const char *user, const char *password);
-static int get_basic_auth_credentials(Session *session, char *user, size_t user_len,
-                                      char *password, size_t password_len);
+static int get_caller_credentials(Session *session, char *user, size_t user_len,
+                                  char *password, size_t password_len);
 
 static const unsigned char ASCII_CRLF[] = {CR, LF};
 
@@ -1198,16 +1198,17 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		char user[64] = {0};
 		char password[256] = {0};
 
-		if (get_basic_auth_credentials(session, user, sizeof(user),
+		if (get_caller_credentials(session, user, sizeof(user),
 									   password, sizeof(password)) < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
-							"Job submission requires Basic authentication credentials", NULL, 0);
+							"Job submission requires an authenticated session with a password", NULL, 0);
 			rc = -1;
 			goto quit;
 		}
 
 		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
+		memset(password, 0, sizeof(password));   /* scrub; it now lives on the card */
 		if (rc < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
@@ -1531,82 +1532,40 @@ find_job_card_range(char **lines, int count, int *start_idx, int *end_idx)
 }
 
 /*
- * INTRDR job submission runs under the caller's RACF identity via classic
- * USER=/PASSWORD= job-card injection below -- on this JES2 setup, setting
- * the submitting task's ACEE alone does not propagate to the submitted
- * job. httpd's credential resolver deliberately never hands the decrypted
- * password back to the CGI (mvslovers/httpd#96/#97/#99), so recover both
- * here directly from this request's own Authorization: Basic header. This
- * only works while job submission authenticates with Basic Auth on every
- * call; it has no answer for a token-authenticated session. See issue
- * #164 for the open architecture question.
- *
- * (http_get_userid() was tried here instead of re-decoding the header for
- * the userid, to get the RACF-canonical case -- it returned garbage in
- * live testing against the latest httpd, unrelated to this decode path.
- * Reverted to the known-working raw decode; the JCL-case requirement is
- * handled by uppercasing locally instead. See #164 for the httpd-side
- * follow-up on http_get_userid.)
+ * INTRDR job submission must place a real USER=/PASSWORD= on the JOB card (see
+ * process_jobcard): MVS 3.8j/RAKF does no userid propagation, so a passwordless
+ * job would run as the PROD default. The identity and password come from the
+ * credential httpd already resolved for this request -- not from re-parsing
+ * Authorization -- so this works for Basic and token auth alike. httpd retains
+ * the caller's password (blowfish-encrypted) in the CRED for the whole session;
+ * http_get_password() decrypts it in httpd's context (mvslovers/httpd#111) and
+ * http_get_userid() returns the RACF-canonical userid from the ACEE. Both are
+ * already uppercase (RACF userids are; cred_login() upper-cases the password at
+ * login), which is what JES2/RAKF job initiation expects. Returns 0, or -1 when
+ * the session has no usable userid+password (e.g. a token-only session with no
+ * password login). See #164.
  */
-__asm__("\n&FUNC    SETC 'get_basic_auth_credentials'");
+__asm__("\n&FUNC    SETC 'get_caller_credentials'");
 static int
-get_basic_auth_credentials(Session *session, char *user, size_t user_len,
+get_caller_credentials(Session *session, char *user, size_t user_len,
                           char *password, size_t password_len)
 {
-	const char *authhdr = getHeaderParam(session, "Authorization");
-	UCHAR *decoded = NULL;
-	size_t decoded_len = 0;
-	char creds[256];
-	char *colon;
-	size_t n;
-	int rc = -1;
-
-	if (!authhdr || strncmp(authhdr, "Basic ", 6) != 0) {
+	if (!user || user_len == 0 || !password || password_len == 0) {
 		return -1;
 	}
 
-	decoded = base64_decode((const UCHAR *)(authhdr + 6), strlen(authhdr + 6), &decoded_len);
-	if (!decoded) {
+	/* userid from the ACEE (RACF-canonical); NULL if unauthenticated */
+	if (!http_get_userid(session->httpc, (UCHAR *)user, (unsigned)user_len)) {
 		return -1;
 	}
 
-	n = decoded_len;
-	if (n >= sizeof(creds)) n = sizeof(creds) - 1;
-	memcpy(creds, decoded, n);
-	creds[n] = '\0';
-	free(decoded);
-
-	/* the decoded user:pass is ASCII on the wire -> translate to EBCDIC */
-	http_atoe((UCHAR *)creds, (int)n);
-
-	colon = strchr(creds, ':');
-	if (colon) {
-		size_t i;
-
-		*colon = '\0';
-		strncpy(user, creds, user_len - 1);
-		user[user_len - 1] = '\0';
-		/* JCL keyword values must be uppercase or JES2 rejects the JOB
-		 * card ("UNDEFINED OR ILLEGAL CHARACTERS IN THE USER FIELD") */
-		for (i = 0; user[i]; i++) {
-			user[i] = (char)toupper((unsigned char)user[i]);
-		}
-
-		strncpy(password, colon + 1, password_len - 1);
-		password[password_len - 1] = '\0';
-		/* RACF/RAKF job initiation (RACROUTE VERIFY at JES2 job start)
-		 * checks the password case-sensitively here, unlike the Basic
-		 * Auth login check on this same request -- fold to uppercase
-		 * to match (a mixed-case password was rejected as invalid by
-		 * JES2 in live testing). */
-		for (i = 0; password[i]; i++) {
-			password[i] = (char)toupper((unsigned char)password[i]);
-		}
-		rc = 0;
+	/* plaintext password from the resolved credential; NULL if the session
+	 * carries no password (e.g. a token-only session with no password login) */
+	if (!http_get_password(session->httpc, (UCHAR *)password, (unsigned)password_len)) {
+		return -1;
 	}
 
-	memset(creds, 0, sizeof(creds));   /* scrub the password */
-	return rc;
+	return 0;
 }
 
 __asm__("\n&FUNC    SETC 'process_jobcard'");
@@ -1860,8 +1819,8 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         line = tokenize(NULL, delimiter, &saveptr);
     }
 
-    /* ensure room for 2 extra lines added by process_jobcard */
-    if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 2) < 0) {
+    /* ensure room for the extra line added by process_jobcard */
+    if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 1) < 0) {
         wtof("MVSMF22E Memory allocation failed growing lines array");
         rc = -1;
         goto quit;
@@ -1871,17 +1830,18 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     char user[64] = {0};
     char password[256] = {0};
 
-    if (get_basic_auth_credentials(session, user, sizeof(user),
+    if (get_caller_credentials(session, user, sizeof(user),
                                    password, sizeof(password)) < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,
-                        "Job submission requires Basic authentication credentials", NULL, 0);
+                        "Job submission requires an authenticated session with a password", NULL, 0);
         rc = -1;
         goto quit;
     }
 
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
+    memset(password, 0, sizeof(password));   /* scrub; it now lives on the card */
     if (rc < 0) {
         wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,

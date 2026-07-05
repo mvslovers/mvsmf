@@ -1594,6 +1594,14 @@ get_basic_auth_credentials(Session *session, char *user, size_t user_len,
 
 		strncpy(password, colon + 1, password_len - 1);
 		password[password_len - 1] = '\0';
+		/* RACF/RAKF job initiation (RACROUTE VERIFY at JES2 job start)
+		 * checks the password case-sensitively here, unlike the Basic
+		 * Auth login check on this same request -- fold to uppercase
+		 * to match (a mixed-case password was rejected as invalid by
+		 * JES2 in live testing). */
+		for (i = 0; password[i]; i++) {
+			password[i] = (char)toupper((unsigned char)password[i]);
+		}
 		rc = 0;
 	}
 
@@ -1765,11 +1773,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         wtof("MVSMF23E Buffer overflow in snprintf ");
         return -1;
     }
-
-    /* TEMPORARY diagnostic for issue #164 follow-up: length only, never
-     * the password itself. Remove once the PASSWORD= empty-on-card
-     * mystery is confirmed as either a real bug or a display artifact. */
-    wtof("MVSMF97D process_jobcard: password strlen=%d", (int)strlen(password));
 
     rc = snprintf(lines[end_idx + 2], 72, "//         PASSWORD=%s", password);
     if (rc < 0 || rc >= 72) {

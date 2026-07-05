@@ -518,7 +518,7 @@ int consoleIssueHandler(Session *session)
 		cmd_upper[i] = (char)toupper((unsigned char)cmd[i]);
 	cmd_upper[cmdlen] = '\0';
 
-	/* issue under the authenticated user's ACEE (set by authmw) */
+	/* issue under the authenticated user's ACEE (set by the identity middleware) */
 	issue_command(cmd_upper, (unsigned)cmdlen);
 
 	/* unsol-key: uppercase it and snapshot the baseline match count *before*

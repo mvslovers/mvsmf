@@ -6,7 +6,7 @@
 #include <clibwto.h>
 #include <racf.h>
 
-#include "authmw.h"
+#include "common.h"
 #include "logmw.h"
 #include "dsapi.h"
 #include "httpcgi.h"
@@ -17,7 +17,30 @@
 #include "testapi.h"
 #include "router.h"
 
-int main(int argc, char **argv) 
+/* httpd has already resolved the client credential (Basic/token) before
+ * dispatching to this CGI; ACEE(0) means no credential resolved. Reject
+ * here rather than trusting httpd's MOD= login flag, which today is a
+ * coarse, uniform-across-CGIs bitmask (per-route policy is tracked
+ * separately, see mvslovers/httpd#98) — this keeps mvsMF self-gating in
+ * the meantime. */
+__asm__("\n&FUNC	SETC 'identity_middleware'");
+static
+int identity_middleware(Session *session)
+{
+	ACEE *acee = http_get_acee(session->httpc);
+
+	if (!acee) {
+		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
+		return -1;
+	}
+
+	session->old_acee = racf_set_acee(acee);
+	session->acee = acee;
+
+	return 0;
+}
+
+int main(int argc, char **argv)
 {
 	int irc = 0;
 
@@ -55,7 +78,7 @@ int main(int argc, char **argv)
 	init_router(&router);
 	init_session(&session, &router, httpd, httpc);
 
-	add_middleware(&router, "Authentication", authentication_middleware);
+	add_middleware(&router, "Authentication", identity_middleware);
 
 #if 0
 	add_middleware(&router, "Logging", logging_middleware);
@@ -106,9 +129,9 @@ int main(int argc, char **argv)
 
 quit:
 
-	/* TODO (mig): the whole security stuff must be reworked */
+	/* The ACEE belongs to httpd's credential store now (reused across
+	 * requests by token) — restore the prior task ACEE, don't log it out. */
 	if (session.acee) {
-		irc = racf_logout(&session.acee);
 		racf_set_acee(session.old_acee);
 		session.acee = NULL;
 		session.old_acee = NULL;

@@ -11,6 +11,13 @@ z/OSMF-compatible REST API for MVS 3.8j. All endpoints require Basic Auth unless
 |--------|------|-------------|
 | GET | [`/zosmf/info`](info.md) | System information (no auth required) |
 
+## Authentication (`/zosmf/services`)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | [`/zosmf/services/authenticate`](auth/authenticate.md) | Log in; returns `LtpaToken2` cookie |
+| DELETE | [`/zosmf/services/authenticate`](auth/authenticate.md) | Log out; invalidates the token |
+
 ## Jobs (`/zosmf/restjobs/jobs`)
 
 | Method | Path | Description |

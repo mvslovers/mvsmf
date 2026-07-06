@@ -140,9 +140,9 @@ outside click.
 
 ### Login screen
 Fullscreen desktop background, centered OS/2 dialog. System dropdown
-(`NAME — host:port (local)`), live connection status bar, username,
-password, Cancel/Login, "Manage systems…" and "Demo mode" links,
-version string bottom-right.
+(`NAME — host:port (local)`), idle status bar (no pre-login probe),
+username, password, Cancel/Login, "Demo mode" link, version string
+bottom-right. Systems are managed post-login (Systems program), not here.
 
 ### Program icon colors
 | Program          | iconBg    | icon (Tabler)   | iconColor |
@@ -229,27 +229,29 @@ cannot be removed. `baseUrl()` follows the page protocol for the local
 system (TLS-proxy safe), plain `http:` for remotes.
 
 ### Connection check — checkSystem(sys)
-Anonymous LED probe only. `GET {base}/zosmf/info`, 4s timeout via AbortController.
-- 200 → `connected` (+parsed info)
-- 401/403 → `auth_failed` — **counts as reachable** (yellow LED)
-- fetch TypeError → retry with `mode: "no-cors"`: resolves → `cors_blocked`
-  (yellow, "serve this page from the HTTPD"), rejects → `unreachable` (red)
-- Sends NO custom headers (CORS simple request, no preflight)
+Anonymous reachability probe (`GET {base}/zosmf/info`, 4s timeout;
+`connected`/`auth_failed`/`cors_blocked`/`unreachable`). **Not used by the
+login screen** — only by the post-login Systems program and the start-menu
+tray LEDs. The login screen does no pre-login probe: an anonymous `GET` would
+hit the HTTPD's `WWW-Authenticate: Basic` 401 and pop the browser's native
+credential dialog (see mvslovers/httpd#119).
 
 ### Token login — authenticate(sys, {user, pass})
 `POST {base}/zosmf/services/authenticate` **once** with `Authorization: Basic`
 + `X-CSRF-ZOSMF-HEADER`, `credentials: same-origin`. On `200` the server sets
 `LtpaToken2` (a session cookie); the browser replays it on every later call, so
 the password is never stored. `401/403` → `auth_failed`; a fetch reject →
-`unreachable` (a cross-origin login blocked by CORS — the token flow is
-same-origin, i.e. the SPA must be served from the HTTPD).
+`unreachable` (local system down) or, for a remote system, the cross-origin
+login blocked by CORS (not supported yet — the token flow is same-origin, i.e.
+the SPA served from the HTTPD).
 
 ### Login flow
-System select → live check → username/password → `authenticate()` → success
-stores the **non-secret** session (`user` + system name + demo flag in
-`SafeStore`, no password/token; system becomes `defaultSystem`), enter desktop,
-open Welcome. Demo mode link enters the desktop without a backend
-(`Session.demo`, canned data).
+System select → username/password → `authenticate()` → success stores the
+**non-secret** session (`user` + system name + demo flag in `SafeStore`, no
+password/token; system becomes `defaultSystem`), enter desktop, open Welcome.
+No pre-login reachability probe (the local system is this page's origin, so it
+is online by definition; a failed login just reports the error). Demo mode link
+enters the desktop without a backend (`Session.demo`, canned data).
 
 ### Session persistence & logout
 The `LtpaToken2` cookie survives a page reload, so on boot `Session.restore()`

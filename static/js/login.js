@@ -1,22 +1,23 @@
 /* ============================================================
    login.js — login screen + auth flow
-   System selector, live /zosmf/info connection check (401 = still
-   reachable, no-cors fallback), token login (POST once to
+   System selector, token login (POST once to
    /zosmf/services/authenticate — the password is never stored),
-   demo mode, inline "Manage systems…" add, real server-side logout.
-   On success it enters the desktop and opens the Welcome window.
-   A live session (LtpaToken2 cookie) is restored across a reload;
-   a 401 from any API call returns to the login screen.
+   demo mode, real server-side logout. On success it enters the
+   desktop and opens the Welcome window. A live session (LtpaToken2
+   cookie) is restored across a reload; a 401 from any API call
+   returns to the login screen.
+
+   No pre-login reachability probe: the local system IS this page's
+   origin (so it is online by definition), and remote systems don't
+   work yet (CORS) — a failed login just reports the error.
    ============================================================ */
-import { Session, SystemRegistry, checkSystem, authenticate, SafeStore } from "./systems.js";
+import { Session, SystemRegistry, authenticate, SafeStore } from "./systems.js";
 import { WM } from "./wm.js";
 import { Programs } from "./programs/registry.js";
-import { Dialog } from "./dialog.js";
 
 export const Login = (() => {
   const layer = () => document.getElementById("login-layer");
   const sel = () => document.getElementById("login-system");
-  let checkSeq = 0;
 
   function refreshSystems() {
     const s = sel();
@@ -39,28 +40,11 @@ export const Login = (() => {
     document.getElementById("login-status-text").textContent = text;
   }
 
-  async function checkSelected() {
-    const mySeq = ++checkSeq;
+  /* Neutral idle status — no live probe; just name the login target. */
+  function idleStatus() {
     const sys = SystemRegistry.get(sel().value);
-    if (!sys) { setStatus("warn", "var(--wps-led-yellow)", "No systems configured — use Manage systems…"); return; }
-    setStatus("wait", "var(--wps-led-off)", `Checking ${sys.name} …`);
-    const res = await checkSystem(sys);
-    if (mySeq !== checkSeq) return;   // stale response, selection changed
-    // Green whenever the endpoint is reachable at all; only "unreachable"
-    // is red. The distinct texts keep the detail the LED no longer encodes.
-    if (res.status === "connected") {
-      const ver = res.info && (res.info.zos_version || res.info.zosmf_full_version);
-      setStatus("ok", "var(--wps-led-green)", `Connected${ver ? " — " + ver : ""}`);
-    } else if (res.status === "auth_failed") {
-      setStatus("ok", "var(--wps-led-green)", "Connected — login required");
-    } else if (res.status === "cors_blocked") {
-      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending)");
-    } else if (res.status === "unreachable") {
-      setStatus("bad", "var(--wps-led-red)", "Unreachable — check host and port");
-    } else {
-      // reachable, but /zosmf/info returned an unexpected HTTP status
-      setStatus("ok", "var(--wps-led-green)", `Reachable — HTTP ${res.code || "?"}`);
-    }
+    setStatus("wait", "var(--wps-led-off)",
+      sys ? `Ready — sign in to ${sys.name}` : "No system — use Demo mode");
   }
 
   async function submit() {
@@ -86,9 +70,12 @@ export const Login = (() => {
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
     } else {
-      // fetch rejected — host unreachable, or a cross-origin login blocked by
-      // CORS (the token flow is same-origin: serve the SPA from the HTTPD).
-      setStatus("bad", "var(--wps-led-red)", "System unreachable (serve the SPA from the HTTPD, or use demo mode)");
+      // fetch rejected. The local system is this page's origin, so this means
+      // the server is down; a remote system fails the cross-origin login (CORS
+      // is not supported yet) — report whichever applies.
+      setStatus("bad", "var(--wps-led-red)", sys.local
+        ? "System unreachable — is the server up?"
+        : "Remote systems are not supported yet (CORS) — use the local system or Demo mode");
     }
   }
 
@@ -135,7 +122,7 @@ export const Login = (() => {
   function init() {
     refreshSystems();
     window.addEventListener("mvsmf:session-expired", onSessionExpired);
-    sel().addEventListener("change", checkSelected);
+    sel().addEventListener("change", idleStatus);
     document.getElementById("login-submit").addEventListener("click", submit);
     document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     document.getElementById("login-user").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("login-pass").focus(); });
@@ -144,22 +131,6 @@ export const Login = (() => {
       document.getElementById("login-pass").value = "";
     });
     document.getElementById("login-demo").addEventListener("click", demoLogin);
-    document.getElementById("login-manage").addEventListener("click", async () => {
-      // quick add from the login screen; the Systems program offers
-      // full management once logged in
-      const r = await Dialog.show({
-        title: "Add system", icon: "ti-server", okLabel: "Add",
-        fields: [
-          { key: "name", label: "System name", maxLength: 8, upper: true, placeholder: "MVSD" },
-          { key: "host", label: "Host or IP", placeholder: "mvs.example.lan" },
-          { key: "port", label: "Port", value: "1080", maxLength: 5 }
-        ]
-      });
-      if (!r || !r.name || !r.host) return;
-      SystemRegistry.add({ name: r.name, host: r.host, port: parseInt(r.port || "1080", 10) });
-      refreshSystems();
-      checkSelected();
-    });
 
     // A prior session-expiry (or logout) may have left a one-shot notice.
     const notice = SafeStore.get("mvsmf.notice", null);
@@ -173,7 +144,7 @@ export const Login = (() => {
     // the markup so a restored session never flashes it first).
     layer().style.display = "flex";
     if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
-    else checkSelected();
+    else idleStatus();
   }
 
   return { init, refreshSystems, logout };

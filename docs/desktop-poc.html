@@ -385,7 +385,7 @@ html, body {
       </div>
       <div id="login-status" class="wait">
         <span class="led" style="background:#999;"></span>
-        <span id="login-status-text">Checking connection…</span>
+        <span id="login-status-text">Ready</span>
       </div>
       <div class="lb-field">
         <label for="login-user">Username</label>
@@ -400,7 +400,6 @@ html, body {
         <button class="lb-btn primary" id="login-submit">Login</button>
       </div>
       <div class="lb-links">
-        <span class="lb-link" id="login-manage">Manage systems…</span>
         <span class="lb-link" id="login-demo">Demo mode</span>
       </div>
     </div>
@@ -1354,7 +1353,6 @@ const StartMenu = (() => {
 const Login = (() => {
   const layer = () => document.getElementById("login-layer");
   const sel = () => document.getElementById("login-system");
-  let checkSeq = 0;
 
   function refreshSystems() {
     const s = sel();
@@ -1377,23 +1375,11 @@ const Login = (() => {
     document.getElementById("login-status-text").textContent = text;
   }
 
-  async function checkSelected() {
-    const mySeq = ++checkSeq;
+  /* Neutral idle status — no live probe; just name the login target. */
+  function idleStatus() {
     const sys = SystemRegistry.get(sel().value);
-    if (!sys) { setStatus("warn", "var(--wps-led-yellow)", "No systems configured — use Manage systems…"); return; }
-    setStatus("wait", "#999", `Checking ${sys.name} …`);
-    const res = await checkSystem(sys);
-    if (mySeq !== checkSeq) return;   // stale response, selection changed
-    if (res.status === "connected") {
-      const ver = res.info && (res.info.zos_version || res.info.zosmf_full_version);
-      setStatus("ok", "var(--wps-led-green)", `Connected${ver ? " — " + ver : ""}`);
-    } else if (res.status === "auth_failed") {
-      setStatus("warn", "var(--wps-led-yellow)", "Reachable — authentication required");
-    } else if (res.status === "cors_blocked") {
-      setStatus("warn", "var(--wps-led-yellow)", "Reachable — response blocked by CORS (serve this page from the HTTPD)");
-    } else {
-      setStatus("bad", "var(--wps-led-red)", "Unreachable — check host and port");
-    }
+    setStatus("wait", "#999",
+      sys ? `Ready — sign in to ${sys.name}` : "No system — use Demo mode");
   }
 
   async function submit() {
@@ -1419,9 +1405,12 @@ const Login = (() => {
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
     } else {
-      // fetch rejected — host unreachable, or a cross-origin login blocked by
-      // CORS (the token flow is same-origin: serve the SPA from the HTTPD).
-      setStatus("bad", "var(--wps-led-red)", "System unreachable (serve the SPA from the HTTPD, or use demo mode)");
+      // fetch rejected. The local system is this page's origin, so this means
+      // the server is down; a remote system fails the cross-origin login (CORS
+      // is not supported yet) — report whichever applies.
+      setStatus("bad", "var(--wps-led-red)", sys.local
+        ? "System unreachable — is the server up?"
+        : "Remote systems are not supported yet (CORS) — use the local system or Demo mode");
     }
   }
 
@@ -1468,7 +1457,7 @@ const Login = (() => {
   function init() {
     refreshSystems();
     window.addEventListener("mvsmf:session-expired", onSessionExpired);
-    sel().addEventListener("change", checkSelected);
+    sel().addEventListener("change", idleStatus);
     document.getElementById("login-submit").addEventListener("click", submit);
     document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     document.getElementById("login-user").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("login-pass").focus(); });
@@ -1477,18 +1466,6 @@ const Login = (() => {
       document.getElementById("login-pass").value = "";
     });
     document.getElementById("login-demo").addEventListener("click", demoLogin);
-    document.getElementById("login-manage").addEventListener("click", () => {
-      // Phase 1: quick inline prompt-based add; the Systems program
-      // offers full management once logged in.
-      const name = prompt("System name (e.g. MVSD):");
-      if (!name) return;
-      const host = prompt("Host or IP:");
-      if (!host) return;
-      const port = parseInt(prompt("Port:", "1080") || "1080", 10);
-      SystemRegistry.add({ name: name.toUpperCase(), host, port });
-      refreshSystems();
-      checkSelected();
-    });
 
     // A prior session-expiry (or logout) may have left a one-shot notice.
     const notice = SafeStore.get("mvsmf.notice", null);
@@ -1502,7 +1479,7 @@ const Login = (() => {
     // the markup so a restored session never flashes it first).
     layer().style.display = "flex";
     if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
-    else checkSelected();
+    else idleStatus();
   }
 
   return { init, refreshSystems, logout };

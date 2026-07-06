@@ -140,9 +140,9 @@ outside click.
 
 ### Login screen
 Fullscreen desktop background, centered OS/2 dialog. System dropdown
-(`NAME — host:port (local)`), live connection status bar, username,
-password, Cancel/Login, "Manage systems…" and "Demo mode" links,
-version string bottom-right.
+(`NAME — host:port (local)`), idle status bar (no pre-login probe),
+username, password, Cancel/Login, "Demo mode" link, version string
+bottom-right. Systems are managed post-login (Systems program), not here.
 
 ### Program icon colors
 | Program          | iconBg    | icon (Tabler)   | iconColor |
@@ -206,9 +206,12 @@ Programs.register({
 });
 ```
 
-`apiFetch()` injects `Authorization: Basic` and `X-CSRF-ZOSMF-HEADER`
-and prefixes `baseUrl`. In demo mode it throws — programs provide canned
-data instead (see sysinfo).
+`apiFetch()` prefixes `baseUrl` and sends `X-CSRF-ZOSMF-HEADER` with
+`credentials: same-origin`; authentication rides on the browser's
+`LtpaToken2` session cookie — no `Authorization` header, no password in JS.
+A `401` dispatches a `mvsmf:session-expired` window event (the shell then
+returns to the login screen). In demo mode it throws — programs provide
+canned data instead (see sysinfo).
 
 ## Systems & login
 
@@ -225,21 +228,39 @@ duplicated. The local system is the default, shown as `(local)`, and
 cannot be removed. `baseUrl()` follows the page protocol for the local
 system (TLS-proxy safe), plain `http:` for remotes.
 
-### Connection check — checkSystem(sys, auth?)
-`GET {base}/zosmf/info`, 4s timeout via AbortController.
-- 200 → `connected` (+parsed info)
-- 401/403 → `auth_failed` — **counts as reachable** (yellow LED); works
-  today while `/zosmf/info` still requires auth (TSK-282 will open it up)
-- fetch TypeError → retry with `mode: "no-cors"`: resolves → `cors_blocked`
-  (yellow, "serve this page from the HTTPD"), rejects → `unreachable` (red)
-- Anonymous probe sends NO custom headers (CORS simple request, no
-  preflight); authenticated check sends Authorization + CSRF header
+### Connection check — checkSystem(sys)
+Anonymous reachability probe (`GET {base}/zosmf/info`, 4s timeout;
+`connected`/`auth_failed`/`cors_blocked`/`unreachable`). **Not used by the
+login screen** — only by the post-login Systems program and the start-menu
+tray LEDs. The login screen does no pre-login probe: an anonymous `GET` would
+hit the HTTPD's `WWW-Authenticate: Basic` 401 and pop the browser's native
+credential dialog (see mvslovers/httpd#119).
+
+### Token login — authenticate(sys, {user, pass})
+`POST {base}/zosmf/services/authenticate` **once** with `Authorization: Basic`
++ `X-CSRF-ZOSMF-HEADER`, `credentials: same-origin`. On `200` the server sets
+`LtpaToken2` (a session cookie); the browser replays it on every later call, so
+the password is never stored. `401/403` → `auth_failed`; a fetch reject →
+`unreachable` (local system down) or, for a remote system, the cross-origin
+login blocked by CORS (not supported yet — the token flow is same-origin, i.e.
+the SPA served from the HTTPD).
 
 ### Login flow
-System select → live check → username/password → authenticated
-`/zosmf/info` → success stores session (system becomes `defaultSystem`),
-enter desktop, open Welcome. Demo mode link enters the desktop without a
-backend (`Session.demo`, canned data). Logout = clean reload.
+System select → username/password → `authenticate()` → success stores the
+**non-secret** session (`user` + system name + demo flag in `SafeStore`, no
+password/token; system becomes `defaultSystem`), enter desktop, open Welcome.
+No pre-login reachability probe (the local system is this page's origin, so it
+is online by definition; a failed login just reports the error). Demo mode link
+enters the desktop without a backend (`Session.demo`, canned data).
+
+### Session persistence & logout
+The `LtpaToken2` cookie survives a page reload, so on boot `Session.restore()`
+re-enters the desktop directly when the cookie (and stored identity) are still
+present — no re-login. A `401` from any API call (token expired or reaped by
+the HTTPD idle `SESSION_TIMEOUT`, default 30 min) clears the stored session and
+reloads to the login screen with a "Session expired" notice. Logout is a real
+server-side `DELETE {base}/zosmf/services/authenticate` (invalidates the token)
+followed by a clean reload.
 
 ## Phase 1 acceptance
 

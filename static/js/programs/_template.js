@@ -44,8 +44,10 @@ Programs.register({
        setStatus(t),                   // write to the status bar (if statusBar)
        close()                         // close this window
      }
-     system.apiFetch() injects Authorization: Basic + X-CSRF-ZOSMF-HEADER
-     and prefixes baseUrl. In demo mode it throws — provide canned data. */
+     system.apiFetch() prefixes baseUrl and sends X-CSRF-ZOSMF-HEADER; auth
+     rides on the browser's LtpaToken2 session cookie (no password in JS). A
+     401 signals session-expiry to the shell. In demo mode it throws —
+     provide canned data. */
   create(ctx) {
     const el = document.createElement("div");
     el.className = "prog-pad";

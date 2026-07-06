@@ -1,19 +1,23 @@
 /* ============================================================
    login.js — login screen + auth flow
-   System selector, live /zosmf/info connection check (401 = still
-   reachable, no-cors fallback), authenticated login, demo mode,
-   inline "Manage systems…" add, logout. On success it enters the
-   desktop and opens the Welcome window.
+   System selector, token login (POST once to
+   /zosmf/services/authenticate — the password is never stored),
+   demo mode, real server-side logout. On success it enters the
+   desktop and opens the Welcome window. A live session (LtpaToken2
+   cookie) is restored across a reload; a 401 from any API call
+   returns to the login screen.
+
+   No pre-login reachability probe: the local system IS this page's
+   origin (so it is online by definition), and remote systems don't
+   work yet (CORS) — a failed login just reports the error.
    ============================================================ */
-import { Session, SystemRegistry, checkSystem } from "./systems.js";
+import { Session, SystemRegistry, authenticate, SafeStore } from "./systems.js";
 import { WM } from "./wm.js";
 import { Programs } from "./programs/registry.js";
-import { Dialog } from "./dialog.js";
 
 export const Login = (() => {
   const layer = () => document.getElementById("login-layer");
   const sel = () => document.getElementById("login-system");
-  let checkSeq = 0;
 
   function refreshSystems() {
     const s = sel();
@@ -36,28 +40,11 @@ export const Login = (() => {
     document.getElementById("login-status-text").textContent = text;
   }
 
-  async function checkSelected() {
-    const mySeq = ++checkSeq;
+  /* Neutral idle status — no live probe; just name the login target. */
+  function idleStatus() {
     const sys = SystemRegistry.get(sel().value);
-    if (!sys) { setStatus("warn", "var(--wps-led-yellow)", "No systems configured — use Manage systems…"); return; }
-    setStatus("wait", "var(--wps-led-off)", `Checking ${sys.name} …`);
-    const res = await checkSystem(sys);
-    if (mySeq !== checkSeq) return;   // stale response, selection changed
-    // Green whenever the endpoint is reachable at all; only "unreachable"
-    // is red. The distinct texts keep the detail the LED no longer encodes.
-    if (res.status === "connected") {
-      const ver = res.info && (res.info.zos_version || res.info.zosmf_full_version);
-      setStatus("ok", "var(--wps-led-green)", `Connected${ver ? " — " + ver : ""}`);
-    } else if (res.status === "auth_failed") {
-      setStatus("ok", "var(--wps-led-green)", "Connected — login required");
-    } else if (res.status === "cors_blocked") {
-      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending)");
-    } else if (res.status === "unreachable") {
-      setStatus("bad", "var(--wps-led-red)", "Unreachable — check host and port");
-    } else {
-      // reachable, but /zosmf/info returned an unexpected HTTP status
-      setStatus("ok", "var(--wps-led-green)", `Reachable — HTTP ${res.code || "?"}`);
-    }
+    setStatus("wait", "var(--wps-led-off)",
+      sys ? `Ready — sign in to ${sys.name}` : "No system — use Demo mode");
   }
 
   async function submit() {
@@ -68,31 +55,35 @@ export const Login = (() => {
     if (!user) { setStatus("warn", "var(--wps-led-yellow)", "Enter a username"); return; }
 
     setStatus("wait", "var(--wps-led-off)", "Authenticating …");
-    const res = await checkSystem(sys, { user, pass });
-    if (res.status === "connected") {
+    // POST the credentials once to /zosmf/services/authenticate; on success the
+    // browser holds the LtpaToken2 cookie and the password is never stored.
+    const res = await authenticate(sys, { user, pass });
+    if (res.status === "ok") {
       Session.system = sys;
       Session.user = user.toUpperCase();
-      Session.pass = pass;
       Session.demo = false;
+      Session.save();
       const d = SystemRegistry.load();
       d.defaultSystem = sys.name;
       SystemRegistry.save(d);
       enterDesktop();
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
-    } else if (res.status === "cors_blocked") {
-      // reachable, but cross-origin blocks reading the auth response
-      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending); serve from the HTTPD or use demo mode");
     } else {
-      setStatus("bad", "var(--wps-led-red)", "System unreachable");
+      // fetch rejected. The local system is this page's origin, so this means
+      // the server is down; a remote system fails the cross-origin login (CORS
+      // is not supported yet) — report whichever applies.
+      setStatus("bad", "var(--wps-led-red)", sys.local
+        ? "System unreachable — is the server up?"
+        : "Remote systems are not supported yet (CORS) — use the local system or Demo mode");
     }
   }
 
   function demoLogin() {
     Session.system = null;
     Session.user = "DEMO";
-    Session.pass = "";
     Session.demo = true;
+    Session.save();
     enterDesktop();
   }
 
@@ -108,15 +99,30 @@ export const Login = (() => {
     WM.open(Programs.get("welcome"));
   }
 
-  function logout() {
-    // close everything by reloading state — simplest clean slate
+  async function logout() {
+    // real server-side logout (DELETE the token), then reload for a clean slate
+    await Session.logout();
+    location.reload();
+  }
+
+  // A 401 from any API call means the token expired or was reaped by the HTTPD
+  // (idle SESSION_TIMEOUT, default 30 min). Drop the stored session so the
+  // reload boots to the login screen — not straight back into a dead desktop —
+  // and leave a one-shot notice to explain why. The guard collapses the burst
+  // of 401s that concurrent requests produce into a single teardown.
+  let tearingDown = false;
+  function onSessionExpired() {
+    if (tearingDown) return;
+    tearingDown = true;
+    Session.clearStored();
+    SafeStore.set("mvsmf.notice", "Session expired — please log in again");
     location.reload();
   }
 
   function init() {
     refreshSystems();
-    checkSelected();
-    sel().addEventListener("change", checkSelected);
+    window.addEventListener("mvsmf:session-expired", onSessionExpired);
+    sel().addEventListener("change", idleStatus);
     document.getElementById("login-submit").addEventListener("click", submit);
     document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
     document.getElementById("login-user").addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("login-pass").focus(); });
@@ -125,22 +131,20 @@ export const Login = (() => {
       document.getElementById("login-pass").value = "";
     });
     document.getElementById("login-demo").addEventListener("click", demoLogin);
-    document.getElementById("login-manage").addEventListener("click", async () => {
-      // quick add from the login screen; the Systems program offers
-      // full management once logged in
-      const r = await Dialog.show({
-        title: "Add system", icon: "ti-server", okLabel: "Add",
-        fields: [
-          { key: "name", label: "System name", maxLength: 8, upper: true, placeholder: "MVSD" },
-          { key: "host", label: "Host or IP", placeholder: "mvs.example.lan" },
-          { key: "port", label: "Port", value: "1080", maxLength: 5 }
-        ]
-      });
-      if (!r || !r.name || !r.host) return;
-      SystemRegistry.add({ name: r.name, host: r.host, port: parseInt(r.port || "1080", 10) });
-      refreshSystems();
-      checkSelected();
-    });
+
+    // A prior session-expiry (or logout) may have left a one-shot notice.
+    const notice = SafeStore.get("mvsmf.notice", null);
+    if (notice) SafeStore.set("mvsmf.notice", null);
+
+    // Restore a live session across a reload: the LtpaToken2 cookie survives,
+    // so a valid session skips the login screen entirely.
+    if (Session.restore()) { enterDesktop(); return; }
+
+    // No session to restore — reveal the login screen (hidden by default in
+    // the markup so a restored session never flashes it first).
+    layer().style.display = "flex";
+    if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
+    else idleStatus();
   }
 
   return { init, refreshSystems, logout };

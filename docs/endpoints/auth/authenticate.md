@@ -92,21 +92,12 @@ None.
 
 ### Response
 On a request carrying a valid token, HTTP status code **204 (No Content)**, no
-body. The `LtpaToken2` cookie is expired via `Set-Cookie: LtpaToken2=deleted;
-Path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT` and the handler calls
-`http_logout()` to drop the credential from httpd's store.
+body. `http_logout()` drops the credential from httpd's store (invalidating the
+token), and the `LtpaToken2` cookie is expired via `Set-Cookie:
+LtpaToken2=deleted; Path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`.
 
-A request **without** a valid token is rejected with **401** by httpd's auth
-gate before it reaches the handler (the z/OSMF spec also requires a valid token
-to log out). The handler itself is idempotent, but that only applies once httpd
-forwards the request — see the notes below.
-
-> **Known limitations (httpd side):**
-> - Token invalidation currently does not take effect: `http_logout()` is a
->   no-op when called from a CGI, so the token still resolves after logout
->   (mvslovers/httpd#113). The handler logs `MVSMF32W` when invalidation fails.
-> - Whether an unauthenticated request reaches this endpoint at all depends on
->   the httpd route policy (mvslovers/httpd#114).
+A request **without** a valid token is rejected with **401 (Unauthorized)**, no
+body — the z/OSMF spec requires a valid token to log out.
 
 ---
 

@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <clibwto.h>
 #include <clibb64.h>
 
 #include "authapi.h"
@@ -110,6 +109,14 @@ auth_send(Session *session, int status, const char *set_cookie, const char *json
 		if (rc < 0) {
 			return rc;
 		}
+	} else if (status != 204) {
+		/* Header-only response with an explicit empty body. Send Content-Length: 0
+		   so http_printf does not inject Transfer-Encoding: chunked on it (204 is
+		   body-less and is handled without a Content-Length). */
+		rc = http_printf(httpc, "Content-Length: 0\r\n");
+		if (rc < 0) {
+			return rc;
+		}
 	}
 
 	rc = http_printf(httpc, "Cache-Control: no-store\r\n");
@@ -200,25 +207,18 @@ int authLogoutHandler(Session *session)
 	HTTPC *httpc = session->httpc;
 	int rc = 0;
 
-	/* Drop the credential from httpd's store and check the result: 0 means the
-	   session token was invalidated; non-zero means nothing was removed (no live
-	   credential, or the store could not be reached). We surface a non-zero rc
-	   for diagnosis but still complete the client-side logout below, so the
-	   client's logout stays consistent either way.
-
-	   NOTE: from a CGI, http_logout() -> credtok_logout() currently reaches an
-	   empty credential array (it runs cred_array() in the CGI's GRT, not
-	   httpd's) and so returns non-zero without invalidating the token -- see
-	   httpd#113. This diagnostic will fall silent once that is fixed. */
+	/* Drop the credential from httpd's store. rc < 0 means there was no live
+	   credential -- the request carried no valid token. The z/OSMF logout spec
+	   requires one, so reject with 401. (Reachable now that httpd forwards the
+	   authenticate route to the CGI; when httpd gates it, httpd 401s first.) */
 	rc = http_logout(httpc);
-	if (rc != 0) {
-		wtof("MVSMF32W Logout did not invalidate the session token (rc=%d); "
-		     "see httpd#113", rc);
+	if (rc < 0) {
+		return auth_send(session, HTTP_STATUS_UNAUTHORIZED, NULL, NULL);
 	}
 
-	/* 204 No Content per the IBM logout spec; expire the cookie client-side
-	   (mirrors httpd's Sec-Token deletion). auth_send sends no body for a
-	   NULL json, and http_printf treats 204 as body-less. */
+	/* Token invalidated: 204 No Content per the IBM logout spec; expire the
+	   cookie client-side (mirrors httpd's Sec-Token deletion). auth_send sends
+	   no body for a NULL json, and http_printf treats 204 as body-less. */
 	return auth_send(session, 204,
 	                 "LtpaToken2=deleted; Path=/; "
 	                 "expires=Thu, 01 Jan 1970 00:00:00 GMT",

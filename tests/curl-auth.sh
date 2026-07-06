@@ -10,12 +10,10 @@
 # invalid credentials (401), logout (204), no-token logout, and that the token
 # is rejected after logout.
 #
-# Some assertions depend on the httpd side of the stack:
-#   - The z/OSMF-shaped JSON body on a bad login only appears if httpd forwards
-#     the request to mvsMF instead of answering bad creds with its own 401
-#     (httpd gates /zosmf/*) -- see httpd#114. Reported as SKIP when front-gated.
-#   - Token invalidation after logout depends on httpd#113 (http_logout() is a
-#     no-op from a CGI today). Reported as SKIP until that is fixed.
+# One assertion adapts to the httpd route policy: the z/OSMF-shaped JSON body on
+# a bad login only appears when httpd forwards the authenticate route to mvsMF
+# (rather than answering bad creds with its own 401). It is asserted when the
+# body is present, else reported as SKIP.
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -178,27 +176,22 @@ fi
 # =========================================================================
 echo ""
 echo "--- logout (no token) ---"
-# The z/OSMF spec requires a valid token to log out, and httpd gates the route,
-# so an unauthenticated DELETE is rejected (401) before reaching mvsMF. mvsMF's
-# handler is idempotent, but that only takes effect if httpd forwards the
-# request (httpd#114); the observable, spec-correct behavior here is 401.
+# The z/OSMF spec requires a valid token to log out. mvsMF's handler returns 401
+# when no credential was resolved, so the result is 401 whether httpd forwards
+# the request to the CGI or gates it (rejecting first).
 CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
 	-H 'X-CSRF-ZOSMF-HEADER: *' "$AUTH_URL")
 assert_http_status "401" "$CODE" "logout without a token is rejected"
 
 # =========================================================================
-# 6. The token should be rejected after logout -- blocked by httpd#113
+# 6. The token is rejected after logout
 # =========================================================================
 echo ""
-echo "--- token invalid after logout (httpd#113) ---"
+echo "--- token invalid after logout ---"
 if [ -n "$TOKEN" ]; then
 	CODE=$(curl -s -o /dev/null -w '%{http_code}' \
 		-H "Cookie: LtpaToken2=${TOKEN}" "$GATED_URL")
-	if [ "$CODE" = "401" ]; then
-		pass "logged-out token is rejected (httpd#113 resolved)"
-	else
-		skip "token still valid after logout (HTTP $CODE) -- known httpd#113"
-	fi
+	assert_http_status "401" "$CODE" "logged-out token is rejected"
 else
 	skip "post-logout replay (no token captured)"
 fi

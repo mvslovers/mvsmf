@@ -169,6 +169,9 @@ export const Login = (() => {
     // so a valid session skips the login screen entirely.
     if (Session.restore()) { enterDesktop(); return; }
 
+    // No session to restore — reveal the login screen (hidden by default in
+    // the markup so a restored session never flashes it first).
+    layer().style.display = "flex";
     if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
     else checkSelected();
   }

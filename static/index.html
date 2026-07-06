@@ -11,7 +11,9 @@
 <body>
 
 <!-- ================= Login layer ================= -->
-<div id="login-layer">
+<!-- Hidden until boot decides: a restored session goes straight to the
+     desktop, so the login screen must not flash first. login.js reveals it. -->
+<div id="login-layer" style="display:none;">
   <div id="login-box">
     <div class="lb-title">
       <div class="ticon"><i class="ti ti-lock"></i></div>

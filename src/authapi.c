@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <clibwto.h>
 #include <clibb64.h>
 
 #include "authapi.h"
@@ -197,11 +198,23 @@ int authLoginHandler(Session *session)
 int authLogoutHandler(Session *session)
 {
 	HTTPC *httpc = session->httpc;
+	int rc = 0;
 
-	/* Drop the credential from httpd's store. Idempotent: an absent or
-	   already-expired token returns -1, which we ignore -- the client is
-	   logging out either way. */
-	(void)http_logout(httpc);
+	/* Drop the credential from httpd's store and check the result: 0 means the
+	   session token was invalidated; non-zero means nothing was removed (no live
+	   credential, or the store could not be reached). We surface a non-zero rc
+	   for diagnosis but still complete the client-side logout below, so the
+	   client's logout stays consistent either way.
+
+	   NOTE: from a CGI, http_logout() -> credtok_logout() currently reaches an
+	   empty credential array (it runs cred_array() in the CGI's GRT, not
+	   httpd's) and so returns non-zero without invalidating the token -- see
+	   httpd#113. This diagnostic will fall silent once that is fixed. */
+	rc = http_logout(httpc);
+	if (rc != 0) {
+		wtof("MVSMF32W Logout did not invalidate the session token (rc=%d); "
+		     "see httpd#113", rc);
+	}
 
 	/* 204 No Content per the IBM logout spec; expire the cookie client-side
 	   (mirrors httpd's Sec-Token deletion). auth_send sends no body for a

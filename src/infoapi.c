@@ -5,8 +5,8 @@
 /** Maximum length of a hostname string */
 #define MAX_HOST_NAME_LENGTH 256
 
-/** Maximum length of a port string */
-#define MAX_PORT_LENGTH 5
+/** Maximum length of a port string (max port 65535 = 5 digits + nul) */
+#define MAX_PORT_LENGTH 6
 
 /** Default port if none specified */
 #define DEFAULT_PORT "8080"

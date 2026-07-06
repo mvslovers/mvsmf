@@ -1,11 +1,14 @@
 /* ============================================================
    login.js — login screen + auth flow
    System selector, live /zosmf/info connection check (401 = still
-   reachable, no-cors fallback), authenticated login, demo mode,
-   inline "Manage systems…" add, logout. On success it enters the
-   desktop and opens the Welcome window.
+   reachable, no-cors fallback), token login (POST once to
+   /zosmf/services/authenticate — the password is never stored),
+   demo mode, inline "Manage systems…" add, real server-side logout.
+   On success it enters the desktop and opens the Welcome window.
+   A live session (LtpaToken2 cookie) is restored across a reload;
+   a 401 from any API call returns to the login screen.
    ============================================================ */
-import { Session, SystemRegistry, checkSystem } from "./systems.js";
+import { Session, SystemRegistry, checkSystem, authenticate, SafeStore } from "./systems.js";
 import { WM } from "./wm.js";
 import { Programs } from "./programs/registry.js";
 import { Dialog } from "./dialog.js";
@@ -68,31 +71,32 @@ export const Login = (() => {
     if (!user) { setStatus("warn", "var(--wps-led-yellow)", "Enter a username"); return; }
 
     setStatus("wait", "var(--wps-led-off)", "Authenticating …");
-    const res = await checkSystem(sys, { user, pass });
-    if (res.status === "connected") {
+    // POST the credentials once to /zosmf/services/authenticate; on success the
+    // browser holds the LtpaToken2 cookie and the password is never stored.
+    const res = await authenticate(sys, { user, pass });
+    if (res.status === "ok") {
       Session.system = sys;
       Session.user = user.toUpperCase();
-      Session.pass = pass;
       Session.demo = false;
+      Session.save();
       const d = SystemRegistry.load();
       d.defaultSystem = sys.name;
       SystemRegistry.save(d);
       enterDesktop();
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
-    } else if (res.status === "cors_blocked") {
-      // reachable, but cross-origin blocks reading the auth response
-      setStatus("ok", "var(--wps-led-green)", "Connected — cross-origin (CORS pending); serve from the HTTPD or use demo mode");
     } else {
-      setStatus("bad", "var(--wps-led-red)", "System unreachable");
+      // fetch rejected — host unreachable, or a cross-origin login blocked by
+      // CORS (the token flow is same-origin: serve the SPA from the HTTPD).
+      setStatus("bad", "var(--wps-led-red)", "System unreachable (serve the SPA from the HTTPD, or use demo mode)");
     }
   }
 
   function demoLogin() {
     Session.system = null;
     Session.user = "DEMO";
-    Session.pass = "";
     Session.demo = true;
+    Session.save();
     enterDesktop();
   }
 
@@ -108,14 +112,29 @@ export const Login = (() => {
     WM.open(Programs.get("welcome"));
   }
 
-  function logout() {
-    // close everything by reloading state — simplest clean slate
+  async function logout() {
+    // real server-side logout (DELETE the token), then reload for a clean slate
+    await Session.logout();
+    location.reload();
+  }
+
+  // A 401 from any API call means the token expired or was reaped by the HTTPD
+  // (idle SESSION_TIMEOUT, default 30 min). Drop the stored session so the
+  // reload boots to the login screen — not straight back into a dead desktop —
+  // and leave a one-shot notice to explain why. The guard collapses the burst
+  // of 401s that concurrent requests produce into a single teardown.
+  let tearingDown = false;
+  function onSessionExpired() {
+    if (tearingDown) return;
+    tearingDown = true;
+    Session.clearStored();
+    SafeStore.set("mvsmf.notice", "Session expired — please log in again");
     location.reload();
   }
 
   function init() {
     refreshSystems();
-    checkSelected();
+    window.addEventListener("mvsmf:session-expired", onSessionExpired);
     sel().addEventListener("change", checkSelected);
     document.getElementById("login-submit").addEventListener("click", submit);
     document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
@@ -141,6 +160,17 @@ export const Login = (() => {
       refreshSystems();
       checkSelected();
     });
+
+    // A prior session-expiry (or logout) may have left a one-shot notice.
+    const notice = SafeStore.get("mvsmf.notice", null);
+    if (notice) SafeStore.set("mvsmf.notice", null);
+
+    // Restore a live session across a reload: the LtpaToken2 cookie survives,
+    // so a valid session skips the login screen entirely.
+    if (Session.restore()) { enterDesktop(); return; }
+
+    if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
+    else checkSelected();
   }
 
   return { init, refreshSystems, logout };

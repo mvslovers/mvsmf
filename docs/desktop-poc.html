@@ -536,19 +536,14 @@ const SystemRegistry = {
 };
 
 /* ---------- Connection check via /zosmf/info ---------- */
-async function checkSystem(sys, auth) {
-  // auth: optional {user, pass} to verify credentials
+async function checkSystem(sys) {
+  // Anonymous reachability probe for the login-screen LED. Credentials are
+  // verified separately by authenticate() (the token login), so this stays a
+  // header-less "simple request" that avoids a CORS preflight.
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), 4000);
   try {
-    // Anonymous probe stays a "simple request" (no custom headers) so it
-    // avoids a CORS preflight; authenticated checks send the full headers.
-    const headers = {};
-    if (auth) {
-      headers["Authorization"] = "Basic " + btoa(auth.user + ":" + auth.pass);
-      headers["X-CSRF-ZOSMF-HEADER"] = "true";
-    }
-    const resp = await fetch(SystemRegistry.baseUrl(sys) + "/zosmf/info", { headers, signal: ctl.signal });
+    const resp = await fetch(SystemRegistry.baseUrl(sys) + "/zosmf/info", { signal: ctl.signal });
     clearTimeout(timer);
     if (resp.ok) {
       let info = null;
@@ -574,12 +569,104 @@ async function checkSystem(sys, auth) {
   }
 }
 
-/* ---------- Session (current login) ---------- */
+/* ---------- Token login via /zosmf/services/authenticate ----------
+   POST the Basic credentials ONCE; on success the server returns
+   Set-Cookie: LtpaToken2=<token>. For a same-origin deployment (the SPA
+   served from the HTTPD) the browser stores that cookie and replays it on
+   every later request automatically — we never touch the raw password again
+   and never read the token (JS cannot read Set-Cookie / set a Cookie header). */
+async function authenticate(sys, { user, pass }) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 8000);
+  try {
+    const resp = await fetch(SystemRegistry.baseUrl(sys) + "/zosmf/services/authenticate", {
+      method: "POST",
+      credentials: "same-origin",   // let the browser keep the LtpaToken2 cookie
+      headers: {
+        "Authorization": "Basic " + btoa(user + ":" + pass),
+        "X-CSRF-ZOSMF-HEADER": "true"
+      },
+      signal: ctl.signal
+    });
+    clearTimeout(timer);
+    if (resp.ok) return { status: "ok" };
+    if (resp.status === 401 || resp.status === 403) return { status: "auth_failed" };
+    return { status: "error", code: resp.status };
+  } catch (e) {
+    clearTimeout(timer);
+    // fetch rejected: host down, or a cross-origin login blocked by CORS
+    // (the token flow is same-origin only — cross-origin is "CORS pending").
+    return { status: "unreachable" };
+  }
+}
+
+/* Is the LtpaToken2 session cookie present? (Set without HttpOnly, so it is
+   readable same-origin.) We only need its presence to decide whether to
+   restore a session on boot — the value stays opaque and browser-managed. */
+function hasSessionCookie() {
+  return typeof document !== "undefined" &&
+    /(?:^|;\s*)LtpaToken2=/.test(document.cookie || "");
+}
+
+/* ---------- Session (current login) ----------
+   Holds NO password and NO token — only the non-secret identity (user +
+   system) plus the demo flag. The credential lives entirely in the browser's
+   LtpaToken2 cookie, so the session survives a page reload and a real logout
+   is a server-side DELETE, not just dropping JS state. */
 const Session = {
+  KEY: "mvsmf.session",
   system: null,     // system object from registry
   user: null,
-  pass: null,
   demo: false,
+
+  /* Persist the non-secret identity so a reload can restore it. */
+  save() {
+    SafeStore.set(this.KEY, {
+      systemName: this.system ? this.system.name : null,
+      user: this.user,
+      demo: !!this.demo
+    });
+  },
+  clearStored() { SafeStore.set(this.KEY, null); },
+
+  /* Restore a session after a reload. Real systems require the LtpaToken2
+     cookie to still be present (else the server has no session to talk to);
+     demo needs no backend. Returns true when a session was restored. */
+  restore() {
+    const saved = SafeStore.get(this.KEY, null);
+    if (!saved) return false;
+    if (saved.demo) {
+      this.demo = true;
+      this.user = saved.user || "DEMO";
+      this.system = null;
+      return true;
+    }
+    const sys = saved.systemName ? SystemRegistry.get(saved.systemName) : null;
+    if (!sys || !hasSessionCookie()) { this.clearStored(); return false; }
+    this.system = sys;
+    this.user = saved.user;
+    this.demo = false;
+    return true;
+  },
+
+  /* Real server-side logout: DELETE the token (best-effort — the cookie is a
+     session cookie and dies on browser close regardless), then drop JS state. */
+  async logout() {
+    if (!this.demo && this.system) {
+      try {
+        await fetch(SystemRegistry.baseUrl(this.system) + "/zosmf/services/authenticate", {
+          method: "DELETE",
+          credentials: "same-origin",
+          headers: { "X-CSRF-ZOSMF-HEADER": "true" }
+        });
+      } catch (e) { /* offline logout is fine; the cookie still expires */ }
+    }
+    this.clearStored();
+    this.system = null;
+    this.user = null;
+    this.demo = false;
+  },
+
   /* Build a system context handed to every program window. */
   contextFor(systemName) {
     const sys = systemName ? SystemRegistry.get(systemName) : this.system;
@@ -593,11 +680,18 @@ const Session = {
       demo: self.demo,
       async apiFetch(path, options = {}) {
         if (self.demo) throw new Error("demo mode: no backend");
+        // No Authorization header: the browser attaches the LtpaToken2 cookie
+        // (same-origin). A 401 means the token expired or was reaped — signal
+        // the shell to return to the login screen (handled in Login).
+        options.credentials = options.credentials || "same-origin";
         options.headers = Object.assign({
-          "Authorization": "Basic " + btoa(self.user + ":" + self.pass),
           "X-CSRF-ZOSMF-HEADER": "true"
         }, options.headers || {});
-        return fetch(this.baseUrl + path, options);
+        const resp = await fetch(this.baseUrl + path, options);
+        if (resp.status === 401 && typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("mvsmf:session-expired"));
+        }
+        return resp;
       }
     };
   }
@@ -1308,30 +1402,32 @@ const Login = (() => {
     if (!user) { setStatus("warn", "var(--wps-led-yellow)", "Enter a username"); return; }
 
     setStatus("wait", "#999", "Authenticating …");
-    const res = await checkSystem(sys, { user, pass });
-    if (res.status === "connected") {
+    // POST the credentials once to /zosmf/services/authenticate; on success the
+    // browser holds the LtpaToken2 cookie and the password is never stored.
+    const res = await authenticate(sys, { user, pass });
+    if (res.status === "ok") {
       Session.system = sys;
       Session.user = user.toUpperCase();
-      Session.pass = pass;
       Session.demo = false;
+      Session.save();
       const d = SystemRegistry.load();
       d.defaultSystem = sys.name;
       SystemRegistry.save(d);
       enterDesktop();
     } else if (res.status === "auth_failed") {
       setStatus("bad", "var(--wps-led-red)", "Login failed — check credentials");
-    } else if (res.status === "cors_blocked") {
-      setStatus("warn", "var(--wps-led-yellow)", "Blocked by CORS — serve this page from the HTTPD or use demo mode");
     } else {
-      setStatus("bad", "var(--wps-led-red)", "System unreachable");
+      // fetch rejected — host unreachable, or a cross-origin login blocked by
+      // CORS (the token flow is same-origin: serve the SPA from the HTTPD).
+      setStatus("bad", "var(--wps-led-red)", "System unreachable (serve the SPA from the HTTPD, or use demo mode)");
     }
   }
 
   function demoLogin() {
     Session.system = null;
     Session.user = "DEMO";
-    Session.pass = "";
     Session.demo = true;
+    Session.save();
     enterDesktop();
   }
 
@@ -1347,14 +1443,29 @@ const Login = (() => {
     WM.open(Programs.get("welcome"));
   }
 
-  function logout() {
-    // close everything by reloading state — simplest clean slate
+  async function logout() {
+    // real server-side logout (DELETE the token), then reload for a clean slate
+    await Session.logout();
+    location.reload();
+  }
+
+  // A 401 from any API call means the token expired or was reaped by the HTTPD
+  // (idle SESSION_TIMEOUT, default 30 min). Drop the stored session so the
+  // reload boots to the login screen — not straight back into a dead desktop —
+  // and leave a one-shot notice to explain why. The guard collapses the burst
+  // of 401s that concurrent requests produce into a single teardown.
+  let tearingDown = false;
+  function onSessionExpired() {
+    if (tearingDown) return;
+    tearingDown = true;
+    Session.clearStored();
+    SafeStore.set("mvsmf.notice", "Session expired — please log in again");
     location.reload();
   }
 
   function init() {
     refreshSystems();
-    checkSelected();
+    window.addEventListener("mvsmf:session-expired", onSessionExpired);
     sel().addEventListener("change", checkSelected);
     document.getElementById("login-submit").addEventListener("click", submit);
     document.getElementById("login-pass").addEventListener("keydown", e => { if (e.key === "Enter") submit(); });
@@ -1376,6 +1487,17 @@ const Login = (() => {
       refreshSystems();
       checkSelected();
     });
+
+    // A prior session-expiry (or logout) may have left a one-shot notice.
+    const notice = SafeStore.get("mvsmf.notice", null);
+    if (notice) SafeStore.set("mvsmf.notice", null);
+
+    // Restore a live session across a reload: the LtpaToken2 cookie survives,
+    // so a valid session skips the login screen entirely.
+    if (Session.restore()) { enterDesktop(); return; }
+
+    if (notice) setStatus("warn", "var(--wps-led-yellow)", notice);
+    else checkSelected();
   }
 
   return { init, refreshSystems, logout };

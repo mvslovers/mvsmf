@@ -1,5 +1,6 @@
 #include <stddef.h>
 #include <stdio.h>
+#include <string.h>
 #include <clibgrt.h>
 #include <clibppa.h>
 #include <clibcrt.h>
@@ -14,6 +15,7 @@
 #include "jobsapi.h"
 #include "ussapi.h"
 #include "consapi.h"
+#include "authapi.h"
 #include "testapi.h"
 #include "router.h"
 
@@ -28,6 +30,18 @@ static
 int identity_middleware(Session *session)
 {
 	ACEE *acee = http_get_acee(session->httpc);
+
+	/* The authenticate endpoint is how a client logs in, so it must not be
+	 * gated on an already-resolved credential: a bad-credential login has no
+	 * ACEE and still needs to reach authLoginHandler to return the z/OSMF-
+	 * shaped 401, and logout must run even once the token is gone. Let it
+	 * through here (the handler inspects httpc->cred itself via the HTTPX
+	 * auth export). */
+	char *path = (char *) http_get_env(session->httpc,
+	                                   (const UCHAR *) "REQUEST_PATH");
+	if (path && strcmp(path, "/zosmf/services/authenticate") == 0) {
+		return 0;
+	}
 
 	if (!acee) {
 		sendDefaultHeaders(session, HTTP_STATUS_UNAUTHORIZED, HTTP_CONTENT_TYPE_NONE, 0);
@@ -88,6 +102,9 @@ int main(int argc, char **argv)
 	add_route(&router, GET, "/zosmf/info", infoHandler);
 	add_route(&router, GET, "/zosmf/test", testHandler);
 	add_route(&router, GET, "/zosmf/test/wildcard/{*filepath}", testWildcardHandler);
+
+	add_route(&router, POST, "/zosmf/services/authenticate", authLoginHandler);
+	add_route(&router, DELETE, "/zosmf/services/authenticate", authLogoutHandler);
 
 	add_route(&router, GET, "/zosmf/restjobs/jobs", jobListHandler);
 	add_route(&router, GET, "/zosmf/restjobs/jobs/{job-name}/{jobid}/files", jobFilesHandler);

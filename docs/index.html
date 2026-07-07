@@ -549,13 +549,13 @@ h1 span { color: var(--green); }
       <div class="box box-green" onclick="toggleDetail('detail-mvsmf')">
         <span class="tag">REST API</span>
         <h3>mvsMF</h3>
-        <div class="desc">z/OSMF-compatible REST API for datasets, jobs, and USS files. Runs as a CGI module inside HTTPD.</div>
+        <div class="desc">z/OSMF-compatible REST API for datasets, jobs, USS files, and console services. Runs as a CGI module inside HTTPD.</div>
         <a href="https://github.com/mvslovers/mvsmf" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/mvsmf</a>
       </div>
       <div class="box box-cyan" onclick="toggleDetail('detail-webui')" style="background: var(--bg-card); border: 1px solid #1a4a5c;">
-        <span class="tag" style="color: var(--cyan); background: rgba(86, 212, 200, 0.12);">Web Frontend · Planned</span>
-        <h3 style="font-size: 16px;">mvsMF Web UI</h3>
-        <div class="desc">Browser-based Dataset Explorer and JES2 Spool Viewer. A modern web app built on the mvsMF REST APIs.</div>
+        <span class="tag" style="color: var(--cyan); background: rgba(86, 212, 200, 0.12);">Web Frontend · In Development</span>
+        <h3 style="font-size: 16px;">mvsMF Desktop</h3>
+        <div class="desc">A browser-based management desktop in the style of the OS/2 Workplace Shell — windows, taskbar, start menu — built entirely on the mvsMF REST APIs.</div>
       </div>
     </div>
 
@@ -590,8 +590,13 @@ h1 span { color: var(--green); }
       <p>mvsMF implements the <strong>IBM z/OSMF REST API</strong> on MVS 3.8j. This means you can use
       modern tools like <code>Zowe Explorer</code> in VSCode to browse datasets, edit members,
       submit JCL, and view job output — all on a 1979 mainframe.</p>
-      <p>It handles three API families: <code>/zosmf/restfiles/ds/*</code> (datasets),
-      <code>/zosmf/restjobs/*</code> (jobs), and <code>/zosmf/restfiles/fs/*</code> (USS files via UFSD).</p>
+      <p>It handles four API families: <code>/zosmf/restfiles/ds/*</code> (datasets),
+      <code>/zosmf/restjobs/*</code> (jobs), <code>/zosmf/restfiles/fs/*</code> (USS files via UFSD),
+      and <code>/zosmf/restconsoles/*</code> (console services — issue operator commands and read the
+      hardcopy log).</p>
+      <p>Clients authenticate with HTTP Basic, or log in once at <code>/zosmf/services/authenticate</code>
+      to get a token (the z/OSMF <code>LtpaToken2</code>) and replay that instead of sending credentials
+      on every call.</p>
       <p>mvsMF is a <strong>CGI module</strong> — it doesn't listen on a port itself. Instead, it plugs
       into HTTPD, which handles all HTTP protocol work (TCP, Keep-Alive, TLS) and routes
       <code>/zosmf/*</code> requests to mvsMF.</p>
@@ -599,17 +604,20 @@ h1 span { color: var(--green); }
 
     <div id="detail-webui" class="detail-panel">
       <button class="close-btn" onclick="toggleDetail('detail-webui')">close</button>
-      <h3>mvsMF Web UI — Planned</h3>
-      <p>The Web UI will be a <strong>browser-based frontend</strong> that gives you a visual interface for working
-      with your MVS system — no IDE or CLI required. Just open a browser and go.</p>
-      <p>It will include a <strong>Dataset Explorer</strong> for browsing, viewing, and editing MVS datasets and PDS members,
-      and a <strong>JES2 Spool Viewer</strong> for inspecting job output, JCL, and spool files.
-      Think of the classic HTTPD 3.3.x built-in JES browser and dataset pages, but redesigned
-      from scratch as a modern, responsive web app.</p>
-      <p>The key design principle: the Web UI will be a pure frontend that
+      <h3>mvsMF Desktop — In Development</h3>
+      <p>The Desktop is a <strong>browser-based frontend</strong> that gives you a visual interface for working
+      with your MVS system — no IDE or CLI required. Just open a browser and go. It's modelled on the
+      <strong>OS/2 Workplace Shell</strong>: overlapping windows, a taskbar, a start menu, and desktop icons —
+      pure vanilla HTML/JS/CSS, no framework, no build step.</p>
+      <p>A <strong>feature-complete Phase 1 proof-of-concept</strong> already runs on a live HTTPD/UFS, and work is
+      under way to port it into the production module structure. Programs land one at a time — a
+      <strong>Dataset browser</strong> (with PDS member editing), a <strong>JES2 spool browser</strong>, a console, and more —
+      each one just another client of the REST APIs.</p>
+      <p>The key design principle: the Desktop is a pure frontend that
       consumes the <strong>mvsMF REST APIs</strong>. This means it benefits from all the work going into
       mvsMF (codepage handling, error handling, authentication) without duplicating any logic.
-      HTTPD serves the Web UI's HTML/CSS/JS as static files from UFS.</p>
+      HTTPD serves the Desktop's HTML/CSS/JS as static files from UFS.</p>
+      <p><a href="desktop-poc.html" style="color: var(--cyan);">↗ Try the Phase 1 proof-of-concept</a></p>
     </div>
 
     <div id="detail-httpd" class="detail-panel">
@@ -668,7 +676,7 @@ h1 span { color: var(--green); }
       from your workstation.</p>
     </div>
 
-    <!-- Foundation -->
+    <!-- Foundation: runtime library -->
     <div class="ssi-row">
       <div class="ssi-line"></div>
       <div class="ssi-label">C runtime</div>
@@ -678,12 +686,37 @@ h1 span { color: var(--green); }
     <div class="box-row foundation">
       <div class="box box-full" style="background: var(--bg-card); border: 1px solid var(--border); cursor: default;">
         <div style="text-align: center;">
-          <span class="tag" style="color: var(--text-dim); background: rgba(255,255,255,0.04);">Shared Foundation</span>
-          <h3 style="font-size: 15px; color: var(--text-dim);">crent370</h3>
-          <div class="desc" style="max-width: 500px; margin: 0 auto;">
-            Mike Rayborn's C runtime library for MVS 3.8j — provides TCP/IP sockets (DYN75), RACF authentication,
-            JES2 interfaces, VSAM, and 200+ standard C library functions. Every project above depends on it.
+          <span class="tag" style="color: var(--text-dim); background: rgba(255,255,255,0.04);">Runtime Library</span>
+          <h3 style="font-size: 15px; color: var(--text-dim);">libc370</h3>
+          <div class="desc" style="max-width: 540px; margin: 0 auto;">
+            The reentrant C runtime every project above links against — the standard C library plus the
+            MVS extras that make the rest possible: TCP/IP sockets (DYN75), RACF authentication, JES2
+            interfaces, VSAM, and SMF. Originally Michael Dean Rayborn's <strong>crent370</strong>; now the
+            cc370 target libc, maintained by the mvslovers community.
           </div>
+          <a href="https://github.com/mvslovers/libc370" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/libc370</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Foundation: build toolchain -->
+    <div class="ssi-row" style="margin-top: 12px;">
+      <div class="ssi-line"></div>
+      <div class="ssi-label">build toolchain</div>
+      <div class="ssi-line"></div>
+    </div>
+
+    <div class="box-row foundation">
+      <div class="box box-full" style="background: var(--bg-card); border: 1px solid var(--border); cursor: default;">
+        <div style="text-align: center;">
+          <span class="tag" style="color: var(--text-dim); background: rgba(255,255,255,0.04);">Host Cross-Toolchain</span>
+          <h3 style="font-size: 15px; color: var(--text-dim);">cc370</h3>
+          <div class="desc" style="max-width: 540px; margin: 0 auto;">
+            The host-native cross-toolchain — cc370 / as370 / ld370 / ar370, a GCC 3.4.6 fork — that compiles,
+            links and packages every project above entirely on macOS or Linux. The only thing that ever reaches
+            the mainframe is the finished load module. Successor to the old c2asm370 translator.
+          </div>
+          <a href="https://github.com/mvslovers/cc370" class="repo" onclick="event.stopPropagation()">⟩ mvslovers/cc370</a>
         </div>
       </div>
     </div>
@@ -705,21 +738,23 @@ h1 span { color: var(--green); }
         <div class="q">Do I need all of them?</div>
         <div class="a">Depends on your use case. For Zowe/VSCode: you need HTTPD + mvsMF + UFSD.
           For FTP access: just FTPD. For a simple web server: just HTTPD + UFSD.
-          All of them need crent370 as the C runtime.</div>
+          All of them link the libc370 C runtime.</div>
       </div>
       <div class="why-card">
         <div class="q">What's the current focus?</div>
         <div class="a">HTTPD 4.0.0 (major cleanup), UFSD beta readiness (AP-4a milestone),
-          FTPD testing and stabilization, and the mvsMF Web UI (Dataset Explorer + JES2 Spool Viewer).
-          The mvsMF REST API itself is stable — most active work is in the infrastructure it depends
-          on and the frontend it powers.</div>
+          FTPD testing and stabilization, and the mvsMF Desktop web frontend (a working Phase 1
+          proof-of-concept). The mvsMF REST API keeps growing too — console services and token-based
+          login landed recently — but most active work is in the infrastructure it depends on and the
+          frontend it powers.</div>
       </div>
       <div class="why-card">
         <div class="q">How do I get these programs?</div>
-        <div class="a">Right now, all projects are built from source using
-          <strong>mbt</strong> (MVS Build Tools) and require the <strong>crent370</strong> C runtime
-          on your MVS system. It's a hands-on process, but well-documented in each repo's README.
-          Looking ahead, the goal is to ship everything pre-built as part of the
+        <div class="a">Right now, all projects are built from source. The whole build runs on your
+          host (macOS or Linux) with the <strong>cc370</strong> cross-toolchain and <strong>mbt</strong>
+          (MVS Build Tools); they link the <strong>libc370</strong> C runtime, and only the final deploy
+          step uploads the finished load module to MVS. It's a hands-on process, but well-documented in
+          each repo's README. Looking ahead, the goal is to ship everything pre-built as part of the
           <strong>MVS Turnkey distributions</strong> (TK5 and friends) and as packages for the
           <strong>MVP package manager</strong> — so eventually it'll be a one-liner to install.</div>
       </div>

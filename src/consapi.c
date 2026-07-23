@@ -36,7 +36,13 @@
  * offset.  WARNING: unlike httpx at offset 0x08 (which httpcgi.h documents as an
  * ABI commitment), offset 0x2C for `flag` is NOT a published ABI -- it hardcodes
  * httpd's private struct layout (httpd/include/httpd.h: "volatile UCHAR flag",
- * masks 0x40/0x80).  If httpd reorders a field before `flag`, this reads garbage.
+ * masks 0x40/0x80).  If httpd's struct layout changes and this offset lands on
+ * an unrelated byte, the failure is SILENT (read-only, nothing is corrupted) and
+ * has two equally confusing shapes: if that byte happens to have 0x40/0x80 set,
+ * EVERY console request returns 503; if it does not, this quiesce check is
+ * silently INACTIVE and long polls stop draining at shutdown again. Neither
+ * announces itself -- keep this offset in lockstep with httpd's struct, and
+ * migrate to the accessor when it lands.
  * Read-only, so no httpd or libc370 change is needed now; the durable fix is an
  * httpd-provided accessor (follow-up).  Mirrors the http_get_httpx() offset idiom. */
 #define HTTPD_OFF_FLAG        0x2C     /* volatile UCHAR flag   (httpd.h layout) */
@@ -593,8 +599,14 @@ int consoleIssueHandler(Session *session)
 	if (!is_async) {
 		int captured = capture_response(session, cmd_upper, resp, RESP_CAP);
 		if (captured == CONS_POLL_INTERRUPTED) {
+			/* The command has already been ISSUED (issue_command/MGCR above);
+			 * only the response capture was abandoned. This is NOT a pre-issue
+			 * failure -- a blind retry RE-ISSUES the command (harmless for a
+			 * display like D T, not for S / V / $P). Reason-code 8/15 carries
+			 * that meaning; see docs/endpoints/console/issue-command.md. */
 			send_console_error(session, HTTP_STATUS_SERVICE_UNAVAILABLE, 8, 15,
-			    "Server is quiescing; command response capture interrupted.");
+			    "Command was issued; response capture abandoned (server "
+			    "quiescing). Do not blindly retry -- retry re-issues the command.");
 			rc = -1;
 			goto quit;
 		}
@@ -628,10 +640,15 @@ int consoleIssueHandler(Session *session)
 		strcpy(det_status, "timeout");
 		for (;;) {
 			if (server_quiescing(session)) {
+				/* Command already ISSUED above; only unsolicited-message
+				 * detection was abandoned. As with capture, reason-code 8/15
+				 * means "issued, poll abandoned" -- a blind retry re-issues
+				 * the command. */
 				send_console_error(session,
 				    HTTP_STATUS_SERVICE_UNAVAILABLE, 8, 15,
-				    "Server is quiescing; unsolicited-message "
-				    "detection interrupted.");
+				    "Command was issued; unsolicited-message detection "
+				    "abandoned (server quiescing). Do not blindly retry -- "
+				    "retry re-issues the command.");
 				rc = -1;
 				goto quit;
 			}

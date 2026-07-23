@@ -85,6 +85,14 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 400 | 1 | 25 | Regex `sol-key`/`unsol-key` not supported |
 | 400 | 1 | 5  | `system` is not the local system |
 | 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
+| 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
+
+> **`503 / 8 / 15` is a post-issue outcome, not a pre-issue failure.** The command
+> has already executed (SVC 34 / MGCR) when the server begins quiescing; only the
+> synchronous response capture or unsolicited-message detection is abandoned. A
+> blind retry **re-issues the command** — harmless for a display (`D T`) but not
+> for a state-changing command (`S`, `V`, `$P`). Treat it as "issued, result
+> unavailable," not "not issued."
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** under the authenticated user's ACEE (so RAKF evaluates command authority for that user); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

@@ -29,6 +29,22 @@
 #define RESP_CAP       32768      /* cap on captured cmd-response bytes        */
 #define POLL_SECONDS   3          /* sync capture window (~ TOD high-word ticks)*/
 
+/* Server quiesce/shutdown, read from the OPAQUE HTTPD control block.
+ *
+ * httpd hands each CGI an opaque HTTPD* (httpcgi.h forward-declares struct
+ * httpd), so we read the processing-flags byte directly at its fixed layout
+ * offset.  WARNING: unlike httpx at offset 0x08 (which httpcgi.h documents as an
+ * ABI commitment), offset 0x2C for `flag` is NOT a published ABI -- it hardcodes
+ * httpd's private struct layout (httpd/include/httpd.h: "volatile UCHAR flag",
+ * masks 0x40/0x80).  If httpd reorders a field before `flag`, this reads garbage.
+ * Read-only, so no httpd or libc370 change is needed now; the durable fix is an
+ * httpd-provided accessor (follow-up).  Mirrors the http_get_httpx() offset idiom. */
+#define HTTPD_OFF_FLAG        0x2C     /* volatile UCHAR flag   (httpd.h layout) */
+#define HTTPD_FLAG_QUIESCE    0x40     /* server: stop accepting new requests    */
+#define HTTPD_FLAG_SHUTDOWN   0x80     /* server: shutting down now              */
+
+#define CONS_POLL_INTERRUPTED (-1)     /* capture_response(): quiesced mid-poll  */
+
 /* Column layout of a formatted MTT line (see /zosmf/test?fn=mtt output):
  *   "0000  9.24.38 STC  320  IEE136I ..."
  *    flags^   time^    jobtype+num^    message^
@@ -48,6 +64,29 @@ static unsigned tod_hi(void)
 	unsigned char clk[8];
 	__asm__ volatile("STCK %0" : "=m"(clk) : : "cc");
 	return *(unsigned *)clk;
+}
+
+/* Non-zero once the server is quiescing or shutting down.  A worker parked in a
+ * poll loop must notice this and drain promptly: libc370's worker-shutdown gives
+ * each task only ~5 s before a force-DETACH (httpd#122 / mvsmf#179). */
+__asm__("\n&FUNC	SETC 'SRVQUIES'");
+static int server_quiescing(Session *session)
+{
+	const volatile unsigned char *flag;
+
+	if (!session || !session->httpd) return 0;
+	flag = (const volatile unsigned char *)session->httpd + HTTPD_OFF_FLAG;
+	return (*flag & (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) != 0;
+}
+
+/* Sub-second pause between MTT snapshots.  The MTT is second-granular, so a
+ * 0.10 s wait loses no fidelity while dropping the former CPU-bound spin to near
+ * zero.  BINTVL is in 0.01 s units -- the same STIMER primitive libc370's thread
+ * manager uses for its own drain loop. */
+__asm__("\n&FUNC	SETC 'CPOLLNAP'");
+static void cons_poll_nap(void)
+{
+	__asm__("STIMER WAIT,BINTVL==F'10'   0.10 seconds" : : : "0", "1");
 }
 
 /* Minimal JSON string-field extractor (body is already EBCDIC).
@@ -319,6 +358,7 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 	unsigned total = 0;
 
 	for (;;) {
+		if (server_quiescing(session)) return CONS_POLL_INTERRUPTED;
 		correlate_once(session, cmd_upper, out, outsz, 0, &total);
 		if (total > 0) {
 			if (total == prev_total) {
@@ -329,6 +369,7 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 		}
 		prev_total = total;
 		if (tod_hi() - start >= (unsigned)POLL_SECONDS) break;
+		cons_poll_nap();
 	}
 
 	return (int)total;
@@ -550,7 +591,14 @@ int consoleIssueHandler(Session *session)
 	resp[0] = '\0';
 
 	if (!is_async) {
-		delivered = (unsigned)capture_response(session, cmd_upper, resp, RESP_CAP);
+		int captured = capture_response(session, cmd_upper, resp, RESP_CAP);
+		if (captured == CONS_POLL_INTERRUPTED) {
+			send_console_error(session, HTTP_STATUS_SERVICE_UNAVAILABLE, 8, 15,
+			    "Server is quiescing; command response capture interrupted.");
+			rc = -1;
+			goto quit;
+		}
+		delivered = (unsigned)captured;
 		if (solkey[0] && strstr(resp, solkey)) sol_detected = 1;
 	}
 
@@ -579,12 +627,21 @@ int consoleIssueHandler(Session *session)
 		if (to == 0 || to > 60) to = 20;            /* sane bound */
 		strcpy(det_status, "timeout");
 		for (;;) {
+			if (server_quiescing(session)) {
+				send_console_error(session,
+				    HTTP_STATUS_SERVICE_UNAVAILABLE, 8, 15,
+				    "Server is quiescing; unsolicited-message "
+				    "detection interrupted.");
+				rc = -1;
+				goto quit;
+			}
 			if (detect_count(session, unsol_upper, det_msg, sizeof(det_msg))
 			    > unsol_base) {
 				strcpy(det_status, "detected");
 				break;
 			}
 			if (tod_hi() - start >= to) break;
+			cons_poll_nap();
 		}
 		if (strcmp(det_status, "detected") != 0) det_msg[0] = '\0';
 	} else if (has_unsol) {

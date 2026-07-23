@@ -85,6 +85,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 400 | 1 | 25 | Regex `sol-key`/`unsol-key` not supported |
 | 400 | 1 | 5  | `system` is not the local system |
 | 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
+| 503 | 8 | 15 | Server quiescing/shutting down; command/detection poll interrupted |
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** under the authenticated user's ACEE (so RAKF evaluates command authority for that user); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

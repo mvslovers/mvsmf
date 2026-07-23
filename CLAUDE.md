@@ -262,8 +262,11 @@ int ussXxxHandler(Session *session) {
 Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` mapping functions
 in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
 
-**Note:** HTTPD does not support HTTP 409, 414, or 507 status codes. These are
-mapped to the closest supported alternative (400 or 500).
+**Note:** httpd supports HTTP 409, 414, and 507 (added in httpd#28 / PR #56,
+reachable from CGIs via `http_resp()`). mvsMF's mapping below still collapses
+these to 400/500 (EXIST/NOTEMPTY → 400 instead of 409, NAMETOOLONG → 400 instead
+of 414, NOSPACE/NOINODES → 500 instead of 507); adopting the precise codes is
+tracked in #102.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

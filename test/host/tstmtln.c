@@ -61,6 +61,7 @@ static int correlate_once_len(const MTENTRY_T *e)
 	char tmp[160];
 	int len = e ? (int)e->mtentlen : 0;
 	if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
+	if (len < 0) len = 0;       /* #176 fix — mirrors consapi.c */
 	return len;                 /* value handed to memcpy(tmp,...,len) at :273 */
 }
 
@@ -70,6 +71,7 @@ static int detect_count_len(const MTENTRY_T *e)
 	char up[200];
 	int len = e ? (int)e->mtentlen : 0;
 	if (len > (int)sizeof(up) - 1) len = sizeof(up) - 1;
+	if (len < 0) len = 0;       /* #176 fix — mirrors consapi.c */
 	return len;                 /* loop/index bound up[k]/up[len] at :418-420 */
 }
 

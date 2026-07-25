@@ -270,6 +270,8 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 		int len = e ? (int)e->mtentlen : 0;
 		if (!e) continue;
 		if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
+		if (len < 0) len = 0;   /* mtentlen is a signed short: a bogus/over-read
+		                         * entry can sign-extend negative (#176) */
 		memcpy(tmp, e->mtentdat, len);
 		tmp[len] = '\0';
 		if (strstr(tmp, cmd_upper)) { ei = (int)(i - 1); break; }
@@ -415,6 +417,8 @@ static int detect_count(Session *session, const char *keyword_upper,
 		int k;
 		if (!e) continue;
 		if (len > (int)sizeof(up) - 1) len = sizeof(up) - 1;
+		if (len < 0) len = 0;   /* mtentlen is a signed short: a bogus/over-read
+		                         * entry can sign-extend negative (#176) */
 		for (k = 0; k < len; k++)
 			up[k] = (char)toupper((unsigned char)e->mtentdat[k]);
 		up[len] = '\0';

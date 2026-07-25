@@ -32,5 +32,13 @@ name = "TSTNTST"
 sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
 norent = true
 
+# TSTMTLN: #176 host repro — signed-short mtentlen must not drive a negative
+# copy length in the console MTT consumers. Portable C (runs under test-host).
+# NOTE: mirrors the consapi.c clamp; it does not link the real functions.
+[[test]]
+name = "TSTMTLN"
+sources = ["test/host/tstmtln.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

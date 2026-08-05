@@ -32,8 +32,10 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Dataset is a PDS (use the member endpoint instead)
+- HTTP 404 (Not Found)
+    - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)
-    - Dataset not found or cannot be opened
+    - The dataset exists but cannot be opened (I/O error)
     - Memory allocation failed
 
 ## Limitations

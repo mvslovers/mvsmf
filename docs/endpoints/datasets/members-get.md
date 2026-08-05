@@ -27,9 +27,16 @@ or with explicit volume:
 On successful completion, this request returns HTTP status code 200 (OK) with the member content. In text mode, trailing space padding on F/FB records is stripped so the output matches VB-style line endings.
 
 ## Error Responses
+- HTTP 404 (Not Found)
+    - Dataset not cataloged (`reason` 4, `Dataset not found`)
+    - Dataset exists but has no such member (`reason` 5, `PDS member not found`)
 - HTTP 500 (Internal Server Error)
-    - Dataset or member not found
+    - The member exists but cannot be opened (I/O error)
     - Memory allocation failed
+
+A failed open used to be reported as 500 whatever the cause, so a member that
+was simply not there looked like a broken server (issue #191). The two cases are
+now told apart by a catalog lookup and a filtered directory read.
 
 ## Limitations
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.

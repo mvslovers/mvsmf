@@ -620,15 +620,29 @@ assert_json_field "$BODY" '.reason' "4" "member of missing PDS: reason 4 (datase
 # asking for a member of a data set that is not partitioned. __listpd() reads
 # the directory with BPAM and abends S001 on a sequential data set, so this
 # used to come back as the router's abend-recovery 500.
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}(M1)")
-HTTP_CODE=$(echo "$RESP" | tail -1)
-BODY=$(echo "$RESP" | sed '$d')
-assert_http_status "400" "$HTTP_CODE" "read a member of a sequential dataset"
-if echo "$BODY" | grep -q "abend"; then
-	fail "member of sequential dataset must not abend" "abend recovery response"
+# Self-contained: TEST_SEQ has already been deleted by the delete tests at
+# this point, and a missing data set would answer 404 instead of 400.
+PROBE_SEQ="${MVSMF_USER}.CURL.NOTPDS"
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}")
+
+if [ "$HTTP_CODE" = "201" ]; then
+	RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}(M1)")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+	assert_http_status "400" "$HTTP_CODE" "read a member of a sequential dataset"
+	if echo "$BODY" | grep -q "abend"; then
+		fail "member of sequential dataset must not abend" "abend recovery response"
+	else
+		pass "member of sequential dataset does not abend"
+	fi
+	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
 else
-	pass "member of sequential dataset does not abend"
+	skip "member of a sequential dataset (could not create ${PROBE_SEQ})"
 fi
 
 # writing into a dataset that does not exist. fopen("w") auto-allocates an

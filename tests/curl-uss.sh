@@ -45,6 +45,23 @@ TEST_DIR="${USS_TEST_DIR:-/}"
 # Test file path for read tests (must exist on the UFS filesystem)
 TEST_FILE="${USS_TEST_FILE:-}"
 
+# Only the stat query and the read tests need TEST_FILE to already exist -
+# the write/create/delete blocks make their own. Their guard covered an unset
+# variable but not a configured path that is absent on the target, so a stale
+# USS_TEST_FILE produced five failures claiming the endpoints were broken when
+# they had correctly answered 404. Probe once; the two read-only blocks below
+# skip on TEST_FILE_EXISTS, everything else keeps using TEST_FILE.
+TEST_FILE_EXISTS=""
+if [ -n "$TEST_FILE" ]; then
+	if [ "$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_FILE}")" = "200" ]; then
+		TEST_FILE_EXISTS=1
+	else
+		echo "NOTE: USS_TEST_FILE=${TEST_FILE} is not on the target;" \
+			"the stat and read tests that need it will be skipped."
+	fi
+fi
+
 # --- state ---
 PASSED=0
 FAILED=0
@@ -240,7 +257,7 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 
 assert_http_status "404" "$HTTP_CODE" "non-existent path returns 404"
 
-if [ -n "$TEST_FILE" ]; then
+if [ -n "$TEST_FILE_EXISTS" ]; then
 	echo ""
 	echo "--- List file path (stat-like query) ---"
 
@@ -270,7 +287,7 @@ fi
 # 2. Read file tests (read-only, no cleanup needed)
 # =========================================================================
 
-if [ -n "$TEST_FILE" ]; then
+if [ -n "$TEST_FILE_EXISTS" ]; then
 	echo ""
 	echo "--- Read file (text mode, default) ---"
 
@@ -322,7 +339,7 @@ if [ -n "$TEST_FILE" ]; then
 else
 	echo ""
 	echo "--- Read file tests ---"
-	skip "read file: USS_TEST_FILE not set in .env, skipping read tests"
+	skip "read file: USS_TEST_FILE is unset in .env or absent on the target"
 fi
 
 # =========================================================================

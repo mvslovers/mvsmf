@@ -316,20 +316,20 @@ is_pds(const char *dsname)
 #define OPEN_FAIL_NOMEM   2     /* the data set has no such member        */
 #define OPEN_FAIL_NOTPDS  3     /* a member was asked of a non-PDS        */
 
-__asm__("\n&FUNC    SETC 'diagnose_open_failure'");
+/* Is the data set in the catalog? __locate() wants a blank-padded 44-byte
+   name, which is the only reason this is a function and not a call. */
+__asm__("\n&FUNC    SETC 'dataset_cataloged'");
 static int
-diagnose_open_failure(const char *dsname, const char *member)
+dataset_cataloged(const char *dsname)
 {
-    LOCWORK  locwork;
-    PDSLIST  **pdslist;
-    char     dsn44[44];
-    size_t   len;
+    LOCWORK locwork;
+    char    dsn44[44];
+    size_t  len;
 
     if (!dsname) {
-        return OPEN_FAIL_IO;
+        return 0;
     }
 
-    /* __locate() wants a blank-padded 44-byte name */
     len = strlen(dsname);
     if (len > sizeof(dsn44)) {
         len = sizeof(dsn44);
@@ -338,7 +338,21 @@ diagnose_open_failure(const char *dsname, const char *member)
     memcpy(dsn44, dsname, len);
 
     memset(&locwork, 0, sizeof(locwork));
-    if (__locate(dsn44, &locwork) != 0) {
+
+    return __locate(dsn44, &locwork) == 0;
+}
+
+__asm__("\n&FUNC    SETC 'diagnose_open_failure'");
+static int
+diagnose_open_failure(const char *dsname, const char *member)
+{
+    PDSLIST  **pdslist;
+
+    if (!dsname) {
+        return OPEN_FAIL_IO;
+    }
+
+    if (!dataset_cataloged(dsname)) {
         return OPEN_FAIL_NODSN;
     }
 
@@ -385,6 +399,39 @@ send_open_failure(Session *session, const char *dsname, const char *member,
     }
 
     return handle_error(session, ERR_IO, io_message);
+}
+
+/*
+ * Pre-flight for a directory read (issue #193).
+ *
+ * __listpd() opens the data set and reads its directory with BPAM. Against a
+ * data set that is not partitioned that is an S001 abend, not a NULL return -
+ * so the DSCB has to be checked before the call, not the result after it.
+ * Without this, GET .../{sequential-dataset}/member abends the handler and the
+ * client is answered by the router's ESTAE recovery.
+ *
+ * Returns 0 when the caller may go ahead; otherwise the response has already
+ * been sent.
+ */
+__asm__("\n&FUNC    SETC 'require_pds'");
+static int
+require_pds(Session *session, const char *dsname)
+{
+    if (!dataset_cataloged(dsname)) {
+        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+            RC_ERROR, REASON_DATASET_NOT_FOUND, ERR_MSG_DATASET_NOT_FOUND,
+            NULL, 0);
+        return -1;
+    }
+
+    if (!is_pds(dsname)) {
+        /* mirror of the "dataset is a PDS, use the member endpoint" 400 */
+        handle_error(session, ERR_INVALID_PARAM,
+            "Dataset is not partitioned (use the dataset endpoint instead)");
+        return -1;
+    }
+
+    return 0;
 }
 
 // Helper function to parse X-IBM-Data-Type header
@@ -1286,6 +1333,11 @@ int memberListHandler(Session *session)
 	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START"); 
 	pattern = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_PATTERN"); 
 
+	/* __listpd() abends S001 on a data set that is not partitioned (#193) */
+	if (require_pds(session, dsname) != 0) {
+		goto quit;
+	}
+
 	pdslist = __listpd(dsname, NULL);
 
 	session->headers_sent = 1;
@@ -1474,23 +1526,10 @@ int memberPutHandler(Session *session)
        set behind and then answer 500. Checking afterwards cannot help; by then
        the data set exists. A member that does not exist yet is fine - that is
        what a create looks like. */
-    {
-        LOCWORK locwork;
-        char    dsn44[44];
-        size_t  len = strlen(dsname);
-
-        if (len > sizeof(dsn44)) {
-            len = sizeof(dsn44);
-        }
-        memset(dsn44, ' ', sizeof(dsn44));
-        memcpy(dsn44, dsname, len);
-        memset(&locwork, 0, sizeof(locwork));
-
-        if (__locate(dsn44, &locwork) != 0) {
-            return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
-                CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
-                ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
-        }
+    if (!dataset_cataloged(dsname)) {
+        return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+            CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+            ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
     }
 
     fp = fopen(dataset, member_mode);

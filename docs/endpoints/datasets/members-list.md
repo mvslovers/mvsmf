@@ -36,8 +36,19 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 ```
 
 ## Error Responses
+- HTTP 400 (Bad Request)
+    - The dataset is not partitioned (use the dataset endpoint instead)
+- HTTP 404 (Not Found)
+    - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)
-    - Dataset not found or not a PDS
+    - I/O error while reading the directory
+
+The target is checked against the catalog and the DSCB before the directory is
+read. `__listpd()` reads it with BPAM, and against a data set that is not
+partitioned that is an S001 abend rather than an error return — so the check
+has to happen first (issue #193). A dataset that was not cataloged used to be
+answered with an empty `items` list and 200, which reads as "this PDS has no
+members".
 
 ## Limitations
 - No member statistics (TTR, size, dates) are returned yet

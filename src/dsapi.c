@@ -311,9 +311,10 @@ is_pds(const char *dsname)
  * member: a member that does not exist yet is what a create looks like, only
  * a missing data set is an error there.
  */
-#define OPEN_FAIL_IO     0      /* the object is there - a real I/O error */
-#define OPEN_FAIL_NODSN  1      /* the data set is not cataloged          */
-#define OPEN_FAIL_NOMEM  2      /* the data set has no such member        */
+#define OPEN_FAIL_IO      0     /* the object is there - a real I/O error */
+#define OPEN_FAIL_NODSN   1     /* the data set is not cataloged          */
+#define OPEN_FAIL_NOMEM   2     /* the data set has no such member        */
+#define OPEN_FAIL_NOTPDS  3     /* a member was asked of a non-PDS        */
 
 __asm__("\n&FUNC    SETC 'diagnose_open_failure'");
 static int
@@ -345,6 +346,13 @@ diagnose_open_failure(const char *dsname, const char *member)
         return OPEN_FAIL_IO;
     }
 
+    /* __listpd() reads the directory with BPAM and abends S001 if the data
+       set is not partitioned, so the DSCB has to be checked first - a member
+       request against a sequential data set is a client error, not a dump. */
+    if (!is_pds(dsname)) {
+        return OPEN_FAIL_NOTPDS;
+    }
+
     pdslist = __listpd(dsname, member);
     if (!pdslist) {
         return OPEN_FAIL_NOMEM;
@@ -370,6 +378,10 @@ send_open_failure(Session *session, const char *dsname, const char *member,
         return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
             CATEGORY_SERVICE, RC_ERROR, REASON_MEMBER_NOT_FOUND,
             ERR_MSG_MEMBER_NOT_FOUND, NULL, 0);
+    case OPEN_FAIL_NOTPDS:
+        /* mirror of the "dataset is a PDS, use the member endpoint" 400 */
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Dataset is not partitioned (use the dataset endpoint instead)");
     }
 
     return handle_error(session, ERR_IO, io_message);
@@ -1455,6 +1467,32 @@ int memberPutHandler(Session *session)
     } else {
         snprintf(member_mode, sizeof(member_mode), "%s", "w");
     }
+    /* Verify the data set exists before opening the member for output. Same
+       reason as the sequential path (issue #65): fopen("w") on a name that is
+       not cataloged auto-allocates it, and it does so with the wrong DCB - a
+       PUT to a member of a missing PDS used to leave a RECFM=V sequential data
+       set behind and then answer 500. Checking afterwards cannot help; by then
+       the data set exists. A member that does not exist yet is fine - that is
+       what a create looks like. */
+    {
+        LOCWORK locwork;
+        char    dsn44[44];
+        size_t  len = strlen(dsname);
+
+        if (len > sizeof(dsn44)) {
+            len = sizeof(dsn44);
+        }
+        memset(dsn44, ' ', sizeof(dsn44));
+        memcpy(dsn44, dsname, len);
+        memset(&locwork, 0, sizeof(locwork));
+
+        if (__locate(dsn44, &locwork) != 0) {
+            return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+                CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+                ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+        }
+    }
+
     fp = fopen(dataset, member_mode);
     if (!fp) {
         wtof("MVSMF06E Failed to open dataset member for writing: %s (errno=%d)", dataset, errno);

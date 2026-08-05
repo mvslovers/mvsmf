@@ -617,13 +617,40 @@ BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "404" "$HTTP_CODE" "read member of a missing PDS"
 assert_json_field "$BODY" '.reason' "4" "member of missing PDS: reason 4 (dataset not found)"
 
-# writing into a dataset that does not exist
+# asking for a member of a data set that is not partitioned. __listpd() reads
+# the directory with BPAM and abends S001 on a sequential data set, so this
+# used to come back as the router's abend-recovery 500.
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}(M1)")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "400" "$HTTP_CODE" "read a member of a sequential dataset"
+if echo "$BODY" | grep -q "abend"; then
+	fail "member of sequential dataset must not abend" "abend recovery response"
+else
+	pass "member of sequential dataset does not abend"
+fi
+
+# writing into a dataset that does not exist. fopen("w") auto-allocates an
+# unknown name with the wrong DCB, so this used to answer 500 *and* leave a
+# RECFM=V sequential data set behind (same defect as issue #65 on the
+# sequential path). Assert both the status and that nothing was created.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X PUT -u "$AUTH" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'X\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS(M1)")
 assert_http_status "404" "$HTTP_CODE" "write member into a missing PDS"
+
+LOCBODY=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/test?fn=locate&dsn=${MVSMF_USER}.NOSUCH.PDS")
+if echo "$LOCBODY" | grep -q '"rc": 0'; then
+	fail "failed member write must not create the dataset" "${MVSMF_USER}.NOSUCH.PDS now exists"
+	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS"
+else
+	pass "failed member write did not create the dataset"
+fi
 
 # ... but a member that does not exist YET is a create, not an error. This is
 # the regression guard for the write path: it must not inherit the read path's

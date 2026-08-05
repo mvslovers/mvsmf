@@ -447,6 +447,44 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list PDS members"
 assert_json_field_exists "$CONTENT" '.items[0].member' "member list has member field"
 
+# --- List members: the target must actually be a PDS (issue #193) ---
+# __listpd() reads the directory with BPAM and abends S001 on a sequential
+# data set, so this used to be answered by the router's abend recovery. A
+# data set that is not cataloged at all used to come back as an empty 200,
+# which reads as "this PDS has no members".
+echo ""
+echo "--- List PDS Members: wrong or missing target (issue #193) ---"
+
+LIST_SEQ="${MVSMF_USER}.CURL.LISTSEQ"
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}")
+
+if [ "$HTTP_CODE" = "201" ]; then
+	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}/member")
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+	assert_http_status "400" "$HTTP_CODE" "list members of a sequential dataset"
+	if echo "$CONTENT" | grep -q "abend"; then
+		fail "list members of a sequential dataset must not abend" "abend recovery response"
+	else
+		pass "list members of a sequential dataset does not abend"
+	fi
+	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
+else
+	skip "list members of a sequential dataset (could not create ${LIST_SEQ})"
+fi
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.LISTPDS/member")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "404" "$HTTP_CODE" "list members of a missing dataset"
+assert_json_field "$CONTENT" '.reason' "4" "missing dataset: reason 4 (dataset not found)"
+
 # --- List PDS members with volume prefix ---
 echo ""
 echo "--- List PDS Members with Volume Prefix ---"

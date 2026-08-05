@@ -720,44 +720,50 @@ test_spool_records_stale_checkpoint() {
 	#
 	# A purge cannot be provoked from the API (purging the job removes it from
 	# the checkpoint entirely, which is a 404), so this walks whatever the
-	# system currently holds: long-lived started tasks such as SYSLOG are where
-	# stale entries collect. The invariant asserted for every spool file that
-	# advertises records is: never an empty 200.
+	# system currently holds. Stale entries collect on long-lived started
+	# tasks: SYSLOG spins its log to a SYSOUT class, a printer drains and
+	# purges it, and the checkpointed PDDB keeps advertising it. The invariant
+	# asserted for every spool file that advertises records is: never an empty
+	# 200 - either the records come back, or the loss is reported as 410.
+	#
+	# The job list does not return STCs, so SYSLOG is located through the
+	# internal /zosmf/test?fn=syslog probe (jobid + dsid/record-count per DD)
+	# and read through the records endpoint directly by name and id. Falls
+	# back to the job this suite submitted when the probe is unavailable.
 
-	local jobs_resp jobname jobid
-	jobs_resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?prefix=SYSLOG")
-	split_response "$jobs_resp"
+	local jobname jobid ids probe
+	jobname="SYSLOG"
+	# the probe writes HTTP text lines: strip CR or the $ anchors never match
+	probe=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=syslog&step=4" 2>/dev/null | tr -d '\r')
+	jobid=$(printf '%s\n' "$probe" | sed -n 's/.*jobid=\([A-Z0-9]*\).*/\1/p' | head -1)
 
-	if [ "$HTTP_STATUS" != "200" ]; then
-		skip "stale checkpoint (job list returned HTTP $HTTP_STATUS)"
-		return
+	if [ -n "$jobid" ]; then
+		# dsids the probe reports with a non-zero record count
+		ids=$(printf '%s\n' "$probe" \
+			| sed -n 's/^step4 .*dsid=\([0-9]*\) .*records=\([1-9][0-9]*\)$/\1/p')
 	fi
 
-	jobname=$(echo "$BODY" | jq -r '.[0].jobname // empty' 2>/dev/null)
-	jobid=$(echo "$BODY" | jq -r '.[0].jobid // empty' 2>/dev/null)
-
-	if [ -z "$jobname" ] || [ -z "$jobid" ]; then
+	if [ -z "$jobid" ] || [ -z "$ids" ]; then
 		# fall back to the job this suite submitted
 		jobname="$SUBMIT_JOBNAME"
 		jobid="$SUBMIT_JOBID"
+
+		if [ -z "$jobname" ] || [ -z "$jobid" ]; then
+			skip "stale checkpoint (no job to inspect)"
+			return
+		fi
+
+		local files_resp
+		files_resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+		split_response "$files_resp"
+
+		if [ "$HTTP_STATUS" != "200" ]; then
+			skip "stale checkpoint (spool files returned HTTP $HTTP_STATUS)"
+			return
+		fi
+
+		ids=$(echo "$BODY" | jq -r '.[] | select(.["record-count"] > 0) | .id' 2>/dev/null)
 	fi
-
-	if [ -z "$jobname" ] || [ -z "$jobid" ]; then
-		skip "stale checkpoint (no job to inspect)"
-		return
-	fi
-
-	local files_resp
-	files_resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
-	split_response "$files_resp"
-
-	if [ "$HTTP_STATUS" != "200" ]; then
-		skip "stale checkpoint (spool files returned HTTP $HTTP_STATUS)"
-		return
-	fi
-
-	local ids
-	ids=$(echo "$BODY" | jq -r '.[] | select(.["record-count"] > 0) | .id' 2>/dev/null)
 
 	if [ -z "$ids" ]; then
 		skip "stale checkpoint (${jobname}(${jobid}) has no spool file with records)"

@@ -586,6 +586,100 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent member"
 
+# --- Open failures: 404 vs 500 (Issue #191) ---
+# fopen() only reports NULL, so every failed open used to be an I/O error 500 —
+# a member that is simply not there was indistinguishable from a broken server,
+# and 500 invites a retry that can never succeed.
+echo ""
+echo "--- Open failures: not found must be 404, not 500 (issue #191) ---"
+
+# missing sequential dataset
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.SEQDS")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "404" "$HTTP_CODE" "read missing sequential dataset"
+assert_json_field "$BODY" '.reason' "4" "missing dataset: reason 4 (dataset not found)"
+
+# missing member of a dataset that does exist
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOSUCHMB)")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "404" "$HTTP_CODE" "read missing member of an existing PDS"
+assert_json_field "$BODY" '.reason' "5" "missing member: reason 5 (member not found)"
+
+# member of a dataset that does not exist — the dataset is the reason, not the member
+RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS(M1)")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+assert_http_status "404" "$HTTP_CODE" "read member of a missing PDS"
+assert_json_field "$BODY" '.reason' "4" "member of missing PDS: reason 4 (dataset not found)"
+
+# asking for a member of a data set that is not partitioned. __listpd() reads
+# the directory with BPAM and abends S001 on a sequential data set, so this
+# used to come back as the router's abend-recovery 500.
+# Self-contained: TEST_SEQ has already been deleted by the delete tests at
+# this point, and a missing data set would answer 404 instead of 400.
+PROBE_SEQ="${MVSMF_USER}.CURL.NOTPDS"
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}")
+
+if [ "$HTTP_CODE" = "201" ]; then
+	RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}(M1)")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	BODY=$(echo "$RESP" | sed '$d')
+	assert_http_status "400" "$HTTP_CODE" "read a member of a sequential dataset"
+	if echo "$BODY" | grep -q "abend"; then
+		fail "member of sequential dataset must not abend" "abend recovery response"
+	else
+		pass "member of sequential dataset does not abend"
+	fi
+	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
+else
+	skip "member of a sequential dataset (could not create ${PROBE_SEQ})"
+fi
+
+# writing into a dataset that does not exist. fopen("w") auto-allocates an
+# unknown name with the wrong DCB, so this used to answer 500 *and* leave a
+# RECFM=V sequential data set behind (same defect as issue #65 on the
+# sequential path). Assert both the status and that nothing was created.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary $'X\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS(M1)")
+assert_http_status "404" "$HTTP_CODE" "write member into a missing PDS"
+
+LOCBODY=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/test?fn=locate&dsn=${MVSMF_USER}.NOSUCH.PDS")
+if echo "$LOCBODY" | grep -q '"rc": 0'; then
+	fail "failed member write must not create the dataset" "${MVSMF_USER}.NOSUCH.PDS now exists"
+	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS"
+else
+	pass "failed member write did not create the dataset"
+fi
+
+# ... but a member that does not exist YET is a create, not an error. This is
+# the regression guard for the write path: it must not inherit the read path's
+# member check, or creating a member would start answering 404.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary $'NEW MEMBER\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NEWMBR)")
+assert_http_status "204" "$HTTP_CODE" "create a new member in an existing PDS"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NEWMBR)")
+assert_http_status "204" "$HTTP_CODE" "delete the member just created"
+
 # --- Long DSN(member) name validation (Issue #133) ---
 # DSN <=44 and member <=8 are individually valid even when combined they exceed 44.
 # A 36-char DSN + 8-char member = 36+1+8+1=46 chars qualified: previously false 400, now passes guard.

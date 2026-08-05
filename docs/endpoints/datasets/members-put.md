@@ -30,9 +30,14 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing Content-Length or Transfer-Encoding header
+- HTTP 404 (Not Found)
+    - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)
-    - Dataset or member cannot be opened for writing
+    - The dataset exists but cannot be opened for writing (I/O error)
     - I/O error during write
+
+Only a missing *dataset* is an error here. A member that does not exist yet is
+what a create looks like, and it is written normally.
 
 ## Limitations
 - Text mode: records longer than LRECL are truncated with a warning

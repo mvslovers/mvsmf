@@ -282,8 +282,9 @@ jobRecordsHandler(Session *session)
 			}
 		}
 
-		sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
-
+		/* do_print_sysout() owns the response from here on: it holds the
+		   headers back until the first spool line is ready, so an outcome
+		   with no output at all can still answer 410 or 500 (issue #187) */
 		rc = do_print_sysout(session, job, (unsigned)ddid_val);
 		if (rc < 0) {
 			goto quit;
@@ -495,71 +496,155 @@ quit:
  * block chain to the EOB marker, so without a cap that line leaks into
  * every response. SYSIN record counts are final after input processing,
  * so capping at the PDDB count is exact; SYSOUT datasets stay uncapped
- * (their counts may lag while a job is active). The cap travels to the
- * per-line callback through the per-task GRT (grtapp3) - RENT-safe and
- * private to this worker thread.
+ * (their counts may lag while a job is active).
+ *
+ * The cap and the response target travel to the per-line callback in this
+ * context struct, handed straight through jesprint()'s arg (libc370 #21/#22,
+ * issue #187). Before that signature existed the cap had to ride the per-task
+ * GRT, because the callback took no argument of its own.
  */
-typedef struct spool_cap {
-	unsigned	limit;		/* stop after this many lines (0 = no cap) */
-	unsigned	count;		/* lines printed so far                    */
-} SPOOL_CAP;
+typedef struct spool_ctx {
+	Session		*session;	/* response target, and the httpx anchor   */
+	unsigned	limit;		/* cap for the current dd (0 = no cap)     */
+	unsigned	count;		/* lines printed from the current dd       */
+	unsigned	total;		/* lines printed from all dds so far       */
+} SPOOL_CTX;
 
 #define RC_SPOOL_CAP	(-77)	/* sentinel: cap reached, normal end */
 
+/*
+ * Why jesprint() stopped walking the block chain, in the terms this endpoint
+ * has to answer in. An ordinary end returns NULL; everything else names a
+ * condition the caller either reports as an error or logs as truncation.
+ *
+ * END and EMPTY are ordinary ends, and so is OPENEND: a data set that is
+ * still being written ends on a block whose chain points at a track that is
+ * allocated but not yet written, so that track carries a foreign key. Every
+ * running job reads that way - answering "gone" there would throw away output
+ * that was just read correctly (measured in libc370 #31: 350 and 3170 lines
+ * before the foreign block).
+ *
+ * FOREIGN needs the PDDB record count to be read correctly. It means the very
+ * first block was already foreign, so nothing was read at all - but that alone
+ * does not prove a loss: a data set nobody ever wrote to points at an
+ * allocated-but-unwritten track just the same, and with no accepted block in
+ * front of it libc370 cannot call that OPENEND. Only a non-zero record count
+ * makes it a loss: the checkpoint promises records the spool no longer holds,
+ * because JES2 printed and purged the data set and reallocated its tracks.
+ */
+__asm__("\n&FUNC	SETC 'do_print_sysout_why'");
+static const char *
+do_print_sysout_why(int prc, const JESPRST *st, unsigned records)
+{
+	/* jesprint() rejected the request before the walk started; a completed
+	   walk returns 0 or the callback's negative rc, never a positive one */
+	if (prc > 0) {
+		return "JES2 checkpoint or spool data set not available";
+	}
+
+	switch (st->reason) {
+	case JESPR_IOERR:	return "spool read failed";
+	case JESPR_FOREIGN:	return records ? "no longer on the spool" : NULL;
+	case JESPR_DSID:	return "first spool block belongs to another data set";
+	case JESPR_LOOP:	return "spool block chain loops, output truncated";
+	case JESPR_CAP:		return "spool block limit reached, output truncated";
+	case JESPR_NOBUF:	return "incomplete spanned record, output truncated";
+	case JESPR_NOMEM:	return "out of storage, output truncated";
+	}
+
+	return NULL;
+}
+
+/* HTTP status for an outcome that produced no output at all. 410 is reserved
+   for the one case that really is a loss - see do_print_sysout_why(). */
+__asm__("\n&FUNC	SETC 'do_print_sysout_status'");
+static int
+do_print_sysout_status(int prc, const JESPRST *st, unsigned records)
+{
+	if (prc > 0) {
+		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	}
+
+	if (st->reason == JESPR_FOREIGN && records) {
+		return HTTP_STATUS_GONE;
+	}
+
+	return do_print_sysout_why(prc, st, records)
+		? HTTP_STATUS_INTERNAL_SERVER_ERROR : HTTP_STATUS_OK;
+}
+
 __asm__("\n&FUNC	SETC 'do_print_sysout_line'");
 static int
-do_print_sysout_line(const char *line, unsigned linelen)
+do_print_sysout_line(const char *line, unsigned linelen, void *arg)
 {
+	SPOOL_CTX *ctx = (SPOOL_CTX *) arg;
+	Session *session = ctx->session;	/* the httpx macro reads session->httpd */
 	int rc = 0;
 
-// we do not have httpr in this function,
-// so we have to use httpd
-#undef httpx
-#define httpx http_get_httpx(httpd)
-
-	CLIBGRT *grt = __grtget();
-	HTTPD *httpd = grt->grtapp1;
-	HTTPC *httpc = grt->grtapp2;
-	SPOOL_CAP *cap = (SPOOL_CAP *) grt->grtapp3;
-
 	/* logical end of the dataset reached - stop jesprint */
-	if (cap && cap->limit && cap->count >= cap->limit) {
+	if (ctx->limit && ctx->count >= ctx->limit) {
 		return RC_SPOOL_CAP;
 	}
 
-	rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
-
-	if (rc >= 0 && cap) {
-		cap->count++;
+	/* headers are held back until there is something to send, so that an
+	   outcome with no output at all can still pick its own status */
+	if (!session->headers_sent) {
+		rc = sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
+		if (rc < 0) {
+			return rc;
+		}
 	}
 
-// switch back to httpr
-#undef httpx
-#define httpx http_get_httpx(session->httpd)
+	rc = http_printf(session->httpc, "%-*.*s\r\n", linelen, linelen, line);
+
+	if (rc >= 0) {
+		ctx->count++;
+		ctx->total++;
+	}
 
 	return rc;
 }
 
+/*
+ * Streams one spool dataset (dsid) and owns the whole response for it: the
+ * 200 headers are emitted by the callback on the first line, so an outcome
+ * that never produces a line can still answer 410 or 500 instead of an empty
+ * 200 (issue #187). Once a line has gone out the status is committed - a walk
+ * that then goes wrong is logged for the operator, not turned into an error
+ * body, because the records already sent are valid.
+ */
 __asm__("\n&FUNC	SETC 'do_print_sysout'");
-static int 
-do_print_sysout(Session *session, JESJOB *job, unsigned dsid) 
+static int
+do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 {
 	int rc = 0;
+	int prc = 0;
+	int status = HTTP_STATUS_OK;
+	unsigned bad_dsid = 0;
+	const char *bad_why = NULL;
+	char msg[MAX_ERR_MSG_LENGTH] = {0};
+	SPOOL_CTX ctx;
+	JESPRST st;
 
 	JES *jes = jesopen();
 	if (!jes) {
 		wtof(MSG_JOB_JES_ERROR);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_SERVICE, RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
+						ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
 		rc = -1;
 		goto quit;
 	}
 
-	CLIBGRT *grt = __grtget();
-	SPOOL_CAP cap;
-	unsigned printed = 0;
+	ctx.session = session;
+	ctx.limit = 0;
+	ctx.count = 0;
+	ctx.total = 0;
 
 	unsigned ii = 0;
 	for (ii = 0; ii < array_count(&job->jesdd); ii++) {
 		JESDD *dd = job->jesdd[ii];
+		const char *why = NULL;
 
 		if (!dd) {
 			continue;
@@ -578,8 +663,9 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 			continue;
 		}
 
-		/* dashed separator between multiple DDs - never trailing */
-		if (printed) {
+		/* dashed separator between dds that produced output - never leading,
+		   never trailing */
+		if (ctx.total) {
 			rc = http_printf(session->httpc, "- - - - - - - - - - - - - - - - - - - - "
 											"- - - - - - - - - - - - - - - - - - - - "
 											"- - - - - - - - - - - - - - - - - - - - "
@@ -591,21 +677,61 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 
 		/* cap SYSIN datasets at their (final) PDDB record count so the
 		   pre-built JES2 deletion line behind the records stays hidden */
-		cap.limit = ((dd->flag & FLAG_SYSIN) && dd->records) ? dd->records : 0;
-		cap.count = 0;
-		grt->grtapp3 = &cap;
-		rc = jesprint(jes, job, dd->dsid, do_print_sysout_line);
-		grt->grtapp3 = NULL;
+		ctx.limit = ((dd->flag & FLAG_SYSIN) && dd->records) ? dd->records : 0;
+		ctx.count = 0;
 
-		if (rc == RC_SPOOL_CAP) {
-			rc = 0;		/* cap reached - normal end of dataset */
+		prc = jesprint(jes, job, dd->dsid, do_print_sysout_line, &ctx, &st);
+
+		if (prc == RC_SPOOL_CAP) {
+			prc = 0;	/* cap reached - normal end of dataset */
 		}
-		if (rc < 0) {
+		if (prc < 0) {
+			/* the callback gave up: the socket is gone, nothing to answer */
+			rc = prc;
 			goto quit;
 		}
 
-		printed++;
+		/* remember the first abnormal outcome; it decides the status only if
+		   no dd ends up producing any output */
+		why = do_print_sysout_why(prc, &st, dd->records);
+		if (why && !bad_why) {
+			bad_why  = why;
+			bad_dsid = dd->dsid;
+			status   = do_print_sysout_status(prc, &st, dd->records);
+		}
 	}
+
+	/* output went out - the response is committed to 200, so an outcome that
+	   truncated it can only be reported to the operator. The no-output cases
+	   need no console message: the error body below says the same thing, and
+	   a purged dataset that a client polls would flood the log. */
+	if (ctx.total) {
+		if (bad_why) {
+			wtof(MSG_JOB_SPOOL_WALK, (char *) job->jobname,
+				(char *) job->jobid, bad_dsid, bad_why);
+		}
+		rc = 0;
+		goto quit;
+	}
+
+	if (status == HTTP_STATUS_GONE) {
+		snprintf(msg, sizeof(msg), ERR_MSG_SPOOL_GONE,
+				(char *) job->jobname, (char *) job->jobid, bad_dsid);
+		rc = sendErrorResponse(session, HTTP_STATUS_GONE, CATEGORY_SERVICE,
+						RC_WARNING, REASON_SPOOL_GONE, msg, NULL, 0);
+		goto quit;
+	}
+
+	if (status != HTTP_STATUS_OK) {
+		snprintf(msg, sizeof(msg), ERR_MSG_SPOOL_READ,
+				(char *) job->jobname, (char *) job->jobid, bad_dsid, bad_why);
+		rc = sendErrorResponse(session, status, CATEGORY_SERVICE,
+						RC_ERROR, REASON_SPOOL_READ, msg, NULL, 0);
+		goto quit;
+	}
+
+	/* nothing was written and nothing went wrong: an empty spool dataset */
+	rc = sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
 
 quit:
 	if (jes) {

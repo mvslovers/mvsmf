@@ -27,26 +27,37 @@
 /* NOTE: MVSMF is link-edited RENT (loaded into read-only storage), so this
  * module must carry NO writable static/global data -- any write to one S0C4s
  * (protection).  The jesprint callback therefore keeps no counter; it just
- * streams each line, exactly like jobsapi.c's do_print_sysout_line().      */
+ * streams each line, exactly like jobsapi.c's do_print_sysout_line().
+ *
+ * The Session arrives through jesprint()'s arg (libc370 #21/#22, issue #187);
+ * before that signature existed the callback had to fish httpd/httpc out of
+ * the per-task GRT anchors.                                                */
 __asm__("\n&FUNC	SETC 'print_syslog_line'");
-static int print_syslog_line(const char *line, unsigned linelen) {
-  int rc = 0;
+static int print_syslog_line(const char *line, unsigned linelen, void *arg) {
+  Session *session = (Session *)arg; /* the httpx macro reads session->httpd */
 
-/* this callback has no Session in scope; reach httpc via the GRT anchors,
- * exactly like jobsapi.c's do_print_sysout_line() */
-#undef httpx
-#define httpx http_get_httpx(httpd)
+  return http_printf(session->httpc, "%-*.*s\r\n", linelen, linelen, line);
+}
 
-  CLIBGRT *grt = __grtget();
-  HTTPD *httpd = grt->grtapp1;
-  HTTPC *httpc = grt->grtapp2;
+/* JESPR_* as text, so the probe reports why a walk stopped rather than just
+ * how much came out -- that distinction is the whole point of issue #186. */
+__asm__("\n&FUNC	SETC 'jespr_reason_name'");
+static const char *jespr_reason_name(int reason) {
+  switch (reason) {
+  case JESPR_END:     return "END";
+  case JESPR_EMPTY:   return "EMPTY";
+  case JESPR_IOERR:   return "IOERR";
+  case JESPR_FOREIGN: return "FOREIGN";
+  case JESPR_DSID:    return "DSID";
+  case JESPR_LOOP:    return "LOOP";
+  case JESPR_CAP:     return "CAP";
+  case JESPR_STOPPED: return "STOPPED";
+  case JESPR_NOBUF:   return "NOBUF";
+  case JESPR_NOMEM:   return "NOMEM";
+  case JESPR_OPENEND: return "OPENEND";
+  }
 
-  rc = http_printf(httpc, "%-*.*s\r\n", linelen, linelen, line);
-
-#undef httpx
-#define httpx http_get_httpx(session->httpd)
-
-  return rc;
+  return "?";
 }
 
 /* --- fn=abend (ESTAE recovery test hook) --------------------------------
@@ -244,12 +255,19 @@ int testHandler(Session *session) {
         dc = array_count(&job->jesdd);
         for (di = 0; di < dc; di++) {
           JESDD *dd = job->jesdd[di];
+          JESPRST st;
+          int prc;
           if (!dd || !dd->mttr)
             continue;
           http_printf(session->httpc,
                       "----- jobid=%-8.8s dd=%-8.8s dsid=%u -----\r\n",
                       (char *)job->jobid, (char *)dd->ddname, dd->dsid);
-          jesprint(jes, job, dd->dsid, print_syslog_line);
+          prc = jesprint(jes, job, dd->dsid, print_syslog_line, session, &st);
+          http_printf(session->httpc,
+                      "----- rc=%d reason=%s blocks=%u lines=%u mttr=%08X "
+                      "records=%u -----\r\n",
+                      prc, jespr_reason_name(st.reason), st.blocks, st.lines,
+                      st.mttr, dd->records);
         }
       }
     }

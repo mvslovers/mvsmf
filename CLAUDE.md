@@ -263,10 +263,13 @@ Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` ma
 in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
 
 **Note:** httpd supports HTTP 409, 414, and 507 (added in httpd#28 / PR #56,
-reachable from CGIs via `http_resp()`). mvsMF's mapping below still collapses
+reachable from CGIs via `http_resp()`), plus 410 (httpd#132 / PR #133, for the
+spool records endpoint — see below). mvsMF's mapping below still collapses
 these to 400/500 (EXIST/NOTEMPTY → 400 instead of 409, NAMETOOLONG → 400 instead
 of 414, NOSPACE/NOINODES → 500 instead of 507); adopting the precise codes is
-tracked in #102.
+tracked in #102. Any status httpd does not know falls through to
+`500 Internal Server Error` on the wire — check `httpresp()` before sending a
+new one.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

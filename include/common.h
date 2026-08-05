@@ -42,6 +42,7 @@
 #define HTTP_STATUS_UNAUTHORIZED 401          /**< Unauthorized */
 #define HTTP_STATUS_FORBIDDEN 403             /**< Forbidden */
 #define HTTP_STATUS_NOT_FOUND 404             /**< Resource not found */
+#define HTTP_STATUS_GONE 410                  /**< Resource existed, is gone */
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500 /**< Server error */
 #define HTTP_STATUS_SERVICE_UNAVAILABLE 503  /**< Service unavailable */
 

@@ -53,8 +53,21 @@
 #define REASON_MISSING_FILE_FIELD 7    /**< Missing file field in JSON */
 #define REASON_SUBMIT_FILE_OPEN 8      /**< Cannot open dataset */
 #define REASON_JES_BUSY 9             /**< JES2 resources busy */
+#define REASON_SPOOL_GONE 10          /**< Spool dataset purged by JES2 */
+#define REASON_SPOOL_READ 11          /**< Spool read failed or truncated */
 
 /** @brief Error message for JES2 busy */
 #define ERR_MSG_JES_BUSY "JES2 subsystem is busy, please retry"
+
+/** @brief Error message for spool output JES2 has already purged */
+#define ERR_MSG_SPOOL_GONE                                                     \
+  "Spool output for job '%.8s(%.8s)' DD id %u is no longer on the spool"
+
+/** @brief Error message for a spool read that failed or was truncated */
+#define ERR_MSG_SPOOL_READ                                                     \
+  "Unable to read spool output for job '%.8s(%.8s)' DD id %u: %s"
+
+/** @brief Operator message for an abnormal spool walk */
+#define MSG_JOB_SPOOL_WALK "MVSMF10W Spool read %-8.8s(%-8.8s) DSID %u: %s"
 
 #endif // JOBSAPI_MSG_H

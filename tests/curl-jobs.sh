@@ -708,6 +708,107 @@ test_spool_records_exact_count() {
 	fi
 }
 
+test_spool_records_stale_checkpoint() {
+	echo ""
+	echo "--- Spool File Records: stale checkpoint entry (issue #187) ---"
+
+	# A spool data set JES2 has printed and purged stays in the checkpointed
+	# PDDB, record count and all, while its tracks are reallocated. Reading it
+	# lands on a foreign block and yields nothing. Before #187 that came back
+	# as an empty 200, indistinguishable from an empty data set; it must now be
+	# 410 Gone.
+	#
+	# A purge cannot be provoked from the API (purging the job removes it from
+	# the checkpoint entirely, which is a 404), so this walks whatever the
+	# system currently holds. Stale entries collect on long-lived started
+	# tasks: SYSLOG spins its log to a SYSOUT class, a printer drains and
+	# purges it, and the checkpointed PDDB keeps advertising it. The invariant
+	# asserted for every spool file that advertises records is: never an empty
+	# 200 - either the records come back, or the loss is reported as 410.
+	#
+	# The job list does not return STCs, so SYSLOG is located through the
+	# internal /zosmf/test?fn=syslog probe (jobid + dsid/record-count per DD)
+	# and read through the records endpoint directly by name and id. Falls
+	# back to the job this suite submitted when the probe is unavailable.
+
+	local jobname jobid ids probe
+	jobname="SYSLOG"
+	# the probe writes HTTP text lines: strip CR or the $ anchors never match
+	probe=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=syslog&step=4" 2>/dev/null | tr -d '\r')
+	jobid=$(printf '%s\n' "$probe" | sed -n 's/.*jobid=\([A-Z0-9]*\).*/\1/p' | head -1)
+
+	if [ -n "$jobid" ]; then
+		# dsids the probe reports with a non-zero record count
+		ids=$(printf '%s\n' "$probe" \
+			| sed -n 's/^step4 .*dsid=\([0-9]*\) .*records=\([1-9][0-9]*\)$/\1/p')
+	fi
+
+	if [ -z "$jobid" ] || [ -z "$ids" ]; then
+		# fall back to the job this suite submitted
+		jobname="$SUBMIT_JOBNAME"
+		jobid="$SUBMIT_JOBID"
+
+		if [ -z "$jobname" ] || [ -z "$jobid" ]; then
+			skip "stale checkpoint (no job to inspect)"
+			return
+		fi
+
+		local files_resp
+		files_resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+		split_response "$files_resp"
+
+		if [ "$HTTP_STATUS" != "200" ]; then
+			skip "stale checkpoint (spool files returned HTTP $HTTP_STATUS)"
+			return
+		fi
+
+		ids=$(echo "$BODY" | jq -r '.[] | select(.["record-count"] > 0) | .id' 2>/dev/null)
+	fi
+
+	if [ -z "$ids" ]; then
+		skip "stale checkpoint (${jobname}(${jobid}) has no spool file with records)"
+		return
+	fi
+
+	local checked=0 gone=0 bad=0 detail=""
+	local id resp
+	for id in $ids; do
+		resp=$(do_curl GET \
+			"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files/${id}/records")
+		split_response "$resp"
+		checked=$((checked + 1))
+
+		case "$HTTP_STATUS" in
+			200)
+				if [ -z "$BODY" ]; then
+					bad=$((bad + 1))
+					detail="${detail} id=${id}:empty-200"
+				fi
+				;;
+			410)
+				gone=$((gone + 1))
+				local cat
+				cat=$(echo "$BODY" | jq -r '.category // empty' 2>/dev/null)
+				if [ -z "$cat" ]; then
+					bad=$((bad + 1))
+					detail="${detail} id=${id}:410-without-error-body"
+				fi
+				;;
+			*)
+				bad=$((bad + 1))
+				detail="${detail} id=${id}:HTTP-${HTTP_STATUS}"
+				;;
+		esac
+	done
+
+	if [ "$bad" -eq 0 ]; then
+		pass "${jobname}(${jobid}): ${checked} spool file(s) with records, none empty-200 (${gone} reported 410 Gone)"
+	else
+		fail "${jobname}(${jobid}): spool files with records must never be an empty 200" \
+			"${detail# }"
+	fi
+}
+
 test_spool_records_invalid_ddid() {
 	echo ""
 	echo "--- Spool File Records: invalid DDID ---"
@@ -807,6 +908,7 @@ test_spool_files_not_found
 # Spool records tests
 test_spool_records
 test_spool_records_exact_count
+test_spool_records_stale_checkpoint
 test_spool_records_invalid_ddid
 
 # Purge tests (last, since it removes the test job)

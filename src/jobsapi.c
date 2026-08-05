@@ -319,7 +319,10 @@ jobPurgeHandler(Session *session)
 	const char *jobname = getPathParam(session, "job-name");
 	const char *jobid = getPathParam(session, "jobid");
 
+	JESJOB *job = NULL;
+	JESJOB **joblist = NULL;
 	JsonBuilder *builder = createJsonBuilder();
+	char owner[JOBNAME_STR_SIZE + 1] = {0};
 
 	if (!jobname || !jobid) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
@@ -327,6 +330,26 @@ jobPurgeHandler(Session *session)
 						  NULL, 0);
 		goto quit;
 	}
+
+	/* Resolve the job before purging it. Two reasons (issue #190):
+	   - it is the only chance to read the owner, which the purge feedback
+	     document carries and which is gone once the job is;
+	   - it answers "no such job" the way the status and files handlers do.
+	     jescanj() alone cannot: a jobid JES2 rejects as malformed - anything
+	     outside JOB00001-JOB09999 on 3.8j, e.g. JOB99999 - comes back as
+	     CANJ_SYNTX, which used to fall through to a 500. */
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
+	if (!job) {
+		char msg[MAX_ERR_MSG_LENGTH] = {0};
+		snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
+		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+						RC_WARNING, REASON_JOB_NOT_FOUND,
+						msg, NULL, 0);
+		goto quit;
+	}
+
+	/* copy it out now - the job the pointer describes is about to be purged */
+	snprintf(owner, sizeof(owner), "%.8s", (char *) job->owner);
 
 	rc = jescanj(jobname, jobid, 1);
 
@@ -338,6 +361,7 @@ jobPurgeHandler(Session *session)
 		rc = addJsonString(builder, "message", "Request was successful.");
 		rc = addJsonString(builder, "original-jobid", jobid);
 		rc = addJsonString(builder, "jobname", jobname);
+		rc = addJsonString(builder, "owner", owner);
 		rc = addJsonNumber(builder, "status", 0);
 
 		rc = endJsonObject(builder);
@@ -350,6 +374,9 @@ jobPurgeHandler(Session *session)
 		break;
 	case CANJ_NOJB:
 	case CANJ_BADI:
+	case CANJ_SYNTX:
+		/* the lookup above found it, so this is a job that went away between
+		   the two calls - still "not found" from the client's side */
 		{
 			char msg[MAX_ERR_MSG_LENGTH] = {0};
 			snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
@@ -372,6 +399,10 @@ jobPurgeHandler(Session *session)
 	}
 
 quit:
+	if (joblist) {
+		jesjobfr(&joblist);
+	}
+
 	if (builder) {
 		freeJsonBuilder(builder);
 	}

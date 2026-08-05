@@ -17,14 +17,20 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 
 ```json
 {
-    "owner": "string",       // Owner of the job
-    "jobid": "string",       // Job ID
-    "job-correlator": "",    // Job correlator (not supported in MVS 3.8j)
-    "message": "string",     // Success message
-    "jobname": "string",     // Name of the job
-    "status": 0             // Status of the delete operation
+    "owner": "string",           // Owner of the job
+    "jobid": "string",           // Job ID
+    "original-jobid": "string",  // Same as jobid
+    "message": "string",         // Success message
+    "jobname": "string",         // Name of the job
+    "status": 0                  // Status of the delete operation
 }
 ```
+
+`job-correlator` is not emitted — MVS 3.8j has no job correlators.
+
+The job is looked up before it is purged. That lookup is what supplies `owner`
+(it cannot be read afterwards, the job is gone) and what makes an unknown job
+answer 404 the same way `GET /jobs/{name}/{id}` does.
 
 ## Error Responses
 - HTTP 400 (Bad Request)
@@ -32,7 +38,10 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 - HTTP 403 (Forbidden)
     - No permission (e.g. attempt to delete HTTPD itself)
 - HTTP 404 (Not Found)
-    - Job not found
+    - Job not found. This also covers a jobid JES2 rejects as malformed —
+      on 3.8j anything outside `JOB00001`–`JOB09999`, e.g. `JOB99999`, or a
+      non-conforming string. `jescanj()` reports those as `CANJ_SYNTX`, which
+      used to surface as 500 (issue #190).
 - HTTP 500 (Internal Server Error)
     - JES2 system error
     - VSAM error

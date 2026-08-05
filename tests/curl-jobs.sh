@@ -856,11 +856,19 @@ test_purge_not_found() {
 	echo ""
 	echo "--- Purge Job: not found ---"
 
-	local resp
-	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/NOSUCHJB/JOB99999")
-	split_response "$resp"
+	# Three shapes an unknown job can take, all of which must answer 404 the
+	# way GET /jobs/{name}/{id} does (issue #190). Only the first is a plain
+	# "no such job": JES2 on 3.8j accepts JOB00001-JOB09999, so JOB99999 and
+	# a non-conforming string come back from jescanj() as CANJ_SYNTX, which
+	# used to fall through to a 500.
+	local jid resp
+	for jid in JOB09999 JOB99999 NOTAJOBID; do
+		resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/NOSUCHJB/${jid}")
+		split_response "$resp"
 
-	assert_http_status "404" "$HTTP_STATUS" "purge job not found"
+		assert_http_status "404" "$HTTP_STATUS" "purge job not found (${jid})"
+		assert_json_field "$BODY" '.reason' "2" "purge not found: reason 2 (${jid})"
+	done
 }
 
 # =========================================================================

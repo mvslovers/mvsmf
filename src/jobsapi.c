@@ -567,8 +567,10 @@ __asm__("\n&FUNC	SETC 'do_print_sysout_why'");
 static const char *
 do_print_sysout_why(int prc, const JESPRST *st, unsigned records)
 {
-	/* jesprint() rejected the request before the walk started; a completed
-	   walk returns 0 or the callback's negative rc, never a positive one */
+	/* jesprint() rejected the request before the walk started: since libc370
+	   #26 its rc is a status and nothing else - 0 when the walk ran, 404 for
+	   an unknown dsid, 503 when JES2 is unusable.  Why a walk that DID run
+	   ended is st->reason, below.                                          */
 	if (prc > 0) {
 		return "JES2 checkpoint or spool data set not available";
 	}
@@ -713,13 +715,20 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 
 		prc = jesprint(jes, job, dd->dsid, do_print_sysout_line, &ctx, &st);
 
-		if (prc == RC_SPOOL_CAP) {
-			prc = 0;	/* cap reached - normal end of dataset */
+		/* Since libc370 #26 prc is a status (0/404/503) and no longer carries
+		   the print callback's rc: a callback that stopped the walk arrives as
+		   JESPR_STOPPED with its own rc in st.prtrc.  RC_SPOOL_CAP is our
+		   sentinel for "capped at the PDDB record count", which is a normal
+		   end of the data set - anything else means the callback gave up.
+		   Reading st also works against a pre-#26 libc370, which additionally
+		   returned that rc in prc.                                          */
+		if (st.reason == JESPR_STOPPED && st.prtrc != RC_SPOOL_CAP) {
+			/* the callback gave up: the socket is gone, nothing to answer */
+			rc = st.prtrc;
+			goto quit;
 		}
 		if (prc < 0) {
-			/* the callback gave up: the socket is gone, nothing to answer */
-			rc = prc;
-			goto quit;
+			prc = 0;	/* pre-#26 libc370: the callback's rc, handled above */
 		}
 
 		/* remember the first abnormal outcome; it decides the status only if

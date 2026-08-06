@@ -2108,8 +2108,6 @@ int datasetCreateHandler(Session *session)
 		dsname, dsorg, recfm, lrecl, blksize,
 		alcunit, primary, secondary, dirblk);
 
-	wtof("MVSMF63I Dataset create: %s", opts);
-
 	/* Allocate the dataset */
 	rc = __dsalcf(ddname, "%s", opts);
 	if (rc != 0) {
@@ -2168,8 +2166,6 @@ int datasetDeleteHandler(Session *session)
 			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
 	}
 
-	wtof("MVSMF73I Dataset deleted: %s", dsname);
-
 	/* Send HTTP 204 No Content */
 	rc = sendDefaultHeaders(session, 204, "application/json", 0);
 
@@ -2221,8 +2217,6 @@ int memberDeleteHandler(Session *session)
 			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
 			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
 	}
-
-	wtof("MVSMF77I Member deleted: %s", dataset);
 
 	/* Send HTTP 204 No Content */
 	rc = sendDefaultHeaders(session, 204, "application/json", 0);

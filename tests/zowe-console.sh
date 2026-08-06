@@ -16,6 +16,37 @@
 
 set -uo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="${ROOT_DIR}/.env"
+
+if [ ! -f "$ENV_FILE" ]; then
+	echo "ERROR: ${ENV_FILE} not found."
+	echo "Copy .env.example to .env and fill in your values."
+	exit 1
+fi
+
+# shellcheck source=../.env
+. "$ENV_FILE"
+
+MVS_USER="${MVSMF_USER:-}"
+if [ -z "$MVS_USER" ]; then
+	echo "ERROR: MVSMF_USER is not set in ${ENV_FILE}."
+	echo "  Without it every data set name is built from an empty prefix and the"
+	echo "  suite silently works on the wrong HLQ. Refusing to run. See issue #204."
+	exit 1
+fi
+
+# Every connection option goes on every invocation. A Zowe base profile is
+# merged into each command and overrides host and credentials silently --
+# passing --user/--password alone is not enough, the request still goes to
+# the base profile's host and comes back 401. See issue #204.
+ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
+	--protocol "${MVSMF_PROTOCOL:-http}"
+	--user "$MVS_USER" --password "$MVSMF_PASS"
+	--reject-unauthorized false)
+
+
 # --- state ---
 PASSED=0
 FAILED=0
@@ -31,7 +62,7 @@ fail() {
 # Run a zowe command with JSON output; sets OUTPUT and RC.
 run_zowe_json() {
 	RC=0
-	OUTPUT=$(zowe "$@" --rfj 2>&1) || RC=$?
+	OUTPUT=$(zowe "$@" --rfj "${ZOWE_CONN[@]}" 2>&1 </dev/null) || RC=$?
 }
 
 assert_rc() {

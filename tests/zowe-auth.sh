@@ -57,7 +57,7 @@ fail() {
 # Run a zowe command with JSON output; sets OUTPUT and RC.
 run_zowe_json() {
 	RC=0
-	OUTPUT=$(zowe "$@" --rfj 2>&1) || RC=$?
+	OUTPUT=$(zowe "$@" --rfj 2>&1 </dev/null) || RC=$?
 }
 
 assert_rc() {

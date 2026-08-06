@@ -1,5 +1,7 @@
-# Generated ASM sources
-*.s
+# Generated ASM sources (cc370 output next to the C sources).
+# Scoped to src/ on purpose: asm/ holds hand-written S/370 assembler, which
+# may carry a .s suffix and must stay tracked.
+src/*.s
 
 # Prerequisites
 *.d

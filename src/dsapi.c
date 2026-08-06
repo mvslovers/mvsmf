@@ -455,13 +455,11 @@ static int parse_data_type(const char *data_type) {
  *
  * eff_lrecl: the caller's allocation size and record limit in one value -- the
  * data set's LRECL, or its BLKSIZE for RECFM=U where LRECL is 0. Clamping
- * against fp->lrecl instead would cut every record of a RECFM=U data set to
- * zero length.
- *
- * truncated: incremented once per record that had to be cut to eff_lrecl. The
- * caller reports the total once per request rather than one WTO per record.
+ * against fp->lrecl instead cut every record of a RECFM=U data set to zero
+ * length, because a text-mode write is selected by the X-IBM-Data-Type header
+ * and does not care what RECFM the data set has.
  */
-static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t eff_lrecl, size_t *truncated)
+static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t eff_lrecl)
 {
     int recfm = fp->recfm;  // Get record format from file handle
 
@@ -537,10 +535,13 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
                 record_length--;
             }
             
-            // Ensure we don't exceed the record limit
+            /* Backstop only: every text caller already rejects a line at
+               eff_lrecl - 1 with "Record too long", so this cannot normally
+               fire. It stays as the last line of defence against a caller
+               and this function disagreeing about the limit -- which is
+               precisely how issue #198 happened. */
             if (eff_lrecl && record_length > eff_lrecl) {
                 record_length = eff_lrecl;
-                if (truncated) (*truncated)++;
             }
 
             // Convert to EBCDIC in place -- the caller's buffer is sized to the
@@ -941,12 +942,10 @@ int datasetPutHandler(Session *session)
     size_t content_length = 0;
     size_t total_written = 0;
     int line_count = 0;
-    size_t truncated = 0;
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
-    size_t bytes_received = 0;
     int data_type;
 
     // Validate parameters
@@ -1078,7 +1077,7 @@ int datasetPutHandler(Session *session)
                         memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                         record_pos = eff_lrecl;
                     }
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1126,7 +1125,7 @@ int datasetPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -1156,7 +1155,7 @@ int datasetPutHandler(Session *session)
                     record_buffer[record_pos++] = c;
 
                     if (c == 0x0A) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -1168,7 +1167,7 @@ int datasetPutHandler(Session *session)
 
                 /* Write any remaining text data at end of chunk */
                 if (record_pos > 0) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1210,7 +1209,7 @@ int datasetPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1226,7 +1225,7 @@ int datasetPutHandler(Session *session)
                     memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                     record_pos = eff_lrecl;
                 }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1254,7 +1253,7 @@ int datasetPutHandler(Session *session)
                 record_buffer[record_pos++] = c;
 
                 if (c == 0x0A || c == 0x0D) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1277,7 +1276,7 @@ int datasetPutHandler(Session *session)
                 if (record_pos > eff_lrecl) {
                     record_pos = eff_lrecl;
                 }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1291,11 +1290,6 @@ int datasetPutHandler(Session *session)
     record_buffer = NULL;
     session_fclose(session, fp);
     fp = NULL;
-
-    if (truncated) {
-        wtof("MVSMF30W %u RECORD(S) TRUNCATED TO LRECL %u WRITING %s",
-             (unsigned) truncated, (unsigned) eff_lrecl, dsname);
-    }
 
     /* Send response */
     session->headers_sent = 1;
@@ -1473,12 +1467,10 @@ int memberPutHandler(Session *session)
     size_t content_length = 0;
     size_t total_written = 0;
     int line_count = 0;
-    size_t truncated = 0;
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
-    size_t bytes_received = 0;
     int data_type;
 
     // Validate parameters
@@ -1621,7 +1613,7 @@ int memberPutHandler(Session *session)
                         memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                         record_pos = eff_lrecl;
                     }
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF11E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1669,7 +1661,7 @@ int memberPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                             wtof("MVSMF14E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -1699,7 +1691,7 @@ int memberPutHandler(Session *session)
                     record_buffer[record_pos++] = c;
 
                     if (c == 0x0A) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                             wtof("MVSMF14E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -1711,7 +1703,7 @@ int memberPutHandler(Session *session)
 
                 // Write any remaining text data at end of chunk
                 if (record_pos > 0) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1753,7 +1745,7 @@ int memberPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF18E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1767,7 +1759,7 @@ int memberPutHandler(Session *session)
             if (record_pos > 0) {
                 memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                 record_pos = eff_lrecl;
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                     wtof("MVSMF19E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1795,7 +1787,7 @@ int memberPutHandler(Session *session)
                 record_buffer[record_pos++] = c;
 
                 if (c == 0x0A || c == 0x0D) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                         wtof("MVSMF18E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1818,7 +1810,7 @@ int memberPutHandler(Session *session)
                 if (record_pos > eff_lrecl) {
                     record_pos = eff_lrecl;
                 }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl, &truncated) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
                     wtof("MVSMF19E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1832,11 +1824,6 @@ int memberPutHandler(Session *session)
     record_buffer = NULL;
     session_fclose(session, fp);
     fp = NULL;
-
-    if (truncated) {
-        wtof("MVSMF30W %u RECORD(S) TRUNCATED TO LRECL %u WRITING %s",
-             (unsigned) truncated, (unsigned) eff_lrecl, dataset);
-    }
 
     // Send response
     session->headers_sent = 1;

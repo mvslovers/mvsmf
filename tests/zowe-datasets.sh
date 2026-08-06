@@ -36,6 +36,8 @@ MVS_USER=$(jq -r '.profiles.mvsmf.properties.user' "$CONFIG_FILE")
 TEST_SEQ="${MVS_USER}.ZOWE.TESTSEQ"
 TEST_SEQ2="${MVS_USER}.ZOWE.TESTSEQ2"
 TEST_PDS="${MVS_USER}.ZOWE.TESTPDS"
+# Large-LRECL fixture for issue #198 (records above the old 1024-byte limit)
+TEST_BIG="${MVS_USER}.ZOWE.TESTBIG"
 
 # --- state ---
 PASSED=0
@@ -420,6 +422,40 @@ if echo "$OUTPUT" | grep -q "too long"; then
 else
 	pass "long DSN(member) GET passes validation (rc=$RC, no false 'too long' error)"
 fi
+
+# --- Records longer than 1024 bytes (issue #198) ---
+# The write path used fixed 1024-byte buffers while bounding the copy by the
+# data set's LRECL, so anything above 1024 smashed the stack (S0C1, answered
+# as an internal server error). Needs an LRECL well above 1024 to reproduce.
+echo ""
+echo "--- Large LRECL: write and read back (issue #198) ---"
+
+RC=0
+OUTPUT=$(run_zowe files create ps "$TEST_BIG" --recfm VB --lrecl 4004 --blksize 8000 --size 5TRK) || RC=$?
+assert_rc 0 "$RC" "create VB dataset with LRECL 4004"
+
+TMPFILE=$(mktemp)
+awk 'BEGIN { s = ""; while (length(s) < 4000) s = s "X"; l = substr(s, 1, 4000);
+             print l; print l; print l }' > "$TMPFILE"
+RC=0
+OUTPUT=$(run_zowe files upload ftds "$TMPFILE" "$TEST_BIG") || RC=$?
+rm -f "$TMPFILE"
+assert_rc 0 "$RC" "upload 4000-byte records (was S0C1)"
+
+RC=0
+OUTPUT=$(run_zowe files view ds "$TEST_BIG") || RC=$?
+assert_rc 0 "$RC" "read back 4000-byte records"
+
+LONGEST=$(echo "$OUTPUT" | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+if [ "$LONGEST" = "4000" ]; then
+	pass "records survived at full length (longest=$LONGEST)"
+else
+	fail "records survived at full length" "expected longest line 4000, got $LONGEST"
+fi
+
+RC=0
+OUTPUT=$(run_zowe files delete ds "$TEST_BIG" -f) || RC=$?
+assert_rc 0 "$RC" "cleanup: delete large-LRECL dataset"
 
 # --- Cleanup: delete PDS ---
 echo ""

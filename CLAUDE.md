@@ -20,6 +20,70 @@ Implications:
 
 Cross-compiled for MVS/370 with the **cc370** toolchain (a GCC 3.4.6 fork: `cc370`/`as370`/`ar370`/`ld370`). The whole build runs **on the host**; MVS is only touched by `make deploy`. All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
 
+## Codepage Override (CRITICAL)
+
+**There is no single project codepage.** The root CLAUDE.md states a blanket
+"the runtime is EBCDIC (CP037)"; for mvsMF that is true only of datasets and
+jobs. **USS/UFS payloads are IBM-1047.** This section overrides the root rule
+for mvsMF.
+
+The failure mode is silent: CP037 and IBM-1047 disagree on `[ ] ^ ! ¬` and
+friends. Translating a USS payload with CP037 compiles, runs, returns 200, and
+corrupts exactly those bytes. Nothing surfaces the mistake — pick the table
+deliberately.
+
+| API surface | Codepage | Table |
+|---|---|---|
+| USS / UFS files (`ussapi.c`) | **IBM-1047** | `httpx->xlate_1047` |
+| Datasets (`dsapi.c`) | **CP037** | `httpx->xlate_cp037` |
+| Jobs (`jobsapi.c`) | **CP037** | `httpx->xlate_cp037` |
+| HTTPD server default | **CP037** | `http_xlate_init()` fallback |
+
+### Where the tables live
+
+**Not in this repo.** There is no `src/xlate.c` and no local table — both were
+removed in `edad0e5` (#114/#115) and dropped from the link list in `13acfbf`.
+The tables live in **libhttpd** and are reached through the httpx vector:
+`httpx->xlate_cp037`, `xlate_1047`, `xlate_legacy` (`HTTPCP *`, each with an
+`atoe` and an `etoa` member — see `.mbt/deps/httpd/include/httpxlat.h`).
+
+`httpx` is not a variable you declare — `include/router.h:31` defines it as
+`#define httpx http_get_httpx(session->httpd)`, so it resolves wherever a
+`session` is in scope. mvsMF never calls `http_xlate_init()` and never selects a
+codepage globally: **selection is per call site**, by naming the field.
+
+```c
+/* USS payload, EBCDIC -> ASCII on the way out */
+http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
+
+/* dataset payload, ASCII -> EBCDIC on the way in */
+http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
+```
+
+### Who translates what
+
+- **`http_printf()` translates for you.** It goes through `http_printv()`, which
+  applies `http_etoa()` with the *server-default* table. Response headers and
+  JSON bodies built with `http_printf` need no explicit call — and must not be
+  pre-translated, or they get converted twice.
+- **`http_send()` does not translate.** It sends the buffer raw and expects the
+  caller to have produced ASCII already.
+- **Raw bytes are always yours.** Every explicit `http_xlate()` in this repo sits
+  on payload crossing a boundary — outbound before `http_send()` (`dsapi.c:203`,
+  `ussapi.c:488`), inbound after reading a body or a chunk header
+  (`dsapi.c:1067`, `ussapi.c:594`), or before writing a record to a data set
+  (`dsapi.c:549`). None of them wrap a `http_printf()`.
+
+So the rule is: **payload bytes are yours to translate, formatted output is
+httpd's.**
+
+### Changing a codepage
+
+A codepage change is an **httpd-side change**, not a local edit — there is no
+local table to edit. The order is: change the table in httpd → cut/refresh the
+httpd release → `make deps` in mvsMF (updates `mbt.lock`) → rebuild and
+`make deploy`. Editing anything in mvsMF alone cannot change a codepage.
+
 ## Development Workflow
 
 1. Every bug fix or feature requires a **GitHub Issue**. If none exists, create one first.
@@ -142,7 +206,7 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **infoapi.c**: `/zosmf/info` endpoint (no auth required).
 - **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
-- **xlate.c**: EBCDIC/ASCII character translation tables.
+- *(No `xlate.c`)* — the EBCDIC/ASCII tables live in libhttpd and are reached via `httpx->xlate_*`. See **Codepage Override**.
 - **testapi.c**: Internal `/zosmf/test` endpoint for exercising libc370 functions in isolation (`fn=version`, `fn=mtt`, `fn=cmd`, catalog/DSCB probes, …). The CGI launcher (`cgistart`, providing `@@START`) is autocalled from httpd's `libhttpd.a` — the old local `cgxstart.c` is excluded from the build.
 
 ### REST API Structure
@@ -234,10 +298,13 @@ The `receive_raw_data()` function in `jobsapi.c` works around this by reading on
 
 ### Encoding Rules (CRITICAL)
 
+> Read **Codepage Override** above first. USS is **IBM-1047**, not CP037 —
+> `httpx->xlate_1047`. Using the dataset table here corrupts `[ ] ^ ! ¬` silently.
+
 - UFSD stores RAW BYTES — no encoding transformation
 - Convention: files stored in EBCDIC (so MVS programs can read them)
-- ussPutHandler (text mode): ASCII→EBCDIC via mvsmf_atoe() BEFORE ufs_fwrite()
-- ussGetHandler (text mode): EBCDIC→ASCII via mvsmf_etoa() AFTER ufs_fread()
+- ussPutHandler (text mode): ASCII→EBCDIC via `http_xlate(..., httpx->xlate_1047->atoe)` BEFORE ufs_fwrite()
+- ussGetHandler (text mode): EBCDIC→ASCII via `http_xlate(..., httpx->xlate_1047->etoa)` AFTER ufs_fread()
 - Binary mode: NO conversion, pass bytes through
 - X-IBM-Data-Type header determines mode: "text" (default) or "binary"
 
@@ -288,30 +355,41 @@ new one.
 
 ### I/O Pattern for File Read
 
+`http_send()` does not translate — convert the payload before handing it over.
+`USS_DATA_TYPE_TEXT` / `_BINARY` are file-local `#define`s in `src/ussapi.c`;
+`get_data_type()` derives the mode from the `X-IBM-Data-Type` header.
+
 ```c
-char buf[4096];
+char   buf[4096];
 UINT32 n;
+int    data_type = get_data_type(session);
+
 while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-    if (is_text_mode) {
-        mvsmf_etoa((UCHAR *)buf, n);  /* EBCDIC → ASCII */
+    if (data_type == USS_DATA_TYPE_TEXT) {
+        /* EBCDIC -> ASCII, IBM-1047 (USS), not CP037 */
+        http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
     }
-    http_write(session->httpc, buf, n);
+    if (http_send(session->httpc, (const UCHAR *)buf, n) < 0) {
+        break;  /* real handlers goto their cleanup label */
+    }
 }
 ```
 
 ### I/O Pattern for File Write
 
 ```c
-char *body = NULL;
-size_t body_len = 0;
+char   *body = NULL;
+size_t  body_len = 0;
+int     data_type = get_data_type(session);
 
 // Supports Content-Length and Transfer-Encoding: chunked
 if (read_request_content(session, &body, &body_len) < 0) {
     return sendErrorResponse(session, 400, ...);
 }
 
-if (is_text_mode) {
-    mvsmf_atoe((unsigned char *)body, (int)body_len);  /* ASCII → EBCDIC */
+if (data_type == USS_DATA_TYPE_TEXT) {
+    /* ASCII -> EBCDIC, IBM-1047 (USS), not CP037 */
+    http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
 }
 
 UFSFILE *fp = ufs_fopen(ufs, filepath, "w");

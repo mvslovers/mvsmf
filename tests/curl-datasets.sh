@@ -44,6 +44,9 @@ AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 TEST_SEQ="${MVSMF_USER}.CURL.TESTSEQ"
 TEST_SEQ2="${MVSMF_USER}.CURL.TESTSEQ2"
 TEST_PDS="${MVSMF_USER}.CURL.TESTPDS"
+# Large-LRECL fixtures for issue #198 (records above the old 1024-byte limit)
+TEST_BIG="${MVSMF_USER}.CURL.TESTBIG"
+TEST_BIGPDS="${MVSMF_USER}.CURL.TESTBGP"
 
 # --- state ---
 PASSED=0
@@ -804,9 +807,94 @@ else
 	skip "rename sequential dataset (could not create source)"
 fi
 
+# =========================================================================
+# Records longer than 1024 bytes (issue #198)
+#
+# write_record() used to convert TEXT records through a fixed 1024-byte
+# stack buffer while clamping the length to the data set's LRECL, and
+# memberPutHandler bounded its binary reads by fp->lrecl into a 1024-byte
+# stack array. Either one smashed the stack for LRECL > 1024 -- observed
+# as S0C1 in the handler, answered as HTTP 500 by the ESTAE recovery.
+# Both paths need an LRECL well above 1024 to be exercised at all.
+# =========================================================================
+
+echo ""
+echo "--- Large LRECL: sequential write (issue #198) ---"
+
+BIGLINE=$(awk 'BEGIN { s = ""; while (length(s) < 4000) s = s "X"; print substr(s, 1, 4000) }')
+
+BODY='{"dsorg":"PS","recfm":"VB","lrecl":4004,"blksize":8000,"alcunit":"TRK","primary":5,"secondary":5}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
+assert_http_status "201" "$HTTP_CODE" "create VB dataset with LRECL 4004"
+
+printf '%s\n%s\n%s\n' "$BIGLINE" "$BIGLINE" "$BIGLINE" > /tmp/curl_ds_big.txt
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary @/tmp/curl_ds_big.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
+assert_http_status "204" "$HTTP_CODE" "write 4000-byte records (was S0C1)"
+
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "read back 4000-byte records"
+
+LONGEST=$(echo "$CONTENT" | awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }')
+if [ "$LONGEST" = "4000" ]; then
+	pass "records survived at full length (longest=$LONGEST)"
+else
+	fail "records survived at full length" "expected longest line 4000, got $LONGEST"
+fi
+
+echo ""
+echo "--- Large LRECL: binary member write (issue #198) ---"
+
+BODY='{"dsorg":"PO","recfm":"FB","lrecl":4004,"blksize":8008,"alcunit":"TRK","primary":5,"secondary":5,"dirblk":5}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}")
+assert_http_status "201" "$HTTP_CODE" "create PDS with LRECL 4004"
+
+# Exactly two full 4004-byte records
+awk 'BEGIN { s = ""; while (length(s) < 8008) s = s "B"; printf "%s", substr(s, 1, 8008) }' \
+	> /tmp/curl_ds_big.bin
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	-H "X-IBM-Data-Type: binary" \
+	--data-binary @/tmp/curl_ds_big.bin \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}(BIGBIN)")
+assert_http_status "204" "$HTTP_CODE" "write binary member with LRECL 4004 (was S0C1)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_big_rt.bin \
+	-u "$AUTH" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}(BIGBIN)")
+assert_http_status "200" "$HTTP_CODE" "read back binary member"
+
+RT_SIZE=$(wc -c < /tmp/curl_ds_big_rt.bin | tr -d ' ')
+if [ "$RT_SIZE" = "8008" ]; then
+	pass "binary member round-trips at full size ($RT_SIZE bytes)"
+else
+	fail "binary member round-trips at full size" "expected 8008 bytes, got $RT_SIZE"
+fi
+
+rm -f /tmp/curl_ds_big.txt /tmp/curl_ds_big.bin /tmp/curl_ds_big_rt.bin
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}" >/dev/null 2>&1 || true
 
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 

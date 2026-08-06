@@ -40,8 +40,14 @@ Only a missing *dataset* is an error here. A member that does not exist yet is
 what a create looks like, and it is written normally.
 
 ## Limitations
-- Text mode: records longer than LRECL are truncated with a warning
+- Text mode: a line longer than the dataset's LRECL is rejected with an error
+  ("Record too long"); it is not silently split across two records
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
+
+There is no fixed upper bound on the record size: the write buffer is sized
+from the dataset's own DCB (LRECL, or BLKSIZE for RECFM=U). Records above
+1024 bytes used to overrun a fixed stack buffer and abend the handler
+(issue #198) — the binary path was affected as well as text.
 
 ## Examples
 

@@ -36,8 +36,14 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
-- Text mode: records longer than LRECL are truncated with a warning
+- Text mode: a line longer than the dataset's LRECL is rejected with an error
+  ("Record too long"); it is not silently split across two records
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
+
+There is no fixed upper bound on the record size: the write buffer is sized
+from the dataset's own DCB (LRECL, or BLKSIZE for RECFM=U). Records above
+1024 bytes used to overrun a fixed conversion buffer and abend the handler
+(issue #198).
 
 ## Examples
 

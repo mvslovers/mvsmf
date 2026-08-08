@@ -43,6 +43,13 @@
 #define MIN_USER_SYSOUT_DSID 	100
 #define MAX_USER_SYSOUT_DSID 	199
 
+/* an ISO 8601 instant with a millisecond fraction: 2018-11-03T09:05:18.010Z */
+#define EXEC_TIME_STR_SIZE	(24 + 1)
+
+/* libc370 ships __tzget() (src/clib/@@tzget.c) but declares it in no header;
+   httpd carries the same local declaration in src/httpjes2.c. */
+extern int __tzget(void);
+
 //
 // private functions prototypes
 //
@@ -53,7 +60,9 @@ static int  do_print_sysout(Session *session, JESJOB *job, unsigned dsid);
 // needed by jobListHandler
 static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt);
 static unsigned get_max_jobs(Session *session);
-static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host);
+static int  want_exec_data(Session *session);
+static const char* format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen);
+static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host, int exec_data);
 static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
@@ -131,9 +140,11 @@ jobListHandler(Session *session)
 
 	startArray(builder);
 
+	const int exec_data = want_exec_data(session);
+
 	int ii = 0;
 	for (ii = 0; ii < MIN(max_jobs, array_count(&joblist)); ii++) {
-		rc = process_job(builder, joblist[ii], owner, host);
+		rc = process_job(builder, joblist[ii], owner, host, exec_data);
 		if (rc < 0) {
 			goto quit;
 		}
@@ -845,9 +856,75 @@ should_skip_job(const JESJOB *job, const char *owner)
 	return 0;
 }
 
+/* z/OSMF gates the exec-* fields on exec-data=Y; the Zowe CLI sends exactly
+   that (GET /zosmf/restjobs/jobs?prefix=...&exec-data=Y).  Without it the job
+   object keeps the shape it had before. */
+__asm__("\n&FUNC	SETC 'want_exec_data'");
+static int
+want_exec_data(Session *session)
+{
+	const char *exec_data = getQueryParam(session, "exec-data");
+
+	return (exec_data && (exec_data[0] == 'Y' || exec_data[0] == 'y'));
+}
+
+/* Render a JES2 job timestamp as an ISO 8601 instant in UTC -- the shape real
+   z/OSMF emits, "2018-11-03T09:05:18.010Z".  Returns NULL when the job has no
+   such time yet, so the caller emits JSON null rather than a bogus 1970 date.
+
+   Two things this must not do.  It must not use ctime64()/localtime64(): those
+   convert through crt->crttzoff, the calling task's timezone, which would apply
+   an offset a second time on top of tzadjust and report an instant that is
+   neither UTC nor anyone's local time (mvslovers/httpd#145).  And it must not
+   render local time at all -- the server cannot know the caller's zone, so a
+   local string would be unlabelled and the client could not tell what it got.
+   gmtime64_r() touches no timezone state, which is why the USS mtime timestamps
+   never had this class of bug.
+
+   JES2 keeps its checkpoint times in system local time, so tzadjust carries
+   them to UTC.  Resolution is seconds (time64_t), hence the fixed ".000" --
+   which is what z/OSMF itself reports for exec-submitted. */
+__asm__("\n&FUNC	SETC 'format_exec_time'");
+static const char *
+format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen)
+{
+	struct tm	tm;
+	time64_t	utc;
+	int			written;
+
+	if (!t || !out || outlen == 0) {
+		return NULL;
+	}
+
+	/* a job that has not started (or has not ended) carries a zero time */
+	if (__64_cmp_u32((time64_t *)t, 0) == __64_EQUAL) {
+		return NULL;
+	}
+
+	__64_init(&utc);
+	__64_add_i32((time64_t *)t, tzadjust, &utc);
+
+	if (!gmtime64_r(&utc, &tm)) {
+		return NULL;
+	}
+
+	/* snprintf reports truncation with the would-be length, not a negative rc,
+	   so a short buffer would otherwise yield a silently clipped instant that
+	   still looks like a valid string to the caller. */
+	written = snprintf(out, outlen, "%04d-%02d-%02dT%02d:%02d:%02d.000Z",
+			tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+			tm.tm_hour, tm.tm_min, tm.tm_sec);
+
+	if (written < 0 || written >= (int)outlen) {
+		return NULL;
+	}
+
+	return out;
+}
+
 __asm__("\n&FUNC	SETC 'process_job'");
-static int 
-process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host) 
+static int
+process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host, int exec_data)
 {
 	int rc = 0;
 
@@ -940,7 +1017,28 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 		}
 	}
 	rc = addJsonString(builder, "retcode", retcode);
-	
+
+	if (exec_data) {
+		/* crttzoff is seconds east of UTC (negative west) and UTC = local -
+		   offset, so the addend is the negated offset.  __tzget() reports the
+		   value tzset() resolved for this task from TZ or the system's CVTTZ --
+		   a fact about the machine, not a configured preference.  Kept on the
+		   stack: MVSMF is link-edited RENT, so caching it in a static would
+		   ABEND S0C4 on the write. */
+		int  tzadjust = __tzget() * -1;
+		char exec_time[EXEC_TIME_STR_SIZE];
+
+		/* exec-submitted is deliberately absent: JES2 records it as
+		   JCTRDRON/JCTRDTON (time/date on the input processor), which libc370's
+		   JESJOB does not carry -- see mvslovers/libc370#79. */
+		rc = addJsonString(builder, "exec-started",
+			format_exec_time(&job->start_time64, tzadjust,
+				exec_time, sizeof(exec_time)));
+		rc = addJsonString(builder, "exec-ended",
+			format_exec_time(&job->end_time64, tzadjust,
+				exec_time, sizeof(exec_time)));
+	}
+
 	rc = endJsonObject(builder);
 
 	return rc;
@@ -1489,7 +1587,7 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
         return -1;
     }
 
-    rc = process_job(builder, job, NULL, host);
+    rc = process_job(builder, job, NULL, host, want_exec_data(session));
     if (rc < 0) {
         freeJsonBuilder(builder);
         return rc;

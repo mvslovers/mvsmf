@@ -387,6 +387,41 @@ test_list_jobs_with_prefix() {
 	assert_rc 0 "$rc" "list jobs with prefix"
 }
 
+test_list_jobs_exec_data() {
+	echo ""
+	echo "--- List Jobs: --exec-data ---"
+
+	local output rc=0
+	output=$(run_zowe_json jobs list jobs --owner "*" --exec-data) || rc=$?
+
+	assert_rc 0 "$rc" "list jobs --exec-data"
+
+	if [ $rc -ne 0 ]; then
+		return
+	fi
+
+	# the CLI turns --exec-data into exec-data=Y on the wire; every job object
+	# must carry the keys, though the values may be null for a job that has not
+	# reached that stage
+	assert_json_field "$output" '[.data[] | has("exec-started")] | all' "true" \
+		"--exec-data: every job has exec-started"
+	assert_json_field "$output" '[.data[] | has("exec-ended")] | all' "true" \
+		"--exec-data: every job has exec-ended"
+
+	# what the user actually sees: the exec-started column must not be blank for
+	# a job that has run.  This is the regression #208 reported.
+	local started
+	started=$(echo "$output" | jq -r \
+		'[.data[] | .["exec-started"] | select(. != null)] | first // ""' 2>/dev/null)
+	if [ -z "$started" ]; then
+		skip "--exec-data: exec-started populated (no job has started)"
+	elif [[ "$started" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$ ]]; then
+		pass "--exec-data: exec-started is an ISO 8601 UTC instant ($started)"
+	else
+		fail "--exec-data: exec-started format" "got '$started'"
+	fi
+}
+
 test_job_status() {
 	echo ""
 	echo "--- Job Status ---"
@@ -527,6 +562,7 @@ test_submit_from_dataset
 test_list_jobs_default
 test_list_jobs_all_owners
 test_list_jobs_with_prefix
+test_list_jobs_exec_data
 
 # Status test
 test_job_status

@@ -449,6 +449,76 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list PDS members"
 assert_json_field_exists "$CONTENT" '.items[0].member' "member list has member field"
+assert_json_field "$CONTENT" '.moreRows' "false" "member list: moreRows false when complete"
+
+# --- List members: a large directory must not take the server down (#212) ---
+# memberListHandler used to build the whole member array in storage via
+# __listpd(). On SYS1.SMPCDS (~23000 members) that exhausts the region and
+# abends S878, and because the abend unwinds before __freepd() the storage is
+# never returned -- httpd can then no longer load MVSMF and EVERY endpoint
+# answers S80A until it is restarted. One request was enough.
+#
+# So this case asserts two things: the request itself succeeds, and the server
+# is still alive afterwards. The second assertion is the one that matters.
+echo ""
+echo "--- List PDS Members: large directory (issue #212) ---"
+
+BIG_PDS="${BIG_PDS:-SYS1.SMPCDS}"
+
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 180 -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member")
+
+if [ "$HTTP_CODE" = "404" ]; then
+	skip "large member list (${BIG_PDS} not on this system)"
+	skip "large member list: X-IBM-Max-Items (${BIG_PDS} not on this system)"
+	skip "server survives a large member list (${BIG_PDS} not on this system)"
+else
+	assert_http_status "200" "$HTTP_CODE" "list members of ${BIG_PDS}"
+
+	# Member names are not guaranteed to be printable -- the SMP/E keys in
+	# SYS1.SMPCDS are binary. Emitted raw they produce control characters
+	# inside a JSON string, which no parser accepts, so the response has to
+	# survive an actual parse and not merely arrive with status 200.
+	if curl -s -m 180 -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member" | jq -e . >/dev/null 2>&1; then
+		pass "${BIG_PDS} member list is valid JSON (binary names escaped)"
+	else
+		fail "${BIG_PDS} member list is valid JSON" \
+			"jq rejected the response -- unescaped bytes in a member name"
+	fi
+
+	# The cap is asserted here rather than against TEST_PDS: that one holds a
+	# single member, so max-items=1 and no cap at all produce byte-identical
+	# output and the assertion would pass either way. Against a directory with
+	# thousands of entries the cap is the only thing that can produce 10 rows,
+	# and moreRows must then be true.
+	BODY=$(curl -s -w '\n%{http_code}' -m 180 -u "$AUTH" -H 'X-IBM-Max-Items: 10' \
+		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member")
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+
+	if [ "$HTTP_CODE" = "200" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.returnedRows')" = "10" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.items | length')" = "10" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.moreRows')" = "true" ]; then
+		pass "max-items=10 on ${BIG_PDS}: 10 rows and moreRows=true"
+	else
+		fail "max-items=10 on ${BIG_PDS}" \
+			"got HTTP $HTTP_CODE returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows') moreRows=$(echo "$CONTENT" | jq -r '.moreRows')"
+	fi
+
+	# the regression: is MVSMF still loadable at all?
+	AFTER=$(curl -s -m 20 -u "$AUTH" "${BASE_URL}/zosmf/info")
+	case "$AFTER" in
+		*S80A*|"")
+			fail "server survives a large member list" \
+				"MVSMF no longer loads after ${BIG_PDS} -- httpd needs a restart"
+			;;
+		*)
+			pass "server still serves requests after listing ${BIG_PDS}"
+			;;
+	esac
+fi
 
 # --- List members: the target must actually be a PDS (issue #193) ---
 # __listpd() reads the directory with BPAM and abends S001 on a sequential

@@ -20,6 +20,9 @@ or with explicit volume:
 - `start` (optional): Starting member name for pagination
 - `pattern` (optional): Member name filter pattern
 
+## Request Headers
+- `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
+
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON object:
 
@@ -31,9 +34,40 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
         }
     ],
     "returnedRows": 0,
+    "moreRows": false,
     "JSONversion": 1
 }
 ```
+
+`moreRows` is `true` only when the list was cut short by `X-IBM-Max-Items`.
+
+## Large directories
+
+The directory is walked and each member emitted as it is read, so the handler's
+storage footprint is one 256-byte block regardless of how many members the data
+set has. `SYS1.SMPCDS` (22982 members) returns in about 3 s and 850 KB.
+
+This matters more than it sounds. The handler used to call `__listpd()`, which
+builds the complete member array in storage before anything is emitted. On a
+data set that size the region is exhausted, the request abends **S878**, and
+because the abend unwinds before the handler's `__freepd()` the storage is never
+returned — after which httpd can no longer load MVSMF at all and *every*
+endpoint answers `S80A` until the server is restarted (issue #212). A single
+ordinary request, such as opening a large PDS in Zowe Explorer, was enough.
+
+Use `X-IBM-Max-Items` if a bounded response is wanted; it is no longer needed to
+keep the server alive.
+
+## Non-printable member names
+
+Nothing requires a directory entry to hold a printable name, and some do not —
+the SMP/E keys in `SYS1.SMPCDS` are binary. Any byte that cannot appear literally
+in a JSON string is emitted as a `\uXXXX` escape naming its ASCII value, so the
+response parses whatever the directory contains. Ordinary names (`A-Z 0-9 @ # $`)
+are unaffected.
+
+Names are returned padded to 8 characters, as they are held in the directory
+(issue #154).
 
 ## Error Responses
 - HTTP 400 (Bad Request)
@@ -66,6 +100,12 @@ curl http://mvs:1080/zosmf/restfiles/ds/MIKE.TEST.JCL/member
 zowe files list all-members "MIKE.TEST.JCL"
 ```
 
+```bash
+# bounded
+curl -H 'X-IBM-Max-Items: 100' \
+  http://mvs:1080/zosmf/restfiles/ds/SYS1.MACLIB/member
+```
+
 ### Success Response
 ```json
 {
@@ -75,6 +115,7 @@ zowe files list all-members "MIKE.TEST.JCL"
         { "member": "LINKJOB" }
     ],
     "returnedRows": 3,
+    "moreRows": false,
     "JSONversion": 1
 }
 ```

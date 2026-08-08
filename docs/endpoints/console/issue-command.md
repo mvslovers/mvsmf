@@ -97,6 +97,31 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** under the authenticated user's ACEE (so RAKF evaluates command authority for that user); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
 
+### How the response block is identified
+
+The newest MTT entry containing the command text is the **echo**. Its source
+field (`"STC  nnn"`) seeds the block, and following entries are kept while they
+carry that source, a blank source (an MLWTO header such as `IEE102I`), or a
+matching MLWTO continuation number. A differently attributed originator ends the
+block.
+
+**A command routed to another address space is the exception.** The echo carries
+the *issuer's* source — mvsMF's own worker — while the reply to `F <stc>,...` is
+written by the *target* started task under its own source. So while the block has
+produced no line yet, the first differently attributed originator is adopted as
+the block's source, once, provided it falls in the echo's own second. Without
+that, every `MODIFY` to anything but HTTPD itself returned an empty
+`cmd-response` (issue #174); `D T` and `F HTTPD,...` were unaffected only because
+there the issuer *is* the target.
+
+The same-second requirement is what keeps an unrelated message written between
+the echo and the reply from hijacking the block. MTT timestamps are
+second-granular, so that is as tight as correlation gets here.
+
+**Known limitation:** every mvsMF worker shares one source, so two console
+requests issued concurrently through the same server can pick up each other's
+lines. Tracked in #214.
+
 ## Examples
 
 ### Using curl

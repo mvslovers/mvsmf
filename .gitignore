@@ -95,3 +95,6 @@ soak-176-*.log
 loadtest-176-*.log
 mtt-at-fail-*.json
 log-at-fail-*.json
+soak-triage-*.txt
+mtt-ring-*.json
+herc-at-fail-*.log

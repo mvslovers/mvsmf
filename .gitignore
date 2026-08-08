@@ -45,6 +45,10 @@ src/*.s
 # Build system
 .env
 *.jcl
+# ...except the test fixtures and operational jobs, which are source.
+# The ones already in tests/jcl/ predate the rule above and were force-added;
+# make the exception explicit so the next one does not hit the same wall.
+!tests/jcl/*.jcl
 .build-warnings
 .mbt/
 build/
@@ -84,3 +88,14 @@ dkms.conf
 
 # generated build-identity header
 include/buildid.h
+
+# soak / churn / loadtest artefacts (tests/*-176.sh write these to the cwd)
+churn-176-*.log
+soak-176-*.log
+loadtest-176-*.log
+mtt-at-fail-*.json
+log-at-fail-*.json
+soak-triage-*.txt
+mtt-ring-*.json
+herc-at-fail-*.log
+worker-watch-*.txt

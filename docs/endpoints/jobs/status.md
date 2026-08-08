@@ -12,6 +12,9 @@ GET
 - `job-name`: Name of the job
 - `jobid`: ID of the job (e.g. JOB00123)
 
+## Query Parameters
+- `exec-data` (optional): `Y` adds `exec-started` and `exec-ended` to the job object, exactly as for [list](list.md#execution-timestamps). Any other value (or omitting the parameter) returns the object unchanged.
+
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON object with the following properties:
 
@@ -29,6 +32,16 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
     "retcode": "CC nnnn|ABEND Sxxx|ABEND Unnnn|JCL ERROR|null"
 }
 ```
+
+With `exec-data=Y`, two further fields follow `retcode`:
+
+```json
+    "exec-started": "2026-08-07T18:57:10.000Z",
+    "exec-ended": "2026-08-07T18:57:10.000Z"
+```
+
+Format, `null` semantics and the missing `exec-submitted` are described under
+[Execution timestamps](list.md#execution-timestamps).
 
 ## Error Responses
 - HTTP 400 (Bad Request)

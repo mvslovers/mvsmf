@@ -14,6 +14,7 @@ GET
 - `jobid` (optional): Filter by specific job ID.
 - `status` (optional): Filter by job status (`INPUT`, `ACTIVE`, `OUTPUT`). Use `*` for all.
 - `max-jobs` (optional): Maximum number of jobs to return (1-1000). Default: 1000.
+- `exec-data` (optional): `Y` adds the execution timestamps to each job object. Any other value (or omitting the parameter) returns the object unchanged. The Zowe CLI sends `exec-data=Y` for `zowe jobs list jobs --exec-data`.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON array of job objects:
@@ -33,6 +34,49 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
         "retcode": "CC nnnn|ABEND Sxxx|ABEND Unnnn|JCL ERROR|null"
     }
 ]
+```
+
+With `exec-data=Y`, two further fields follow `retcode`:
+
+```json
+        "exec-started": "2026-08-07T18:57:10.000Z",
+        "exec-ended": "2026-08-07T18:57:10.000Z"
+```
+
+See [Execution timestamps](#execution-timestamps).
+
+## Execution timestamps
+
+`exec-started` and `exec-ended` are ISO 8601 instants in **UTC**, with a
+millisecond fraction and a literal `Z` — the format real z/OSMF uses. JES2
+records these with second resolution, so the fraction is always `.000`; z/OSMF
+itself reports `exec-submitted` the same way, so this is compatible rather than
+a compromise.
+
+A job that has not reached that stage yet returns `null` for the field, not a
+placeholder date. An active job therefore has `exec-started` set and
+`exec-ended` null.
+
+The timestamps are always UTC and never local time: the server cannot know the
+caller's timezone, so a local string would be unlabelled and the client could
+not tell which zone it received. Zowe and browsers localise the instant
+themselves.
+
+**`exec-submitted` is not implemented.** JES2 records it as `JCTRDRON` /
+`JCTRDTON` (time and date on the input processor), which libc370's `JESJOB`
+does not carry — tracked in mvslovers/libc370#79. The field is omitted rather
+than guessed.
+
+`exec-system` and `exec-member` are likewise not implemented (mvslovers/mvsmf#209).
+
+### Cross-check
+
+httpd's `/jes/status` reports the same instants in the same format, so the two
+APIs can be compared directly for a given job:
+
+```bash
+curl -s -u user:pass "http://host:8080/jes/status?jobname=IEFBR14" \
+  | grep -E 'start_display|end_display'
 ```
 
 ## Error Responses
@@ -59,12 +103,16 @@ curl "http://mvs:1080/zosmf/restjobs/jobs?prefix=TEST*"
 
 # List jobs by job ID
 curl "http://mvs:1080/zosmf/restjobs/jobs?jobid=JOB00123"
+
+# List jobs with execution timestamps
+curl "http://mvs:1080/zosmf/restjobs/jobs?prefix=TEST*&exec-data=Y"
 ```
 
 ### Using Zowe CLI
 ```bash
 zowe jobs list jobs
 zowe jobs list jobs --owner "*" --prefix "TEST*"
+zowe jobs list jobs --prefix "TEST*" --exec-data
 ```
 
 ### Success Response

@@ -36,6 +36,8 @@ The request body is a JSON object referencing a dataset containing JCL:
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and the job status as a JSON object (same format as the [status](status.md) endpoint).
 
+`exec-data=Y` is honoured here too, since the response is built by the same code, but it is of little use: a job that has just been submitted has usually not started yet, so `exec-started` and `exec-ended` are typically `null`. A very short job can already have run by the time the response is built, in which case they carry real instants — do not rely on either outcome.
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Invalid internal reader parameters

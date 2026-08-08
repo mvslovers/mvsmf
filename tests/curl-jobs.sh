@@ -538,6 +538,102 @@ test_list_jobs_with_max() {
 	fi
 }
 
+# An ISO 8601 instant in UTC with a millisecond fraction, the shape z/OSMF uses:
+# 2026-08-07T18:57:10.000Z.  JES2 has second resolution, so .000 is expected.
+assert_iso8601_utc() {
+	local value="$1"
+	local label="$2"
+
+	if [[ "$value" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$ ]]; then
+		pass "$label ($value)"
+	else
+		fail "$label" "not an ISO 8601 UTC instant: '$value'"
+	fi
+}
+
+test_list_jobs_exec_data() {
+	echo ""
+	echo "--- List Jobs: exec-data ---"
+
+	local resp
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*&exec-data=Y")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "list jobs exec-data=Y"
+
+	# jq's `all` is true for an empty array, so every has()-assertion below would
+	# pass vacuously on an empty spool.  Anchor them on a non-empty result first.
+	assert_json_array_nonempty "$BODY" "exec-data=Y returned jobs"
+
+	# has_key, not a value test: a job that has not started carries null, which
+	# is a correct answer and must not be confused with the field being absent.
+	assert_json_field "$BODY" '[.[] | has("exec-started")] | all' "true" \
+		"exec-data=Y: every job has exec-started"
+	assert_json_field "$BODY" '[.[] | has("exec-ended")] | all' "true" \
+		"exec-data=Y: every job has exec-ended"
+
+	# any non-null exec-started must be a well-formed UTC instant
+	local started
+	started=$(echo "$BODY" | jq -r '[.[] | .["exec-started"] | select(. != null)] | first // ""' 2>/dev/null)
+	if [ -n "$started" ]; then
+		assert_iso8601_utc "$started" "exec-started format"
+	else
+		skip "exec-started format (no job has started)"
+	fi
+
+	# an ACTIVE job has started but not ended -- exec-ended must be null, not a
+	# placeholder date.
+	#
+	# Count first, and never funnel the value through jq's `//`: that operator
+	# fires on null as well as on absence, so `[null] | first // "none"` yields
+	# "none" and the check would skip itself in exactly the case it exists to
+	# verify.
+	local active_count
+	active_count=$(echo "$BODY" | jq '[.[] | select(.status == "ACTIVE")] | length' 2>/dev/null) || active_count=0
+
+	if [ "$active_count" -eq 0 ] 2>/dev/null; then
+		skip "exec-ended null while active (no ACTIVE job on the system)"
+	else
+		local all_null
+		all_null=$(echo "$BODY" | jq -r \
+			'[.[] | select(.status == "ACTIVE") | .["exec-ended"] == null] | all' 2>/dev/null)
+		if [ "$all_null" = "true" ]; then
+			pass "exec-ended is null for all $active_count ACTIVE job(s)"
+		else
+			fail "exec-ended null while active" \
+				"an ACTIVE job carries a non-null exec-ended"
+		fi
+
+		# the counterpart: an ACTIVE job has started, so exec-started must be set
+		local started_set
+		started_set=$(echo "$BODY" | jq -r \
+			'[.[] | select(.status == "ACTIVE") | .["exec-started"] != null] | all' 2>/dev/null)
+		if [ "$started_set" = "true" ]; then
+			pass "exec-started is set for all $active_count ACTIVE job(s)"
+		else
+			fail "exec-started set while active" \
+				"an ACTIVE job carries a null exec-started"
+		fi
+	fi
+}
+
+test_list_jobs_without_exec_data() {
+	echo ""
+	echo "--- List Jobs: exec-data absent ---"
+
+	local resp
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "list jobs without exec-data"
+
+	# without the parameter the object keeps its previous shape
+	assert_json_field "$BODY" '[.[] | has("exec-started")] | any' "false" \
+		"no exec-started without exec-data"
+	assert_json_field "$BODY" '[.[] | has("exec-ended")] | any' "false" \
+		"no exec-ended without exec-data"
+}
+
 test_job_status() {
 	echo ""
 	echo "--- Job Status ---"
@@ -563,6 +659,49 @@ test_job_status() {
 	assert_json_field_exists "$BODY" '.url' "status has url"
 	assert_json_field_exists "$BODY" '.["files-url"]' "status has files-url"
 	assert_json_field_exists "$BODY" '.status' "status has status"
+}
+
+test_job_status_exec_data() {
+	echo ""
+	echo "--- Job Status: exec-data ---"
+
+	if [ -z "$SUBMIT_JOBNAME" ] || [ -z "$SUBMIT_JOBID" ]; then
+		skip "job status exec-data (no submitted job)"
+		return
+	fi
+
+	wait_for_output "$SUBMIT_JOBNAME" "$SUBMIT_JOBID" || true
+
+	local resp
+	resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${SUBMIT_JOBNAME}/${SUBMIT_JOBID}?exec-data=Y")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "job status exec-data=Y"
+	assert_json_field "$BODY" 'has("exec-started")' "true" "status has exec-started"
+	assert_json_field "$BODY" 'has("exec-ended")' "true" "status has exec-ended"
+
+	# the job ran to completion, so both instants must be present and well-formed
+	local started ended
+	started=$(echo "$BODY" | jq -r '.["exec-started"] // ""' 2>/dev/null)
+	ended=$(echo "$BODY" | jq -r '.["exec-ended"] // ""' 2>/dev/null)
+
+	if [ -n "$started" ]; then
+		assert_iso8601_utc "$started" "status exec-started format"
+	else
+		fail "status exec-started" "null for a completed job"
+	fi
+
+	if [ -n "$ended" ]; then
+		assert_iso8601_utc "$ended" "status exec-ended format"
+	else
+		fail "status exec-ended" "null for a completed job"
+	fi
+
+	# exec-submitted is deliberately not implemented (libc370#79) -- assert it
+	# stays absent so the gap is visible if someone adds a placeholder
+	assert_json_field "$BODY" 'has("exec-submitted")' "false" \
+		"exec-submitted absent (libc370#79)"
 }
 
 test_job_status_not_found() {
@@ -904,9 +1043,12 @@ test_list_jobs_with_prefix
 test_list_jobs_with_jobid
 test_list_jobs_with_status
 test_list_jobs_with_max
+test_list_jobs_exec_data
+test_list_jobs_without_exec_data
 
 # Status tests
 test_job_status
+test_job_status_exec_data
 test_job_status_not_found
 
 # Spool file tests

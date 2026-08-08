@@ -46,6 +46,8 @@ fail() {
 	FAILED=$((FAILED + 1)); TOTAL=$((TOTAL + 1)); echo "  FAIL: $1"
 	[ -n "${2:-}" ] && echo "        $2"
 }
+# SKIPPED was counted in the summary but had no way to be incremented
+skip() { SKIPPED=$((SKIPPED + 1)); TOTAL=$((TOTAL + 1)); echo "  SKIP: $1"; }
 
 assert_http_status() {
 	if [ "$2" = "$1" ]; then pass "$3 (HTTP $2)"
@@ -111,6 +113,55 @@ assert_contains     "$BODY" '.["cmd-response"]' "IEE136I" "D T: response has IEE
 assert_json_exists  "$BODY" '.["cmd-response-key"]' "D T: key present"
 assert_json_exists  "$BODY" '.["cmd-response-url"]' "D T: url present"
 assert_json_exists  "$BODY" '.["cmd-response-uri"]' "D T: uri present"
+
+# =========================================================================
+# 1b. MODIFY to a started task OTHER than HTTPD (issue #174)
+#
+# correlate_once() anchors on the command echo and used to keep only entries
+# carrying THAT source -- the issuer, i.e. mvsMF's own worker. A MODIFY reply is
+# written by the target started task under its own source, so it was dropped and
+# cmd-response came back empty for every F to anything but HTTPD itself.
+#
+# "F HTTPD,..." cannot catch this: there the issuer IS the target, which is why
+# it worked all along. The test needs a different address space, so it is run
+# against a known-safe target and skipped where none is up. Even a rejection
+# ("unknown command") proves the point -- it is a reply from the target.
+# =========================================================================
+echo ""
+echo "--- sync: MODIFY to another started task (issue #174) ---"
+
+# which started tasks are up? D A,L lists them.
+ACTIVE_RESP=$(issue '{"cmd":"D A,L"}')
+ACTIVE_LIST=$(echo "$ACTIVE_RESP" | sed '$d' | jq -r '.["cmd-response"] // ""' 2>/dev/null | tr '\r' '\n')
+
+MODIFY_TARGET=""
+for cand in UFSD FTPD; do
+	if echo "$ACTIVE_LIST" | grep -q "$cand"; then MODIFY_TARGET="$cand"; break; fi
+done
+
+if [ -z "$MODIFY_TARGET" ]; then
+	skip "MODIFY to another STC (neither UFSD nor FTPD is active)"
+else
+	RESP=$(issue "{\"cmd\":\"F ${MODIFY_TARGET},STATUS\"}")
+	CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+	assert_http_status "200" "$CODE" "issue F ${MODIFY_TARGET},STATUS"
+
+	MLINES=$(echo "$BODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null | tr '\r' '\n' | grep -c .)
+	if [ "${MLINES:-0}" -ge 1 ]; then
+		pass "F ${MODIFY_TARGET},STATUS: target's reply is correlated (${MLINES} lines)"
+	else
+		fail "F ${MODIFY_TARGET},STATUS: cmd-response is empty" \
+			"the target's reply was dropped -- #174 has regressed"
+	fi
+
+	# the reply must come from the target, not be an echo of our own command
+	if echo "$BODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null | grep -q "$MODIFY_TARGET"; then
+		pass "F ${MODIFY_TARGET},STATUS: reply text names the target"
+	else
+		fail "F ${MODIFY_TARGET},STATUS: reply text does not name the target" \
+			"correlated the wrong block?"
+	fi
+fi
 
 # =========================================================================
 # 2. Synchronous, multi-line MLWTO response (D A,L -> IEE102I + continuations)

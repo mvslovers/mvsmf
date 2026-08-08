@@ -59,6 +59,33 @@
 #define MTT_SRC_LEN    8
 #define MTT_MSG_OFF    24         /* message text start                       */
 
+/* An MTT entry is one console line; nothing in the record bounds it for us.  */
+#define MTT_ENTRY_MAX  256
+
+/* mtentlen is a signed halfword (ieezb806.h) over a flexible mtentdat[], so a
+ * bogus or over-read entry presents a negative or absurd length and any use of
+ * it as a scan bound walks off the record -- #176.
+ *
+ * That fix clamped the two consumers known at the time (the echo search and
+ * detect_count) and left the rest of this file reading the field raw. The
+ * MODIFY correlation in #174 then started processing entries that the source
+ * predicate had previously skipped, which turned one of those raw reads into a
+ * live S0C4. Every length goes through here now, so there is one place to be
+ * right rather than six. Callers still clamp to their own buffer on top. */
+__asm__("\n&FUNC	SETC 'mtt_len'");
+static int mtt_len(const MTENTRY *e)
+{
+	int len;
+
+	if (!e) return 0;
+
+	len = (int) e->mtentlen;
+	if (len < 0) return 0;
+	if (len > MTT_ENTRY_MAX) return MTT_ENTRY_MAX;
+
+	return len;
+}
+
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
 /* ------------------------------------------------------------------ */
@@ -246,6 +273,8 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 /* of lines appended.  (session: array_count() routes through the      */
 /* httpd httpx vector, which needs session->httpd.)                    */
 /* ------------------------------------------------------------------ */
+static int mtt_secs_of_day(const char *dat, int len);
+
 __asm__("\n&FUNC	SETC 'correlate_once'");
 static int correlate_once(Session *session, const char *cmd_upper, char *out,
                           size_t outsz, unsigned skip, unsigned *total)
@@ -260,6 +289,8 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	char src[MTT_SRC_LEN + 1];
 	char num[12];
 	int have_num = 0;
+	int echo_secs = -1;	/* hh.mm.ss of the echo, for the adoption below */
+	int adopted = 0;	/* the block's source was taken from the target  */
 
 	out[0] = '\0';
 
@@ -267,11 +298,9 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	for (i = n; i > 0; i--) {
 		MTENTRY *e = arr[i - 1];
 		char tmp[160];
-		int len = e ? (int)e->mtentlen : 0;
+		int len = mtt_len(e);
 		if (!e) continue;
 		if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
-		if (len < 0) len = 0;   /* mtentlen is a signed short: a bogus/over-read
-		                         * entry can sign-extend negative (#176) */
 		memcpy(tmp, e->mtentdat, len);
 		tmp[len] = '\0';
 		if (strstr(tmp, cmd_upper)) { ei = (int)(i - 1); break; }
@@ -279,15 +308,17 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 
 	if (ei >= 0) {
 		MTENTRY *ee = arr[ei];
-		int elen = (int)ee->mtentlen;
+		int elen = mtt_len(ee);
 		memset(src, ' ', MTT_SRC_LEN);
 		if (elen >= MTT_SRC_OFF + MTT_SRC_LEN)
 			memcpy(src, &ee->mtentdat[MTT_SRC_OFF], MTT_SRC_LEN);
 		src[MTT_SRC_LEN] = '\0';
 
+		echo_secs = mtt_secs_of_day(ee->mtentdat, elen);
+
 		for (i = (unsigned)ei + 1; i < n; i++) {
 			MTENTRY *e = arr[i];
-			int len = e ? (int)e->mtentlen : 0;
+			int len = mtt_len(e);
 			const char *dat = e ? e->mtentdat : "";
 			const char *msg;
 			int msglen, k;
@@ -310,6 +341,43 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 				if (len - k >= (int)strlen(num) &&
 				    memcmp(&dat[k], num, strlen(num)) == 0)
 					cont = 1;
+			}
+
+			/* A differently attributed originator normally ends our block --
+			   but the reply to a command routed to another address space is
+			   exactly that, and dropping it here is #174.
+
+			   The echo carries the ISSUER's source: MVSMF's own worker, e.g.
+			   "STC  631". A MODIFY reply is written by the TARGET started task
+			   under its own source, e.g. "STC  264" for UFSD, so it is neither
+			   has_src nor blank_src nor cont and fell through to the continue
+			   below -- leaving cmd-response empty for every F to anything but
+			   HTTPD itself. "D T" and "F HTTPD,D P" only ever worked because
+			   there the issuer IS the target; "D A,L" because IEE102I carries a
+			   blank source.
+
+			   So: while the block has produced no line yet, the first
+			   differently attributed originator is adopted as the block's
+			   source, once. Requiring it to fall in the echo's own second is
+			   what stops an unrelated message written between the echo and the
+			   reply from hijacking the block -- adjacency alone would not, and
+			   the MTT is second-granular, which is as tight as correlation gets
+			   here. */
+			if (!has_src && !blank_src && !cont &&
+			    line_idx == 0 && !adopted && echo_secs >= 0 &&
+			    len >= MTT_SRC_OFF + MTT_SRC_LEN) {
+				int s = mtt_secs_of_day(dat, len);
+
+				if (s >= 0) {
+					int d = s - echo_secs;
+					if (d < 0) d += 86400;	/* midnight roll */
+					if (d <= 1) {
+						memcpy(src, &dat[MTT_SRC_OFF], MTT_SRC_LEN);
+						src[MTT_SRC_LEN] = '\0';
+						adopted = 1;
+						has_src = 1;
+					}
+				}
 			}
 
 			/* a different, attributed originator ends our block */
@@ -413,12 +481,10 @@ static int detect_count(Session *session, const char *keyword_upper,
 	for (i = 0; i < n; i++) {
 		MTENTRY *e = arr[i];
 		char up[200];
-		int len = e ? (int)e->mtentlen : 0;
+		int len = mtt_len(e);
 		int k;
 		if (!e) continue;
 		if (len > (int)sizeof(up) - 1) len = sizeof(up) - 1;
-		if (len < 0) len = 0;   /* mtentlen is a signed short: a bogus/over-read
-		                         * entry can sign-extend negative (#176) */
 		for (k = 0; k < len; k++)
 			up[k] = (char)toupper((unsigned char)e->mtentdat[k]);
 		up[len] = '\0';
@@ -1064,7 +1130,7 @@ int consoleLogHandler(Session *session)
 	prev_hms  = base.tm_hour * 3600 + base.tm_min * 60 + base.tm_sec;
 	for (i = (int)n - 1; i >= 0; i--) {                /* newest -> oldest */
 		MTENTRY *e = arr[i];
-		int sod = e ? mtt_secs_of_day((const char *)e->mtentdat, (int)e->mtentlen) : -1;
+		int sod = e ? mtt_secs_of_day((const char *)e->mtentdat, mtt_len(e)) : -1;
 		struct tm etm;
 		if (sod < 0) { esecs[i] = (time_t)0; continue; }
 		if (sod > prev_hms + 43200) days_back++;       /* midnight crossing */
@@ -1102,7 +1168,7 @@ int consoleLogHandler(Session *session)
 		if (!e || esecs[i] == 0 || esecs[i] < lo || esecs[i] > hi) continue;
 
 		dat = (const char *)e->mtentdat;
-		len = (int)e->mtentlen;
+		len = mtt_len(e);
 
 		off = (len > MTT_MSG_OFF) ? MTT_MSG_OFF : 0;
 		while (off < len && dat[off] == ' ') off++;

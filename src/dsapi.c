@@ -1313,23 +1313,88 @@ error:
     return rc;
 }
 
+/* PDS directory block, as delivered by fopen(dataset, "r,record") -- one block
+   per record, 256 bytes:
+
+       0..1    halfword: bytes used in this block, including these two
+       2..     packed entries, each
+                 0..7   member name, blank padded
+                 8..10  TTR
+                 11     0x80 alias, 0x60 TTR count, 0x1F user data halfwords
+                 12..   user data
+       a name of eight 0xFF bytes marks the logical end of the directory
+
+   This mirrors the walk in libc370's __listpd() (libc370/src/clib/@@listpd.c).
+   There are now two parsers for this format -- keep them in step. */
+#define PDS_DIR_BLKSIZE		256
+#define PDS_DIR_ENT_FIXED	12	/* name + TTR + indicator */
+#define PDS_DIR_UDATA_MASK	0x1F	/* user data size, in halfwords */
+
+/* 8 name bytes, each worst case "\uXXXX", plus the terminator */
+#define MEMBER_ESC_SIZE		(8 * 6 + 1)
+
+/* Render a directory member name as the body of a JSON string.
+
+   Member names are normally A-Z 0-9 @ # $, but nothing enforces that: a PDS
+   directory can hold arbitrary bytes, and the SMP/E keys in SYS1.SMPCDS are
+   binary. Emitting those raw produces a response that is not JSON -- jq and
+   every other parser reject the unescaped control characters.
+
+   The printability test has to be applied to the ASCII byte, not the EBCDIC
+   one, because http_printf() translates everything we emit on the way out.
+   So each name byte is run through the same table httpd will use, and the
+   result decides: pass the EBCDIC byte through and let the translation do its
+   work, or emit a \uXXXX escape naming the ASCII value.
+
+   This is the one place where comparing against numeric ASCII values is
+   correct rather than the mistake the root CLAUDE.md warns about: `a` is
+   already post-translation, so 0x22 and 0x5C really are the quote and the
+   backslash the parser will see. */
+__asm__("\n&FUNC    SETC 'json_escape_member'");
+static void
+json_escape_member(const unsigned char *raw, unsigned rawlen,
+                   const unsigned char *etoa, char *out, size_t outlen)
+{
+	size_t		o = 0;
+	unsigned	i;
+
+	for (i = 0; i < rawlen; i++) {
+		unsigned char a = etoa[raw[i]];
+
+		/* room for the longest escape plus the terminator */
+		if (o + 6 >= outlen) break;
+
+		if (a < 0x20 || a > 0x7E || a == 0x22 /* " */ || a == 0x5C /* \ */) {
+			o += (size_t) snprintf(&out[o], outlen - o, "\\u%04X", a);
+		} else {
+			out[o++] = (char) raw[i];
+		}
+	}
+
+	out[o] = '\0';
+}
+
 int memberListHandler(Session *session)
 {
 	unsigned	rc		= 0;
-	unsigned	count		= 0;
+	unsigned	emitted		= 0;
 	unsigned	first		= 1;
-	unsigned	i		= 0;
+	unsigned	maxitems	= 0;
+	int		more		= 0;
+	int		at_end		= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
 	char		*verb		= NULL;
 
-	PDSLIST		**pdslist	= NULL;
+	FILE		*fp		= NULL;
+	char		blk[PDS_DIR_BLKSIZE];
 
 	char 		*dsname		= NULL;
 
 	char		*start		= NULL;
 	char		*pattern	= NULL;
+	char		*maxitems_str	= NULL;
 
 
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
@@ -1346,12 +1411,28 @@ int memberListHandler(Session *session)
 	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START"); 
 	pattern = (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_PATTERN"); 
 
-	/* __listpd() abends S001 on a data set that is not partitioned (#193) */
+	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
+	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
+
+	/* opening a non-partitioned data set this way abends S001 (#193) */
 	if (require_pds(session, dsname) != 0) {
 		goto quit;
 	}
 
-	pdslist = __listpd(dsname, NULL);
+	/* Walk the directory and emit as we go.  This used to call __listpd(),
+	   which builds the complete member array in storage first: on a data set
+	   like SYS1.SMPCDS (~23000 members) that exhausts the region, abends S878,
+	   and -- because the abend unwinds before the handler's __freepd() -- leaves
+	   the storage lost, after which httpd can no longer LINK MVSMF at all and
+	   every endpoint answers S80A until the server is restarted (#212).
+	   Streaming keeps the footprint at one 256-byte block. */
+	fp = fopen(dsname, "r,record");
+	if (!fp) {
+		rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+				CATEGORY_UNEXPECTED, RC_ERROR, REASON_DATASET_NOT_FOUND,
+				ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+		goto quit;
+	}
 
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
@@ -1361,44 +1442,78 @@ int memberListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
-	count = array_count(&pdslist);
-
 	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
-	if (!pdslist) {
-		goto end;
-	} 
+	while (!at_end) {
+		int	len;
+		int	used;
+		int	pos;
 
-	for(i=0; i < count; i++) {
-		PDSLIST *pds = pdslist[i];
-		
-		if (!pds) continue;
-		
-		if (first) {
-			/* first time we're printing this '{' so no ',' needed */
-			if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
-			first = 0;
-		} else {
-			/* all other times we need a ',' before the '{' */
-			if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
+		len = fread(blk, 1, sizeof(blk), fp);
+		if (len <= 0) break;
+
+		used = (int) *(unsigned short *) blk;
+
+		/* the block says how much of it is in use -- never take that at face
+		   value.  A short read or a damaged block would otherwise walk us off
+		   the end of blk[], the same class of defect as the MTT length in
+		   #176.  Clamp to what we actually read. */
+		if (used > len) used = len;
+
+		/* PDS_DIR_ENT_FIXED bytes must be present before the indicator byte
+		   at +11 can be read */
+		for (pos = 2; pos + PDS_DIR_ENT_FIXED <= used; ) {
+			int	size;
+			char	member[MEMBER_ESC_SIZE];
+
+			if (memcmp(&blk[pos],
+			           "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF", 8) == 0) {
+				at_end = 1;
+				break;
+			}
+
+			size = PDS_DIR_ENT_FIXED
+			     + ((blk[pos + 11] & PDS_DIR_UDATA_MASK) * 2);
+
+			if (maxitems > 0 && emitted >= maxitems) {
+				more = 1;
+				at_end = 1;
+				break;
+			}
+
+			json_escape_member((const unsigned char *) &blk[pos], 8,
+				httpx->xlate_cp037->etoa, member, sizeof(member));
+
+			if (first) {
+				/* first time we're printing this '{' so no ',' needed */
+				if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
+				first = 0;
+			} else {
+				/* all other times we need a ',' before the '{' */
+				if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
+			}
+
+			// TODO: extract user data from the entry, if X-IBM-Attributes == base
+			if ((rc = http_printf(session->httpc, "      \"member\": \"%s\"\n", member)) < 0) goto quit;
+			if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
+
+			emitted++;
+			pos += size;
 		}
-
-		// TODO: extract user data from pds->udata, if X-IBM-Attributes == base 
-		if ((rc = http_printf(session->httpc, "      \"member\": \"%.8s\"\n", pds->name)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
 	}
 
-end:
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", count)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
+	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
+		more ? "true" : "false")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 
 quit:
-	if (pdslist) {
-		__freepd(&pdslist);
+	if (fp) {
+		fclose(fp);
 	}
 
 	return rc;

@@ -69,15 +69,16 @@ than guessed.
 
 `exec-system` and `exec-member` are likewise not implemented (mvslovers/mvsmf#209).
 
-### Cross-check
+### Provenance of the format
 
-httpd's `/jes/status` reports the same instants in the same format, so the two
-APIs can be compared directly for a given job:
+The conversion was validated against httpd's `/jes/status`, which emitted the
+same instants in the same format after mvslovers/httpd#151 — the two agreed to
+the second on the same job.
 
-```bash
-curl -s -u user:pass "http://host:8080/jes/status?jobname=IEFBR14" \
-  | grep -E 'start_display|end_display'
-```
+**Do not reach for that comparison again:** httpd retires `/jes/*` (and `/dsl/*`)
+in 4.0.0, since these endpoints are what mvsMF replaces. The reference is
+recorded here because it is how the timezone handling was verified, not as a
+check to re-run.
 
 ## Error Responses
 - HTTP 500 (Internal Server Error)

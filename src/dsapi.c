@@ -1434,6 +1434,14 @@ int memberListHandler(Session *session)
 		goto quit;
 	}
 
+	/* The handle is held across the whole streaming loop, which on a large
+	   directory runs for seconds. If this handler abends in that window the
+	   quit: path below never runs, and an unregistered handle is one that
+	   session_cleanup() cannot find -- the data set then stays allocated to
+	   the address space for good, and the next DELETE of it waits on the
+	   SCRATCH enqueue forever, costing a worker permanently (#217). */
+	session_register_file(session, fp);
+
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
@@ -1513,7 +1521,7 @@ int memberListHandler(Session *session)
 
 quit:
 	if (fp) {
-		fclose(fp);
+		session_fclose(session, fp);
 	}
 
 	return rc;

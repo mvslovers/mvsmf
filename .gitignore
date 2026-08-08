@@ -98,3 +98,4 @@ log-at-fail-*.json
 soak-triage-*.txt
 mtt-ring-*.json
 herc-at-fail-*.log
+worker-watch-*.txt

@@ -17,6 +17,7 @@
 
 #include "common.h"
 #include "httpcgi.h"
+#include "jclines.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "json.h"
@@ -1297,47 +1298,6 @@ extract_file_value(char *json, size_t len)
 	*val_end = '\0';
 
 	return val_start;
-}
-
-__asm__("\n&FUNC	SETC 'grow_lines_arrays'");
-static int
-grow_lines_arrays(char ***lines_p, char **lines_buf_p, int *capacity_p, int required)
-{
-	int new_cap;
-	char *new_buf;
-	char **new_lines;
-	int i;
-
-	if (required <= *capacity_p) {
-		return 0;
-	}
-
-	new_cap = *capacity_p;
-	while (new_cap < required) {
-		new_cap *= 2;
-	}
-
-	new_buf = (char *)realloc(*lines_buf_p, (size_t)new_cap * 81);
-	if (!new_buf) {
-		return -1;
-	}
-	memset(new_buf + (size_t)(*capacity_p) * 81, 0,
-		   (size_t)(new_cap - *capacity_p) * 81);
-
-	new_lines = (char **)realloc(*lines_p, (size_t)new_cap * sizeof(char *));
-	if (!new_lines) {
-		*lines_buf_p = new_buf;
-		return -1;
-	}
-
-	for (i = 0; i < new_cap; i++) {
-		new_lines[i] = new_buf + (i * 81);
-	}
-
-	*lines_buf_p = new_buf;
-	*lines_p = new_lines;
-	*capacity_p = new_cap;
-	return 0;
 }
 
 __asm__("\n&FUNC	SETC 'submit_file'");

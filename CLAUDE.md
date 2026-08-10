@@ -157,7 +157,40 @@ make help          # list all targets
 The build chain is: C source → `.o` via cc370 on the host → `as370` for the
 hand-written assembler → `ld370` link, with the C runtime and dependencies
 resolved by **autocall** from `.a` archives. `make deploy` packs the load
-library to XMIT, uploads it, and RECEIVEs it into the httpd LINKLIB.
+library to XMIT, uploads it, and RECEIVEs it into the **deploy** LINKLIB.
+
+### Deploy and Activation (`make deploy` alone changes nothing)
+
+`make deploy` RECEIVEs the load module into the deploy LINKLIB
+(`<MBT_MVS_HLQ>.MVSMF.V1R0M0D.LINKLIB`) **and stops there**. The running httpd
+serves from its own STEPLIB, so until you copy the member across, the old build
+is still live. Deploying and then testing against the server is a standing trap:
+you will be measuring the previous module.
+
+httpd loads the CGI **fresh per request**, so the copy activates immediately —
+no httpd restart, no `P HTTPD`.
+
+```
+make deploy                       # -> deploy LINKLIB
+<submit tests/jcl/mvsmfact.jcl>   # deploy LINKLIB -> httpd STEPLIB (hot)
+GET /zosmf/test?fn=version        # must equal the HEAD you built
+```
+
+`tests/jcl/mvsmfact.jcl` is the activation job. It uses `DISP=SHR` on the output
+deliberately — httpd holds the STEPLIB SHR, so `DISP=OLD` would leave the job
+waiting in the enqueue for a server stop that is not needed.
+
+**Confirm the STEPLIB from the running STC, never from the data set list** —
+several `HTTPD.LINKLIB*` data sets exist on a given stand and only one is in
+use. Find the ACTIVE `STC` via `GET /zosmf/restjobs/jobs?owner=*&prefix=HTTPD*`,
+then read its JESJCL (file id 3) for `XXSTEPLIB DD DISP=SHR,DSN=…`.
+
+The one case that *does* need `P HTTPD` / `S HTTPD` is a compress: every replace
+copy orphans the old member's space, and at the extent limit the copy fails
+`IEF450I … ABEND SE37`. That failure is clean — it abends before writing, so the
+live member and the running server are unharmed — but nothing activates until
+the library is compressed (`COPY INDD=LIB,OUTDD=LIB`, `DISP=OLD`). IEBCOPY's
+`IEB144I` line reports the tracks left; watch it fall.
 
 ### Dependencies (from project.toml)
 

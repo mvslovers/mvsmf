@@ -39,10 +39,19 @@ static int name_free(const char *n)
 	return 1;
 }
 
-static int slot_expired(const NT_SLOT *sl, unsigned long long now)
+/* Takes last_access BY VALUE, not the slot pointer. Reading a 64-bit member
+ * through a pointer that is dead afterwards makes cc370 -O1 emit
+ *
+ *     L 2,16(2)  /  L 3,4+16(2)
+ *
+ * -- the first half overwrites its own base register and the second half then
+ * indexes off the loaded TOD value, which on a 24-bit machine is nowhere: S0C4.
+ * Passing the value keeps the caller's `s` live across its loop, so the load
+ * keeps a base register of its own. See issue #225. */
+static int slot_expired(unsigned long long last_access, unsigned long long now)
 {
 	unsigned now_hi = (unsigned)(now >> 32);
-	unsigned acc_hi = (unsigned)(sl->last_access >> 32);
+	unsigned acc_hi = (unsigned)(last_access >> 32);
 	return (now_hi - acc_hi) >= KVS_TTL_TICKS;
 }
 
@@ -88,7 +97,7 @@ int nt_set(NT_STORE *s, const char *name, const void *val, unsigned len)
 	if (!target) {
 		for (i = 0; i < s->nslots; i++) {
 			if (name_free(s->slot[i].name) ||
-			    slot_expired(&s->slot[i], now)) {
+			    slot_expired(s->slot[i].last_access, now)) {
 				target = &s->slot[i];
 				break;
 			}
@@ -138,7 +147,7 @@ int nt_get(NT_STORE *s, const char *name, void *buf, unsigned max,
 		if (name_free(s->slot[i].name)) {
 			continue;
 		}
-		if (slot_expired(&s->slot[i], now)) {
+		if (slot_expired(s->slot[i].last_access, now)) {
 			continue;                    /* expired -> treat as miss */
 		}
 		if (name_eq(s->slot[i].name, name)) {

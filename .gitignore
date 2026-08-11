@@ -44,6 +44,12 @@ src/*.s
 
 # Build system
 .env
+# Per-stand connection files (.env.mvsdev, .env.drnmig3a, ...) carry
+# MBT_MVS_PASS just like .env does -- a bare '.env' pattern does not match a
+# suffixed name, so name them explicitly. .env.example is the committed
+# template and stays tracked.
+.env.*
+!.env.example
 *.jcl
 # ...except the test fixtures and operational jobs, which are source.
 # The ones already in tests/jcl/ predate the rule above and were force-added;

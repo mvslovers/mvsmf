@@ -27,8 +27,12 @@ exclude = ["src/cgxstart.c"]
 # Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
 # norent: mbtcheck.h keeps file-static counters; a standalone test needs them
 # in writable storage, so drop the module's RENT attribute.
+# host = false: both TUs include mvssupa.h and ntstore.c calls __getm/__getclk
+# plus cliblock.h -- libc370 services with no host equivalent, so the native
+# compile can only ever fail.  test-mvs still runs it.
 [[test]]
 name = "TSTNTST"
+host = false
 sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
 norent = true
 

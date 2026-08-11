@@ -1,6 +1,7 @@
 #include "mvsmfctx.h"
 #include "ntstore.h"
 #include "mvssupa.h"    /* __getm */
+#include "clibos.h"     /* __getmsp */
 #include "cliblock.h"   /* lock / unlock, LOCK_EXC */
 #include "httpcgi.h"    /* HTTPD, HTTPX, http_get_httpx, http_cgictx_get */
 
@@ -56,7 +57,14 @@ NT_STORE *mvsmf_kvstore(void *httpd)
 			ctx->ver = 1;
 		}
 		if (!ctx->kvstore) {
-			NT_STORE *store = (NT_STORE *)__getm(sizeof(NT_STORE));
+			/* Subpool 0 explicitly, not the ambient one. This block hangs off
+			 * MVSMF_CTX, which lives in httpd's cgictx[] for the life of the
+			 * address space -- so it must outlive the request. On a route with
+			 * RECLAIM=YES the ambient subpool is non-zero and gets FREEMAINed
+			 * when the module abends or the worker TCB ends, which would leave
+			 * a dangling pointer in an address-space-lifetime block. See #223;
+			 * this mirrors the pin httpd applied to its own registrar. */
+			NT_STORE *store = (NT_STORE *)__getmsp(sizeof(NT_STORE), 0);
 			if (store) {
 				nt_store_init(store);
 				ctx->kvstore = store;

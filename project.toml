@@ -10,8 +10,8 @@ type = "application"
 cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 [dependencies]
-"mvslovers/httpd" = "=4.0.0-dev"
-"mvslovers/ufsd" = "=1.0.0-dev"
+"mvslovers/httpd" = ">=4.0.0-dev"
+"mvslovers/ufsd" = ">=1.1.0"
 
 # Single load module: a CGI program that runs under httpd.  It includes its
 # own request router + API handlers; the CGI launcher (cgistart, providing

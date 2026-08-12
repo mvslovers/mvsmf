@@ -29,26 +29,6 @@
 #define RESP_CAP       32768      /* cap on captured cmd-response bytes        */
 #define POLL_SECONDS   3          /* sync capture window (~ TOD high-word ticks)*/
 
-/* Server quiesce/shutdown, read from the OPAQUE HTTPD control block.
- *
- * httpd hands each CGI an opaque HTTPD* (httpcgi.h forward-declares struct
- * httpd), so we read the processing-flags byte directly at its fixed layout
- * offset.  WARNING: unlike httpx at offset 0x08 (which httpcgi.h documents as an
- * ABI commitment), offset 0x2C for `flag` is NOT a published ABI -- it hardcodes
- * httpd's private struct layout (httpd/include/httpd.h: "volatile UCHAR flag",
- * masks 0x40/0x80).  If httpd's struct layout changes and this offset lands on
- * an unrelated byte, the failure is SILENT (read-only, nothing is corrupted) and
- * has two equally confusing shapes: if that byte happens to have 0x40/0x80 set,
- * EVERY console request returns 503; if it does not, this quiesce check is
- * silently INACTIVE and long polls stop draining at shutdown again. Neither
- * announces itself -- keep this offset in lockstep with httpd's struct, and
- * migrate to the accessor when it lands.
- * Read-only, so no httpd or libc370 change is needed now; the durable fix is an
- * httpd-provided accessor (follow-up).  Mirrors the http_get_httpx() offset idiom. */
-#define HTTPD_OFF_FLAG        0x2C     /* volatile UCHAR flag   (httpd.h layout) */
-#define HTTPD_FLAG_QUIESCE    0x40     /* server: stop accepting new requests    */
-#define HTTPD_FLAG_SHUTDOWN   0x80     /* server: shutting down now              */
-
 #define CONS_POLL_INTERRUPTED (-1)     /* capture_response(): quiesced mid-poll  */
 
 /* Column layout of a formatted MTT line (see /zosmf/test?fn=mtt output):
@@ -101,15 +81,19 @@ static unsigned tod_hi(void)
 
 /* Non-zero once the server is quiescing or shutting down.  A worker parked in a
  * poll loop must notice this and drain promptly: libc370's worker-shutdown gives
- * each task only ~5 s before a force-DETACH (httpd#122 / mvsmf#179). */
+ * each task only ~5 s before a force-DETACH (httpd#122 / mvsmf#179).
+ *
+ * http_get_flag() is httpd's committed accessor for the byte (httpcgi.h, one of
+ * the two documented exceptions to "CGIs hold the HTTPD* opaque"); the offset it
+ * hides is asserted against the real struct at compile time in httpd's own
+ * build, so a layout change breaks there instead of silently reading a stray
+ * byte here.  The macro is unguarded -- keep the NULL check. */
 __asm__("\n&FUNC	SETC 'SRVQUIES'");
 static int server_quiescing(Session *session)
 {
-	const volatile unsigned char *flag;
-
 	if (!session || !session->httpd) return 0;
-	flag = (const volatile unsigned char *)session->httpd + HTTPD_OFF_FLAG;
-	return (*flag & (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) != 0;
+	return (http_get_flag(session->httpd) &
+	        (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) != 0;
 }
 
 /* Sub-second pause between MTT snapshots.  The MTT is second-granular, so a

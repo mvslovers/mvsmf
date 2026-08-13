@@ -410,6 +410,33 @@ else
 			"got HTTP $HTTP_CODE first='$FIRST' returnedRows=$RETURNED (expected first='$SECOND', $((COUNT - 1)) rows)"
 	fi
 
+	# The exact-name entry must sort in front of its own children. LISTC
+	# returns the children of a level and the handler looks the exact name up
+	# separately, so before #232 it was appended last -- with max-items=1 the
+	# first page was the CHILD and the parent was unreachable from any later
+	# start=.
+	BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+	for D in "${MVSMF_USER}.CURL.EXACT" "${MVSMF_USER}.CURL.EXACT.CHILD"; do
+		curl -s -o /dev/null -X POST -u "$AUTH" \
+			-H "Content-Type: application/json" -d "$BODY" \
+			"${BASE_URL}/zosmf/restfiles/ds/${D}"
+	done
+
+	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Max-Items: 1" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL.EXACT")
+	if [ "$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)" = "${MVSMF_USER}.CURL.EXACT" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
+		pass "exact-name entry sorts before its children"
+	else
+		fail "exact-name entry sorts before its children" \
+			"first item is '$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)'"
+	fi
+
+	for D in "${MVSMF_USER}.CURL.EXACT.CHILD" "${MVSMF_USER}.CURL.EXACT"; do
+		curl -s -o /dev/null -X DELETE -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/ds/${D}"
+	done
+
 	# past the last name is an empty page, not a full one -- and moreRows
 	# must not claim there is more to fetch
 	CONTENT=$(curl -s -u "$AUTH" \

@@ -508,15 +508,70 @@ test_list_jobs_with_jobid() {
 	assert_json_array_nonempty "$BODY" "list by jobid returns results"
 }
 
+# every element of the array must carry the requested status.  An empty array
+# is a pass: status=ACTIVE legitimately matches nothing on a quiet system.
+assert_all_status() {
+	local json="$1"
+	local want="$2"
+	local label="$3"
+	local len others
+	len=$(echo "$json" | jq 'length' 2>/dev/null) || len=0
+	others=$(echo "$json" | jq --arg s "$want" '[.[] | select(.status != $s)] | length' 2>/dev/null) || others="?"
+	if [ "$others" = "0" ]; then
+		pass "$label ($len jobs, all $want)"
+	else
+		fail "$label" "$others of $len jobs have a status other than $want"
+	fi
+}
+
 test_list_jobs_with_status() {
 	echo ""
 	echo "--- List Jobs: with status filter ---"
 
-	local resp
+	local resp all_len out_len
+
+	# '*' means no filter, so it can only ever return a superset. Listed first
+	# on purpose: the two counts come from separate requests, and a job purged
+	# in between can only shrink the later one, never break the comparison.
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=*&owner=*")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=*"
+	all_len=$(echo "$BODY" | jq 'length' 2>/dev/null) || all_len=0
+
 	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=OUTPUT&owner=*")
 	split_response "$resp"
-
 	assert_http_status "200" "$HTTP_STATUS" "list jobs status=OUTPUT"
+	assert_all_status "$BODY" "OUTPUT" "status=OUTPUT excludes other statuses"
+	out_len=$(echo "$BODY" | jq 'length' 2>/dev/null) || out_len=0
+
+	if [ "$all_len" -ge "$out_len" ] 2>/dev/null; then
+		pass "status=* is a superset of status=OUTPUT ($all_len >= $out_len)"
+	else
+		fail "status=* returned fewer jobs than status=OUTPUT" "$all_len < $out_len"
+	fi
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=ACTIVE&owner=*")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=ACTIVE"
+	assert_all_status "$BODY" "ACTIVE" "status=ACTIVE excludes OUTPUT jobs"
+
+	# the filter is case insensitive
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=output&owner=*")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=output (lower case)"
+	assert_all_status "$BODY" "OUTPUT" "lower case status filters the same way"
+
+	# an unknown status matches nothing - 200 with an empty array, not an error
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=NOSUCH&owner=*")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=NOSUCH"
+	local len
+	len=$(echo "$BODY" | jq 'length' 2>/dev/null) || len="?"
+	if [ "$len" = "0" ]; then
+		pass "unknown status returns an empty array"
+	else
+		fail "unknown status returned jobs" "got $len results"
+	fi
 }
 
 test_list_jobs_with_max() {
@@ -535,6 +590,26 @@ test_list_jobs_with_max() {
 		pass "max-jobs=2 respected (got $len)"
 	else
 		fail "max-jobs=2 not respected" "got $len results"
+	fi
+
+	# max-jobs caps the jobs returned, not the queue entries scanned: combined
+	# with a filter it must still fill up to the limit
+	local out_total out_capped
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*&status=OUTPUT")
+	split_response "$resp"
+	out_total=$(echo "$BODY" | jq 'length' 2>/dev/null) || out_total=0
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*&status=OUTPUT&max-jobs=1")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=OUTPUT&max-jobs=1"
+	out_capped=$(echo "$BODY" | jq 'length' 2>/dev/null) || out_capped=0
+
+	if [ "$out_total" -eq 0 ] 2>/dev/null; then
+		skip "max-jobs with status filter (no OUTPUT jobs on the system)"
+	elif [ "$out_capped" -eq 1 ] 2>/dev/null; then
+		pass "max-jobs=1 with status=OUTPUT returned 1 job (of $out_total)"
+	else
+		fail "max-jobs limits the scan, not the result" "got $out_capped of $out_total"
 	fi
 }
 

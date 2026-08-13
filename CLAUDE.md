@@ -254,6 +254,39 @@ All endpoints are under `/zosmf/`:
 
 Endpoint documentation lives in `docs/endpoints/` (with a curl & Zowe cookbook in `docs/examples.md`).
 
+### HTTP Status Codes — the z/OSMF contract is a closed list
+
+z/OSMF's "Error handling" section does not merely say "4nn/5nn means error"; it
+**enumerates the valid status codes**. mvsMF is a clone, so that list is the
+constraint — a status outside it is a deviation even when it is the semantically
+nicer answer, and even when httpd happily puts it on the wire.
+
+```
+200 OK              204 No content      206 Partial content   304 Not Modified
+400 Bad request     401 Unauthorized    404 Not found         405 Method not allowed
+412 Precondition failed                 413 Request entity too large
+429 Too many requests                   500 Internal server error
+503 Service unavailable
+```
+
+Two consequences that keep getting rediscovered:
+
+- **409 Conflict, 414 URI Too Long and 507 Insufficient Storage are not in the
+  list.** httpd gained all three in httpd#28/PR#56, and a live probe confirms a
+  CGI-set 414 reaches the client unchanged — but adopting them is still wrong.
+  "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
+  **500**. This was tracked as #102 and closed as won't-do; do not re-open the
+  reasoning from the httpd side alone.
+- **httpd does not know 206, 412 or 429** — `httpresp()` in httpd's
+  `src/httpresp.c` has no case for them and its `default:` emits *500* on the
+  wire. Any of these three needs an httpd change first. 304 and 413 *are*
+  supported. Check `httpresp()` before sending any status this codebase does not
+  already use.
+
+`sendErrorResponse()` (`common.c`) does not branch on status — it builds the
+JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
+here fails silently, on the wire only.
+
 ### Keeping Docs and Tests in Sync
 
 Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, `consapi.c`, or `infoapi.c`):
@@ -362,14 +395,19 @@ int ussXxxHandler(Session *session) {
 Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` mapping functions
 in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
 
-**Note:** httpd supports HTTP 409, 414, and 507 (added in httpd#28 / PR #56,
-reachable from CGIs via `http_resp()`), plus 410 (httpd#132 / PR #133, for the
-spool records endpoint — see below). mvsMF's mapping below still collapses
-these to 400/500 (EXIST/NOTEMPTY → 400 instead of 409, NAMETOOLONG → 400 instead
-of 414, NOSPACE/NOINODES → 500 instead of 507); adopting the precise codes is
-tracked in #102. Any status httpd does not know falls through to
-`500 Internal Server Error` on the wire — check `httpresp()` before sending a
-new one.
+**Note:** most of the table below is correct as it stands — see **HTTP Status
+Codes** above. EXIST/NOTEMPTY map to 400 and NOSPACE/NOINODES to 500 not because
+httpd lacks 409/507 (it has both), but because the z/OSMF status list does not
+contain them. The same holds for NAMETOOLONG → 400: the two
+`sendErrorResponse(..., 414, ...)` calls still in `ussapi.c` are the deviation,
+not the mapping.
+
+**One row is unresolved:** `UFSD_RC_ROFS → 403`. 403 is not in the z/OSMF list
+either, and neither is the 201 this codebase returns for created resources
+(`dsapi.c:2597`, `ussapi.c:960`). Both are open in #248 — the question is
+whether the enumerated list is exhaustive for the whole API or whether the
+per-service reference pages add codes (201 on create is the likely case). Do not
+"fix" either one before that is settled.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

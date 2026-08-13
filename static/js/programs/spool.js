@@ -210,9 +210,9 @@ Programs.register({
       if (st.status !== "*") q.set("status", st.status);
       const resp = await api("/zosmf/restjobs/jobs?" + q.toString());
       let jobs = await resp.json();   // plain JSON array
-      // jobListHandler currently ignores the status parameter (#157) —
-      // filter client-side; the param stays so the server-side filter
-      // is picked up automatically once implemented
+      // jobListHandler applies the status parameter since #157, so this is a
+      // no-op against a current server; it stays as the fallback for a build
+      // deployed before that fix, which returns every status regardless
       if (st.status !== "*") jobs = jobs.filter(j => j.status === st.status);
       return jobs;
     }

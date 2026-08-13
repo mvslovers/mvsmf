@@ -530,11 +530,25 @@ test_list_jobs_with_status() {
 
 	local resp all_len out_len
 
+	# '*' means no filter, so it can only ever return a superset. Listed first
+	# on purpose: the two counts come from separate requests, and a job purged
+	# in between can only shrink the later one, never break the comparison.
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=*&owner=*")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list jobs status=*"
+	all_len=$(echo "$BODY" | jq 'length' 2>/dev/null) || all_len=0
+
 	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=OUTPUT&owner=*")
 	split_response "$resp"
 	assert_http_status "200" "$HTTP_STATUS" "list jobs status=OUTPUT"
 	assert_all_status "$BODY" "OUTPUT" "status=OUTPUT excludes other statuses"
 	out_len=$(echo "$BODY" | jq 'length' 2>/dev/null) || out_len=0
+
+	if [ "$all_len" -ge "$out_len" ] 2>/dev/null; then
+		pass "status=* is a superset of status=OUTPUT ($all_len >= $out_len)"
+	else
+		fail "status=* returned fewer jobs than status=OUTPUT" "$all_len < $out_len"
+	fi
 
 	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=ACTIVE&owner=*")
 	split_response "$resp"
@@ -546,17 +560,6 @@ test_list_jobs_with_status() {
 	split_response "$resp"
 	assert_http_status "200" "$HTTP_STATUS" "list jobs status=output (lower case)"
 	assert_all_status "$BODY" "OUTPUT" "lower case status filters the same way"
-
-	# '*' means no filter, so it can only ever return a superset
-	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=*&owner=*")
-	split_response "$resp"
-	assert_http_status "200" "$HTTP_STATUS" "list jobs status=*"
-	all_len=$(echo "$BODY" | jq 'length' 2>/dev/null) || all_len=0
-	if [ "$all_len" -ge "$out_len" ] 2>/dev/null; then
-		pass "status=* is a superset of status=OUTPUT ($all_len >= $out_len)"
-	else
-		fail "status=* returned fewer jobs than status=OUTPUT" "$all_len < $out_len"
-	fi
 
 	# an unknown status matches nothing - 200 with an empty array, not an error
 	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?status=NOSUCH&owner=*")

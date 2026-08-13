@@ -13,7 +13,10 @@ GET
 - `volser` (optional): Filter by volume serial
 - `start` (optional): Starting dataset name for pagination. The listing begins
   at this name — **inclusive**, as in z/OSMF — and runs to the end of the list.
-  The value is folded to upper case and trailing blanks are trimmed.
+  The value is folded to upper case and trailing blanks are trimmed. A value
+  longer than the 44 characters a dataset name can hold is cut to 44, and the
+  page then begins *after* that prefix: no cataloged name can be the value
+  itself, and one equal to the prefix sorts before it (issue #240).
 
 ## Request Headers
 - `X-IBM-Max-Items` (optional): Maximum number of items to return. Value `0` means unlimited (default behavior). When the result set is truncated, `moreRows` is set to `true`.

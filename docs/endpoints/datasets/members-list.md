@@ -21,7 +21,10 @@ or with explicit volume:
   this member — **inclusive**, as in z/OSMF — and runs to the end of the
   directory. The name is folded to upper case and trailing blanks are trimmed,
   so a name padded to the directory's eight characters — by an older client, or
-  by one that kept a list from before issue #154 — works unchanged.
+  by one that kept a list from before issue #154 — works unchanged. A value
+  longer than eight characters cannot name a member: it is cut to eight and the
+  page then begins *after* that prefix, since a member named exactly the prefix
+  sorts before the value that was sent (issue #240).
 - `pattern` (optional): Member name filter. `*` matches any run of characters
   including none, `%` matches exactly one; everything else matches literally,
   and the value is folded to upper case. A pattern without wildcards is an

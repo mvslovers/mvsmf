@@ -671,13 +671,21 @@ jday_to_md(unsigned short year, unsigned short jday,
    case), and truncate to what the key can hold.
 
    Returns 1 when there is a key to work with, 0 when the parameter was absent
-   or empty -- list everything. */
+   or empty -- list everything.  *truncated, when a pointer is passed, says
+   whether the value did not fit.  The key is then a prefix of what the client
+   asked for rather than the value itself, and the caller has to know: no name
+   can equal the value, and a name equal to the prefix sorts before it, so the
+   start of the page moves from inclusive to exclusive (#240). */
 __asm__("\n&FUNC    SETC 'make_query_key'");
 static int
-make_query_key(const char *value, char *key, size_t keylen)
+make_query_key(const char *value, char *key, size_t keylen, int *truncated)
 {
 	size_t	n;
 	size_t	i;
+
+	if (truncated) {
+		*truncated = 0;
+	}
 
 	if (!value) {
 		return 0;
@@ -690,7 +698,12 @@ make_query_key(const char *value, char *key, size_t keylen)
 		return 0;
 	}
 
-	if (n > keylen - 1) n = keylen - 1;
+	if (n > keylen - 1) {
+		n = keylen - 1;
+		if (truncated) {
+			*truncated = 1;
+		}
+	}
 
 	for (i = 0; i < n; i++) {
 		key[i] = (char) toupper((unsigned char) value[i]);
@@ -784,6 +797,7 @@ int datasetListHandler(Session *session)
 	char		level_buf[45]	= {0};
 	char		start_key[MAX_DATASET_NAME + 1] = {0};
 	int		have_start	= 0;
+	int		start_after	= 0;
 
 	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
 	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
@@ -900,7 +914,8 @@ int datasetListHandler(Session *session)
 		}
 	}
 
-	have_start = make_query_key(start, start_key, sizeof(start_key));
+	have_start = make_query_key(start, start_key, sizeof(start_key),
+			&start_after);
 
 	/* start= paging is only well defined on an ordered list: the client asks
 	** for the next page by name, so an entry that sits out of order is not
@@ -942,8 +957,16 @@ int datasetListHandler(Session *session)
 		if (!ds) continue;
 
 		/* start= is inclusive: everything sorting before it belongs to a
-		** page the client already has */
-		if (have_start && strcmp(ds->dsn, start_key) < 0) continue;
+		** page the client already has.  Unless the value did not fit --
+		** then start_key is its first 44 characters, no cataloged name
+		** can be the value itself, and strcmp() puts a name equal to the
+		** prefix before it (the prefix ends in NUL, which sorts below the
+		** character the value continues with).  Drop it too (#240). */
+		if (have_start) {
+			int cmp = strcmp(ds->dsn, start_key);
+
+			if (cmp < 0 || (start_after && cmp == 0)) continue;
+		}
 
 		/* keep counting past the page limit -- moreRows has to tell "page
 		** full" from "list exhausted", and only the entries at or after
@@ -1536,6 +1559,7 @@ int memberListHandler(Session *session)
 
 	char		start_key[MAX_MEMBER_NAME];	/* EBCDIC, blank padded */
 	int		skipping	= 0;
+	int		start_after	= 0;
 
 	/* a pattern is not a name: "*A*B*C*D*" is longer than any member it can
 	   match, so the buffer is sized for the pattern, not for eight bytes */
@@ -1569,18 +1593,19 @@ int memberListHandler(Session *session)
 	{
 		char	start_buf[MAX_MEMBER_NAME + 1];
 
-		if (make_query_key(start, start_buf, sizeof(start_buf))) {
+		if (make_query_key(start, start_buf, sizeof(start_buf),
+				&start_after)) {
 			memset(start_key, ' ', sizeof(start_key));
 			memcpy(start_key, start_buf, strlen(start_buf));
 			skipping = 1;
 		}
 	}
 
-	/* make_query_key() truncates, which is harmless for start= -- a key longer
-	   than a name simply sorts past every entry -- but not for a pattern: a
-	   cut pattern selects a different set of members, and the client would be
-	   answered 200 with a list that does not match what it asked for.  Say so
-	   instead. */
+	/* A truncated pattern is answered rather than obeyed: a cut pattern
+	   selects a different set of members, and the client would be given a
+	   plain 200 carrying a list that does not match what it asked for.  Say so
+	   instead.  start= is cut to size too, but there the prefix still locates
+	   the page -- see the skip in the loop below (#240). */
 	if (pattern && strlen(pattern) >= sizeof(pattern_key)) {
 		rc = sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 				CATEGORY_SERVICE, RC_ERROR, REASON_PATTERN_TOO_LONG,
@@ -1588,7 +1613,8 @@ int memberListHandler(Session *session)
 		goto quit;
 	}
 
-	have_pattern = make_query_key(pattern, pattern_key, sizeof(pattern_key));
+	have_pattern = make_query_key(pattern, pattern_key, sizeof(pattern_key),
+			NULL);
 
 	/* opening a non-partitioned data set this way abends S001 (#193) */
 	if (require_pds(session, dsname) != 0) {
@@ -1682,10 +1708,23 @@ int memberListHandler(Session *session)
 			   page budget and the response is an empty items array with
 			   moreRows true -- a different-looking bug.  The directory
 			   is sorted, so once we are past the key there is nothing
-			   left to compare and the flag stays off. */
+			   left to compare and the flag stays off.
+
+			   start= names the first member of the page, so the match
+			   is kept -- unless the value was too long for a member
+			   name and start_key is only its first eight characters.
+			   No member can then be the value itself, and the one
+			   equal to the prefix sorts before it: the eight name
+			   bytes run out and the value carries on, and every
+			   character a client can put there sorts above the blank
+			   the name is padded with.  So that one goes as well, and
+			   the page starts after the prefix rather than at it
+			   (#240). */
 			if (skipping) {
-				if (memcmp(&blk[pos], start_key,
-					sizeof(start_key)) < 0) {
+				int cmp = memcmp(&blk[pos], start_key,
+						sizeof(start_key));
+
+				if (cmp < 0 || (start_after && cmp == 0)) {
 					pos += size;
 					continue;
 				}

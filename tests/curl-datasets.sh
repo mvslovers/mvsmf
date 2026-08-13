@@ -448,6 +448,57 @@ else
 		fail "start= beyond the last dataset returns an empty page" \
 			"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 	fi
+
+	# --- over-long start= (issue #240) ---
+	#
+	# The dataset list cuts start= to 44 characters, the longest a cataloged
+	# name can be. A 45-character value was then applied as if the client had
+	# asked for its 44-character prefix, so a data set named exactly that
+	# prefix -- which sorts BEFORE the value that was sent -- stayed in the
+	# page. Only a 44-character name can collide, so one is built here.
+	LONG_DSN="${MVSMF_USER}.CURL"
+	while [ "${#LONG_DSN}" -lt 44 ]; do
+		QLEN=$((44 - ${#LONG_DSN} - 1))
+		[ "$QLEN" -le 0 ] && break
+		[ "$QLEN" -gt 8 ] && QLEN=8
+		LONG_DSN="${LONG_DSN}.$(printf 'Q%.0s' $(seq 1 $QLEN))"
+	done
+
+	if [ "${#LONG_DSN}" -ne 44 ]; then
+		skip "over-long start= (no 44-character name fits under ${MVSMF_USER}.CURL)"
+	else
+		curl -s -o /dev/null -X POST -u "$AUTH" \
+			-H "Content-Type: application/json" \
+			-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' \
+			"${BASE_URL}/zosmf/restfiles/ds/${LONG_DSN}"
+
+		# 44 characters fit, so start= still names the first row
+		LIST=$(curl -s -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${LONG_DSN}" |
+			jq -r '.items[].dsname' 2>/dev/null)
+
+		if echo "$LIST" | grep -qx "$LONG_DSN"; then
+			pass "start= at 44 characters is inclusive"
+		else
+			fail "start= at 44 characters is inclusive" \
+				"got: $(echo "$LIST" | tr '\n' ' ')"
+		fi
+
+		# 45 do not, and the prefix must not readmit the name
+		LIST=$(curl -s -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${LONG_DSN}X" |
+			jq -r '.items[].dsname' 2>/dev/null)
+
+		if ! echo "$LIST" | grep -qx "$LONG_DSN"; then
+			pass "start= at 45 characters starts after the truncated prefix"
+		else
+			fail "start= at 45 characters starts after the truncated prefix" \
+				"got: $(echo "$LIST" | tr '\n' ' ') -- a truncated start= must not readmit the prefix"
+		fi
+
+		curl -s -o /dev/null -X DELETE -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/ds/${LONG_DSN}"
+	fi
 fi
 
 # --- Read with volume prefix ---
@@ -695,6 +746,51 @@ if [ "$LIST" = "MBRB MBRC" ]; then
 else
 	fail "start= and pattern= compose" "got '$LIST' (expected 'MBRB MBRC')"
 fi
+
+# --- List PDS members (over-long start=, issue #240) ---
+#
+# A start= value longer than eight characters is cut to eight. It used to be
+# applied as if the client had asked for that prefix, so a member named exactly
+# the prefix -- which sorts BEFORE the value the client sent -- came back in the
+# page. The prefix now starts the page exclusively.
+#
+# The directory here is MBRA, MBRB, MBRC, MBRCXXXX, MBRF1, MBR03, TESTMBR, in
+# EBCDIC order: MBRC pads with blanks and 0x40 sorts below 'X'.
+echo ""
+echo "--- List PDS Members (over-long start=, issue #240) ---"
+
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "MEMBER MBRCXXXX" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(MBRCXXXX)"
+
+# eight characters still fit, so start= keeps naming the first member of the page
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRCXXXX" |
+	jq -r '.items[].member' 2>/dev/null)
+
+if [ "$(echo "$LIST" | head -1)" = "MBRCXXXX" ]; then
+	pass "start=MBRCXXXX (8 chars) is inclusive"
+else
+	fail "start=MBRCXXXX (8 chars) is inclusive" \
+		"got: $(echo "$LIST" | tr '\n' ' ')"
+fi
+
+# nine characters do not: MBRCXXXX sorts before MBRCXXXXY and must be dropped
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRCXXXXY" |
+	jq -r '.items[].member' 2>/dev/null)
+
+if [ "$(echo "$LIST" | head -1)" = "MBRF1" ] &&
+   ! echo "$LIST" | grep -qx 'MBRCXXXX'; then
+	pass "start=MBRCXXXXY (9 chars) starts after the truncated prefix"
+else
+	fail "start=MBRCXXXXY (9 chars) starts after the truncated prefix" \
+		"got: $(echo "$LIST" | tr '\n' ' ') -- a truncated start= must not readmit the prefix"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(MBRCXXXX)"
 
 for M in MBRA MBRB MBRC MBRF1 MBR03; do
 	curl -s -o /dev/null -X DELETE -u "$AUTH" \

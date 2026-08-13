@@ -659,31 +659,31 @@ jday_to_md(unsigned short year, unsigned short jday,
 	*day_out = (unsigned char)d;
 }
 
-/* Normalise a "start=" query value into a comparison key.
+/* Normalise a query value -- start= or pattern= -- into a comparison key.
 
-   Both list endpoints page with z/OSMF's start= parameter: the listing begins
-   at that name -- inclusive -- and runs to the end of the list.  Query values
-   reach a CGI already in EBCDIC, so no translation is involved; they do arrive
-   exactly as the client typed them, and a client that feeds a name back from a
-   member listing still carries the blank padding of #154.  Trim that, fold to
-   upper case (both catalog and directory names are upper case), and truncate
-   to what the key can hold.
+   The list endpoints page with z/OSMF's start= parameter (the listing begins at
+   that name, inclusive, and runs to the end) and filter with pattern=.  Query
+   values reach a CGI already in EBCDIC, so no translation is involved; they do
+   arrive exactly as the client typed them, and a client that feeds a name back
+   from a member listing still carries the blank padding of #154.  Trim that,
+   fold to upper case (both catalog and directory names are upper case), and
+   truncate to what the key can hold.
 
-   Returns 1 when there is a key to compare against, 0 when start= was absent
+   Returns 1 when there is a key to work with, 0 when the parameter was absent
    or empty -- list everything. */
-__asm__("\n&FUNC    SETC 'make_start_key'");
+__asm__("\n&FUNC    SETC 'make_query_key'");
 static int
-make_start_key(const char *start, char *key, size_t keylen)
+make_query_key(const char *value, char *key, size_t keylen)
 {
 	size_t	n;
 	size_t	i;
 
-	if (!start) {
+	if (!value) {
 		return 0;
 	}
 
-	n = strlen(start);
-	while (n > 0 && start[n - 1] == ' ') n--;
+	n = strlen(value);
+	while (n > 0 && value[n - 1] == ' ') n--;
 
 	if (n == 0) {
 		return 0;
@@ -692,11 +692,55 @@ make_start_key(const char *start, char *key, size_t keylen)
 	if (n > keylen - 1) n = keylen - 1;
 
 	for (i = 0; i < n; i++) {
-		key[i] = (char) toupper((unsigned char) start[i]);
+		key[i] = (char) toupper((unsigned char) value[i]);
 	}
 	key[n] = '\0';
 
 	return 1;
+}
+
+/* Match a member name against a z/OSMF member pattern: '*' stands for any run
+   of characters including none, '%' for exactly one.  Everything else compares
+   literally, in EBCDIC on both sides -- the directory bytes are EBCDIC and so
+   is the pattern from the query string.
+
+   The loop backtracks to the last '*' instead of recursing.  A recursive
+   matcher is the textbook form, and its depth is driven by the input: on this
+   platform that is the wrong shape entirely.  Iterating costs two saved
+   positions and nothing else.
+
+   name is the raw directory name with its trailing blanks already trimmed off
+   by the caller; it is not NUL terminated, hence namelen. */
+__asm__("\n&FUNC    SETC 'member_match'");
+static int
+member_match(const char *name, size_t namelen, const char *pat)
+{
+	size_t	patlen	= strlen(pat);
+	size_t	n	= 0;
+	size_t	p	= 0;
+	size_t	star_p	= (size_t) -1;	/* pattern position after the last '*' */
+	size_t	star_n	= 0;		/* name position it was matched at */
+
+	while (n < namelen) {
+		if (p < patlen && (pat[p] == '%' || pat[p] == name[n])) {
+			p++;
+			n++;
+		} else if (p < patlen && pat[p] == '*') {
+			star_p = p++;
+			star_n = n;
+		} else if (star_p != (size_t) -1) {
+			/* mismatch: let the last '*' swallow one more character */
+			p = star_p + 1;
+			n = ++star_n;
+		} else {
+			return 0;
+		}
+	}
+
+	/* trailing stars may still match the empty rest */
+	while (p < patlen && pat[p] == '*') p++;
+
+	return p == patlen;
 }
 
 /* order two catalog entries by name, holes last */
@@ -855,7 +899,7 @@ int datasetListHandler(Session *session)
 		}
 	}
 
-	have_start = make_start_key(start, start_key, sizeof(start_key));
+	have_start = make_query_key(start, start_key, sizeof(start_key));
 
 	/* start= paging is only well defined on an ordered list: the client asks
 	** for the next page by name, so an entry that sits out of order is not
@@ -1419,6 +1463,11 @@ error:
 /* 8 name bytes, each worst case "\uXXXX", plus the terminator */
 #define MEMBER_ESC_SIZE		(8 * 6 + 1)
 
+/* A member pattern may be longer than the names it matches ("*A*B*C*D*"), so
+   it gets its own size rather than borrowing the eight-byte name length.
+   Anything longer is truncated, like an over-long start= value. */
+#define MEMBER_PATTERN_SIZE	45
+
 /* Render a directory member name as the body of a JSON string.
 
    Member names are normally A-Z 0-9 @ # $, but nothing enforces that: a PDS
@@ -1485,6 +1534,11 @@ int memberListHandler(Session *session)
 	char		start_key[MAX_MEMBER_NAME];	/* EBCDIC, blank padded */
 	int		skipping	= 0;
 
+	/* a pattern is not a name: "*A*B*C*D*" is longer than any member it can
+	   match, so the buffer is sized for the pattern, not for eight bytes */
+	char		pattern_key[MEMBER_PATTERN_SIZE];
+	int		have_pattern	= 0;
+
 
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname){
@@ -1512,12 +1566,14 @@ int memberListHandler(Session *session)
 	{
 		char	start_buf[MAX_MEMBER_NAME + 1];
 
-		if (make_start_key(start, start_buf, sizeof(start_buf))) {
+		if (make_query_key(start, start_buf, sizeof(start_buf))) {
 			memset(start_key, ' ', sizeof(start_key));
 			memcpy(start_key, start_buf, strlen(start_buf));
 			skipping = 1;
 		}
 	}
+
+	have_pattern = make_query_key(pattern, pattern_key, sizeof(pattern_key));
 
 	/* opening a non-partitioned data set this way abends S001 (#193) */
 	if (require_pds(session, dsname) != 0) {
@@ -1602,6 +1658,25 @@ int memberListHandler(Session *session)
 					continue;
 				}
 				skipping = 0;
+			}
+
+			/* Filter, then cap -- for the same reason the skip above
+			   comes first: a member the client did not ask for must not
+			   consume a slot of the page, or a narrow pattern answers
+			   with an empty items array and moreRows true.  Ordering
+			   also means moreRows counts matches, not directory
+			   entries. */
+			if (have_pattern) {
+				size_t	nlen = MAX_MEMBER_NAME;
+
+				while (nlen > 0 && blk[pos + nlen - 1] == ' ') {
+					nlen--;
+				}
+
+				if (!member_match(&blk[pos], nlen, pattern_key)) {
+					pos += size;
+					continue;
+				}
 			}
 
 			if (maxitems > 0 && emitted >= maxitems) {

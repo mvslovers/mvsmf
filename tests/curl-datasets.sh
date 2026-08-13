@@ -611,6 +611,68 @@ else
 		"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 fi
 
+# --- List PDS members (pattern=) ---
+#
+# pattern= was accepted and ignored, so a filtered member view silently showed
+# the whole directory (#236). '*' matches any run of characters, '%' exactly
+# one -- and '%' has to be sent percent-encoded as %25, or the URL parser eats
+# it as an escape.
+#
+# The directory at this point is MBRA, MBRB, MBRC, MBRF1, MBR03, TESTMBR.
+echo ""
+echo "--- List PDS Members (pattern=, issue #236) ---"
+
+pattern_list() {
+	curl -s -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=$1" |
+		jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' | tr '\n' ' ' |
+		sed 's/ *$//'
+}
+
+assert_pattern() {
+	local got
+	got=$(pattern_list "$1")
+	if [ "$got" = "$2" ]; then
+		pass "pattern=$1 -> $2"
+	else
+		fail "pattern=$1 -> $2" "got '$got'"
+	fi
+}
+
+assert_pattern 'MBR*'  'MBRA MBRB MBRC MBRF1 MBR03'
+assert_pattern 'MBR%25' 'MBRA MBRB MBRC'
+assert_pattern '*MBR*' 'MBRA MBRB MBRC MBRF1 MBR03 TESTMBR'
+assert_pattern 'MBRC'  'MBRC'
+assert_pattern 'NOSUCH*' ''
+
+# a filtered-out member must not consume a slot of the page
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=MBR%25")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' |
+	tr '\n' ' ' | sed 's/ *$//')
+
+if [ "$HTTP_CODE" = "200" ] && [ "$LIST" = "MBRA MBRB" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
+	pass "pattern= with max-items=2 fills the page with matches only"
+else
+	fail "pattern= with max-items=2 fills the page with matches only" \
+		"got HTTP $HTTP_CODE items='$LIST' moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+fi
+
+# pattern= and start= have to compose -- Zowe pages a filtered list
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRB&pattern=MBR%25" |
+	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' | tr '\n' ' ' | sed 's/ *$//')
+
+if [ "$LIST" = "MBRB MBRC" ]; then
+	pass "start= and pattern= compose"
+else
+	fail "start= and pattern= compose" "got '$LIST' (expected 'MBRB MBRC')"
+fi
+
 for M in MBRA MBRB MBRC MBRF1 MBR03; do
 	curl -s -o /dev/null -X DELETE -u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"

@@ -524,6 +524,18 @@ assert_http_status "200" "$HTTP_CODE" "list PDS members"
 assert_json_field_exists "$CONTENT" '.items[0].member' "member list has member field"
 assert_json_field "$CONTENT" '.moreRows' "false" "member list: moreRows false when complete"
 
+# Names come back as z/OSMF reports them, without the directory's blank padding
+# (#154). A padded name makes a client build "dsn(member )" for the follow-up
+# request. Every other member assertion below compares the exact string, so this
+# is checked once here for the directory as a whole.
+if echo "$CONTENT" | jq -e '[.items[].member] | length > 0 and all(test("^[^ ]+$"))' \
+	>/dev/null 2>&1; then
+	pass "member names are returned unpadded"
+else
+	fail "member names are returned unpadded" \
+		"got: $(echo "$CONTENT" | jq -c '[.items[].member]' 2>/dev/null)"
+fi
+
 # --- List PDS members (start=) ---
 #
 # start= was accepted and ignored, so Zowe Explorer could never page past the
@@ -546,10 +558,9 @@ for M in MBRA MBRB MBRC MBRF1 MBR03; do
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"
 done
 
-# member names still come back padded to eight bytes (#154) -- trim to compare
 LIST=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC" |
-	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+	jq -r '.items[].member' 2>/dev/null)
 
 if [ "$(echo "$LIST" | head -1)" = "MBRC" ] &&
    ! echo "$LIST" | grep -qxE 'MBRA|MBRB'; then
@@ -561,7 +572,7 @@ fi
 
 LIST=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBR03" |
-	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+	jq -r '.items[].member' 2>/dev/null)
 
 if [ "$(echo "$LIST" | head -1)" = "MBR03" ] && ! echo "$LIST" | grep -qx 'MBRF1'; then
 	pass "start=MBR03 skips MBRF1 (EBCDIC collating order)"
@@ -576,7 +587,7 @@ BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null)
 
 if [ "$HTTP_CODE" = "200" ] &&
    [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
@@ -589,10 +600,12 @@ else
 		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) items='$(echo "$LIST" | tr '\n' ' ')' moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 fi
 
-# a client echoing a name back from a listing still sends the #154 padding
+# the listing no longer pads the names it returns (#154), but a client holding
+# an older list -- or padding a name itself -- still sends the blanks, and
+# start= has to keep tolerating them
 LIST=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC%20%20%20%20" |
-	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+	jq -r '.items[].member' 2>/dev/null)
 
 if [ "$(echo "$LIST" | head -1)" = "MBRC" ]; then
 	pass "start= tolerates a blank-padded member name"
@@ -625,7 +638,7 @@ echo "--- List PDS Members (pattern=, issue #236) ---"
 pattern_list() {
 	curl -s -u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=$1" |
-		jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' | tr '\n' ' ' |
+		jq -r '.items[].member' 2>/dev/null | tr '\n' ' ' |
 		sed 's/ *$//'
 }
 
@@ -650,7 +663,7 @@ BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=MBR%25")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' |
+LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null |
 	tr '\n' ' ' | sed 's/ *$//')
 
 if [ "$HTTP_CODE" = "200" ] && [ "$LIST" = "MBRA MBRB" ] &&
@@ -675,7 +688,7 @@ assert_json_field "$(cat /tmp/curl_ds_pat.json)" '.reason' "9" \
 # pattern= and start= have to compose -- Zowe pages a filtered list
 LIST=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRB&pattern=MBR%25" |
-	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//' | tr '\n' ' ' | sed 's/ *$//')
+	jq -r '.items[].member' 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
 
 if [ "$LIST" = "MBRB MBRC" ]; then
 	pass "start= and pattern= compose"

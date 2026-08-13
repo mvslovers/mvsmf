@@ -360,6 +360,17 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 	else
 		fail "member list returned results" "expected >0 items"
 	fi
+
+	# names arrive without the directory's blank padding (#154) -- Zowe hands
+	# them straight to the next request, so a padded name asks for a member
+	# whose name ends in a blank
+	NAMES=$(echo "$OUTPUT" |
+		jq -c '[.data.apiResponse.items[].member]' 2>/dev/null)
+	if echo "$NAMES" | jq -e 'all(test("^[^ ]+$"))' >/dev/null 2>&1; then
+		pass "member names are returned unpadded"
+	else
+		fail "member names are returned unpadded" "got: $NAMES"
+	fi
 fi
 
 # --- Read PDS member ---

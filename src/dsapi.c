@@ -664,10 +664,11 @@ jday_to_md(unsigned short year, unsigned short jday,
    The list endpoints page with z/OSMF's start= parameter (the listing begins at
    that name, inclusive, and runs to the end) and filter with pattern=.  Query
    values reach a CGI already in EBCDIC, so no translation is involved; they do
-   arrive exactly as the client typed them, and a client that feeds a name back
-   from a member listing still carries the blank padding of #154.  Trim that,
-   fold to upper case (both catalog and directory names are upper case), and
-   truncate to what the key can hold.
+   arrive exactly as the client typed them.  The member list no longer pads the
+   names it emits (#154), but a client feeding back a name it kept from before
+   that fix -- or padded itself out of the directory -- still sends the blanks.
+   Trim them, fold to upper case (both catalog and directory names are upper
+   case), and truncate to what the key can hold.
 
    Returns 1 when there is a key to work with, 0 when the parameter was absent
    or empty -- list everything. */
@@ -1648,6 +1649,7 @@ int memberListHandler(Session *session)
 		   at +11 can be read */
 		for (pos = 2; pos + PDS_DIR_ENT_FIXED <= used; ) {
 			int	size;
+			size_t	nlen;
 			char	member[MEMBER_ESC_SIZE];
 
 			if (memcmp(&blk[pos],
@@ -1658,6 +1660,22 @@ int memberListHandler(Session *session)
 
 			size = PDS_DIR_ENT_FIXED
 			     + ((blk[pos + 11] & PDS_DIR_UDATA_MASK) * 2);
+
+			/* The directory holds the name blank padded to eight
+			   bytes; z/OSMF reports it without the padding, and a
+			   client that builds "dsn(member)" from what it was
+			   given otherwise asks for a member with a trailing
+			   blank in its name (#154).  The trimmed length serves
+			   the pattern match as well -- a name is what the
+			   client sees, so both have to agree on where it ends.
+			   A directory may hold arbitrary bytes rather than a
+			   name, and one of those ending in 0x40 is trimmed
+			   too; such an entry is \uXXXX escaped and no client
+			   can address it either way. */
+			nlen = MAX_MEMBER_NAME;
+			while (nlen > 0 && blk[pos + nlen - 1] == ' ') {
+				nlen--;
+			}
 
 			/* Skip up to the start member.  This has to happen before
 			   the maxitems check: otherwise the skipped entries eat the
@@ -1681,12 +1699,6 @@ int memberListHandler(Session *session)
 			   also means moreRows counts matches, not directory
 			   entries. */
 			if (have_pattern) {
-				size_t	nlen = MAX_MEMBER_NAME;
-
-				while (nlen > 0 && blk[pos + nlen - 1] == ' ') {
-					nlen--;
-				}
-
 				if (!member_match(&blk[pos], nlen, pattern_key)) {
 					pos += size;
 					continue;
@@ -1699,7 +1711,8 @@ int memberListHandler(Session *session)
 				break;
 			}
 
-			json_escape_member((const unsigned char *) &blk[pos], 8,
+			json_escape_member((const unsigned char *) &blk[pos],
+				(unsigned) nlen,
 				httpx->xlate_cp037->etoa, member, sizeof(member));
 
 			if (first) {

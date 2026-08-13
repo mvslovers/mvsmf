@@ -14,6 +14,7 @@
 #include "dsapi_err.h"
 #include "common.h"
 #include "httpcgi.h"
+#include "reclines.h"
 
 // Record format flags
 #define FIXED     0x0001
@@ -445,6 +446,29 @@ static int parse_data_type(const char *data_type) {
     return DATA_TYPE_TEXT;  // Default to text for unknown values
 }
 
+/* Usable content bytes in one record of this data set.
+ *
+ * RECFM=F spends the whole LRECL on content. RECFM=V spends four of it on the
+ * RDW: libc370 sizes its write buffer at LRECL-4 (@@fpopen.c) and varflush()
+ * writes an RDW of len+4, so a longer line was silently split into a second
+ * record. RECFM=U has no LRECL and is bounded by the block size.
+ *
+ * eff_lrecl is the caller's LRECL, or BLKSIZE where RECFM=U leaves LRECL 0.
+ */
+__asm__("\n&FUNC    SETC 'rec_content_max'");
+static size_t record_content_max(FILE *fp, size_t eff_lrecl, int is_undefined)
+{
+    if (is_undefined) {
+        return eff_lrecl;
+    }
+
+    if ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
+        return eff_lrecl > 4 ? eff_lrecl - 4 : 0;
+    }
+
+    return eff_lrecl;
+}
+
 /* Helper function to write a complete record.
  *
  * TEXT records are translated to EBCDIC in place, inside the caller's buffer.
@@ -454,13 +478,18 @@ static int parse_data_type(const char *data_type) {
  * buffer is already sized to the data set and its contents are dead once this
  * returns, so no second buffer is needed at all.
  *
- * eff_lrecl: the caller's allocation size and record limit in one value -- the
- * data set's LRECL, or its BLKSIZE for RECFM=U where LRECL is 0. Clamping
- * against fp->lrecl instead cut every record of a RECFM=U data set to zero
- * length, because a text-mode write is selected by the X-IBM-Data-Type header
- * and does not care what RECFM the data set has.
+ * Record framing is NOT done here: the text callers hand over one finished
+ * record, terminator already removed, courtesy of the state machine in
+ * reclines.c. This function used to strip the terminator itself, which is how
+ * a blank line ended up as a zero-length fwrite() and disappeared (#233).
+ *
+ * content_max: the usable content length of one record -- LRECL for RECFM=F,
+ * LRECL-4 for RECFM=V (the RDW is not content), BLKSIZE for RECFM=U where
+ * LRECL is 0. Clamping against fp->lrecl instead cut every record of a
+ * RECFM=U data set to zero length, because a text-mode write is selected by
+ * the X-IBM-Data-Type header and does not care what RECFM the data set has.
  */
-static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t eff_lrecl)
+static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t content_max)
 {
     int recfm = fp->recfm;  // Get record format from file handle
 
@@ -489,7 +518,15 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             break;
             
         case DATA_TYPE_RECORD:
-            // Record mode - each record is preceded by 4-byte length
+            /* Record mode - each record is preceded by 4-byte length.
+             *
+             * NOTE: nothing frames a length-prefixed stream on the write path.
+             * X-IBM-Data-Type: record shares the text loop, which cuts the
+             * body at newlines, so the four bytes read below are a length
+             * prefix only by accident -- a body produced by the read path
+             * (which does emit the prefixes) cannot be written back. Unusable
+             * as it stands, exercised by no test, and tracked separately; this
+             * branch is left as it was found. */
             if (record_length < 4) return -1;  // Need at least 4 bytes for length
             
             // First 4 bytes contain the record length
@@ -525,24 +562,14 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
         case DATA_TYPE_TEXT:
         default:
             // Text mode - convert from ASCII to EBCDIC
-            
-            // Remove newline if present (ASCII LF = 0x0A, ASCII CR = 0x0D)
-            if (record_length > 0 && (record_buffer[record_length-1] == 0x0A || record_buffer[record_length-1] == 0x0D)) {
-                record_length--;
-            }
 
-            // Also remove CR if we had CRLF
-            if (record_length > 0 && record_buffer[record_length-1] == 0x0D) {
-                record_length--;
-            }
-            
-            /* Backstop only: every text caller already rejects a line at
-               eff_lrecl - 1 with "Record too long", so this cannot normally
+            /* Backstop only: recline_put() already rejects a line longer than
+               content_max with "Record too long", so this cannot normally
                fire. It stays as the last line of defence against a caller
                and this function disagreeing about the limit -- which is
                precisely how issue #198 happened. */
-            if (eff_lrecl && record_length > eff_lrecl) {
-                record_length = eff_lrecl;
+            if (content_max && record_length > content_max) {
+                record_length = content_max;
             }
 
             // Convert to EBCDIC in place -- the caller's buffer is sized to the
@@ -1098,13 +1125,17 @@ int datasetPutHandler(Session *session)
     int line_count = 0;
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
+    size_t content_max = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
+    RECLINE rl;
+    char *rec = NULL;
+    size_t rec_len = 0;
     int data_type;
 
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
-    
+
     if (!dsname) {
         wtof("MVSMF31E Missing required parameter: dsname=NULL");
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
@@ -1179,7 +1210,8 @@ int datasetPutHandler(Session *session)
     /* For RECFM=U (undefined record format), lrecl is 0. Use blksize instead. */
     is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)fp->blksize : (size_t)fp->lrecl;
-    if (eff_lrecl == 0) {
+    content_max = record_content_max(fp, eff_lrecl, is_undefined);
+    if (eff_lrecl == 0 || content_max == 0) {
         wtof("MVSMF34E Dataset has zero record length: %s", dsname);
         session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
@@ -1192,6 +1224,7 @@ int datasetPutHandler(Session *session)
         session_fclose(session, fp);
         return handle_error(session, ERR_MEMORY, "Memory allocation failed");
     }
+    recline_init(&rl, record_buffer, content_max);
 
     if (is_chunked) {
         // Handle chunked transfer encoding
@@ -1225,13 +1258,25 @@ int datasetPutHandler(Session *session)
 
             if (chunk_size == 0) {
                 // Write last incomplete record if any
-                if (record_pos > 0) {
-                    if (data_type == DATA_TYPE_BINARY && !is_undefined) {
-                        /* Pad to full LRECL for fixed-length binary records */
-                        memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
-                        record_pos = eff_lrecl;
+                if (data_type == DATA_TYPE_BINARY) {
+                    if (record_pos > 0) {
+                        if (!is_undefined) {
+                            /* Pad to full LRECL for fixed-length binary records */
+                            memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
+                            record_pos = eff_lrecl;
+                        }
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                            wtof("MVSMF39E Error writing final record");
+                            free(record_buffer);
+                            session_fclose(session, fp);
+                            return handle_error(session, ERR_IO, "Error writing final record");
+                        }
                     }
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                } else if (recline_flush(&rl, &rec, &rec_len)) {
+                    /* Text: a body whose last line has no terminator. Nothing
+                       is pending when it ended on one, so a trailing newline
+                       does not add a phantom record. */
+                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF39E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1279,7 +1324,7 @@ int datasetPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -1290,7 +1335,11 @@ int datasetPutHandler(Session *session)
                 }
                 /* Do NOT flush buffer at end of chunk for binary */
             } else {
-                /* Text mode: split records at newline boundaries */
+                /* Text mode: split records at newline boundaries.
+                   The RECLINE state lives across chunks on purpose -- a chunk
+                   is a transport boundary, not a record boundary. Flushing
+                   here (as this did) turned every line split across two chunks
+                   into two records. */
                 while (bytes_read < chunk_size) {
                     if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                         wtof("MVSMF38E Error reading chunk data");
@@ -1300,34 +1349,25 @@ int datasetPutHandler(Session *session)
                     }
                     bytes_read++;
 
-                    if (record_pos >= eff_lrecl - 1) {
+                    switch (recline_put(&rl, c, &rec, &rec_len)) {
+                    case RECLINE_TOOLONG:
                         wtof("MVSMF43E Record too long");
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Record too long");
-                    }
-                    record_buffer[record_pos++] = c;
 
-                    if (c == 0x0A) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                    case RECLINE_RECORD:
+                        if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             wtof("MVSMF42E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
-                        record_pos = 0;
-                    }
-                }
+                        break;
 
-                /* Write any remaining text data at end of chunk */
-                if (record_pos > 0) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
-                        wtof("MVSMF39E Error writing final record");
-                        free(record_buffer);
-                        session_fclose(session, fp);
-                        return handle_error(session, ERR_IO, "Error writing final record");
+                    default:
+                        break;
                     }
-                    record_pos = 0;
                 }
             }
 
@@ -1363,7 +1403,7 @@ int datasetPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1379,7 +1419,7 @@ int datasetPutHandler(Session *session)
                     memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                     record_pos = eff_lrecl;
                 }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1387,7 +1427,11 @@ int datasetPutHandler(Session *session)
                 }
             }
         } else {
-            /* Text mode: split records at newline boundaries */
+            /* Text mode: split records at newline boundaries. LF, CR and CRLF
+               all end a record; recline_put() swallows the LF of a CRLF pair
+               on the next pass through this loop, so every byte read is a byte
+               counted -- the read-ahead this used to do consumed one byte more
+               than Content-Length allowed whenever a CR stood alone. */
             char c;
             while (bytes_remaining > 0) {
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
@@ -1398,39 +1442,30 @@ int datasetPutHandler(Session *session)
                 }
                 bytes_remaining--;
 
-                if (record_pos >= eff_lrecl - 1) {
+                switch (recline_put(&rl, c, &rec, &rec_len)) {
+                case RECLINE_TOOLONG:
                     wtof("MVSMF43E Record too long");
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Record too long");
-                }
-                record_buffer[record_pos++] = c;
 
-                if (c == 0x0A || c == 0x0D) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                case RECLINE_RECORD:
+                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF46E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
-                    record_pos = 0;
-                    if (c == 0x0D) {
-                        char next;
-                        if (recv(session->httpc->socket, &next, 1, 0) == 1 && next == 0x0A) {
-                            bytes_remaining--;
-                        } else {
-                            record_buffer[record_pos++] = next;
-                        }
-                    }
+                    break;
+
+                default:
+                    break;
                 }
             }
 
-            /* Write any remaining text data as the last record */
-            if (record_pos > 0) {
-                if (record_pos > eff_lrecl) {
-                    record_pos = eff_lrecl;
-                }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+            /* A last line without a terminator is still a record */
+            if (recline_flush(&rl, &rec, &rec_len)) {
+                if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                     wtof("MVSMF39E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1853,8 +1888,12 @@ int memberPutHandler(Session *session)
     int line_count = 0;
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
+    size_t content_max = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
+    RECLINE rl;
+    char *rec = NULL;
+    size_t rec_len = 0;
     int data_type;
 
     // Validate parameters
@@ -1945,7 +1984,8 @@ int memberPutHandler(Session *session)
        therefore overran it (issue #198). For RECFM=U, lrecl is 0; use blksize. */
     is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)fp->blksize : (size_t)fp->lrecl;
-    if (eff_lrecl == 0) {
+    content_max = record_content_max(fp, eff_lrecl, is_undefined);
+    if (eff_lrecl == 0 || content_max == 0) {
         wtof("MVSMF06E Dataset has zero record length: %s", dataset);
         session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
@@ -1958,6 +1998,7 @@ int memberPutHandler(Session *session)
         session_fclose(session, fp);
         return handle_error(session, ERR_MEMORY, "Memory allocation failed");
     }
+    recline_init(&rl, record_buffer, content_max);
 
     if (is_chunked) {
         // Handle chunked transfer encoding
@@ -1991,13 +2032,22 @@ int memberPutHandler(Session *session)
 
             if (chunk_size == 0) {
                 // Write last incomplete record if any
-                if (record_pos > 0) {
-                    if (data_type == DATA_TYPE_BINARY) {
+                if (data_type == DATA_TYPE_BINARY) {
+                    if (record_pos > 0) {
                         // Pad to full LRECL for fixed-length binary records
                         memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                         record_pos = eff_lrecl;
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                            wtof("MVSMF11E Error writing final record");
+                            free(record_buffer);
+                            session_fclose(session, fp);
+                            return handle_error(session, ERR_IO, "Error writing final record");
+                        }
                     }
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                } else if (recline_flush(&rl, &rec, &rec_len)) {
+                    /* Text: only a last line without a terminator is pending
+                       here -- a body ending in a newline adds no record. */
+                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF11E Error writing final record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -2045,7 +2095,7 @@ int memberPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             wtof("MVSMF14E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -2056,7 +2106,9 @@ int memberPutHandler(Session *session)
                 }
                 // Do NOT flush buffer at end of chunk for binary
             } else {
-                // Text mode: split records at newline boundaries
+                /* Text mode: split records at newline boundaries. The RECLINE
+                   state deliberately survives the chunk boundary -- see the
+                   sequential handler. */
                 while (bytes_read < chunk_size) {
                     if (recv(session->httpc->socket, &c, 1, 0) != 1) {
                         wtof("MVSMF13E Error reading chunk data");
@@ -2066,34 +2118,25 @@ int memberPutHandler(Session *session)
                     }
                     bytes_read++;
 
-                    if (record_pos >= eff_lrecl - 1) {
+                    switch (recline_put(&rl, c, &rec, &rec_len)) {
+                    case RECLINE_TOOLONG:
                         wtof("MVSMF43E Record too long");
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Record too long");
-                    }
-                    record_buffer[record_pos++] = c;
 
-                    if (c == 0x0A) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                    case RECLINE_RECORD:
+                        if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             wtof("MVSMF14E Error writing record");
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
                         }
-                        record_pos = 0;
-                    }
-                }
+                        break;
 
-                // Write any remaining text data at end of chunk
-                if (record_pos > 0) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
-                        wtof("MVSMF39E Error writing final record");
-                        free(record_buffer);
-                        session_fclose(session, fp);
-                        return handle_error(session, ERR_IO, "Error writing final record");
+                    default:
+                        break;
                     }
-                    record_pos = 0;
                 }
             }
             
@@ -2129,7 +2172,7 @@ int memberPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF18E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -2143,7 +2186,7 @@ int memberPutHandler(Session *session)
             if (record_pos > 0) {
                 memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                 record_pos = eff_lrecl;
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                     wtof("MVSMF19E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -2151,7 +2194,9 @@ int memberPutHandler(Session *session)
                 }
             }
         } else {
-            // Text mode: split records at newline boundaries
+            /* Text mode: split records at newline boundaries -- same framing
+               as the sequential handler, including the CRLF handling that
+               replaces the old read-ahead. */
             char c;
             while (bytes_remaining > 0) {
                 if (recv(session->httpc->socket, &c, 1, 0) != 1) {
@@ -2162,39 +2207,30 @@ int memberPutHandler(Session *session)
                 }
                 bytes_remaining--;
 
-                if (record_pos >= eff_lrecl - 1) {
+                switch (recline_put(&rl, c, &rec, &rec_len)) {
+                case RECLINE_TOOLONG:
                     wtof("MVSMF43E Record too long");
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Record too long");
-                }
-                record_buffer[record_pos++] = c;
 
-                if (c == 0x0A || c == 0x0D) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+                case RECLINE_RECORD:
+                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         wtof("MVSMF18E Error writing record");
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
                     }
-                    record_pos = 0;
-                    if (c == 0x0D) {
-                        char next;
-                        if (recv(session->httpc->socket, &next, 1, 0) == 1 && next == 0x0A) {
-                            bytes_remaining--;
-                        } else {
-                            record_buffer[record_pos++] = next;
-                        }
-                    }
+                    break;
+
+                default:
+                    break;
                 }
             }
 
-            // Write any remaining text data
-            if (record_pos > 0) {
-                if (record_pos > eff_lrecl) {
-                    record_pos = eff_lrecl;
-                }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, eff_lrecl) < 0) {
+            /* A last line without a terminator is still a record */
+            if (recline_flush(&rl, &rec, &rec_len)) {
+                if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                     wtof("MVSMF19E Error writing final record");
                     free(record_buffer);
                     session_fclose(session, fp);

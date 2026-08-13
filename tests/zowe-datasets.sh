@@ -63,6 +63,8 @@ TEST_SEQ2="${MVS_USER}.ZOWE.TESTSEQ2"
 TEST_PDS="${MVS_USER}.ZOWE.TESTPDS"
 # Large-LRECL fixture for issue #198 (records above the old 1024-byte limit)
 TEST_BIG="${MVS_USER}.ZOWE.TESTBIG"
+# Text framing fixture for issue #233 (blank lines, full-width records)
+TEST_FRAME="${MVS_USER}.ZOWE.TESTFRM"
 
 # --- state ---
 PASSED=0
@@ -492,6 +494,53 @@ fi
 RC=0
 OUTPUT=$(run_zowe files delete ds "$TEST_BIG" -f) || RC=$?
 assert_rc 0 "$RC" "cleanup: delete large-LRECL dataset"
+
+# --- Text record framing (issue #233) ---
+# A blank line used to be written as a zero-length record, which never reached
+# the data set, and the usable line length was LRECL-2 -- 80-column source into
+# an FB80 data set came back as "Record too long".
+echo ""
+echo "--- Text framing: blank lines and full-width records (issue #233) ---"
+
+RC=0
+OUTPUT=$(run_zowe files create ps "$TEST_FRAME" --recfm FB --lrecl 80 --blksize 3120 --size 1TRK) || RC=$?
+assert_rc 0 "$RC" "create FB80 dataset"
+
+TMPFILE=$(mktemp)
+awk 'BEGIN { s = ""; while (length(s) < 80) s = s "A";
+             print "ERSTE ZEILE"; print ""; print substr(s, 1, 80) }' > "$TMPFILE"
+RC=0
+OUTPUT=$(run_zowe files upload ftds "$TMPFILE" "$TEST_FRAME") || RC=$?
+rm -f "$TMPFILE"
+assert_rc 0 "$RC" "upload a blank line and an 80-column line"
+
+RC=0
+OUTPUT=$(run_zowe files view ds "$TEST_FRAME") || RC=$?
+assert_rc 0 "$RC" "read back the framed dataset"
+
+LINES=$(echo "$OUTPUT" | wc -l | tr -d ' ')
+if [ "$LINES" = "3" ]; then
+	pass "three lines in, three lines out ($LINES)"
+else
+	fail "three lines in, three lines out" "expected 3 lines, got $LINES"
+fi
+
+if [ -z "$(echo "$OUTPUT" | sed -n '2p')" ]; then
+	pass "the blank line survived"
+else
+	fail "the blank line survived" "line 2 is not empty"
+fi
+
+WIDTH=$(echo "$OUTPUT" | sed -n '3p' | tr -d '\r' | awk '{ print length($0) }')
+if [ "$WIDTH" = "80" ]; then
+	pass "the 80-column line kept all its columns ($WIDTH)"
+else
+	fail "the 80-column line kept all its columns" "expected 80, got $WIDTH"
+fi
+
+RC=0
+OUTPUT=$(run_zowe files delete ds "$TEST_FRAME" -f) || RC=$?
+assert_rc 0 "$RC" "cleanup: delete the framing dataset"
 
 # --- Cleanup: delete PDS ---
 echo ""

@@ -1305,6 +1305,182 @@ fi
 
 rm -f /tmp/curl_ds_big.txt /tmp/curl_ds_big.bin /tmp/curl_ds_big_rt.bin
 
+# =========================================================================
+# Text record framing (issue #233)
+#
+# Two defects on the text write path, both reproducible with plain ASCII
+# into the FB80 PDS above:
+#
+#   - a blank line produced a zero-length fwrite(), which libc370's fflush()
+#     discards at its empty-buffer guard -- the record disappeared and the
+#     upload still answered 204;
+#   - the length guard ran before the byte was stored and counted the
+#     terminator, so the usable line length was LRECL-2: 79 and 80 columns
+#     were rejected as "Record too long".
+#
+# Record counts are checked through a BINARY read: it returns the stored
+# records verbatim (80 bytes each), while the text read strips the padding
+# and would hide a missing blank record.
+# =========================================================================
+
+echo ""
+echo "--- Text framing: blank lines are records (issue #233) ---"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary $'ERSTE ZEILE\n\nDRITTE ZEILE\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
+assert_http_status "204" "$HTTP_CODE" "write member with a blank line"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_blank.bin \
+	-u "$AUTH" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
+assert_http_status "200" "$HTTP_CODE" "read back the member"
+
+RT_SIZE=$(wc -c < /tmp/curl_ds_blank.bin | tr -d ' ')
+if [ "$RT_SIZE" = "240" ]; then
+	pass "three lines stored as three records ($RT_SIZE bytes)"
+else
+	fail "three lines stored as three records" \
+		"expected 240 bytes (3 x 80), got $RT_SIZE"
+fi
+
+CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
+LINE2=$(echo "$CONTENT" | sed -n '2p')
+if [ -z "$LINE2" ]; then
+	pass "the blank line reads back as an empty line"
+else
+	fail "the blank line reads back as an empty line" "got '$LINE2'"
+fi
+
+echo ""
+echo "--- Text framing: a full-width line fits (issue #233) ---"
+
+# 77..80 columns into LRECL=80. 79 and 80 were rejected before the fix.
+# Each width gets its own member and is read back on the spot -- writing them
+# all to one member would only ever prove something about the last one.
+# The line is uploaded from a file: the trailing newline is the byte the old
+# guard tripped over, and a command substitution would strip it.
+for COLS in 77 78 79 80; do
+	awk -v n="$COLS" 'BEGIN { s = ""; while (length(s) < n) s = s "A"; print substr(s, 1, n) }' \
+		> /tmp/curl_ds_wide.txt
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: application/octet-stream" \
+		--data-binary @/tmp/curl_ds_wide.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})")
+	assert_http_status "204" "$HTTP_CODE" "write a ${COLS}-column line into LRECL=80"
+
+	# Binary read: one stored record is exactly LRECL bytes, whatever the
+	# line's own width, so this catches a line that was split in two.
+	curl -s -o /tmp/curl_ds_wide.bin -u "$AUTH" \
+		-H "X-IBM-Data-Type: binary" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})"
+	RT_SIZE=$(wc -c < /tmp/curl_ds_wide.bin | tr -d ' ')
+	if [ "$RT_SIZE" = "80" ]; then
+		pass "the ${COLS}-column line is one record ($RT_SIZE bytes)"
+	else
+		fail "the ${COLS}-column line is one record" \
+			"expected 80 bytes, got $RT_SIZE"
+	fi
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})")
+	RT_COLS=$(echo "$CONTENT" | head -1 | tr -d '\r' | awk '{ print length($0) }')
+	if [ "$RT_COLS" = "$COLS" ]; then
+		pass "all ${COLS} columns survive the round trip"
+	else
+		fail "all ${COLS} columns survive the round trip" \
+			"expected $COLS characters, got $RT_COLS"
+	fi
+done
+
+echo ""
+echo "--- Text framing: one column too many is still rejected ---"
+
+awk 'BEGIN { s = ""; while (length(s) < 81) s = s "A"; print substr(s, 1, 81) }' \
+	> /tmp/curl_ds_wide.txt
+BODY=$(curl -s -w '\n%{http_code}' \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary @/tmp/curl_ds_wide.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "500" "$HTTP_CODE" "an 81-column line is rejected"
+if echo "$CONTENT" | grep -qi "Record too long"; then
+	pass "the rejection names the reason (Record too long)"
+else
+	fail "the rejection names the reason" "got: $CONTENT"
+fi
+
+echo ""
+echo "--- Text framing: terminators and chunked transfer (issue #233) ---"
+
+# CRLF endings, a body that does not end in a newline, and a body that does:
+# each must produce exactly two records and no phantom third one.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary $'ALPHA\r\nBETA\r\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CRLFT)")
+assert_http_status "204" "$HTTP_CODE" "write a CRLF body"
+
+curl -s -o /tmp/curl_ds_crlf.bin -u "$AUTH" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CRLFT)"
+RT_SIZE=$(wc -c < /tmp/curl_ds_crlf.bin | tr -d ' ')
+if [ "$RT_SIZE" = "160" ]; then
+	pass "CRLF body stored as two records ($RT_SIZE bytes)"
+else
+	fail "CRLF body stored as two records" "expected 160 bytes, got $RT_SIZE"
+fi
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary $'ALPHA\nBETA' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOEOLT)")
+assert_http_status "204" "$HTTP_CODE" "write a body without a trailing newline"
+
+curl -s -o /tmp/curl_ds_noeol.bin -u "$AUTH" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOEOLT)"
+RT_SIZE=$(wc -c < /tmp/curl_ds_noeol.bin | tr -d ' ')
+if [ "$RT_SIZE" = "160" ]; then
+	pass "last line without a terminator still stored ($RT_SIZE bytes)"
+else
+	fail "last line without a terminator still stored" \
+		"expected 160 bytes, got $RT_SIZE"
+fi
+
+# Chunked: the framing state has to survive the chunk boundaries curl inserts,
+# and a trailing newline must not add a blank record at the end.
+printf 'CHUNK ONE\n\nCHUNK THREE\n' > /tmp/curl_ds_chunk.txt
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	-H "Transfer-Encoding: chunked" \
+	--data-binary @/tmp/curl_ds_chunk.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CHUNKT)")
+assert_http_status "204" "$HTTP_CODE" "write a chunked body with a blank line"
+
+curl -s -o /tmp/curl_ds_chunk.bin -u "$AUTH" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CHUNKT)"
+RT_SIZE=$(wc -c < /tmp/curl_ds_chunk.bin | tr -d ' ')
+if [ "$RT_SIZE" = "240" ]; then
+	pass "chunked body stored as three records ($RT_SIZE bytes)"
+else
+	fail "chunked body stored as three records" \
+		"expected 240 bytes (3 x 80), got $RT_SIZE"
+fi
+
+rm -f /tmp/curl_ds_blank.bin /tmp/curl_ds_wide.txt /tmp/curl_ds_wide.bin \
+	/tmp/curl_ds_crlf.bin /tmp/curl_ds_noeol.bin /tmp/curl_ds_chunk.txt \
+	/tmp/curl_ds_chunk.bin
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

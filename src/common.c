@@ -42,7 +42,26 @@ getHeaderParam(Session *session, const char *name)
 	return get_env_param(session, "HTTP_", name);
 }
 
-int 
+const char *
+getRequestScheme(Session *session)
+{
+	const char *proto = getHeaderParam(session, "X-Forwarded-Proto");
+
+	if (!proto) {
+		return "http";
+	}
+
+	/* Chained proxies append their own value, so the header can be a list
+	   ("https, http"); the leftmost entry is the one the client used. */
+	if (http_cmpn((const UCHAR *)proto, (const UCHAR *)"https", 5) == 0 &&
+		(proto[5] == '\0' || proto[5] == ',' || proto[5] == ' ')) {
+		return "https";
+	}
+
+	return "http";
+}
+
+int
 sendDefaultHeaders(Session *session, int status, const char *content_type,
 					   size_t content_length)
 {

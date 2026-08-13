@@ -67,7 +67,7 @@ zowe jobs list spool-files-by-jobid JOB00123
         "stepname": "JES2",
         "procstep": "",
         "class": "H",
-        "records-url": "/zosmf/restjobs/jobs/TESTJOB/JOB00123/files/2/records"
+        "records-url": "http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123/files/2/records"
     },
     {
         "jobname": "TESTJOB",
@@ -81,7 +81,10 @@ zowe jobs list spool-files-by-jobid JOB00123
         "stepname": "JES2",
         "procstep": "",
         "class": "H",
-        "records-url": "/zosmf/restjobs/jobs/TESTJOB/JOB00123/files/3/records"
+        "records-url": "http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123/files/3/records"
     }
 ]
 ```
+
+`records-url` is absolute. Its host comes from the request's `Host` header and its scheme
+from `X-Forwarded-Proto` (`https` when a reverse proxy reports it, `http` otherwise).

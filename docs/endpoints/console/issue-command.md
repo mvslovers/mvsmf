@@ -58,6 +58,11 @@ After issuing, the MTT is polled for ~3 s for the correlated response.
 
 `sol-key-detected` is present only when `sol-key` was supplied. A `cmd-response` of `""` means nothing was captured within the window — use the [Collect Command Response](collect.md) endpoint to retrieve the rest.
 
+`cmd-response-url` (and `detection-url`, where present) take their host from the request's
+`Host` header and their scheme from `X-Forwarded-Proto` — `https` when a reverse proxy
+reports it, `http` otherwise. mvsMF itself only ever sees plain HTTP behind a
+TLS-terminating proxy, so the header is the only source for the client's scheme.
+
 ### Asynchronous (`async` = `Y`) — HTTP 200
 Returns immediately without `cmd-response` (the `cmd-response-key`/`-url`/`-uri` only).
 

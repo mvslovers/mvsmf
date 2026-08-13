@@ -26,9 +26,34 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 }
 ```
 
+## Host and Port
+
+`zosmf_hostname` and `zosmf_port` describe the endpoint **the client used**, not the
+address the HTTPD listens on, so both are derived from the request headers:
+
+| Request | `zosmf_port` |
+|---|---|
+| `Host: name:port` | that port |
+| `Host: name`, `X-Forwarded-Port: p` | `p` |
+| `Host: name`, `X-Forwarded-Proto: https` | `443` |
+| `Host: name` | `80` |
+| no `Host` header | `8080` |
+
+A `Host` header without a port is valid — [RFC 7230 §5.4](https://www.rfc-editor.org/rfc/rfc7230#section-5.4)
+leaves the port implied by the scheme — and is what browsers and reverse proxies send for
+the default ports. Behind a TLS-terminating proxy mvsMF only ever sees plain HTTP on its
+own connection, so the public scheme and port can only come from the proxy's
+`X-Forwarded-*` headers.
+
+`SERVER_PORT` is deliberately not consulted: it is the HTTPD's listen port, not the port
+the client dialled.
+
 ## Error Responses
-- HTTP 500 (Internal Server Error)
-    - Failed to parse host name or port
+
+None. A `Host` header that cannot be parsed is logged to the console
+(`MVSMF01E`/`MVSMF02E`/`MVSMF03E`) and falls back to the defaults above; the request still
+returns 200. `/zosmf/info` is the unauthenticated liveness probe every client calls first
+and must not fail on a header quirk (issue #175).
 
 ## Examples
 

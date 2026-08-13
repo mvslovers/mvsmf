@@ -377,6 +377,79 @@ else
 	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
 fi
 
+# --- List datasets (start=) ---
+#
+# start= was read from the query string and then never used, so every page
+# began at the first entry and a client paging by name never advanced (#232).
+echo ""
+echo "--- List Datasets (start=) ---"
+
+ALL=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL" |
+	jq -r '.items[].dsname' 2>/dev/null)
+COUNT=$(echo "$ALL" | grep -c .)
+
+if [ "$COUNT" -lt 2 ]; then
+	skip "start= returns the tail of the list (need two datasets under ${MVSMF_USER}.CURL)"
+	skip "start= beyond the last dataset (need two datasets under ${MVSMF_USER}.CURL)"
+else
+	SECOND=$(echo "$ALL" | sed -n 2p)
+
+	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${SECOND}")
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+	FIRST=$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)
+	RETURNED=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)
+
+	if [ "$HTTP_CODE" = "200" ] && [ "$FIRST" = "$SECOND" ] &&
+	   [ "$RETURNED" = "$((COUNT - 1))" ]; then
+		pass "start=${SECOND} returns the tail of the list (inclusive)"
+	else
+		fail "start=${SECOND} returns the tail of the list" \
+			"got HTTP $HTTP_CODE first='$FIRST' returnedRows=$RETURNED (expected first='$SECOND', $((COUNT - 1)) rows)"
+	fi
+
+	# The exact-name entry must sort in front of its own children. LISTC
+	# returns the children of a level and the handler looks the exact name up
+	# separately, so before #232 it was appended last -- with max-items=1 the
+	# first page was the CHILD and the parent was unreachable from any later
+	# start=.
+	BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+	for D in "${MVSMF_USER}.CURL.EXACT" "${MVSMF_USER}.CURL.EXACT.CHILD"; do
+		curl -s -o /dev/null -X POST -u "$AUTH" \
+			-H "Content-Type: application/json" -d "$BODY" \
+			"${BASE_URL}/zosmf/restfiles/ds/${D}"
+	done
+
+	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Max-Items: 1" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL.EXACT")
+	if [ "$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)" = "${MVSMF_USER}.CURL.EXACT" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
+		pass "exact-name entry sorts before its children"
+	else
+		fail "exact-name entry sorts before its children" \
+			"first item is '$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)'"
+	fi
+
+	for D in "${MVSMF_USER}.CURL.EXACT.CHILD" "${MVSMF_USER}.CURL.EXACT"; do
+		curl -s -o /dev/null -X DELETE -u "$AUTH" \
+			"${BASE_URL}/zosmf/restfiles/ds/${D}"
+	done
+
+	# past the last name is an empty page, not a full one -- and moreRows
+	# must not claim there is more to fetch
+	CONTENT=$(curl -s -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=ZZZZZZZZ")
+	if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+		pass "start= beyond the last dataset returns an empty page"
+	else
+		fail "start= beyond the last dataset returns an empty page" \
+			"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+	fi
+fi
+
 # --- Read with volume prefix ---
 echo ""
 echo "--- Read Sequential Dataset with Volume Prefix ---"
@@ -450,6 +523,98 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list PDS members"
 assert_json_field_exists "$CONTENT" '.items[0].member' "member list has member field"
 assert_json_field "$CONTENT" '.moreRows' "false" "member list: moreRows false when complete"
+
+# --- List PDS members (start=) ---
+#
+# start= was accepted and ignored, so Zowe Explorer could never page past the
+# first X-IBM-Max-Items members of a directory (#232).
+#
+# The names below pin the collating order down. A PDS directory is stored in
+# EBCDIC order, where 'F' (0xC6) sorts BEFORE '0' (0xF0) -- in ASCII it is the
+# other way round. The directory therefore reads
+#
+#     MBRA, MBRB, MBRC, MBRF1, MBR03, TESTMBR
+#
+# and a start=MBR03 compared in ASCII would wrongly keep MBRF1 in the answer.
+echo ""
+echo "--- List PDS Members (start=, issue #232) ---"
+
+for M in MBRA MBRB MBRC MBRF1 MBR03; do
+	curl -s -o /dev/null -X PUT -u "$AUTH" \
+		-H "Content-Type: application/octet-stream" \
+		--data-binary "MEMBER ${M}" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"
+done
+
+# member names still come back padded to eight bytes (#154) -- trim to compare
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC" |
+	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+
+if [ "$(echo "$LIST" | head -1)" = "MBRC" ] &&
+   ! echo "$LIST" | grep -qxE 'MBRA|MBRB'; then
+	pass "start=MBRC begins at MBRC and drops the earlier members"
+else
+	fail "start=MBRC begins at MBRC and drops the earlier members" \
+		"got: $(echo "$LIST" | tr '\n' ' ')"
+fi
+
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBR03" |
+	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+
+if [ "$(echo "$LIST" | head -1)" = "MBR03" ] && ! echo "$LIST" | grep -qx 'MBRF1'; then
+	pass "start=MBR03 skips MBRF1 (EBCDIC collating order)"
+else
+	fail "start=MBR03 skips MBRF1 (EBCDIC collating order)" \
+		"got: $(echo "$LIST" | tr '\n' ' ') -- an ASCII compare keeps MBRF1"
+fi
+
+# the skipped members must not eat the page budget: with the skip applied
+# after the cap this returns zero items and moreRows true
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+
+if [ "$HTTP_CODE" = "200" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
+   [ "$(echo "$LIST" | head -1)" = "MBRC" ] &&
+   [ "$(echo "$LIST" | sed -n 2p)" = "MBRF1" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
+	pass "start=MBRC with max-items=2 returns MBRC,MBRF1 and moreRows=true"
+else
+	fail "start=MBRC with max-items=2 returns MBRC,MBRF1 and moreRows=true" \
+		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) items='$(echo "$LIST" | tr '\n' ' ')' moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+fi
+
+# a client echoing a name back from a listing still sends the #154 padding
+LIST=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC%20%20%20%20" |
+	jq -r '.items[].member' 2>/dev/null | sed 's/ *$//')
+
+if [ "$(echo "$LIST" | head -1)" = "MBRC" ]; then
+	pass "start= tolerates a blank-padded member name"
+else
+	fail "start= tolerates a blank-padded member name" \
+		"got: $(echo "$LIST" | tr '\n' ' ')"
+fi
+
+CONTENT=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=ZZZZZZZZ")
+if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+	pass "start= beyond the last member returns an empty page"
+else
+	fail "start= beyond the last member returns an empty page" \
+		"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+fi
+
+for M in MBRA MBRB MBRC MBRF1 MBR03; do
+	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"
+done
 
 # --- List members: a large directory must not take the server down (#212) ---
 # memberListHandler used to build the whole member array in storage via

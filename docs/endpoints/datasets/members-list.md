@@ -17,7 +17,11 @@ or with explicit volume:
 - `volume-serial` (optional): Volume serial number
 
 ## Query Parameters
-- `start` (optional): Starting member name for pagination
+- `start` (optional): Starting member name for pagination. The listing begins at
+  this member — **inclusive**, as in z/OSMF — and runs to the end of the
+  directory. The name is folded to upper case and trailing blanks are trimmed,
+  so a name echoed back from a previous listing (which is still padded to eight
+  characters, issue #154) works unchanged.
 - `pattern` (optional): Member name filter pattern
 
 ## Request Headers
@@ -84,9 +88,21 @@ has to happen first (issue #193). A dataset that was not cataloged used to be
 answered with an empty `items` list and 200, which reads as "this PDS has no
 members".
 
+## Pagination
+
+`X-IBM-Max-Items` caps a page, `start` picks up where the last one ended, and
+`moreRows` says whether anything is left. Members skipped by `start` are not
+charged against the page limit — a page is always `X-IBM-Max-Items` members
+long as long as the directory still holds that many.
+
+The directory is stored in **EBCDIC** order, and `start` is compared in that
+same order — `IEAVNPF1` precedes `IEAVNP03`, because `F` (0xC6) sorts before
+`0` (0xF0). An ASCII comparison would order the two the other way round and
+mis-skip every name mixing letters and digits (issue #232).
+
 ## Limitations
 - No member statistics (TTR, size, dates) are returned yet
-- `start` and `pattern` query parameters are accepted but not yet implemented
+- the `pattern` query parameter is accepted but not yet implemented
 
 ## Examples
 

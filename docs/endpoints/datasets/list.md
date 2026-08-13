@@ -11,7 +11,9 @@ GET
 ## Query Parameters
 - `dslevel` (required): Dataset name filter pattern. Supports exact names (`USER.TEST.DATA`), hierarchical prefixes (`USER.TEST`), and wildcard patterns (`USER.*`, `USER.**`, `USER.C*`). Internally, the longest concrete prefix is used for the catalog lookup and any wildcard or extra-qualifier filtering is applied afterwards.
 - `volser` (optional): Filter by volume serial
-- `start` (optional): Starting dataset name for pagination
+- `start` (optional): Starting dataset name for pagination. The listing begins
+  at this name — **inclusive**, as in z/OSMF — and runs to the end of the list.
+  The value is folded to upper case and trailing blanks are trimmed.
 
 ## Request Headers
 - `X-IBM-Max-Items` (optional): Maximum number of items to return. Value `0` means unlimited (default behavior). When the result set is truncated, `moreRows` is set to `true`.
@@ -52,10 +54,22 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 - `cdate`: Creation date
 - `rdate`: Last referenced date
 
+## Pagination
+
+The result is sorted by dataset name in EBCDIC order before anything is
+emitted, and `start` is compared in that same order. Sorting is not cosmetic:
+`start` paging asks for the next page *by name*, so an entry out of order would
+be skipped for good once a page boundary passed it — LISTC returns a level's
+children in catalog order, and the exact-name entry (the `A.B` that `dslevel=A.B`
+returns alongside `A.B.C`) is found separately and would otherwise trail the
+list (issue #232).
+
+Entries skipped by `start` are not charged against `X-IBM-Max-Items`, and
+`moreRows` counts only what is still fetchable from `start` onwards.
+
 ## Limitations
 - Only NONVSAM datasets are listed
 - `*` and `**` wildcards are treated identically (both match any number of qualifiers)
-- `start` parameter is not yet implemented
 
 ## Examples
 

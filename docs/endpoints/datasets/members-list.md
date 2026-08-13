@@ -108,11 +108,17 @@ same order — `IEAVNPF1` precedes `IEAVNP03`, because `F` (0xC6) sorts before
 mis-skip every name mixing letters and digits (issue #232).
 
 ```bash
-# the first ten IEFxxx members, then the next ten
-curl -H 'X-IBM-Max-Items: 10' \
-  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=IEF*'
-curl -H 'X-IBM-Max-Items: 10' \
-  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=IEF*&start=IEFPROC'
+# every JES2 member                -> JES2 JES2BLD JES2JOB JES2LNK JES20098 JES20099
+curl 'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=JES2*'
+
+# JES2 plus exactly four more       -> JES20098 JES20099   (%25 is '%')
+curl 'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=JES2%25%25%25%25'
+
+# the filtered list, two per page
+curl -H 'X-IBM-Max-Items: 2' \
+  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=JES2*'
+curl -H 'X-IBM-Max-Items: 2' \
+  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=JES2*&start=JES2JOB'
 ```
 
 ## Limitations

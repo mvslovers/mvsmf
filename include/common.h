@@ -100,6 +100,20 @@ char *getPathParam(Session *session, const char *name) asm("CMN0002");
 char *getHeaderParam(Session *session, const char *name) asm("CMN0003");
 
 /**
+ * @brief Gets the scheme the client used to reach this server
+ *
+ * mvsMF cannot infer the scheme from its own connection: behind a
+ * TLS-terminating reverse proxy it always sees plain HTTP, whatever the
+ * client used. The proxy reports the original scheme in X-Forwarded-Proto,
+ * so that header is the only source. Absent or anything but https, the
+ * answer is http.
+ *
+ * @param session Current session context
+ * @return "https" or "http" (a literal, never NULL — do not free)
+ */
+const char *getRequestScheme(Session *session) asm("CMN0004");
+
+/**
  * @brief Sends default HTTP headers for a response
  *
  * Sends standard HTTP headers including status code, content type,

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <clibary.h>
 #include <clibwto.h>
 #include <cliblist.h>
@@ -658,6 +659,62 @@ jday_to_md(unsigned short year, unsigned short jday,
 	*day_out = (unsigned char)d;
 }
 
+/* Normalise a "start=" query value into a comparison key.
+
+   Both list endpoints page with z/OSMF's start= parameter: the listing begins
+   at that name -- inclusive -- and runs to the end of the list.  Query values
+   reach a CGI already in EBCDIC, so no translation is involved; they do arrive
+   exactly as the client typed them, and a client that feeds a name back from a
+   member listing still carries the blank padding of #154.  Trim that, fold to
+   upper case (both catalog and directory names are upper case), and truncate
+   to what the key can hold.
+
+   Returns 1 when there is a key to compare against, 0 when start= was absent
+   or empty -- list everything. */
+__asm__("\n&FUNC    SETC 'make_start_key'");
+static int
+make_start_key(const char *start, char *key, size_t keylen)
+{
+	size_t	n;
+	size_t	i;
+
+	if (!start) {
+		return 0;
+	}
+
+	n = strlen(start);
+	while (n > 0 && start[n - 1] == ' ') n--;
+
+	if (n == 0) {
+		return 0;
+	}
+
+	if (n > keylen - 1) n = keylen - 1;
+
+	for (i = 0; i < n; i++) {
+		key[i] = (char) toupper((unsigned char) start[i]);
+	}
+	key[n] = '\0';
+
+	return 1;
+}
+
+/* order two catalog entries by name, holes last */
+__asm__("\n&FUNC    SETC 'dslist_cmp'");
+static int
+dslist_cmp(const void *a, const void *b)
+{
+	DSLIST *const *pa = (DSLIST *const *) a;
+	DSLIST *const *pb = (DSLIST *const *) b;
+
+	if (!*pa) return *pb ? 1 : 0;
+	if (!*pb) return -1;
+
+	/* both sides are EBCDIC and strcmp() compares as unsigned char, so this
+	   is the platform's own collating order */
+	return strcmp((*pa)->dsn, (*pb)->dsn);
+}
+
 int datasetListHandler(Session *session)
 {
 	unsigned	rc		= 0;
@@ -666,6 +723,7 @@ int datasetListHandler(Session *session)
 	unsigned	i		= 0;
 	unsigned	maxitems	= 0;
 	unsigned	emitted		= 0;
+	unsigned	eligible	= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
@@ -679,6 +737,8 @@ int datasetListHandler(Session *session)
 	char		*start		= NULL;
 	char		*filter		= NULL;
 	char		level_buf[45]	= {0};
+	char		start_key[MAX_DATASET_NAME + 1] = {0};
+	int		have_start	= 0;
 
 	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
 	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
@@ -795,6 +855,24 @@ int datasetListHandler(Session *session)
 		}
 	}
 
+	have_start = make_start_key(start, start_key, sizeof(start_key));
+
+	/* start= paging is only well defined on an ordered list: the client asks
+	** for the next page by name, so an entry that sits out of order is not
+	** merely misplaced -- it is skipped for good once a page boundary passes
+	** it.  LISTC returns the level's children in catalog order and the
+	** exact-name entry above was appended last (A.B belongs in front of
+	** A.B.C, not behind it), so order the array before emitting.  z/OSMF
+	** returns its lists sorted too.  qsort() recurses only into the smaller
+	** partition, which bounds the depth at log2(n) -- about 15 frames for the
+	** largest catalog on this platform. */
+	if (dslist) {
+		count = array_count(&dslist);
+		if (count > 1) {
+			qsort(dslist, count, sizeof(DSLIST *), dslist_cmp);
+		}
+	}
+
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
 
@@ -818,7 +896,15 @@ int datasetListHandler(Session *session)
 
 		if (!ds) continue;
 
-		if (maxitems > 0 && emitted >= maxitems) break;
+		/* start= is inclusive: everything sorting before it belongs to a
+		** page the client already has */
+		if (have_start && strcmp(ds->dsn, start_key) < 0) continue;
+
+		/* keep counting past the page limit -- moreRows has to tell "page
+		** full" from "list exhausted", and only the entries at or after
+		** start= are still fetchable */
+		eligible++;
+		if (maxitems > 0 && emitted >= maxitems) continue;
 
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
@@ -872,7 +958,7 @@ end:
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
 	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		(maxitems > 0 && emitted < count) ? "true" : "false")) < 0) goto quit;
+		(emitted < eligible) ? "true" : "false")) < 0) goto quit;
 
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
@@ -1396,6 +1482,9 @@ int memberListHandler(Session *session)
 	char		*pattern	= NULL;
 	char		*maxitems_str	= NULL;
 
+	char		start_key[MAX_MEMBER_NAME];	/* EBCDIC, blank padded */
+	int		skipping	= 0;
+
 
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname){
@@ -1413,6 +1502,22 @@ int memberListHandler(Session *session)
 
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
+
+	/* The directory is stored in ascending EBCDIC order -- #232's own output
+	   shows IEAVNPF1 ahead of IEAVNP03, which holds only in EBCDIC ('F' 0xC6
+	   < '0' 0xF0).  So the key is compared against the raw eight name bytes,
+	   blank padded, with no translation at all: query values reach a CGI in
+	   EBCDIC already.  Comparing in ASCII would order those two names the
+	   other way round and mis-skip every name that mixes letters and digits. */
+	{
+		char	start_buf[MAX_MEMBER_NAME + 1];
+
+		if (make_start_key(start, start_buf, sizeof(start_buf))) {
+			memset(start_key, ' ', sizeof(start_key));
+			memcpy(start_key, start_buf, strlen(start_buf));
+			skipping = 1;
+		}
+	}
 
 	/* opening a non-partitioned data set this way abends S001 (#193) */
 	if (require_pds(session, dsname) != 0) {
@@ -1483,6 +1588,21 @@ int memberListHandler(Session *session)
 
 			size = PDS_DIR_ENT_FIXED
 			     + ((blk[pos + 11] & PDS_DIR_UDATA_MASK) * 2);
+
+			/* Skip up to the start member.  This has to happen before
+			   the maxitems check: otherwise the skipped entries eat the
+			   page budget and the response is an empty items array with
+			   moreRows true -- a different-looking bug.  The directory
+			   is sorted, so once we are past the key there is nothing
+			   left to compare and the flag stays off. */
+			if (skipping) {
+				if (memcmp(&blk[pos], start_key,
+					sizeof(start_key)) < 0) {
+					pos += size;
+					continue;
+				}
+				skipping = 0;
+			}
 
 			if (maxitems > 0 && emitted >= maxitems) {
 				more = 1;

@@ -86,9 +86,13 @@ mmf job status TESTJOB JOB00123
     "owner": "MIKE",
     "type": "JOB",
     "class": "A",
-    "url": "/zosmf/restjobs/jobs/TESTJOB/JOB00123",
-    "files-url": "/zosmf/restjobs/jobs/TESTJOB/JOB00123/files",
+    "url": "http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123",
+    "files-url": "http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123/files",
     "status": "OUTPUT",
     "retcode": "CC 0000"
 }
 ```
+
+`url` and `files-url` are absolute. Their host comes from the request's `Host` header and
+their scheme from `X-Forwarded-Proto` (`https` when a reverse proxy reports it, `http`
+otherwise) — mvsMF itself only ever sees plain HTTP behind a TLS-terminating proxy.

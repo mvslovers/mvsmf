@@ -518,6 +518,7 @@ int consoleIssueHandler(Session *session)
 	const char *cn = getPathParam(session, "console-name");
 	const char *ct = getHeaderParam(session, "Content-Type");
 	const char *host = getHeaderParam(session, "Host");
+	const char *scheme = getRequestScheme(session);
 	int cmdlen, cnlen, i, is_async, sol_detected = 0;
 	unsigned delivered = 0;
 	unsigned long long issue_tod;
@@ -639,7 +640,8 @@ int consoleIssueHandler(Session *session)
 	         (unsigned)(issue_tod >> 32), (unsigned)issue_tod);
 	snprintf(uri, sizeof(uri),
 	         "/zosmf/restconsoles/consoles/%s/solmsgs/%s", cn, key);
-	snprintf(url, sizeof(url), "http://%s%s", host ? host : "localhost", uri);
+	snprintf(url, sizeof(url), "%s://%s%s", scheme, host ? host : "localhost",
+	         uri);
 
 	resp = malloc(RESP_CAP);
 	if (!resp) {
@@ -765,7 +767,8 @@ int consoleIssueHandler(Session *session)
 		char duri[200], durl[256];
 		snprintf(duri, sizeof(duri),
 		         "/zosmf/restconsoles/consoles/%s/detections/%s", cn, dkey);
-		snprintf(durl, sizeof(durl), "http://%s%s", host ? host : "localhost", duri);
+		snprintf(durl, sizeof(durl), "%s://%s%s", scheme,
+		         host ? host : "localhost", duri);
 		if (addJsonString(b, "detection-key", dkey) < 0 ||
 		    addJsonString(b, "detection-url", durl) < 0 ||
 		    addJsonString(b, "detection-uri", duri) < 0) {

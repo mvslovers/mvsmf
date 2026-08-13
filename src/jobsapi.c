@@ -70,7 +70,7 @@ static int  want_exec_data(Session *session);
 static const char* format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen);
 static const char* job_status_str(const JESJOB *job);
 static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
-                        const char *host, int exec_data);
+                        const char *host, const char *scheme, int exec_data);
 static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
@@ -151,6 +151,8 @@ jobListHandler(Session *session)
 	startArray(builder);
 
 	const int exec_data = want_exec_data(session);
+	/* hoisted out of the loop: one env lookup for the whole job list */
+	const char *scheme = getRequestScheme(session);
 
 	/* max-jobs caps the jobs *returned*, not the queue entries looked at: with
 	   a status or owner filter in play the first max_jobs entries of the spool
@@ -160,7 +162,7 @@ jobListHandler(Session *session)
 	unsigned ii = 0;
 	for (ii = 0; ii < array_count(&joblist) && emitted < max_jobs; ii++) {
 		rc = process_job(builder, joblist[ii], owner,
-						status[0] ? status : NULL, host, exec_data);
+						status[0] ? status : NULL, host, scheme, exec_data);
 		if (rc < 0) {
 			goto quit;
 		}
@@ -1002,7 +1004,7 @@ format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen)
 __asm__("\n&FUNC	SETC 'process_job'");
 static int
 process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
-			const char *host, int exec_data)
+			const char *host, const char *scheme, int exec_data)
 {
 	int rc = 0;
 
@@ -1031,7 +1033,8 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 
 	// url is the full url to the job
 	rc = snprintf(url_str, sizeof(url_str),
-					"http://%s/zosmf/restjobs/jobs/%s/%s", host_str, job->jobname, job->jobid);
+					"%s://%s/zosmf/restjobs/jobs/%s/%s", scheme, host_str,
+					job->jobname, job->jobid);
 	
 	// files_url is the full url to the job sysout files
 	rc = snprintf(files_url_str, sizeof(files_url_str), "%s/files", url_str);
@@ -1209,7 +1212,8 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
     int rc = 0;
     
 	const char *host_str = host ? host : "127.0.0.1:8080";
-    
+	const char *scheme = getRequestScheme(session);
+
 	char url_str[MAX_URL_LENGTH] = {0};
     char recfm_str[RECFM_STR_SIZE] = {0};
 
@@ -1225,8 +1229,8 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
         }
 
         rc = snprintf(url_str, sizeof(url_str),
-                    "http://%s/zosmf/restjobs/jobs/%s/%s/files/%d/records", 
-                    host_str, job->jobname, job->jobid, dd->dsid);
+                    "%s://%s/zosmf/restjobs/jobs/%s/%s/files/%d/records",
+                    scheme, host_str, job->jobname, job->jobid, dd->dsid);
 
         get_recfm_string(dd->recfm, recfm_str);
 
@@ -1609,7 +1613,8 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
         return -1;
     }
 
-    rc = process_job(builder, job, NULL, NULL, host, want_exec_data(session));
+    rc = process_job(builder, job, NULL, NULL, host, getRequestScheme(session),
+                     want_exec_data(session));
     if (rc < 0) {
         freeJsonBuilder(builder);
         return rc;

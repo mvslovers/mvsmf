@@ -34,11 +34,28 @@ On successful completion, this request returns HTTP status code 204 (No Content)
     - Dataset not found or cannot be opened for writing
     - I/O error during write
 
+## Text mode framing
+- A record ends at LF, CR or CRLF. The terminator is not part of the record.
+- A line of exactly LRECL characters is accepted. Only a longer line is
+  rejected, with "Record too long"; it is never silently split across two
+  records. Until issue #233 the usable length was LRECL-2, so 80-column source
+  could not be uploaded into an FB80 dataset at all.
+- For RECFM=V the usable line length is LRECL-4: the record descriptor word is
+  not content. A longer line used to be split into a second record without
+  notice and is now rejected.
+- A blank line is written as a record of blanks — it used to disappear (#233).
+- A body whose last line carries no terminator still produces that record, and
+  a body ending in a newline does not gain a trailing blank one.
+- With `Transfer-Encoding: chunked` a line split across two chunks stays one
+  record; a chunk boundary is a transport boundary, not a record boundary.
+
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
-- Text mode: a line longer than the dataset's LRECL is rejected with an error
-  ("Record too long"); it is not silently split across two records
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
+- A rejected upload does not leave the previous content in place. The dataset
+  is opened for output before the body is read, so on "Record too long" the
+  records written up to that line are already in the dataset and everything
+  that was there before is gone.
 
 There is no fixed upper bound on the record size: the write buffer is sized
 from the dataset's own DCB (LRECL, or BLKSIZE for RECFM=U). Records above

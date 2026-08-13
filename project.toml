@@ -44,6 +44,15 @@ name = "TSTMTLN"
 sources = ["test/host/tstmtln.c"]
 norent = true
 
+# TSTRECL: #233 — framing a text upload into data set records. Blank lines must
+# survive, and a line of exactly LRECL columns must be accepted. The TU
+# #includes src/reclines.c so it drives the real state machine the four write
+# loops in dsapi.c use — do not list reclines.c here.
+[[test]]
+name = "TSTRECL"
+sources = ["test/host/tstrecl.c"]
+norent = true
+
 # TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
 # the lines[] array and the line buffer consistent. Portable C (test-host); the
 # TU #includes src/jclines.c with a fault-injecting realloc, so it exercises the

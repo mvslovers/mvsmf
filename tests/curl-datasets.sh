@@ -662,6 +662,16 @@ else
 		"got HTTP $HTTP_CODE items='$LIST' moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 fi
 
+# an over-long pattern is rejected, not quietly cut down to size: a truncated
+# pattern selects a different set of members, and answering 200 with that list
+# is a wrong answer rather than an error
+LONG_PATTERN=$(printf 'A%.0s' $(seq 1 60))
+HTTP_CODE=$(curl -s -o /tmp/curl_ds_pat.json -w '%{http_code}' -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=${LONG_PATTERN}")
+assert_http_status "400" "$HTTP_CODE" "over-long pattern is rejected"
+assert_json_field "$(cat /tmp/curl_ds_pat.json)" '.reason' "9" \
+	"over-long pattern: reason 9 (pattern too long)"
+
 # pattern= and start= have to compose -- Zowe pages a filtered list
 LIST=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRB&pattern=MBR%25" |

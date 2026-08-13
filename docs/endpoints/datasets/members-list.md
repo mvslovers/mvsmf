@@ -20,8 +20,8 @@ or with explicit volume:
 - `start` (optional): Starting member name for pagination. The listing begins at
   this member — **inclusive**, as in z/OSMF — and runs to the end of the
   directory. The name is folded to upper case and trailing blanks are trimmed,
-  so a name echoed back from a previous listing (which is still padded to eight
-  characters, issue #154) works unchanged.
+  so a name padded to the directory's eight characters — by an older client, or
+  by one that kept a list from before issue #154 — works unchanged.
 - `pattern` (optional): Member name filter. `*` matches any run of characters
   including none, `%` matches exactly one; everything else matches literally,
   and the value is folded to upper case. A pattern without wildcards is an
@@ -77,8 +77,17 @@ in a JSON string is emitted as a `\uXXXX` escape naming its ASCII value, so the
 response parses whatever the directory contains. Ordinary names (`A-Z 0-9 @ # $`)
 are unaffected.
 
-Names are returned padded to 8 characters, as they are held in the directory
-(issue #154).
+## Name padding
+
+The directory holds every name blank padded to eight bytes. Those blanks are
+**not** part of the name and are trimmed before the name is emitted, matching
+z/OSMF — `"member": "CR"`, not `"member": "CR      "`. The endpoint used to
+return the padded form (issue #154), which left a client building
+`{dsn}({member})` from the listing asking for a member whose name ends in a
+blank.
+
+`start=` still accepts a padded name, so a client holding a list from before the
+fix keeps working.
 
 ## Error Responses
 - HTTP 400 (Bad Request)

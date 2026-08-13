@@ -22,7 +22,11 @@ or with explicit volume:
   directory. The name is folded to upper case and trailing blanks are trimmed,
   so a name echoed back from a previous listing (which is still padded to eight
   characters, issue #154) works unchanged.
-- `pattern` (optional): Member name filter pattern
+- `pattern` (optional): Member name filter. `*` matches any run of characters
+  including none, `%` matches exactly one; everything else matches literally,
+  and the value is folded to upper case. A pattern without wildcards is an
+  exact name. Note that `%` has to be sent percent-encoded as `%25` —
+  unencoded it is consumed as a URL escape before the handler ever sees it.
 
 ## Request Headers
 - `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
@@ -90,19 +94,29 @@ members".
 
 ## Pagination
 
-`X-IBM-Max-Items` caps a page, `start` picks up where the last one ended, and
-`moreRows` says whether anything is left. Members skipped by `start` are not
-charged against the page limit — a page is always `X-IBM-Max-Items` members
-long as long as the directory still holds that many.
+`X-IBM-Max-Items` caps a page, `start` picks up where the last one ended,
+`pattern` filters, and `moreRows` says whether anything is left. The three
+compose, and neither the members skipped by `start` nor the ones rejected by
+`pattern` are charged against the page limit — a page is always
+`X-IBM-Max-Items` members long as long as the directory still holds that many
+matches. `returnedRows` and `moreRows` therefore count matches, not directory
+entries.
 
 The directory is stored in **EBCDIC** order, and `start` is compared in that
 same order — `IEAVNPF1` precedes `IEAVNP03`, because `F` (0xC6) sorts before
 `0` (0xF0). An ASCII comparison would order the two the other way round and
 mis-skip every name mixing letters and digits (issue #232).
 
+```bash
+# the first ten IEFxxx members, then the next ten
+curl -H 'X-IBM-Max-Items: 10' \
+  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=IEF*'
+curl -H 'X-IBM-Max-Items: 10' \
+  'http://mvs:1080/zosmf/restfiles/ds/SYS1.PROCLIB/member?pattern=IEF*&start=IEFPROC'
+```
+
 ## Limitations
 - No member statistics (TTR, size, dates) are returned yet
-- the `pattern` query parameter is accepted but not yet implemented
 
 ## Examples
 

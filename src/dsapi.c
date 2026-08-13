@@ -1465,7 +1465,9 @@ error:
 
 /* A member pattern may be longer than the names it matches ("*A*B*C*D*"), so
    it gets its own size rather than borrowing the eight-byte name length.
-   Anything longer is truncated, like an over-long start= value. */
+   A longer one is rejected rather than truncated: cutting a pattern changes
+   which members it selects, and the client would get a plain 200 carrying a
+   list that does not answer what it asked. */
 #define MEMBER_PATTERN_SIZE	45
 
 /* Render a directory member name as the body of a JSON string.
@@ -1571,6 +1573,18 @@ int memberListHandler(Session *session)
 			memcpy(start_key, start_buf, strlen(start_buf));
 			skipping = 1;
 		}
+	}
+
+	/* make_query_key() truncates, which is harmless for start= -- a key longer
+	   than a name simply sorts past every entry -- but not for a pattern: a
+	   cut pattern selects a different set of members, and the client would be
+	   answered 200 with a list that does not match what it asked for.  Say so
+	   instead. */
+	if (pattern && strlen(pattern) >= sizeof(pattern_key)) {
+		rc = sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_PATTERN_TOO_LONG,
+				ERR_MSG_PATTERN_TOO_LONG, NULL, 0);
+		goto quit;
 	}
 
 	have_pattern = make_query_key(pattern, pattern_key, sizeof(pattern_key));

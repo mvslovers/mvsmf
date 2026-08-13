@@ -27,6 +27,9 @@ or with explicit volume:
   and the value is folded to upper case. A pattern without wildcards is an
   exact name. Note that `%` has to be sent percent-encoded as `%25` —
   unencoded it is consumed as a URL escape before the handler ever sees it.
+  A pattern of 45 characters or more is rejected with HTTP 400 (`reason` 9)
+  rather than truncated, since a shortened pattern would select a different set
+  of members and the 200 would be a wrong answer instead of an error.
 
 ## Request Headers
 - `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
@@ -80,6 +83,7 @@ Names are returned padded to 8 characters, as they are held in the directory
 ## Error Responses
 - HTTP 400 (Bad Request)
     - The dataset is not partitioned (use the dataset endpoint instead)
+    - `pattern` is 45 characters or longer (`reason` 9)
 - HTTP 404 (Not Found)
     - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)

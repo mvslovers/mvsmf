@@ -19,6 +19,7 @@
 #define REASON_INVALID_RENAME_REQUEST	6	// Unsupported or malformed control request
 #define REASON_RENAME_TARGET_EXISTS		7	// Rename target already exists
 #define REASON_RENAME_FAILED			8	// Rename operation failed
+#define REASON_PATTERN_TOO_LONG			9	// Member pattern longer than the handler accepts
 
 // Error messages for Category 6
 #define ERR_MSG_PDS_NOT_SEQUENTIAL		"Dataset is a partitioned dataset (PDS). Use /ds/{dataset-name}({member-name}) to access members"
@@ -29,5 +30,6 @@
 #define ERR_MSG_INVALID_RENAME_REQUEST	"Unsupported request; only 'rename' is supported"
 #define ERR_MSG_RENAME_TARGET_EXISTS	"Rename target already exists"
 #define ERR_MSG_RENAME_FAILED		"Rename operation failed"
+#define ERR_MSG_PATTERN_TOO_LONG	"Member pattern is too long"
 
 #endif // DSAPI_ERR_H

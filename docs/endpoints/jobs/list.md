@@ -12,8 +12,8 @@ GET
 - `owner` (optional): Filter by job owner. Use `*` for all owners. Default: current authenticated user.
 - `prefix` (optional): Filter by job name prefix. Use `*` for all jobs.
 - `jobid` (optional): Filter by specific job ID.
-- `status` (optional): Filter by job status (`INPUT`, `ACTIVE`, `OUTPUT`). Use `*` for all.
-- `max-jobs` (optional): Maximum number of jobs to return (1-1000). Default: 1000.
+- `status` (optional): Filter by job status (`INPUT`, `ACTIVE`, `OUTPUT`). Use `*` for all. See [Status filter](#status-filter).
+- `max-jobs` (optional): Maximum number of jobs **returned** (1-1000). Default: 1000. The filters are applied first, so `max-jobs` caps the matching jobs, not the checkpoint entries scanned.
 - `exec-data` (optional): `Y` adds the execution timestamps to each job object. Any other value (or omitting the parameter) returns the object unchanged. The Zowe CLI sends `exec-data=Y` for `zowe jobs list jobs --exec-data`.
 
 ## Response
@@ -44,6 +44,25 @@ With `exec-data=Y`, two further fields follow `retcode`:
 ```
 
 See [Execution timestamps](#execution-timestamps).
+
+## Status filter
+
+`status` is compared against the value the job reports in its own `status`
+field — the same derivation, so the filter can never disagree with the response.
+The comparison is case insensitive (`status=active` works), and `*` or an
+omitted parameter means no filtering.
+
+JES2 on 3.8j has queues z/OSMF does not name, so besides `INPUT`, `ACTIVE` and
+`OUTPUT` a job can report `XMIT`, `SETUP`, `RECEIVE` or `UNKNOWN`; those values
+can be filtered on as well. The queue flags are not exclusive — a job on the
+execution and the output queue at once reports `ACTIVE` — so a job matches
+exactly one status.
+
+A value that names no status (`status=NOSUCH`) is not an error: it simply
+matches nothing, and the request returns HTTP 200 with an empty array.
+
+The filter is applied by mvsMF while walking the checkpoint, not by JES2 —
+unlike `prefix` and `jobid`, which become the JES filter for the scan itself.
 
 ## Execution timestamps
 
@@ -104,6 +123,9 @@ curl "http://mvs:1080/zosmf/restjobs/jobs?prefix=TEST*"
 
 # List jobs by job ID
 curl "http://mvs:1080/zosmf/restjobs/jobs?jobid=JOB00123"
+
+# List only the jobs currently executing
+curl "http://mvs:1080/zosmf/restjobs/jobs?owner=*&status=ACTIVE"
 
 # List jobs with execution timestamps
 curl "http://mvs:1080/zosmf/restjobs/jobs?prefix=TEST*&exec-data=Y"

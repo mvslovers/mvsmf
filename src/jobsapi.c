@@ -32,6 +32,10 @@
 #define JES_INFO_SIZE   20 + 1
 #define TYPE_STR_SIZE    3 + 1
 #define CLASS_STR_SIZE   3 + 1
+/* room for the longest status job_status_str() reports ("RECEIVE") plus slack:
+   a requested value long enough to be truncated here is 15 characters and can
+   never equal one of them, so truncation can only mean "matches nothing". */
+#define STATUS_STR_SIZE 16
 #define RECFM_STR_SIZE   4 + 1
 #define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
@@ -59,11 +63,14 @@ extern int __tzget(void);
 static int  do_print_sysout(Session *session, JESJOB *job, unsigned dsid);
 
 // needed by jobListHandler
-static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt);
+static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt,
+                                     char *status, size_t status_size);
 static unsigned get_max_jobs(Session *session);
 static int  want_exec_data(Session *session);
 static const char* format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen);
-static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host, int exec_data);
+static const char* job_status_str(const JESJOB *job);
+static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
+                        const char *host, int exec_data);
 static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
@@ -115,6 +122,8 @@ jobListHandler(Session *session)
 	const char *owner = getQueryParam(session, "owner");
 	const unsigned max_jobs = get_max_jobs(session);
 	UCHAR ownerid[64];
+	/* MVSMF is link-edited RENT, so the normalized status stays on the stack */
+	char status[STATUS_STR_SIZE];
 
 	if (owner == NULL) {
 		/* z/OSMF default: jobs owned by the caller, from the identity
@@ -126,7 +135,7 @@ jobListHandler(Session *session)
 		owner = NULL;
 	}
 
-	process_job_list_filters(session, &filter, &jesfilt);
+	process_job_list_filters(session, &filter, &jesfilt, status, sizeof(status));
 
 	jes = jesopen();
 	if (!jes) {
@@ -143,12 +152,19 @@ jobListHandler(Session *session)
 
 	const int exec_data = want_exec_data(session);
 
-	int ii = 0;
-	for (ii = 0; ii < MIN(max_jobs, array_count(&joblist)); ii++) {
-		rc = process_job(builder, joblist[ii], owner, host, exec_data);
+	/* max-jobs caps the jobs *returned*, not the queue entries looked at: with
+	   a status or owner filter in play the first max_jobs entries of the spool
+	   are mostly rows this request does not want, and capping the scan would
+	   answer "no ACTIVE jobs" for a system that has them (issue #157). */
+	unsigned emitted = 0;
+	unsigned ii = 0;
+	for (ii = 0; ii < array_count(&joblist) && emitted < max_jobs; ii++) {
+		rc = process_job(builder, joblist[ii], owner,
+						status[0] ? status : NULL, host, exec_data);
 		if (rc < 0) {
 			goto quit;
 		}
+		emitted += (unsigned)rc;
 	}
 
 	endArray(builder);
@@ -793,20 +809,37 @@ quit:
 	return rc;
 }
 
+/* Reads the list filters off the query string.  prefix/jobid become the JES
+   filter the checkpoint scan itself understands; status has no JES2 equivalent
+   and is returned normalized (upper case, "" when absent or "*") for
+   should_skip_job() to compare against each job's reported status. */
 __asm__("\n&FUNC	SETC 'process_job_list_filters'");
-static void 
-process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt) 
+static void
+process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt,
+						char *status, size_t status_size)
 {
-	const char *prefix = getQueryParam(session, "prefix");
-	const char *status = getQueryParam(session, "status");
-	const char *jobid  = getQueryParam(session, "jobid");
+	const char *prefix     = getQueryParam(session, "prefix");
+	const char *req_status = getQueryParam(session, "status");
+	const char *jobid      = getQueryParam(session, "jobid");
 
 	if (prefix && prefix[0] == '*') {
 		prefix = NULL;
 	}
 
-	if (status && status[0] == '*') {
-		status = NULL;
+	if (req_status && req_status[0] == '*') {
+		req_status = NULL;
+	}
+
+	if (status && status_size > 0) {
+		size_t ii = 0;
+
+		if (req_status) {
+			while (ii < status_size - 1 && req_status[ii] != '\0') {
+				status[ii] = (char)toupper((unsigned char)req_status[ii]);
+				ii++;
+			}
+		}
+		status[ii] = '\0';
 	}
 
 	if (prefix && !jobid) {
@@ -822,8 +855,8 @@ process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt
 }
 
 __asm__("\n&FUNC	SETC 'should_skip_job'");
-static int 
-should_skip_job(const JESJOB *job, const char *owner) 
+static int
+should_skip_job(const JESJOB *job, const char *owner, const char *status)
 {
 	if (!job) {
 		return 1;
@@ -854,7 +887,47 @@ should_skip_job(const JESJOB *job, const char *owner)
 		return 1;
 	}
 
+	/* compare against the very string this job reports as its status, so the
+	   filter can never disagree with the "status" field in the response */
+	if (status && strcmp(job_status_str(job), status) != 0) {
+		return 1;
+	}
+
 	return 0;
+}
+
+/* The job's status as z/OSMF names it.  The queue flags are not exclusive -- a
+   job can sit on the execution and the output queue at once -- so the order of
+   the tests is what decides, and it must stay the single source of the value:
+   both the reported "status" field and the status filter go through here. */
+__asm__("\n&FUNC	SETC 'job_status_str'");
+static const char *
+job_status_str(const JESJOB *job)
+{
+	if (!job || !job->q_type) {
+		return "UNKNOWN";
+	}
+
+	if (job->q_type & _XEQ) {
+		return "ACTIVE";
+	}
+	if (job->q_type & _INPUT) {
+		return "INPUT";
+	}
+	if (job->q_type & _XMIT) {
+		return "XMIT";
+	}
+	if (job->q_type & _SETUP) {
+		return "SETUP";
+	}
+	if (job->q_type & _RECEIVE) {
+		return "RECEIVE";
+	}
+	if (job->q_type & (_OUTPUT | _HARDCPY)) {
+		return "OUTPUT";
+	}
+
+	return "UNKNOWN";
 }
 
 /* z/OSMF gates the exec-* fields on exec-data=Y; the Zowe CLI sends exactly
@@ -923,9 +996,13 @@ format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen)
 	return out;
 }
 
+/* Appends one job object to the array.  Returns 1 when the job was emitted, 0
+   when a filter skipped it (so the caller can count what it returns against
+   max-jobs) and a negative value on error. */
 __asm__("\n&FUNC	SETC 'process_job'");
 static int
-process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *host, int exec_data)
+process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
+			const char *host, int exec_data)
 {
 	int rc = 0;
 
@@ -935,9 +1012,9 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 	char class_str[CLASS_STR_SIZE];
 	char url_str[MAX_URL_LENGTH];
 	char files_url_str[MAX_URL_LENGTH];
-	char *stat_str = "UNKNOWN";
+	const char *stat_str = job_status_str(job);
 
-	if (should_skip_job(job, owner)) {
+	if (should_skip_job(job, owner, status)) {
 		return 0;
 	}
 
@@ -962,24 +1039,6 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 	if (rc < 0) {
 		wtof("MVSMF19E internal error");
 		return -1;
-	}
-
-	if (job->q_type) {
-		if (job->q_type & _XEQ) {
-			stat_str = "ACTIVE";
-		} else if (job->q_type & _INPUT) {
-			stat_str = "INPUT";
-		} else if (job->q_type & _XMIT) {
-			stat_str = "XMIT";
-		} else if (job->q_type & _SETUP) {
-			stat_str = "SETUP";
-		} else if (job->q_type & _RECEIVE) {
-			stat_str = "RECEIVE";
-		} else if (job->q_type & _OUTPUT || job->q_type & _HARDCPY) {
-			stat_str = "OUTPUT";
-		} else {
-			stat_str = "UNKNOWN";
-		}
 	}
 
 	rc = startJsonObject(builder);
@@ -1041,8 +1100,11 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *ho
 	}
 
 	rc = endJsonObject(builder);
+	if (rc < 0) {
+		return rc;
+	}
 
-	return rc;
+	return 1;
 }
 
 __asm__("\n&FUNC    SETC 'find_job_by_name_and_id'");
@@ -1547,7 +1609,7 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
         return -1;
     }
 
-    rc = process_job(builder, job, NULL, host, want_exec_data(session));
+    rc = process_job(builder, job, NULL, NULL, host, want_exec_data(session));
     if (rc < 0) {
         freeJsonBuilder(builder);
         return rc;

@@ -277,11 +277,17 @@ Two consequences that keep getting rediscovered:
   "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
   **500**. This was tracked as #102 and closed as won't-do; do not re-open the
   reasoning from the httpd side alone.
-- **httpd does not know 206, 412 or 429** — `httpresp()` in httpd's
-  `src/httpresp.c` has no case for them and its `default:` emits *500* on the
-  wire. Any of these three needs an httpd change first. 304 and 413 *are*
-  supported. Check `httpresp()` before sending any status this codebase does not
-  already use.
+- **206, 412 and 429 exist in httpd's tree but not yet in the build we link
+  against.** They were added to `src/httpstat.c` by httpd#181/PR#183 (commit
+  `623f6a6`), which sits *nine commits past the `v4.0.0-dev` tag* — and
+  `mbt.lock` pins exactly that tag. `http_resp()` resolves through the httpx
+  vector into the **running** httpd, so the live server's build decides, not the
+  staged `.a`: all three need an httpd re-cut plus a deploy before they reach
+  the wire. Until then `httpresp()` answers them 500. That fallback is no longer
+  silent — an unknown code now also WTOs `HTTPD054E`, which is how a 505 going
+  out as 500 was finally noticed. Check `httpstat()` in the httpd version you
+  are actually running before sending a status this codebase does not already
+  use.
 
 `sendErrorResponse()` (`common.c`) does not branch on status — it builds the
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
@@ -404,10 +410,17 @@ not the mapping.
 
 **One row is unresolved:** `UFSD_RC_ROFS → 403`. 403 is not in the z/OSMF list
 either, and neither is the 201 this codebase returns for created resources
-(`dsapi.c:2597`, `ussapi.c:960`). Both are open in #248 — the question is
-whether the enumerated list is exhaustive for the whole API or whether the
-per-service reference pages add codes (201 on create is the likely case). Do not
-"fix" either one before that is settled.
+(`dsapi.c:2597`, `ussapi.c:960`). Both are open in #248.
+
+The open question there was whether the enumerated list is exhaustive for the
+whole API or whether the per-service reference pages add codes. For the
+files/data set service that is now answered: **its own status list is identical
+to the general one** — same thirteen codes, no 201, no 403. So the
+"per-service pages add codes" escape hatch does not apply here, and both values
+are deviations by the same reasoning that keeps 409/414/507 out. What that page
+does not settle on its own is whether a per-*endpoint* success table may still
+document 201 for a create; 201 is also client-visible in a way an error code is
+not, so decide it separately from ROFS.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

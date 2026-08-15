@@ -78,5 +78,14 @@ name = "TSTABND"
 sources = ["test/host/tstabnd.c"]
 norent = true
 
+# TSTHOST: #260 — a Host header with no name in front of the colon parsed as
+# success with an empty string, so /zosmf/info's fallback never ran. Portable C
+# (test-host); the TU #includes src/hostparse.c so it drives the real parser
+# infoapi.c calls — do not list hostparse.c here.
+[[test]]
+name = "TSTHOST"
+sources = ["test/host/tsthost.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

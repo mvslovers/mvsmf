@@ -1,5 +1,6 @@
 #include <string.h>
 
+#include "hostparse.h"
 #include "infoapi.h"
 #include "common.h"
 #include "json.h"
@@ -20,9 +21,6 @@
 // private function prototypes
 //
 
-static int parse_host_name(const char *value, char *outHost, size_t outSize);
-static int parse_port_string(const char *value, char *outPort, size_t outSize);
-static int validate_port(const char *port);
 static void default_port(Session *session, char *outPort, size_t outSize);
 
 //
@@ -53,7 +51,12 @@ infoHandler(Session *session)
 		   nothing at all and dropping the connection (issue #175). Fall back
 		   silently and still answer 200 -- the client sent the header, so the
 		   operator has nothing to act on, and a probing client would repeat
-		   the message on every poll (issue #201). */
+		   the message on every poll (issue #201).
+
+		   This fallback is only as good as the parser's honesty about
+		   failing: a value with no host name in front of the colon used to
+		   come back as success plus an empty string, so this branch never ran
+		   and the client got "zosmf_hostname":"" (issue #260). */
 		if (parse_host_name(value, hostname, sizeof(hostname)) != 0) {
 			strcpy(hostname, DEFAULT_HOST);
 		}
@@ -107,118 +110,6 @@ quit:
 // private functions
 //
 
-/**
- * Extracts the hostname from a host:port string
- *
- * @param value Input string in format "hostname:port" or just "hostname"
- * @param outHost Buffer to store the extracted hostname
- * @param outSize Size of the outHost buffer
- * @return 0 on success, -1 if parameters are invalid, -2 if outHost buffer is too small
- */
-__asm__("\n&FUNC	SETC 'parse_host_name'");
-static int 
-parse_host_name(const char *value, char *outHost, size_t outSize)
-{
-    if (!value || !outHost || outSize == 0) {
-        return -1;
-    }
-
-    const char *colon = strchr(value, ':');
-    size_t hostLen = 0;
-
-    if (colon) {
-        hostLen = (size_t)(colon - value);
-    } else {
-        hostLen = strlen(value);
-    }
-
-    if (hostLen >= outSize) {
-        return -2; 
-    }
-
-    strncpy(outHost, value, hostLen);
-    outHost[hostLen] = '\0';
-
-    return 0;
-}
-
-/**
- * Extracts the port from a host:port string
- *
- * @param value Input string in format "hostname:port" or just "hostname"
- * @param outPort Buffer to store the extracted port
- * @param outSize Size of the outPort buffer
- * @return 0 on success, -1 if parameters are invalid, -2 if outPort buffer is too small
- *         If no port is specified in the input string, outPort will be empty
- */
-__asm__("\n&FUNC	SETC 'parse_port_string'");
-static int
-parse_port_string(const char *value, char *outPort, size_t outSize)	
-{
-	if (!value || !outPort || outSize == 0) {
-        return -1;
-    }
-
-    const char *colon = strchr(value, ':');
-    if (!colon) {
-        if (outSize > 0) {
-            outPort[0] = '\0';
-        }
-        return 0; 
-    }
-
-    const char *portStr = colon + 1;
-
-    if (*portStr == '\0') {
-        if (outSize > 0) {
-            outPort[0] = '\0';
-        }
-        return 0;
-    }
-
-    size_t needed = strlen(portStr) + 1; /* +1 for null termination */
-    if (needed > outSize) {
-        return -2; /* outPort buffer too small */
-    }
-
-    strncpy(outPort, portStr, outSize - 1);
-    outPort[outSize - 1] = '\0';
-
-    return 0;
-}
-
-/**
- * Validates a port string
- * Checks if the port is a valid number between 1 and 65535
- *
- * @param port Port string to validate
- * @return 0 if valid, -1 if invalid
- */
-__asm__("\n&FUNC	SETC 'validate_port'");
-static int
-validate_port(const char *port)
-{
-    if (!port || !*port) {
-        return -1;
-    }
-
-    // Check if all characters are digits
-    const char *p = port;
-    while (*p) {
-        if (*p < '0' || *p > '9') {
-            return -1;
-        }
-        p++;
-    }
-
-    // Convert to number and validate range
-    long value = atol(port);
-    if (value < 1 || value > 65535) {
-        return -1;
-    }
-
-    return 0;
-}
 
 /**
  * Determines the port for a Host header that carries none

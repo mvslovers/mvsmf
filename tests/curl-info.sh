@@ -170,6 +170,20 @@ info -H "Host: ${TEST_HOST}" -H "X-Forwarded-Port: nonsense"
 assert_http_status "200" "$CODE" "invalid X-Forwarded-Port"
 assert_json_field "$BODY" ".zosmf_port" "80" "invalid X-Forwarded-Port is ignored"
 
+# A Host with no name in front of the colon used to parse as SUCCESS with an
+# empty string, so the handler's fallback to DEFAULT_HOST never ran and the
+# client got "zosmf_hostname":"" (issue #260). The port fell back correctly in
+# the same request, which is what hid it.
+info -H "Host: :::garbage:::"
+assert_http_status "200" "$CODE" "Host with no host name"
+assert_json_field "$BODY" ".zosmf_hostname" "127.0.0.1" "hostname falls back to the default"
+assert_json_field "$BODY" ".zosmf_port" "80" "unparsable port falls back to 80"
+
+info -H "Host: :8080"
+assert_http_status "200" "$CODE" "Host that is only a port"
+assert_json_field "$BODY" ".zosmf_hostname" "127.0.0.1" "hostname falls back to the default"
+assert_json_field "$BODY" ".zosmf_port" "8080" "the port is still taken from the header"
+
 # =========================================================================
 # 5. The rest of the payload
 # =========================================================================

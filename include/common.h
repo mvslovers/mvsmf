@@ -38,6 +38,7 @@
 #define HTTP_STATUS_OK 200                    /**< Success */
 #define HTTP_STATUS_CREATED 201               /**< Resource created */
 #define HTTP_STATUS_ACCEPTED 202              /**< Request accepted */
+#define HTTP_STATUS_NOT_MODIFIED 304          /**< If-None-Match still current */
 #define HTTP_STATUS_BAD_REQUEST 400           /**< Invalid parameters */
 #define HTTP_STATUS_UNAUTHORIZED 401          /**< Unauthorized */
 #define HTTP_STATUS_FORBIDDEN 403             /**< Forbidden */

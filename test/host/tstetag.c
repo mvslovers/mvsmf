@@ -159,6 +159,28 @@ main(void)
 		CHECK_EQ(etag_matches(e, NULL), 0, "a NULL etag never matches");
 	}
 
+	printf("\n--- #263: If-None-Match reads the same predicate ---\n");
+	{
+		const char *e = "1234567890ABCDEF";
+
+		/* One predicate serves both headers: etag_matches() answers "a
+		   listed validator matches", which the write path turns into 412
+		   and the read path into 304. No inverted variant is needed.
+
+		   RFC 9110 13.1.2 makes that true of the wildcard as well: for
+		   If-None-Match, "*" fails the condition when a current
+		   representation exists -- and one the caller could stamp does --
+		   so "*" answers 304, not 200. The opposite reading ("only if it
+		   does not exist") belongs to a conditional create, which this
+		   endpoint does not implement. */
+		check_match("*", e, 1);
+		check_match(e, e, 1);
+		check_match("\"AAAAAAAAAAAAAAAA\", \"1234567890ABCDEF\"", e, 1);
+
+		/* A stale validator leaves the condition true: send the body. */
+		check_match("AAAAAAAAAAAAAAAA", e, 0);
+	}
+
 	printf("\n--- #152: X-IBM-Return-Etag is opt-in ---\n");
 	{
 		CHECK_EQ(etag_requested("true"), 1, "true asks for an ETag");

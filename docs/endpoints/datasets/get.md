@@ -24,9 +24,13 @@ or with explicit volume:
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the dataset, for
   use as `If-Match` on a later write. Identical in behaviour to the member
   endpoint — see [members-get.md](members-get.md#etag).
+- `If-None-Match` (optional): makes the read conditional — a dataset that still
+  holds the stamped state is answered 304 (Not Modified) with the `ETag` and no
+  body. Same header forms and same wildcard rule as the member endpoint, see
+  [Conditional reads](members-get.md#conditional-reads-if-none-match).
 
 ## Response
-On successful completion, this request returns HTTP status code 200 (OK) with the dataset content.
+On successful completion, this request returns HTTP status code 200 (OK) with the dataset content, or 304 (Not Modified) when `If-None-Match` still holds.
 
 - **Text mode**: Each record is sent after EBCDIC-to-ASCII conversion. For F/FB datasets, trailing space padding (added by MVS to fill each record to LRECL) is stripped so the output matches VB-style line endings.
 - **Binary mode**: Raw record data without conversion. For FB datasets, the exact record count is calculated from VTOC (DSCB1/DSCB4) to avoid reading past logical end-of-data.

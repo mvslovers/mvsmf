@@ -232,7 +232,10 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **router.c**: HTTP routing framework. Pattern-based URL matching with `{param-name}` path parameters, percent-decoding, middleware chain execution.
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
 - **etag.c**: The ETag stamp and `If-Match` parsing behind the optimistic
-  locking on data sets and members (#152). Deliberately free of MVS services so
+  locking on data sets and members (#152), and the same predicate answering
+  `If-None-Match` on the read side (#263 — a match means 412 on a write, 304 on
+  a read, wildcard included; there is no inverted variant).
+  Deliberately free of MVS services so
   it unit-tests on the host (`TSTETAG`); the record reading lives in `dsapi.c`
   as `dataset_etag()`, next to the DCB knowledge it needs. Three rules that are
   load-bearing and all fail silently if broken: the stamp is computed over the

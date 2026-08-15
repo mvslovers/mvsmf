@@ -62,5 +62,14 @@ name = "TSTJCLN"
 sources = ["test/host/tstjcln.c"]
 norent = true
 
+# TSTABND: #256 — the abend code has to reach the client, and the x37 family
+# has to be named. Portable C (test-host); the TU #includes src/abendmsg.c so
+# it drives the real formatter router.c calls from its ESTAE recovery — do not
+# list abendmsg.c here.
+[[test]]
+name = "TSTABND"
+sources = ["test/host/tstabnd.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

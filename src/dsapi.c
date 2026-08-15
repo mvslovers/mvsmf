@@ -53,6 +53,7 @@ static int dataset_etag(Session *session, const char *dataset,
                         long max_records, char *out, size_t outlen);
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
+static int send_not_modified(Session *session, const char *etag);
 
 // Helper functions for memory management
 static void cleanup_resources(char* buffer, FILE* fp) {
@@ -379,6 +380,42 @@ check_if_match(Session *session, const char *dataset, long max_records)
 	}
 
 	return 0;
+}
+
+/* Answer a conditional read whose If-None-Match still holds (issue #263).
+ *
+ * No body and no Content-Type: the client keeps the representation it already
+ * has, and a 304 that described a payload it is not sending would only invite
+ * a client to believe there is one. The other headers mirror what the 200
+ * would have carried, which is what RFC 9110 asks a 304 to do.
+ *
+ * The ETag goes out even when the request did not ask for one with
+ * X-IBM-Return-Etag. That looks like it contradicts the opt-in, and does not:
+ * a client sending If-None-Match is already speaking the ETag protocol, and
+ * the stamp had to be computed to answer at all. Withholding it would only
+ * cost the client its confirmation of which state it is now holding.
+ */
+__asm__("\n&FUNC    SETC 'send_notmod'");
+static int
+send_not_modified(Session *session, const char *etag)
+{
+	int rc;
+
+	session->headers_sent = 1;
+	if ((rc = http_resp(session->httpc,
+			HTTP_STATUS_NOT_MODIFIED)) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Cache-Control: no-store\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Pragma: no-cache\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
+
+	return rc;
 }
 
 // Helper function for error handling
@@ -1242,6 +1279,8 @@ int datasetGetHandler(Session *session)
     long max_records = -1;
     char etag[ETAG_SIZE] = {0};
     const char *etag_hdr = NULL;
+    const char *if_none_match = NULL;
+    int want_etag = 0;
     FILE *fp = NULL;
 
     // Validate parameters
@@ -1264,11 +1303,25 @@ int datasetGetHandler(Session *session)
 
     /* Hash pass first, before any DCB for the body is open. It always uses
        the FB record count, even when the body will be read as text: the
-       stamp must not depend on the mode the client happens to read in. */
-    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+       stamp must not depend on the mode the client happens to read in.
+
+       One pass serves both halves of the protocol -- the value returned for
+       X-IBM-Return-Etag (#152) and the comparison for If-None-Match (#263).
+       Hashing twice would be two chances for the two answers to disagree. A
+       data set that cannot be read gets neither: the open below then produces
+       the real diagnosis, which is the more specific answer than a 304. */
+    if_none_match = getHeaderParam(session, "If-None-Match");
+    want_etag = etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"));
+
+    if (if_none_match || want_etag) {
         if (dataset_etag(session, dsname, get_fb_record_count(dsname),
                 etag, sizeof(etag)) == 0) {
-            etag_hdr = etag;
+            if (if_none_match && etag_matches(if_none_match, etag)) {
+                return send_not_modified(session, etag);
+            }
+            if (want_etag) {
+                etag_hdr = etag;
+            }
         }
     }
 
@@ -2095,6 +2148,8 @@ int memberGetHandler(Session *session)
     char dataset[MAX_QUALIFIED_DSN] = {0};
     char etag[ETAG_SIZE] = {0};
     const char *etag_hdr = NULL;
+    const char *if_none_match = NULL;
+    int want_etag = 0;
     FILE *fp = NULL;
 
     // Validate parameters
@@ -2121,10 +2176,23 @@ int memberGetHandler(Session *session)
     /* The ETag has to be known before the first response byte goes out, so
        the hash pass runs before the member is opened for the body -- never
        two DCBs on the same member at once. A member with no readable content
-       simply gets no ETag; the open below then produces the real diagnosis. */
-    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+       simply gets no ETag; the open below then produces the real diagnosis.
+
+       The bound is -1, read to EOF: a member has a real end of data, unlike
+       the sequential path, which has to stop at get_fb_record_count(). The
+       two must not be swapped -- see dataset_etag(). One pass answers both
+       X-IBM-Return-Etag (#152) and If-None-Match (#263). */
+    if_none_match = getHeaderParam(session, "If-None-Match");
+    want_etag = etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"));
+
+    if (if_none_match || want_etag) {
         if (dataset_etag(session, dataset, -1, etag, sizeof(etag)) == 0) {
-            etag_hdr = etag;
+            if (if_none_match && etag_matches(if_none_match, etag)) {
+                return send_not_modified(session, etag);
+            }
+            if (want_etag) {
+                etag_hdr = etag;
+            }
         }
     }
 

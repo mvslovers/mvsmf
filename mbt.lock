@@ -4,7 +4,7 @@
     "version": "4.0.0-dev"
   },
   "mvslovers/ufsd": {
-    "sha256": "5fac9b4c425c62a95c76ca0740a727567fa289cf04632363e152745b46e0aa6d",
-    "version": "1.1.0"
+    "sha256": "a64fb1510760565890c714074cd7bcb5bdb2283c3e78c4b771cc7070d3cc0078",
+    "version": "1.2.0"
   }
 }

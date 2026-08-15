@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <clibary.h>
 #include <clibwto.h>
 #include <cliblist.h>
@@ -1992,8 +1993,13 @@ int memberListHandler(Session *session)
 	   holds one 256-byte block, not a member array.  fopen() again rather than
 	   rewind() -- a backwards seek on a record-mode handle reopens the data set
 	   inside __fseek() anyway, by a DD name it reconstructs itself, so a second
-	   open is the same I/O with none of the guesswork. */
-	if (maxitems > 0) {
+	   open is the same I/O with none of the guesswork.
+
+	   The upper guard keeps maxitems + 1 from wrapping: a negative or absurd
+	   X-IBM-Max-Items arrives here as UINT_MAX, the bound would come out 0 --
+	   which member_scan() reads as "no bound" -- and both passes would then run
+	   the directory end to end.  No page that large can be truncated anyway. */
+	if (maxitems > 0 && maxitems < UINT_MAX) {
 		fp = fopen(dsname, "r,record");
 		if (!fp) {
 			rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,

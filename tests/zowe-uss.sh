@@ -207,6 +207,20 @@ else
 	fail "list: testfile.txt present" "not found in listing"
 fi
 
+# A truncated listing answers 206 rather than 200 (#249). What is asserted here
+# is that Zowe still treats it as success -- the status is what its RestClient
+# decides on, so a client rejecting 206 fails here with a well-formed body.
+RC=0
+OUTPUT_MAX=$(run_zowe_json files list uss-files "${TEST_DIR}" --max 1) || RC=$?
+assert_rc 0 "$RC" "list USS directory (max-items=1, HTTP 206)"
+
+MORE=$(echo "$OUTPUT_MAX" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""
+if [ "$MORE" = "true" ]; then
+	pass "USS list max-items=1: moreRows=true"
+else
+	fail "USS list max-items=1: moreRows=true" "got '$MORE'"
+fi
+
 # Check that subdir appears in listing
 HAS_DIR=$(echo "$OUTPUT" | jq '[.data.apiResponse.items[].name] | index("subdir") != null' 2>/dev/null)
 if [ "$HAS_DIR" = "true" ]; then

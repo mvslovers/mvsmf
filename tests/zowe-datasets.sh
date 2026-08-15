@@ -373,6 +373,51 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 	else
 		fail "member names are returned unpadded" "got: $NAMES"
 	fi
+
+	# A truncated member list answers 206 rather than 200 (#249), and the
+	# assertion that matters is that Zowe still treats it as success: the
+	# status is what its RestClient decides on, so a client that rejected 206
+	# would fail here with the body perfectly well-formed. The dataset list
+	# above covers the same ground for the other handler.
+	#
+	# A second member has to exist first. With only TESTMBR in the directory
+	# max-items=1 is not a truncation at all, the response is a plain 200, and
+	# the case would pass without ever reaching the code it is meant to cover.
+	#
+	# Not TESTMBR2: the rename test below renames TESTMBR to that name and
+	# would fail against an existing member. This one is deleted again as soon
+	# as the two assertions are done, so the directory the later tests see is
+	# the one they expect.
+	PAGEFILE=$(mktemp)
+	printf 'SECOND MEMBER\n' > "$PAGEFILE"
+	run_zowe files upload ftds "$PAGEFILE" "${TEST_PDS}(PAGEMBR)" >/dev/null 2>&1
+	rm -f "$PAGEFILE"
+
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$TEST_PDS" --max 1) || RC=$?
+	assert_rc 0 "$RC" "list PDS members (max-items=1, HTTP 206)"
+
+	ROWS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.returnedRows' 2>/dev/null) || ROWS=0
+	MORE=$(echo "$OUTPUT" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""
+	if [ "$ROWS" = "1" ] && [ "$MORE" = "true" ]; then
+		pass "member list max-items=1: one row and moreRows=true"
+	else
+		fail "member list max-items=1: one row and moreRows=true" \
+			"returnedRows=$ROWS moreRows=$MORE"
+	fi
+
+	# and the negative: a limit the directory does not reach is complete (200)
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$TEST_PDS" --max 100) || RC=$?
+	assert_rc 0 "$RC" "list PDS members (max-items=100, complete)"
+	MORE=$(echo "$OUTPUT" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""
+	if [ "$MORE" = "false" ]; then
+		pass "member list max-items=100: moreRows=false"
+	else
+		fail "member list max-items=100: moreRows=false" "got '$MORE'"
+	fi
+
+	run_zowe files delete ds "${TEST_PDS}(PAGEMBR)" -f >/dev/null 2>&1
 fi
 
 # --- Read PDS member ---

@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <time.h>
 #include <clibwto.h>
 #include <libufs.h>
@@ -338,8 +339,12 @@ int ussListHandler(Session *session)
 	   Only when the client set the header.  USS_LIST_DEFAULT_MAX_ITEMS
 	   truncates too, but that limit is ours, not the client's, and z/OSMF ties
 	   206 to "the request contained the X-IBM-Max-Items header".  Leaving the
-	   default alone also keeps every plain listing at one walk. */
-	if (have_maxitems && maxitems > 0) {
+	   default alone also keeps every plain listing at one walk.
+
+	   A negative or absurd value arrives here as UINT_MAX, which no directory
+	   can exceed: the counting pass could only walk the whole thing to prove
+	   nothing was truncated, so skip it. */
+	if (have_maxitems && maxitems > 0 && maxitems < UINT_MAX) {
 		while ((entry = ufs_dirread(dd)) != NULL) {
 			if (strcmp(entry->name, ".") == 0 ||
 				strcmp(entry->name, "..") == 0) {

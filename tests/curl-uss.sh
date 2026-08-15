@@ -182,6 +182,9 @@ RESP=$(curl -s -w '\n%{http_code}' \
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 
+# No X-IBM-Max-Items, so this is a complete listing and stays 200 even though
+# the handler applies a default cap of its own -- 206 answers the client's
+# limit, not ours (#249). See the max-items block below for the truncated case.
 assert_http_status "200" "$HTTP_CODE" "list directory ${TEST_DIR}"
 assert_json_field_exists "$BODY" ".items" "list: items array present"
 assert_json_field_exists "$BODY" ".returnedRows" "list: returnedRows present"
@@ -213,8 +216,6 @@ RESP=$(curl -s -w '\n%{http_code}' \
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 
-assert_http_status "200" "$HTTP_CODE" "list with max-items=2"
-
 RETURNED=$(echo "$BODY" | jq -r '.returnedRows' 2>/dev/null)
 TOTAL_ROWS=$(echo "$BODY" | jq -r '.totalRows' 2>/dev/null)
 if [ -n "$RETURNED" ] && [ "$RETURNED" -le 2 ] 2>/dev/null; then
@@ -223,9 +224,28 @@ else
 	fail "list max-items: returnedRows" "expected <= 2, got '$RETURNED'"
 fi
 
-if [ -n "$TOTAL_ROWS" ] && [ -n "$RETURNED" ] && [ "$TOTAL_ROWS" -gt 2 ] 2>/dev/null; then
+# Whether this directory has more than two entries decides both the status and
+# moreRows, and the point of asserting them together is that they must agree:
+# a 206 next to moreRows false (or the reverse) is the failure #249 is about.
+if [ -n "$TOTAL_ROWS" ] && [ "$TOTAL_ROWS" -gt 2 ] 2>/dev/null; then
+	assert_http_status "206" "$HTTP_CODE" "list with max-items=2 (truncated)"
 	assert_json_field "$BODY" ".moreRows" "true" "list max-items: moreRows is true when truncated"
+else
+	assert_http_status "200" "$HTTP_CODE" "list with max-items=2 (not truncated)"
+	assert_json_field "$BODY" ".moreRows" "false" "list max-items: moreRows is false when complete"
 fi
+
+# a limit nothing reaches is a complete listing: the header being present is
+# not what makes a response partial
+RESP=$(curl -s -w '\n%{http_code}' \
+	-u "$AUTH" \
+	-H "X-IBM-Max-Items: 10000" \
+	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_DIR}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+BODY=$(echo "$RESP" | sed '$d')
+
+assert_http_status "200" "$HTTP_CODE" "list with max-items above the entry count"
+assert_json_field "$BODY" ".moreRows" "false" "list max-items=10000: moreRows is false"
 
 echo ""
 echo "--- List with X-IBM-Max-Items: 0 ---"

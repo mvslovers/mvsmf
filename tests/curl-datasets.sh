@@ -361,7 +361,10 @@ BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-assert_http_status "200" "$HTTP_CODE" "list datasets (max-items=1)"
+# a listing cut short by X-IBM-Max-Items is partial content, not a complete
+# answer: a client keying off the status could not otherwise tell the two
+# apart (#249)
+assert_http_status "206" "$HTTP_CODE" "list datasets (max-items=1)"
 
 RETURNED=$(echo "$CONTENT" | jq '.returnedRows' 2>/dev/null) || RETURNED=0
 if [ "$RETURNED" -eq 1 ] 2>/dev/null; then
@@ -375,6 +378,22 @@ if [ "$MORE_ROWS" = "true" ]; then
 	pass "moreRows=true when truncated"
 else
 	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
+fi
+
+# The other half of #249, and the half a "send 206 when max-items is set"
+# implementation would get wrong: the header alone does not make a response
+# partial. A limit nothing reaches is a complete listing and stays 200.
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	-H "X-IBM-Max-Items: 1000" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+if [ "$HTTP_CODE" = "200" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+	pass "max-items above the row count stays 200"
+else
+	fail "max-items above the row count stays 200" \
+		"got HTTP $HTTP_CODE moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 fi
 
 # --- List datasets (start=) ---
@@ -640,7 +659,7 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null)
 
-if [ "$HTTP_CODE" = "200" ] &&
+if [ "$HTTP_CODE" = "206" ] &&
    [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
    [ "$(echo "$LIST" | head -1)" = "MBRC" ] &&
    [ "$(echo "$LIST" | sed -n 2p)" = "MBRF1" ] &&
@@ -717,7 +736,7 @@ CONTENT=$(echo "$BODY" | sed '$d')
 LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null |
 	tr '\n' ' ' | sed 's/ *$//')
 
-if [ "$HTTP_CODE" = "200" ] && [ "$LIST" = "MBRA MBRB" ] &&
+if [ "$HTTP_CODE" = "206" ] && [ "$LIST" = "MBRA MBRB" ] &&
    [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
    [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
 	pass "pattern= with max-items=2 fills the page with matches only"
@@ -843,7 +862,7 @@ else
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
 
-	if [ "$HTTP_CODE" = "200" ] &&
+	if [ "$HTTP_CODE" = "206" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.returnedRows')" = "10" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.items | length')" = "10" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.moreRows')" = "true" ]; then
@@ -851,6 +870,25 @@ else
 	else
 		fail "max-items=10 on ${BIG_PDS}" \
 			"got HTTP $HTTP_CODE returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows') moreRows=$(echo "$CONTENT" | jq -r '.moreRows')"
+	fi
+
+	# The counting pass walks the directory a second time, so this is where a
+	# large directory would show it: the page must still be the first 10
+	# members and the walk must still stop one match past them, not read
+	# 23000 entries twice. A timeout here is the regression.
+	START=$(date +%s)
+	BODY=$(curl -s -w '\n%{http_code}' -m 180 -u "$AUTH" -H 'X-IBM-Max-Items: 10' \
+		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member?start=A")
+	ELAPSED=$(( $(date +%s) - START ))
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+
+	if [ "$HTTP_CODE" = "206" ] &&
+	   [ "$(echo "$CONTENT" | jq -r '.returnedRows')" = "10" ]; then
+		pass "max-items=10 with start= on ${BIG_PDS} (${ELAPSED}s)"
+	else
+		fail "max-items=10 with start= on ${BIG_PDS}" \
+			"got HTTP $HTTP_CODE returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows') after ${ELAPSED}s"
 	fi
 
 	# the regression: is MVSMF still loadable at all?

@@ -293,6 +293,10 @@ int ussListHandler(Session *session)
 	unsigned maxitems = USS_LIST_DEFAULT_MAX_ITEMS;
 	unsigned emitted = 0;
 	unsigned total = 0;
+	unsigned counted = 0;
+	int have_maxitems = 0;
+	int truncated = 0;
+	int more = 0;
 	char *path = NULL;
 	char *maxitems_str = NULL;
 	UFS *ufs = NULL;
@@ -310,6 +314,7 @@ int ussListHandler(Session *session)
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) {
 		maxitems = (unsigned) atoi(maxitems_str);
+		have_maxitems = 1;
 	}
 
 	// Open UFS session
@@ -324,9 +329,41 @@ int ussListHandler(Session *session)
 		return uss_stat_file(session, ufs, path);
 	}
 
+	/* Counting pass.  A listing cut short by X-IBM-Max-Items answers 206
+	   Partial content, and the status line goes out before the first entry is
+	   written -- so the page has to be measured up front (#249).  The walk
+	   stops one entry past the page and there is no ufs_dirrewind(), so it
+	   costs a close and a second open.
+
+	   Only when the client set the header.  USS_LIST_DEFAULT_MAX_ITEMS
+	   truncates too, but that limit is ours, not the client's, and z/OSMF ties
+	   206 to "the request contained the X-IBM-Max-Items header".  Leaving the
+	   default alone also keeps every plain listing at one walk. */
+	if (have_maxitems && maxitems > 0) {
+		while ((entry = ufs_dirread(dd)) != NULL) {
+			if (strcmp(entry->name, ".") == 0 ||
+				strcmp(entry->name, "..") == 0) {
+				continue;
+			}
+
+			counted++;
+			if (counted > maxitems) break;
+		}
+
+		truncated = (counted > maxitems);
+
+		ufs_dirclose(&dd);
+
+		// same fallback as the first open: the path may have become a file
+		dd = ufs_diropen(ufs, path, NULL);
+		if (!dd) {
+			return uss_stat_file(session, ufs, path);
+		}
+	}
+
 	// Directory listing — send response headers (streaming JSON)
 	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
+	if ((rc = http_resp(session->httpc, truncated ? 206 : 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
@@ -393,8 +430,14 @@ int ussListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %u,\n", emitted)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"totalRows\": %u,\n", total)) < 0) goto quit;
+	/* With the header in play the status line has already committed to an
+	   answer, so the body repeats it rather than recomputing it: the two walks
+	   are apart in time, and an entry created in between would otherwise leave
+	   a 206 standing next to moreRows false.  Without the header nothing was
+	   committed and this walk's own count is the better value. */
+	more = have_maxitems ? truncated : (maxitems > 0 && emitted < total);
 	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		(maxitems > 0 && emitted < total) ? "true" : "false")) < 0) goto quit;
+		more ? "true" : "false")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "}\n")) < 0) goto quit;
 

@@ -1665,10 +1665,31 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NO.SUCH.PDS(M1)")
 assert_http_status "404" "$HTTP_CODE" "etag: a missing data set is 404, not 412"
 
-# The same protocol on the sequential endpoint.
+# The same protocol on the sequential endpoint. This allocates its own data
+# set rather than reusing TEST_SEQ: that one is deleted further up as part of
+# the DELETE test case and no longer exists by the time this section runs.
+TEST_ETAGSEQ="${MVSMF_USER}.CURL.TESTETG"
+curl -s -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
+
+BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "201" "$HTTP_CODE" "etag: allocate a sequential data set"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "204" "$HTTP_CODE" "etag: seed the sequential data set"
+
 curl -s -D /tmp/curl_ds_h7.txt -o /dev/null -u "$AUTH" \
 	-H "X-IBM-Return-Etag: true" \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
 ETAG7=$(get_etag /tmp/curl_ds_h7.txt)
 if [ -n "$ETAG7" ]; then
 	pass "etag: sequential GET returns one ($ETAG7)"
@@ -1681,7 +1702,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: 0000000000000000" \
 	--data-binary @/tmp/curl_ds_etag.txt \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "412" "$HTTP_CODE" "etag: sequential stale If-Match is refused"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
@@ -1689,11 +1710,13 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: ${ETAG7}" \
 	--data-binary @/tmp/curl_ds_etag.txt \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "204" "$HTTP_CODE" "etag: sequential current If-Match is accepted"
 
 curl -s -X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_h1.txt /tmp/curl_ds_h2.txt /tmp/curl_ds_h3.txt \
 	/tmp/curl_ds_h4.txt /tmp/curl_ds_h5.txt /tmp/curl_ds_h6.txt \

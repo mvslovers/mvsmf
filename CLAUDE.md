@@ -293,6 +293,35 @@ Two consequences that keep getting rediscovered:
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
 here fails silently, on the wire only.
 
+### Operator Messages (WTO) — the catalog is closed
+
+Every `wtof()` literal lives in **`include/mvsmfmsg.h`**, exactly once, and is
+documented for operators in **`docs/messages.md`**. Never write an inline
+literal — that is what let one id (`MVSMF22E`) accumulate 25 different texts
+before #201.
+
+Three rules, in the order they get broken:
+
+- **A WTO is for what an operator can act on or must know.** Everything the
+  client caused — missing parameter, unknown route, data set not found,
+  malformed job card, unparseable `Host` — is reported in the HTTP response and
+  **nowhere else**. This is not tidiness: `consapi.c` reads the Master Trace
+  Table, so every line mvsMF writes comes back out of
+  `/zosmf/restconsoles/.../solmsgs` and the hardcopy log. A client polling a 404
+  turns one message into a flood of its own console API.
+- **One text per id.** Two wordings need two ids; a varying detail becomes an
+  argument (`MSG_STORAGE_FAILED` takes the allocation name, it is not four ids).
+  Ranges: `0xx` router/core, `1xx` data sets, `2xx` jobs, `3xx` USS, `4xx`
+  consoles, `9xx` recovery.
+- **Literals uppercase, substituted values untouched.** MVS names are uppercase
+  already; USS paths and free user text must not be folded. Watch the
+  conversion specifiers — `%s` is not `%S`.
+
+Severity is `I`, `W` or `E`. There is no debug/trace level and no `getenv()`
+gate for one: the natural implementation caches the level in a `static`, which
+is the RENT S0C4 trap. If a gate is ever needed it belongs in `MVSMF_CTX`
+(`mvsmfctx.c`), never in a static.
+
 ### Keeping Docs and Tests in Sync
 
 Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, `consapi.c`, or `infoapi.c`):

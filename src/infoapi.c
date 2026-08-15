@@ -50,25 +50,21 @@ infoHandler(Session *session)
 		/* A Host header this handler cannot make sense of must not fail the
 		   request: /zosmf/info is the unauthenticated liveness probe every
 		   client calls first, and it used to answer an odd Host by sending
-		   nothing at all and dropping the connection (issue #175). Log the
-		   oddity, fall back, still answer 200. */
+		   nothing at all and dropping the connection (issue #175). Fall back
+		   silently and still answer 200 -- the client sent the header, so the
+		   operator has nothing to act on, and a probing client would repeat
+		   the message on every poll (issue #201). */
 		if (parse_host_name(value, hostname, sizeof(hostname)) != 0) {
-			wtof("MVSMF01E Unable to parse host name");
 			strcpy(hostname, DEFAULT_HOST);
 		}
 
 		if (parse_port_string(value, port_str, sizeof(port_str)) != 0) {
-			wtof("MVSMF02E Unable to parse port");
 			port_str[0] = '\0';
 		}
 
+		/* An empty port is not an error either: RFC 7230 5.4 lets a Host
+		   header omit it, and then the scheme implies it. */
 		if (validate_port(port_str) != 0) {
-			/* An empty port is not an error: RFC 7230 5.4 lets a Host header
-			   omit it, and then the scheme implies it. Only a non-empty port
-			   that fails validation is worth a message. */
-			if (port_str[0] != '\0') {
-				wtof("MVSMF03E Invalid port number");
-			}
 			default_port(session, port_str, sizeof(port_str));
 		}
 	}

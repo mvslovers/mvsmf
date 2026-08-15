@@ -26,12 +26,6 @@
 /** @brief Error message for incorrect JES VSAM handle */
 #define ERR_MSG_INCORRECT_JES_VSAM_HANDLE "Unable to open JES2 checkpoint and spool datasets"
 
-/** @brief Message for job submission */
-#define MSG_JOB_SUBMITTED "JOB %s(%s) SUBMITTED"
-
-/** @brief Message for JES error */
-#define MSG_JOB_JES_ERROR "Unable to open JES2 checkpoint and spool datasets"
-
 /** @brief Error categories */
 #define CATEGORY_SERVICE 6      /**< Service related error */
 #define CATEGORY_VSAM 7         /**< VSAM related error */
@@ -66,8 +60,5 @@
 /** @brief Error message for a spool read that failed or was truncated */
 #define ERR_MSG_SPOOL_READ                                                     \
   "Unable to read spool output for job '%.8s(%.8s)' DD id %u: %s"
-
-/** @brief Operator message for an abnormal spool walk */
-#define MSG_JOB_SPOOL_WALK "MVSMF10W Spool read %-8.8s(%-8.8s) DSID %u: %s"
 
 #endif // JOBSAPI_MSG_H

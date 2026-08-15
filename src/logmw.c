@@ -3,6 +3,7 @@
 #include "logmw.h"
 #include "httpcgi.h"
 #include "router.h"
+#include "mvsmfmsg.h"
 
 int logging_middleware(Session *session) 
 {
@@ -16,7 +17,7 @@ int logging_middleware(Session *session)
 				continue;
 			}
 
-			wtof("MVSMF42T env[%u] \"%s\"=\"%s\"", n, env->name, env->value);
+			wtof(MSG_ENV_DUMP, n, env->name, env->value);
 		}
 	}
 

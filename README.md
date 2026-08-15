@@ -22,7 +22,8 @@ builds on.
 
 See **[docs/endpoints/](docs/endpoints/README.md)** for the full endpoint
 reference and **[docs/examples.md](docs/examples.md)** for copy‑paste curl & Zowe
-CLI examples for every endpoint.
+CLI examples for every endpoint. **[docs/messages.md](docs/messages.md)** lists
+every console message mvsMF can write.
 
 ## Installation
 

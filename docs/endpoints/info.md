@@ -50,10 +50,11 @@ the client dialled.
 
 ## Error Responses
 
-None. A `Host` header that cannot be parsed is logged to the console
-(`MVSMF01E`/`MVSMF02E`/`MVSMF03E`) and falls back to the defaults above; the request still
-returns 200. `/zosmf/info` is the unauthenticated liveness probe every client calls first
-and must not fail on a header quirk (issue #175).
+None. A `Host` header that cannot be parsed falls back to the defaults above and the
+request still returns 200. `/zosmf/info` is the unauthenticated liveness probe every
+client calls first and must not fail on a header quirk (issue #175). Nothing is written
+to the console: the client sent the header, so there is nothing for an operator to act on,
+and a polling client would repeat the message forever (issue #201).
 
 ## Examples
 

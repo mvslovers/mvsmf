@@ -75,7 +75,7 @@ struct router {
     size_t route_count;                    /**< Number of registered routes */
     Route routes[MAX_ROUTES];              /**< Array of registered routes */
     size_t middleware_count;               /**< Number of registered middlewares */
-    Middleware middlewares[MAX_ROUTES];    /**< Array of registered middlewares */
+    Middleware middlewares[MAX_MIDDLEWARES]; /**< Array of registered middlewares */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**

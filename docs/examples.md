@@ -177,6 +177,26 @@ sequential endpoint. Details in
 
 The Zowe CLI exposes no flag for either header; the SDK does.
 
+### Re-read a member only if it changed
+`GET` with `If-None-Match`
+
+Hand the stamp back on the next read and an unchanged member answers 304 with
+no body — useful for a poller or a client that caches content between sessions.
+
+```bash
+# 304 while it still holds the state $ETAG describes, 200 with the content once
+# it does not
+curl -s -o local.txt -w '%{http_code}\n' -u $USER:$PASS \
+  -H "If-None-Match: $ETAG" \
+  "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS(TESTMBR)"
+```
+
+`*` matches any member that exists, so it answers 304 rather than 200. The 304
+carries the `ETag` even without `X-IBM-Return-Etag`. What it saves is the
+transfer, not the read: the stamp is computed by reading the member either way.
+Details in
+[endpoints/datasets/members-get.md](endpoints/datasets/members-get.md#conditional-reads-if-none-match).
+
 ### Delete a member
 `DELETE /zosmf/restfiles/ds/{dataset-name}({member-name})`
 

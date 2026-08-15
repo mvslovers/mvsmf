@@ -87,5 +87,15 @@ name = "TSTHOST"
 sources = ["test/host/tsthost.c"]
 norent = true
 
+# TSTETAG: #152 — the ETag stamp must change on every content change (including
+# a same-length edit and a re-split record boundary) and stay stable otherwise,
+# and If-Match must accept bare, quoted, weak and list forms. Portable C
+# (test-host); the TU #includes src/etag.c so it drives the real stamp dsapi.c
+# uses — do not list etag.c here.
+[[test]]
+name = "TSTETAG"
+sources = ["test/host/tstetag.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

@@ -22,9 +22,34 @@ or with explicit volume:
     - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
+- `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the member. Any
+  other value, or an absent header, returns none.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) with the member content. In text mode, trailing space padding on F/FB records is stripped so the output matches VB-style line endings.
+
+## ETag
+
+With `X-IBM-Return-Etag: true` the response carries an `ETag` header — a
+16-hex-digit stamp of the member's current content. Passing it back on a
+subsequent PUT as `If-Match` makes that write conditional: it succeeds only if
+the member still holds the state that was read, and fails with 412 otherwise.
+That is what keeps two editors from silently overwriting each other. See
+[members-put.md](members-put.md) for the write side.
+
+The value is opaque — clients must echo it, never parse it. Two properties are
+guaranteed and are the only ones to rely on:
+
+- Reading the same unchanged member twice yields the same stamp.
+- The stamp does not depend on `X-IBM-Data-Type`: a text read and a binary read
+  of the same member return the same value, because it is computed over the
+  stored records rather than over the converted bytes that go on the wire.
+
+It is opt-in because it costs a second read pass over the member. Requests
+without the header are unaffected.
+
+The header is emitted unquoted, the way z/OSMF emits it. `Access-Control-Expose-Headers: ETag`
+accompanies it so a cross-origin client can read the value at all.
 
 ## Error Responses
 - HTTP 404 (Not Found)

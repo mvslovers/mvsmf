@@ -1481,6 +1481,278 @@ rm -f /tmp/curl_ds_blank.bin /tmp/curl_ds_wide.txt /tmp/curl_ds_wide.bin \
 	/tmp/curl_ds_crlf.bin /tmp/curl_ds_noeol.bin /tmp/curl_ds_chunk.txt \
 	/tmp/curl_ds_chunk.bin
 
+# --- ETag / optimistic locking (issue #152) ---
+echo ""
+echo "--- ETag: optimistic locking (issue #152) ---"
+
+# Pull the ETag out of a response header dump. Case-insensitive, CR stripped:
+# the value is compared literally later, and a stray CR silently breaks that.
+get_etag() {
+	grep -i '^ETag:' "$1" | tr -d '\r' | sed 's/^[Ee][Tt][Aa][Gg]:[ ]*//'
+}
+
+printf 'LINE ONE\nLINE TWO\n' > /tmp/curl_ds_etag.txt
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: seed the member"
+
+# An ETag costs an extra read pass, so it is opt-in: no header, no ETag.
+curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+if [ -z "$(get_etag /tmp/curl_ds_h1.txt)" ]; then
+	pass "etag: a plain GET returns no ETag"
+else
+	fail "etag: a plain GET returns no ETag" "got $(get_etag /tmp/curl_ds_h1.txt)"
+fi
+
+curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+ETAG1=$(get_etag /tmp/curl_ds_h1.txt)
+if [ -n "$ETAG1" ]; then
+	pass "etag: X-IBM-Return-Etag returns one ($ETAG1)"
+else
+	fail "etag: X-IBM-Return-Etag returns one" "no ETag header in response"
+fi
+
+if echo "$ETAG1" | grep -qE '^[0-9A-F]{16}$'; then
+	pass "etag: the value is 16 uppercase hex digits"
+else
+	fail "etag: the value is 16 uppercase hex digits" "got '$ETAG1'"
+fi
+
+# Stability: an unchanged member must stamp the same, or every save would
+# fail its own precondition.
+curl -s -D /tmp/curl_ds_h2.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+ETAG2=$(get_etag /tmp/curl_ds_h2.txt)
+if [ "$ETAG1" = "$ETAG2" ]; then
+	pass "etag: an unchanged member stamps the same twice"
+else
+	fail "etag: an unchanged member stamps the same twice" "$ETAG1 vs $ETAG2"
+fi
+
+# The mode the client reads in must not change the stamp: a text read and a
+# binary read describe the same resource state.
+curl -s -D /tmp/curl_ds_h3.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+ETAG3=$(get_etag /tmp/curl_ds_h3.txt)
+if [ "$ETAG1" = "$ETAG3" ]; then
+	pass "etag: text and binary reads stamp alike"
+else
+	fail "etag: text and binary reads stamp alike" "$ETAG1 vs $ETAG3"
+fi
+
+# A stale precondition must fail, and must fail BEFORE anything is written.
+printf 'LINE ONE\nLINE TWO CHANGED\n' > /tmp/curl_ds_etag2.txt
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: 0000000000000000" \
+	--data-binary @/tmp/curl_ds_etag2.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "412" "$HTTP_CODE" "etag: a stale If-Match is refused"
+
+curl -s -o /tmp/curl_ds_after412.txt -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+if grep -q 'LINE TWO$' /tmp/curl_ds_after412.txt; then
+	pass "etag: the refused write left the member untouched"
+else
+	fail "etag: the refused write left the member untouched" \
+		"content changed despite the 412"
+fi
+
+# The current stamp is accepted, and the response carries the stamp of what
+# was just written -- without it the next save would fail on a stale value.
+HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_h4.txt -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "X-IBM-Return-Etag: true" \
+	-H "If-Match: ${ETAG1}" \
+	--data-binary @/tmp/curl_ds_etag2.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: a current If-Match is accepted"
+
+ETAG4=$(get_etag /tmp/curl_ds_h4.txt)
+if [ -n "$ETAG4" ] && [ "$ETAG4" != "$ETAG1" ]; then
+	pass "etag: the PUT returns the new stamp ($ETAG4)"
+else
+	fail "etag: the PUT returns the new stamp" "got '$ETAG4', was '$ETAG1'"
+fi
+
+# The round trip that makes repeated saves work: what the PUT handed back has
+# to be what the next GET computes.
+curl -s -D /tmp/curl_ds_h5.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+ETAG5=$(get_etag /tmp/curl_ds_h5.txt)
+if [ "$ETAG4" = "$ETAG5" ]; then
+	pass "etag: the PUT stamp matches the next GET stamp"
+else
+	fail "etag: the PUT stamp matches the next GET stamp" "$ETAG4 vs $ETAG5"
+fi
+
+# Saving twice in a row with the stamp the previous save returned: the case
+# that breaks if the PUT hashes the request body instead of the stored member.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: ${ETAG4}" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: a second save with the returned stamp"
+
+# Header forms clients actually send.
+curl -s -D /tmp/curl_ds_h6.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
+ETAG6=$(get_etag /tmp/curl_ds_h6.txt)
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: \"${ETAG6}\"" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: a quoted If-Match is accepted"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: W/\"${ETAG6}\"" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: a weak If-Match is accepted"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: *" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: If-Match * on an existing member"
+
+# "*" asserts the resource exists. A member that does not is the deletion case
+# the precondition is there to catch.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: *" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGNON)")
+assert_http_status "412" "$HTTP_CODE" "etag: If-Match on a missing member is 412"
+
+# Without If-Match nothing changes: last write wins, as before the feature.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	--data-binary @/tmp/curl_ds_etag2.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
+assert_http_status "204" "$HTTP_CODE" "etag: a PUT without If-Match still writes"
+
+# A missing PDS is still a 404 -- the more specific answer wins over 412.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: *" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NO.SUCH.PDS(M1)")
+assert_http_status "404" "$HTTP_CODE" "etag: a missing data set is 404, not 412"
+
+# The same protocol on the sequential endpoint. This allocates its own data
+# set rather than reusing TEST_SEQ: that one is deleted further up as part of
+# the DELETE test case and no longer exists by the time this section runs.
+TEST_ETAGSEQ="${MVSMF_USER}.CURL.TESTETG"
+curl -s -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
+
+BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "201" "$HTTP_CODE" "etag: allocate a sequential data set"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "204" "$HTTP_CODE" "etag: seed the sequential data set"
+
+curl -s -D /tmp/curl_ds_h7.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
+ETAG7=$(get_etag /tmp/curl_ds_h7.txt)
+if [ -n "$ETAG7" ]; then
+	pass "etag: sequential GET returns one ($ETAG7)"
+else
+	fail "etag: sequential GET returns one" "no ETag header in response"
+fi
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: 0000000000000000" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "412" "$HTTP_CODE" "etag: sequential stale If-Match is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_h8.txt -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "X-IBM-Return-Etag: true" \
+	-H "If-Match: ${ETAG7}" \
+	--data-binary @/tmp/curl_ds_etag2.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "204" "$HTTP_CODE" "etag: sequential current If-Match is accepted"
+
+# The round trip again, on the sequential path. It does not inherit the member
+# evidence above: the post-write stamp here is bounded by get_fb_record_count()
+# against a data set whose DSCB was just rewritten, not by the member path's
+# plain read-to-EOF. If that count disagreed with what the next GET computes,
+# the symptom would be every second save failing 412.
+ETAG8=$(get_etag /tmp/curl_ds_h8.txt)
+if [ -n "$ETAG8" ]; then
+	pass "etag: sequential PUT returns the new stamp ($ETAG8)"
+else
+	fail "etag: sequential PUT returns the new stamp" "no ETag header in response"
+fi
+
+curl -s -D /tmp/curl_ds_h9.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
+ETAG9=$(get_etag /tmp/curl_ds_h9.txt)
+if [ "$ETAG8" = "$ETAG9" ]; then
+	pass "etag: sequential PUT stamp matches the next GET stamp"
+else
+	fail "etag: sequential PUT stamp matches the next GET stamp" "$ETAG8 vs $ETAG9"
+fi
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "If-Match: ${ETAG8}" \
+	--data-binary @/tmp/curl_ds_etag.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "204" "$HTTP_CODE" "etag: sequential second save with the returned stamp"
+
+curl -s -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
+rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
+	/tmp/curl_ds_h1.txt /tmp/curl_ds_h2.txt /tmp/curl_ds_h3.txt \
+	/tmp/curl_ds_h4.txt /tmp/curl_ds_h5.txt /tmp/curl_ds_h6.txt \
+	/tmp/curl_ds_h7.txt /tmp/curl_ds_h8.txt /tmp/curl_ds_h9.txt
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

@@ -13,10 +13,11 @@
      PUT    /zosmf/restfiles/ds/{dsn}({mem})          write member
      DELETE /zosmf/restfiles/ds/{dsn}({mem})          delete member
 
-   Etag: member reads request X-IBM-Return-Etag and a PUT sends
-   If-Match when an ETag was received. mvsMF does not implement
-   this yet, so today it degrades to a plain PUT (see the Etag
-   follow-up issue); the protocol here is ready for the backend.
+   Etag: reads request X-IBM-Return-Etag, a save sends If-Match and
+   adopts the ETag the PUT returns. A 412 means the member changed
+   under us since it was read -- reload before saving, or the other
+   edit is lost. A server without ETag support returns none, and the
+   save degrades to a plain last-write-wins PUT.
 
    Demo mode: canned datasets/members (pattern: sysinfo program).
    ============================================================ */
@@ -173,7 +174,11 @@ Programs.register({
     /* ---------------- API (demo-aware) ---------------- */
     async function api(path, opts) {
       const resp = await sys.apiFetch(path, opts);
-      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      if (!resp.ok) {
+        const err = new Error("HTTP " + resp.status);
+        err.status = resp.status;   // callers distinguish 412 from a real failure
+        throw err;
+      }
       return resp;
     }
     async function listDatasets(pattern) {
@@ -214,18 +219,24 @@ Programs.register({
       st.etag = resp.headers.get("ETag");
       return resp.text();
     }
-    async function writeMember(dsn, member, text) {
+    /* etag is passed in rather than read from st: a save guards against a
+       concurrent edit, but creating a member must not send the stamp of
+       whatever was open before -- that member is not this one, and the
+       precondition would fail on a name that does not exist yet.
+       Returns the stamp of what was written, for the caller to adopt. */
+    async function writeMember(dsn, member, text, etag) {
       if (sys.demo) {
         st.demoContent[`${dsn}(${member})`] = text;
         if (!(st.demoMembers[dsn] || []).includes(member)) {
           (st.demoMembers[dsn] = st.demoMembers[dsn] || []).push(member);
         }
-        return;
+        return null;
       }
-      const headers = { "Content-Type": "text/plain" };
-      if (st.etag) headers["If-Match"] = st.etag;   // no-op until mvsMF supports it
-      await api(`/zosmf/restfiles/ds/${dsn}(${member})`,
+      const headers = { "Content-Type": "text/plain", "X-IBM-Return-Etag": "true" };
+      if (etag) headers["If-Match"] = etag;
+      const resp = await api(`/zosmf/restfiles/ds/${dsn}(${member})`,
         { method: "PUT", headers, body: text });
+      return resp.headers.get("ETag") || null;
     }
     async function deleteMember(dsn, member) {
       if (sys.demo) {
@@ -568,14 +579,23 @@ Programs.register({
       const text = st._ta ? st._ta.value : st.text;
       ctx.setStatus(`Saving ${st.sel.dsn}(${st.sel.member}) …`);
       try {
-        await writeMember(st.sel.dsn, st.sel.member, text);
+        st.etag = await writeMember(st.sel.dsn, st.sel.member, text, st.etag);
         st.text = text;
         st.dirty = false; st.editing = false;
         renderView();
         updateButtons();
         ctx.setStatus(`Saved ${st.sel.dsn}(${st.sel.member})`);
       } catch (e) {
-        ctx.setStatus("Save failed — " + e.message);
+        if (e.status === 412) {
+          /* Someone else wrote the member since we read it. Nothing was
+             stored, and the editor deliberately stays open and dirty -- the
+             edit is still the user's to keep, and the only way to keep it is
+             to reload and re-apply it. */
+          ctx.setStatus(`${st.sel.dsn}(${st.sel.member}) was changed by someone `
+            + `else — nothing was saved. Reload to see the current version.`);
+        } else {
+          ctx.setStatus("Save failed — " + e.message);
+        }
       }
     }
 
@@ -605,12 +625,12 @@ Programs.register({
         return;
       }
       try {
-        await writeMember(dsn, name, "");
+        const etag = await writeMember(dsn, name, "", null);
         st.mcache.delete(dsn);
         await doList();          // rebuild tree (caches were touched)
         st.sel = { type: "member", dsn, member: name, meta: st.sel ? st.sel.meta : {} };
         st.text = "";
-        st.etag = null;
+        st.etag = etag;
         st.editing = true;
         renderEditor();
         updateButtons();

@@ -20,6 +20,7 @@
 #define REASON_RENAME_TARGET_EXISTS		7	// Rename target already exists
 #define REASON_RENAME_FAILED			8	// Rename operation failed
 #define REASON_PATTERN_TOO_LONG			9	// Member pattern longer than the handler accepts
+#define REASON_ETAG_MISMATCH			10	// If-Match precondition failed (issue #152)
 
 // Error messages for Category 6
 #define ERR_MSG_PDS_NOT_SEQUENTIAL		"Dataset is a partitioned dataset (PDS). Use /ds/{dataset-name}({member-name}) to access members"
@@ -31,5 +32,6 @@
 #define ERR_MSG_RENAME_TARGET_EXISTS	"Rename target already exists"
 #define ERR_MSG_RENAME_FAILED		"Rename operation failed"
 #define ERR_MSG_PATTERN_TOO_LONG	"Member pattern is too long"
+#define ERR_MSG_ETAG_MISMATCH		"The resource was modified since the supplied ETag was created"
 
 #endif // DSAPI_ERR_H

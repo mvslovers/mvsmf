@@ -542,6 +542,18 @@ RC=0
 OUTPUT=$(run_zowe files delete ds "$TEST_FRAME" -f) || RC=$?
 assert_rc 0 "$RC" "cleanup: delete the framing dataset"
 
+# --- ETag / optimistic locking (issue #152) ---
+echo ""
+echo "--- ETag: optimistic locking (issue #152) ---"
+
+# The z/OSMF SDK carries the ETag through (returnEtag / etag on the upload and
+# download options), but the CLI exposes no flag for either: there is no way to
+# ask `zowe files download` for an ETag or to hand one to `zowe files upload`.
+# So this suite cannot reach the feature at all, and the coverage lives in
+# tests/curl-datasets.sh instead. Recorded as a skip rather than left out, so
+# the gap stays visible if a later CLI version does expose it.
+skip "etag: X-IBM-Return-Etag / If-Match (no Zowe CLI flag — see curl-datasets.sh)"
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

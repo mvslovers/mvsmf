@@ -26,6 +26,13 @@
  * The contract every caller depends on: **a non-zero return means the output
  * is unusable and the caller must fall back.** Returning 0 with an empty host
  * name would be worse than failing, because it looks like success.
+ *
+ * One input still breaks that contract: an IPv6 literal. `[::1]:8080` has its
+ * first colon at offset 1, so the name comes back as "[" and the return is 0.
+ * MVS 3.8j has no IPv6 stack, so nothing on the target can dial one -- but a
+ * reverse proxy could forward such a header, and this code already
+ * accommodates proxies through X-Forwarded-*. Splitting on the last colon
+ * outside brackets would fix it; nobody has needed it yet.
  */
 
 /**

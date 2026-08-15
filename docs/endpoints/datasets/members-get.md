@@ -83,9 +83,12 @@ semantic of a PUT, which this endpoint does not implement.)
 
 Two consequences worth knowing:
 
-- **The 304 always carries the `ETag`**, even without `X-IBM-Return-Etag: true`.
-  That is not a hole in the opt-in: a client sending `If-None-Match` is already
-  speaking the protocol, and the stamp had to be computed to answer at all.
+- **A request carrying `If-None-Match` gets the `ETag` back either way** —
+  on the 304 and on the 200 that follows a change — without
+  `X-IBM-Return-Etag: true`. That is not a hole in the opt-in: the stamp had to
+  be computed to answer at all, and a reader polling on `If-None-Match` alone
+  would otherwise receive the changed content with no validator to ask about the
+  next change.
 - **A 304 saves the transfer, not the read.** The stamp is computed by reading
   the member, so the server does the same I/O either way. A cheaper freshness
   check would need a modification time, and MVS keeps one per data set, not per

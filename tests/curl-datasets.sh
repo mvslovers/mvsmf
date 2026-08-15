@@ -1832,7 +1832,8 @@ for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
 		"cond: If-None-Match ${FORM} is 304"
 done
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_c3.body -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' \
+	-D /tmp/curl_ds_c3.txt -o /tmp/curl_ds_c3.body -u "$AUTH" \
 	-H "If-None-Match: 0000000000000000" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "200" "$HTTP_CODE" "cond: a stale If-None-Match is 200"
@@ -1841,6 +1842,16 @@ if [ -s /tmp/curl_ds_c3.body ]; then
 	pass "cond: the 200 still carries the content"
 else
 	fail "cond: the 200 still carries the content" "empty body"
+fi
+
+# The miss carries the stamp as well, without X-IBM-Return-Etag being sent.
+# A reader polling on If-None-Match alone would otherwise receive the changed
+# content and no validator to ask about the next change with.
+if [ "$(get_etag /tmp/curl_ds_c3.txt)" = "$CETAG" ]; then
+	pass "cond: the 200 carries the current ETag too"
+else
+	fail "cond: the 200 carries the current ETag too" \
+		"got '$(get_etag /tmp/curl_ds_c3.txt)', expected '$CETAG'"
 fi
 
 # 304 has to be a statement about the current content, not about the header
@@ -1852,10 +1863,20 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "204" "$HTTP_CODE" "cond: rewrite the member"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
-	-H "If-None-Match: ${CETAG}" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_c7.txt -o /dev/null \
+	-u "$AUTH" -H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "200" "$HTTP_CODE" "cond: a changed member is 200 again"
+
+# ... and the stamp it hands back is the new one, which is what lets the poll
+# continue from here without a second request.
+CETAGNEW=$(get_etag /tmp/curl_ds_c7.txt)
+if [ -n "$CETAGNEW" ] && [ "$CETAGNEW" != "$CETAG" ]; then
+	pass "cond: the 200 after a change carries the new stamp ($CETAGNEW)"
+else
+	fail "cond: the 200 after a change carries the new stamp" \
+		"got '$CETAGNEW', was '$CETAG'"
+fi
 
 # Nothing to be fresh about: the 404 is the more specific answer and wins.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
@@ -1916,8 +1937,8 @@ rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_h4.txt /tmp/curl_ds_h5.txt /tmp/curl_ds_h6.txt \
 	/tmp/curl_ds_h7.txt /tmp/curl_ds_h8.txt /tmp/curl_ds_h9.txt \
 	/tmp/curl_ds_c1.txt /tmp/curl_ds_c2.txt /tmp/curl_ds_c2.body \
-	/tmp/curl_ds_c3.body /tmp/curl_ds_c4.txt /tmp/curl_ds_c5.txt \
-	/tmp/curl_ds_c6.body
+	/tmp/curl_ds_c3.txt /tmp/curl_ds_c3.body /tmp/curl_ds_c4.txt \
+	/tmp/curl_ds_c5.txt /tmp/curl_ds_c6.body /tmp/curl_ds_c7.txt
 
 # --- Cleanup: delete PDS ---
 echo ""

@@ -1319,9 +1319,12 @@ int datasetGetHandler(Session *session)
             if (if_none_match && etag_matches(if_none_match, etag)) {
                 return send_not_modified(session, etag);
             }
-            if (want_etag) {
-                etag_hdr = etag;
-            }
+            /* Either header means the client wants the validator, and this
+               branch is only reached when one of them was sent -- so the
+               stamp goes out on the miss too. Without it a reader polling on
+               If-None-Match alone would get the changed content and no way to
+               ask about the next change. */
+            etag_hdr = etag;
         }
     }
 
@@ -2190,9 +2193,9 @@ int memberGetHandler(Session *session)
             if (if_none_match && etag_matches(if_none_match, etag)) {
                 return send_not_modified(session, etag);
             }
-            if (want_etag) {
-                etag_hdr = etag;
-            }
+            /* See datasetGetHandler: the stamp goes out on the miss as well,
+               so a client polling on If-None-Match alone can carry on. */
+            etag_hdr = etag;
         }
     }
 

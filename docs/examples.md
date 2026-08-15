@@ -191,9 +191,10 @@ curl -s -o local.txt -w '%{http_code}\n' -u $USER:$PASS \
   "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS(TESTMBR)"
 ```
 
-`*` matches any member that exists, so it answers 304 rather than 200. The 304
-carries the `ETag` even without `X-IBM-Return-Etag`. What it saves is the
-transfer, not the read: the stamp is computed by reading the member either way.
+`*` matches any member that exists, so it answers 304 rather than 200. Both
+answers carry the `ETag` even without `X-IBM-Return-Etag`, so a poll can keep
+running off its own responses. What it saves is the transfer, not the read: the
+stamp is computed by reading the member either way.
 Details in
 [endpoints/datasets/members-get.md](endpoints/datasets/members-get.md#conditional-reads-if-none-match).
 

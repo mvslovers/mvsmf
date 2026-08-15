@@ -33,6 +33,13 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 - HTTP 500 (Internal Server Error)
     - Dataset not found or cannot be opened for writing
     - I/O error during write
+    - The dataset ran out of space mid-upload. The write abends, the router's
+      recovery closes and frees the DD, and the message names the abend:
+      `Internal server error (abend SB37: out of space on the volume)`,
+      `SD37: primary extent full, no secondary allocation` or
+      `SE37: extent limit reached` (issue #256). Any other handler abend
+      carries its code the same way, e.g. `(abend S0C4)`. The dataset is left
+      as the abend left it — the upload is not retried.
 
 ## Text mode framing
 - A record ends at LF, CR or CRLF. The terminator is not part of the record.

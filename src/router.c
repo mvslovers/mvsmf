@@ -6,6 +6,7 @@
 #include "router.h"
 #include "common.h"
 #include "httpcgi.h"
+#include "abendmsg.h"
 
 
 #define INITIAL_BUFFER_SIZE 4096
@@ -148,12 +149,17 @@ int handle_request(Router *router, Session *session)
         unsigned abend = tryrc();
         unsigned sys = (abend >> 12) & 0xFFF;
         unsigned usr = abend & 0xFFF;
+        // on the stack, not static: MVSMF is RENT, and this runs in the
+        // recovery path where a second abend would be unrecoverable
+        char msg[ABEND_MSG_SIZE];
         wtof("MVSMF99E Handler abend S%03X U%04d for %s %s",
              sys, usr, method, path);
         session_cleanup(session);
         if (!session->headers_sent) {
-            sendErrorResponse(session, 500, 6, 8, 99,
-                "Internal server error (abend recovery)", NULL, 0);
+            // the abend code is all the caller gets -- the console message
+            // stays behind on the system (#256)
+            abend_message(msg, sizeof(msg), sys, usr);
+            sendErrorResponse(session, 500, 6, 8, 99, msg, NULL, 0);
         } else {
             wtof("MVSMF99W Headers already sent, cannot send error response");
         }

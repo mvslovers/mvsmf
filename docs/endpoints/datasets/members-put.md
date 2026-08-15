@@ -35,6 +35,12 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 - HTTP 500 (Internal Server Error)
     - The dataset exists but cannot be opened for writing (I/O error)
     - I/O error during write
+    - The library ran out of space or directory blocks mid-upload. The write
+      abends, the router's recovery closes and frees the DD, and the message
+      names the abend: `Internal server error (abend SB37: out of space on the
+      volume)`, `SD37: primary extent full, no secondary allocation` or
+      `SE37: extent limit reached` (issue #256). Any other handler abend
+      carries its code the same way, e.g. `(abend S0C4)`.
 
 Only a missing *dataset* is an error here. A member that does not exist yet is
 what a create looks like, and it is written normally.

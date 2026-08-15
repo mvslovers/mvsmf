@@ -48,6 +48,12 @@ own connection, so the public scheme and port can only come from the proxy's
 `SERVER_PORT` is deliberately not consulted: it is the HTTPD's listen port, not the port
 the client dialled.
 
+`zosmf_hostname` follows the same rule and falls back to `127.0.0.1` when the header
+carries no usable name — including the cases that have a colon but nothing in front of
+it, `Host: :8080` and `Host: :::garbage:::`. Those used to be reported as an empty
+string (issue #260). The two halves fall back independently: `Host: :8080` still yields
+port `8080`.
+
 ## Error Responses
 
 None. A `Host` header that cannot be parsed falls back to the defaults above and the

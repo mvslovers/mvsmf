@@ -1,9 +1,10 @@
 /* ETAG.C
-** ETag computation and If-Match parsing for the data set API (issue #152).
+** ETag computation and If-Match parsing for the data set API (issue #152)
+** and the USS file API (issue #264).
 **
 ** See include/etag.h for what an ETag is for and why it is computed over the
-** raw record stream. This file is deliberately free of MVS services and of
-** the FILE control block, so it builds and unit-tests on the host as well
+** stored bytes. This file is deliberately free of MVS services and of the
+** FILE control block, so it builds and unit-tests on the host as well
 ** (test/host/tstetag.c).
 */
 
@@ -84,6 +85,32 @@ etag_update(ETAGCTX *ctx, const void *buf, size_t len)
 	crc = etag_byte(crc, (unsigned char) ((n >> 8) & 0xFF));
 	crc = etag_byte(crc, (unsigned char) (n & 0xFF));
 
+	for (i = 0; i < len; i++) {
+		crc = etag_byte(crc, p[i]);
+	}
+
+	ctx->crc = crc;
+	ctx->len += (unsigned int) len;
+}
+
+void
+etag_update_raw(ETAGCTX *ctx, const void *buf, size_t len)
+{
+	const unsigned char	*p = (const unsigned char *) buf;
+	unsigned int		 crc;
+	size_t			 i;
+
+	if (!ctx || !buf) {
+		return;
+	}
+
+	crc = ctx->crc;
+
+	/* No length fold, deliberately -- see etag.h. A byte stream has no
+	   record boundaries to preserve, and folding the length of each chunk
+	   would make the stamp depend on how the reader happened to split the
+	   file rather than on its content. The total still reaches the value
+	   through ctx->len in etag_final(). */
 	for (i = 0; i < len; i++) {
 		crc = etag_byte(crc, p[i]);
 	}

@@ -20,6 +20,7 @@
 #include "jclines.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
+#include "mvsmfmsg.h"
 #include "json.h"
 #include "router.h"
 
@@ -139,7 +140,7 @@ jobListHandler(Session *session)
 
 	jes = jesopen();
 	if (!jes) {
-		wtof(MSG_JOB_JES_ERROR);
+		wtof(MSG_JES_UNAVAILABLE);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM,
 						RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
 						ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
@@ -421,7 +422,7 @@ jobPurgeHandler(Session *session)
 							NULL, 0);
 		break;
 	default:
-		wtof("MVSMF42D JESCANJ got RC(%d)", rc);
+		wtof(MSG_JESCANJ_RC, rc);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,
 							RC_SEVERE, REASON_SERVER_ERROR, ERR_MSG_SERVER_ERROR,
 							NULL, 0);
@@ -464,7 +465,7 @@ int jobSubmitHandler(Session *session)
 	/* open internal reader */
 	rc = jesiropn(&intrdr);
 	if (rc < 0) {
-		wtof("MVSMF22E Unable to open JES internal reader");
+		wtof(MSG_INTRDR_OPEN);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_SERVICE,
 						RC_SEVERE, REASON_SERVER_ERROR,
 						"Failed to open internal reader", NULL, 0);
@@ -691,7 +692,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 
 	JES *jes = jesopen();
 	if (!jes) {
-		wtof(MSG_JOB_JES_ERROR);
+		wtof(MSG_JES_UNAVAILABLE);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 						CATEGORY_SERVICE, RC_SEVERE, REASON_INCORRECT_JES_VSAM_HANDLE,
 						ERR_MSG_INCORRECT_JES_VSAM_HANDLE, NULL, 0);
@@ -777,7 +778,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	   a purged dataset that a client polls would flood the log. */
 	if (ctx.total) {
 		if (bad_why) {
-			wtof(MSG_JOB_SPOOL_WALK, (char *) job->jobname,
+			wtof(MSG_SPOOL_WALK, (char *) job->jobname,
 				(char *) job->jobid, bad_dsid, bad_why);
 		}
 		rc = 0;
@@ -1040,7 +1041,6 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	rc = snprintf(files_url_str, sizeof(files_url_str), "%s/files", url_str);
 
 	if (rc < 0) {
-		wtof("MVSMF19E internal error");
 		return -1;
 	}
 
@@ -1126,13 +1126,12 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 	}
 
 	if (!jobname || !jobid) {
-		wtof("MVSMF22E Invalid parameters for find_job_by_name_and_id");
 		goto quit;
 	}
 
 	JES *jes = jesopen();
 	if (!jes) {
-		wtof(MSG_JOB_JES_ERROR);
+		wtof(MSG_JES_UNAVAILABLE);
 		goto quit;
 	}
 
@@ -1156,7 +1155,6 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 		job_found++;
 		if (job_found > 1) {
 			// TODO (mig): create a new error message in jobsapi_msg.h
-			wtof("MVSMF22E More than one job found for reference: '%s(%s)'", jobname, jobid);
 			goto quit;
 		}
 
@@ -1291,19 +1289,16 @@ int validate_intrdr_headers(Session *session)
 {
     const char *intrdr_mode = getHeaderParam(session, "X-IBM-Intrdr-Mode");
     if (intrdr_mode != NULL && strcmp(intrdr_mode, "TEXT") != 0) {
-        wtof("MVSMF22E Invalid intrdr_mode - must be TEXT");
         return -1;
     }
 
     const char *intrdr_lrecl = getHeaderParam(session, "X-IBM-Intrdr-Lrecl");
     if (intrdr_lrecl != NULL && strcmp(intrdr_lrecl, "80") != 0) {
-        wtof("MVSMF22E Invalid intrdr_lrecl - must be 80");
         return -1;
     }
 
     const char *intrdr_recfm = getHeaderParam(session, "X-IBM-Intrdr-Recfm");
     if (intrdr_recfm != NULL && strcmp(intrdr_recfm, "F") != 0) {
-        wtof("MVSMF22E Invalid intrdr_recfm - must be F");
         return -1;
     }
 
@@ -1515,7 +1510,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 			if (lines[ii][0] != '\0') {
 				rc = jesirput(intrdr, lines[ii]);
 				if (rc < 0) {
-					wtof("MVSMF22E Failed to write to internal reader");
+					wtof(MSG_INTRDR_WRITE);
 					sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 									CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
 									ERR_MSG_SERVER_ERROR, NULL, 0);
@@ -1528,7 +1523,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	/* close internal reader and retrieve jobid */
 	rc = jesircls(intrdr);
 	if (rc < 0) {
-		wtof("MVSMF22E Failed to close internal reader");
+		wtof(MSG_INTRDR_CLOSE);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
 						ERR_MSG_SERVER_ERROR, NULL, 0);
@@ -1538,7 +1533,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
 	jobid[JOBID_STR_SIZE] = '\0';
 
-	wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
+	wtof(MSG_JOB_SUBMITTED, jobname, jobid);
 	rc = 0;
 
 	intrdr = NULL;
@@ -1870,32 +1865,27 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     int notify_replaced = 0;
 
     if (!lines || num_lines <= 0 || !jobname || !jobclass || !user) {
-        wtof("MVSMF22E Invalid parameters for process_jobcard");
         return rc;
     }
 
     if (!password) {
-        wtof("MVSMF22E Password is required for user %s", user);
         return rc;
     }
 
     // Find the job card range
     find_job_card_range(lines, num_lines, &start_idx, &end_idx);
     if (start_idx < 0 || end_idx < 0) {
-        wtof("MVSMF22E No valid JOB card found");
         return rc;
     }
 
     // Extract jobname from first line (columns 3-10)
     const char *first_line = lines[start_idx];
     if (!first_line) {
-        wtof("MVSMF22E First line is NULL");
         return rc;
     }
 
     size_t first_line_len = strlen(first_line);
     if (first_line_len < 3) {
-        wtof("MVSMF22E First line too short");
         return rc;
     }
 
@@ -1914,7 +1904,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     // Process job card lines in-place: replace NOTIFY=&SYSUID
     for (ii = start_idx; ii <= end_idx; ii++) {
         if (!lines[ii]) {
-            wtof("MVSMF22E NULL line at index %d", ii);
             return -1;
         }
 
@@ -1961,7 +1950,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                             if (*real_end) {
                                 rc = snprintf(after, sizeof(after), ",%s", real_end);
                                 if (rc < 0 || rc >= sizeof(after)) {
-                                    wtof("MVSMF21E Buffer overflow in snprintf");
                                     return -1;
                                 }
                             }
@@ -1984,7 +1972,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                         rc = snprintf(lines[ii], 72, "%sNOTIFY=%s%s",
                                     before, user, after);
                         if (rc < 0 || rc >= 72) {
-                            wtof("MVSMF22E Buffer overflow in snprintf");
                             return -1;
                         }
                         lines[ii][80] = '\0';
@@ -2002,7 +1989,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
             }
             if (len > 0 && lines[ii][len-1] != ',') {
                 if (len >= 70) {
-                    wtof("MVSMF22E No space for comma at end of job card");
                     return -1;
                 }
                 lines[ii][len++] = ',';
@@ -2026,7 +2012,6 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     rc = snprintf(lines[end_idx + 1], 72,
                   "//         USER=%s,PASSWORD=%s   GENERATED BY MVSMF", user, password);
     if (rc < 0 || rc >= 72) {
-        wtof("MVSMF23E Buffer overflow in job card USER/PASSWORD line");
         return -1;
     }
 
@@ -2054,7 +2039,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
      * even if content contains embedded nulls */
     ebcdic_content = (char *)malloc(content_length + 1);
     if (!ebcdic_content) {
-        wtof("MVSMF22E Memory allocation failed for EBCDIC conversion");
+        wtof(MSG_STORAGE_FAILED, ALLOC_JCL_TEXT);
         rc = -1;
         goto quit;
     }
@@ -2067,7 +2052,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     lines = (char **)calloc(capacity, sizeof(char *));
     lines_buf = (char *)calloc(capacity, 81);
     if (!lines || !lines_buf) {
-        wtof("MVSMF22E Memory allocation failed for lines array");
+        wtof(MSG_STORAGE_FAILED, ALLOC_JCL_LINES);
         rc = -1;
         goto quit;
     }
@@ -2089,7 +2074,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         if (num_lines >= capacity) {
             if (grow_lines_arrays(&lines, &lines_buf, &capacity,
                                   num_lines + 1) < 0) {
-                wtof("MVSMF22E Memory allocation failed growing lines array");
+                wtof(MSG_STORAGE_FAILED, ALLOC_JCL_LINES);
                 rc = -1;
                 goto quit;
             }
@@ -2112,7 +2097,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 
     /* ensure room for the extra line added by process_jobcard */
     if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 1) < 0) {
-        wtof("MVSMF22E Memory allocation failed growing lines array");
+        wtof(MSG_STORAGE_FAILED, ALLOC_JCL_LINES);
         rc = -1;
         goto quit;
     }
@@ -2123,7 +2108,6 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 
     if (get_caller_credentials(session, user, sizeof(user),
                                    password, sizeof(password)) < 0) {
-        wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,
                         "Job submission requires an authenticated session with a password", NULL, 0);
@@ -2134,7 +2118,6 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     memset(password, 0, sizeof(password));   /* scrub; it now lives on the card */
     if (rc < 0) {
-        wtof("MVSMF22E Failed to analyze job card");
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,
                         "No valid JOB card found in submitted JCL", NULL, 0);
@@ -2149,7 +2132,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         if (lines[submit_idx][0] != '\0') {  // Only submit non-empty lines
             rc = jesirput(intrdr, lines[submit_idx]);
             if (rc < 0) {
-                wtof("MVSMF22E Failed to write to internal reader");
+                wtof(MSG_INTRDR_WRITE);
                 goto quit;
             }
         }
@@ -2157,14 +2140,14 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 
     rc = jesircls(intrdr);
 	if (rc < 0) {
-        wtof("MVSMF22E Failed to close internal reader");
+        wtof(MSG_INTRDR_CLOSE);
         goto quit;
     }
 
     strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
     jobid[JOBID_STR_SIZE] = '\0';
 
-    wtof("MVSMF30I JOB %s(%s) SUBMITTED", jobname, jobid);
+    wtof(MSG_JOB_SUBMITTED, jobname, jobid);
     rc = 0;
 
 	intrdr = NULL; 
@@ -2172,7 +2155,6 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 quit:
 	// Close internal reader if it was still opened
 	if (intrdr)	 {
-		wtof("MVSMF22E Emergency closing of INTRDR");
 		jesircls(intrdr);
 	}
 

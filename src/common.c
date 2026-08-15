@@ -10,6 +10,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "json.h"
+#include "mvsmfmsg.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 
@@ -226,8 +227,7 @@ receive_raw_data(HTTPC *httpc, char *buf, int len)
 			if (errno == EINTR) continue;
 			if (errno == EWOULDBLOCK) {
 				if (++retries > RAW_RECV_MAX_RETRIES) {
-					wtof("MVSMF80E recv() EWOULDBLOCK timeout after %d retries",
-						retries);
+					wtof(MSG_RECV_TIMEOUT, retries);
 					return -1;
 				}
 				ecb = 0;
@@ -275,14 +275,13 @@ read_request_content(Session *session, char **content, size_t *content_size)
 	}
 
 	if (!is_chunked && !has_content_length) {
-		wtof("MVSMF22E Missing Content-Length or Transfer-Encoding header");
 		return -1;
 	}
 
 	// Allocate initial buffer
 	*content = malloc(INITIAL_BUFFER_SIZE);
 	if (!*content) {
-		wtof("MVSMF22E Memory allocation failed for content buffer");
+		wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
 		return -1;
 	}
 	buffer_size = INITIAL_BUFFER_SIZE;
@@ -334,7 +333,7 @@ read_request_content(Session *session, char **content, size_t *content_size)
 					char *new_buf = realloc(*content,
 						*content_size + chunk_size + 1);
 					if (!new_buf) {
-						wtof("MVSMF22E Memory reallocation failed");
+						wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
 						free(*content);
 						*content = NULL;
 						return -1;
@@ -379,7 +378,7 @@ read_request_content(Session *session, char **content, size_t *content_size)
 			if (*content_size + sizeof(recv_buffer) > buffer_size) {
 				char *new_buf = realloc(*content, buffer_size * 2);
 				if (!new_buf) {
-					wtof("MVSMF22E Memory reallocation failed");
+					wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
 					free(*content);
 					*content = NULL;
 					return -1;
@@ -404,7 +403,7 @@ read_request_content(Session *session, char **content, size_t *content_size)
 	if (*content_size + 1 > buffer_size) {
 		char *new_buf = realloc(*content, *content_size + 1);
 		if (!new_buf) {
-			wtof("MVSMF22E Memory reallocation failed");
+			wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
 			free(*content);
 			*content = NULL;
 			return -1;

@@ -7,6 +7,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "abendmsg.h"
+#include "mvsmfmsg.h"
 
 
 #define INITIAL_BUFFER_SIZE 4096
@@ -61,12 +62,12 @@ void init_session(Session *session, Router *router, HTTPD *httpd, HTTPC *httpc)
 void add_route(Router *router, HttpMethod method, const char *pattern, RouteHandler handler) 
 {
     if (router->route_count >= MAX_ROUTES) {
-        wtof("MAX_ROUTES limit reached.");
+        wtof(MSG_ROUTES_FULL, MAX_ROUTES);
         return;
     }
 
     if (!pattern || !handler) {
-        wtof("Invalid route parameters");
+        wtof(MSG_ROUTE_INVALID);
         return;
     }
 
@@ -80,7 +81,7 @@ void add_route(Router *router, HttpMethod method, const char *pattern, RouteHand
 void add_middleware(Router *router, const char *middleware_name, MiddlewareHandler handler)
 {
     if (router->middleware_count >= MAX_MIDDLEWARES) {
-        wtof("MVSMF12E MAX_MIDDLEWARES limit reached.");
+        wtof(MSG_MIDDLEWARES_FULL, MAX_MIDDLEWARES);
         return;
     }
 
@@ -92,7 +93,7 @@ void add_middleware(Router *router, const char *middleware_name, MiddlewareHandl
 int handle_request(Router *router, Session *session) 
 {
     if (router == NULL || session == NULL) {
-        wtof("Invalid Router or Session pointer");
+        wtof(MSG_ROUTER_NULL);
         return -1;
     } 
 
@@ -129,7 +130,6 @@ int handle_request(Router *router, Session *session)
     Route *route = find_route(router, reqMethod, path);
 
     if (route == NULL) {
-        wtof("MVSMF01W No route for %s %s", method, path);
         sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);
         return -1;
     }
@@ -152,8 +152,7 @@ int handle_request(Router *router, Session *session)
         // on the stack, not static: MVSMF is RENT, and this runs in the
         // recovery path where a second abend would be unrecoverable
         char msg[ABEND_MSG_SIZE];
-        wtof("MVSMF99E Handler abend S%03X U%04d for %s %s",
-             sys, usr, method, path);
+        wtof(MSG_HANDLER_ABEND, sys, usr, method, path);
         session_cleanup(session);
         if (!session->headers_sent) {
             // the abend code is all the caller gets -- the console message
@@ -161,7 +160,7 @@ int handle_request(Router *router, Session *session)
             abend_message(msg, sizeof(msg), sys, usr);
             sendErrorResponse(session, 500, 6, 8, 99, msg, NULL, 0);
         } else {
-            wtof("MVSMF99W Headers already sent, cannot send error response");
+            wtof(MSG_HEADERS_SENT);
         }
         return -1;
     }
@@ -186,7 +185,7 @@ int session_register_file(Session *session, FILE *fp)
 {
     if (!session || !fp) return -1;
     if (session->open_file_count >= MAX_SESSION_FILES) {
-        wtof("MVSMF98W session file tracking full, cannot register");
+        wtof(MSG_FILES_FULL);
         return -1;
     }
     session->open_files[session->open_file_count++] = fp;
@@ -243,10 +242,9 @@ void session_cleanup(Session *session)
     for (i = 0; i < session->open_file_count; i++) {
         FILE *fp = session->open_files[i];
         if (fp) {
-            wtof("MVSMF99I Recovery: closing %s (DD:%s)",
-                 fp->dataset, fp->ddname);
+            wtof(MSG_RECOVERY_CLOSE, fp->dataset, fp->ddname);
             if (try(safe_fclose_thunk, fp) != 0) {
-                wtof("MVSMF99W Recovery: fclose abended for slot %d", i);
+                wtof(MSG_RECOVERY_ABEND, i);
             }
             session->open_files[i] = NULL;
         }
@@ -309,8 +307,6 @@ __asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 
 int route_matching_middleware(Session *sessionr) 
 {
-    // wtof("MVSMF42D TODO: MATCHING ROUTES");
-
     // Hier kommt die eigentliche RouteMatching-Logik
 
     return 0;
@@ -320,8 +316,6 @@ __asm__("\n&FUNC	SETC 'path_vars_extracting_middleware'");
 static 
 int path_vars_extracting_middleware(Session *session) 
 {
-    // wtof("MVSMF42D TODO: EXTRACTING PATH VARS");
-
     // Hier kommt die eigentliche PathVars-Logik
 
     return 0;

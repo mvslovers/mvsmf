@@ -45,7 +45,7 @@ else's key. Every running job reads that way — measured on the target, HTTPD's
 stopped on a foreign block after 350 correctly read lines.
 
 Once the first record has been written to the socket the response is committed to 200. A walk
-that goes wrong after that is reported to the operator as `MVSMF10W`, not turned into an error
+that goes wrong after that is reported to the operator as `MVSMF202W`, not turned into an error
 body — the records already sent are valid.
 
 ## Error Responses

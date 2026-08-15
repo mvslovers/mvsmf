@@ -9,6 +9,7 @@
 
 #include "common.h"
 #include "logmw.h"
+#include "mvsmfmsg.h"
 #include "dsapi.h"
 #include "httpcgi.h"
 #include "infoapi.h"
@@ -72,10 +73,10 @@ int main(int argc, char **argv)
 	Session session = {.router = &router, .httpd = httpd, .httpc = httpc};
 
 	if (!httpd) {
-		wtof("This program %s must be called by the HTTPD web server%s", argv[0], "");
+		wtof(MSG_NOT_UNDER_HTTPD, argv[0]);
 
 		/* TSO callers might not see a WTO message, so we send a STDOUT message too */
-		printf("This program %s must be called by the HTTPD web server%s", argv[0], "\n");
+		printf("This program %s must be called by the HTTPD web server\n", argv[0]);
 
 		return 12;
 	}

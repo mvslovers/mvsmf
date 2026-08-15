@@ -14,6 +14,7 @@
 #include "dsapi_err.h"
 #include "mvsmfmsg.h"
 #include "common.h"
+#include "etag.h"
 #include "httpcgi.h"
 #include "reclines.h"
 
@@ -42,9 +43,15 @@
 
 // Forward declarations
 static int handle_error(Session *session, int error_code, const char* message);
-static int send_standard_headers(Session *session, const char* content_type);
+static int send_standard_headers(Session *session, const char* content_type,
+                                 const char *etag);
 static int process_rename(Session *session, const char *target_dsn,
                           const char *target_member);
+static long get_fb_record_count(const char *dsname);
+static int dataset_etag(Session *session, const char *dataset,
+                        long max_records, char *out, size_t outlen);
+static int check_if_match(Session *session, const char *dataset,
+                          long max_records);
 
 // Helper functions for memory management
 static void cleanup_resources(char* buffer, FILE* fp) {
@@ -72,7 +79,13 @@ static char* allocate_buffer(FILE* fp, int* rc) {
 }
 
 // Helper function for HTTP headers
-static int send_standard_headers(Session *session, const char* content_type) {
+//
+// etag is NULL unless the client asked for one with X-IBM-Return-Etag. The
+// value goes out unquoted, the way z/OSMF emits it -- Zowe and the Desktop
+// echo whatever they receive straight back into If-Match, and etag_matches()
+// accepts either form on the way in.
+static int send_standard_headers(Session *session, const char* content_type,
+                                 const char *etag) {
     int rc = 0;
 
     session->headers_sent = 1;
@@ -81,8 +94,17 @@ static int send_standard_headers(Session *session, const char* content_type) {
     if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) return rc;
     if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) return rc;
     if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
+    if (etag) {
+        if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
+        /* ETag is not a CORS-safelisted response header: without this a
+           cross-origin client gets null from headers.get("ETag") and cannot
+           tell that apart from a server that has no ETag support at all.
+           Same-origin (httpd serving the Desktop) does not need it. */
+        if ((rc = http_printf(session->httpc,
+                "Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
+    }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
-    
+
     return rc;
 }
 
@@ -157,7 +179,7 @@ get_fb_record_count(const char *dsname)
 __asm__("\n&FUNC    SETC 'read_and_send_ds'");
 static int
 read_and_send_dataset(Session *session, FILE *fp, int data_type,
-	long max_records)
+	long max_records, const char *etag)
 {
 	int rc = 0;
 	char *buffer = NULL;
@@ -176,7 +198,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		content_type = "application/octet-stream";
 	}
 
-	rc = send_standard_headers(session, content_type);
+	rc = send_standard_headers(session, content_type, etag);
 	if (rc < 0) {
 		free(buffer);
 		return rc;
@@ -245,6 +267,117 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 
 	free(buffer);
 	return rc;
+}
+
+/* Compute the ETag of a data set or PDS member (issue #152).
+ *
+ * One extra read pass, opened and closed here. Every caller goes through this
+ * function -- the GET before it sends its headers, the PUT before it opens
+ * for output, and the PUT again after the member is closed -- so there is one
+ * definition of the stamp and no way for the read side and the write side to
+ * drift apart.
+ *
+ * Two properties this depends on, both load-bearing:
+ *
+ *   - It never runs while the same data set is open elsewhere in the handler.
+ *     Open-hash-close, then open for the body.
+ *
+ *   - max_records must be whatever read_and_send_dataset() would be given for
+ *     the same data set. For a sequential FB data set fread() runs past the
+ *     logical end into the residue of the last block, which is why the caller
+ *     passes get_fb_record_count(); hashing that residue would not be wrong
+ *     as such, but it would make the stamp depend on something the client
+ *     never sees. Members have a real EOF and pass -1.
+ *
+ * Returns 0 with out filled, or -1 if the resource cannot be read -- which
+ * for the caller is indistinguishable from "does not exist", and is treated
+ * as such.
+ */
+__asm__("\n&FUNC    SETC 'dataset_etag'");
+static int
+dataset_etag(Session *session, const char *dataset, long max_records,
+	char *out, size_t outlen)
+{
+	ETAGCTX	 ctx;
+	FILE	*fp = NULL;
+	char	*buffer = NULL;
+	size_t	 eff_lrecl;
+	size_t	 n;
+	long	 count = 0;
+	int	 is_undefined;
+
+	fp = fopen(dataset, "rb");
+	if (!fp) {
+		return -1;
+	}
+	session_register_file(session, fp);
+
+	/* Same sizing as the write path: for RECFM=U there is no lrecl. */
+	is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
+	eff_lrecl = is_undefined ? (size_t) fp->blksize : (size_t) fp->lrecl;
+	if (eff_lrecl == 0) {
+		session_fclose(session, fp);
+		return -1;
+	}
+
+	buffer = calloc(1, eff_lrecl);
+	if (!buffer) {
+		session_fclose(session, fp);
+		return -1;
+	}
+
+	etag_init(&ctx);
+	while ((n = fread(buffer, 1, eff_lrecl, fp)) > 0) {
+		if (max_records >= 0 && count >= max_records) break;
+		etag_update(&ctx, buffer, n);
+		count++;
+	}
+
+	free(buffer);
+	session_fclose(session, fp);
+
+	return etag_final(&ctx, out, outlen);
+}
+
+/* Enforce an If-Match precondition before a write (issue #152).
+ *
+ * Returns 0 when the write may proceed -- either no If-Match was sent, or it
+ * still matches. Returns -1 when a 412 has already been sent, in which case
+ * the caller must return without writing anything.
+ *
+ * A resource that cannot be read fails the precondition rather than falling
+ * through to the write: the client is asserting "the state I read is still
+ * there", and a member that has since been deleted is exactly the case that
+ * assertion exists to catch.
+ */
+__asm__("\n&FUNC    SETC 'check_if_match'");
+static int
+check_if_match(Session *session, const char *dataset, long max_records)
+{
+	const char	*if_match;
+	char		 current[ETAG_SIZE];
+
+	if_match = getHeaderParam(session, "If-Match");
+	if (!if_match) {
+		return 0;
+	}
+
+	if (dataset_etag(session, dataset, max_records,
+			current, sizeof(current)) < 0) {
+		sendErrorResponse(session, HTTP_STATUS_PRECONDITION_FAILED,
+			CATEGORY_SERVICE, RC_ERROR, REASON_ETAG_MISMATCH,
+			ERR_MSG_ETAG_MISMATCH, NULL, 0);
+		return -1;
+	}
+
+	if (!etag_matches(if_match, current)) {
+		sendErrorResponse(session, HTTP_STATUS_PRECONDITION_FAILED,
+			CATEGORY_SERVICE, RC_ERROR, REASON_ETAG_MISMATCH,
+			ERR_MSG_ETAG_MISMATCH, NULL, 0);
+		return -1;
+	}
+
+	return 0;
 }
 
 // Helper function for error handling
@@ -1074,6 +1207,8 @@ int datasetGetHandler(Session *session)
     const char *data_type_str = NULL;
     int data_type;
     long max_records = -1;
+    char etag[ETAG_SIZE] = {0};
+    const char *etag_hdr = NULL;
     FILE *fp = NULL;
 
     // Validate parameters
@@ -1094,6 +1229,16 @@ int datasetGetHandler(Session *session)
         (const UCHAR *) "HTTP_X-IBM-Data-Type");
     data_type = parse_data_type(data_type_str);
 
+    /* Hash pass first, before any DCB for the body is open. It always uses
+       the FB record count, even when the body will be read as text: the
+       stamp must not depend on the mode the client happens to read in. */
+    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+        if (dataset_etag(session, dsname, get_fb_record_count(dsname),
+                etag, sizeof(etag)) == 0) {
+            etag_hdr = etag;
+        }
+    }
+
     if (data_type == DATA_TYPE_TEXT) {
         fp = fopen(dsname, "r");
     } else {
@@ -1105,7 +1250,7 @@ int datasetGetHandler(Session *session)
     }
     session_register_file(session, fp);
 
-    rc = read_and_send_dataset(session, fp, data_type, max_records);
+    rc = read_and_send_dataset(session, fp, data_type, max_records, etag_hdr);
 
     session_fclose(session, fp);
     return rc;
@@ -1115,6 +1260,8 @@ int datasetPutHandler(Session *session)
 {
     int rc = 0;
     char *dsname = NULL;
+    char etag[ETAG_SIZE] = {0};
+    const char *etag_hdr = NULL;
     FILE *fp = NULL;
     const char *content_length_str = NULL;
     const char *transfer_encoding = NULL;
@@ -1197,6 +1344,11 @@ int datasetPutHandler(Session *session)
                 ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
         }
         fclose(chk);
+    }
+
+    /* If-Match, before the data set is opened for output (issue #152) */
+    if (check_if_match(session, dsname, get_fb_record_count(dsname)) < 0) {
+        return 0;
     }
 
     fp = fopen(dsname, mode_str);
@@ -1460,6 +1612,15 @@ int datasetPutHandler(Session *session)
     session_fclose(session, fp);
     fp = NULL;
 
+    /* ETag of the state just written -- see the member handler for why this
+       is a re-read and not a hash of the request body. */
+    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+        if (dataset_etag(session, dsname, get_fb_record_count(dsname),
+                etag, sizeof(etag)) == 0) {
+            etag_hdr = etag;
+        }
+    }
+
     /* Send response */
     session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, 204)) < 0) {
@@ -1468,6 +1629,11 @@ int datasetPutHandler(Session *session)
 
     if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
     if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
+    if (etag_hdr) {
+        if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto error;
+        if ((rc = http_printf(session->httpc,
+                "Access-Control-Expose-Headers: ETag\r\n")) < 0) goto error;
+    }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
 
     return rc;
@@ -1809,6 +1975,8 @@ int memberGetHandler(Session *session)
     const char *data_type_str = NULL;
     int data_type;
     char dataset[MAX_QUALIFIED_DSN] = {0};
+    char etag[ETAG_SIZE] = {0};
+    const char *etag_hdr = NULL;
     FILE *fp = NULL;
 
     // Validate parameters
@@ -1832,6 +2000,16 @@ int memberGetHandler(Session *session)
         (const UCHAR *) "HTTP_X-IBM-Data-Type");
     data_type = parse_data_type(data_type_str);
 
+    /* The ETag has to be known before the first response byte goes out, so
+       the hash pass runs before the member is opened for the body -- never
+       two DCBs on the same member at once. A member with no readable content
+       simply gets no ETag; the open below then produces the real diagnosis. */
+    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+        if (dataset_etag(session, dataset, -1, etag, sizeof(etag)) == 0) {
+            etag_hdr = etag;
+        }
+    }
+
     if (data_type == DATA_TYPE_TEXT) {
         fp = fopen(dataset, "r");
     } else {
@@ -1843,7 +2021,7 @@ int memberGetHandler(Session *session)
     session_register_file(session, fp);
 
     // PDS member: record count unknown, pass -1 (no limit)
-    rc = read_and_send_dataset(session, fp, data_type, -1);
+    rc = read_and_send_dataset(session, fp, data_type, -1, etag_hdr);
 
     session_fclose(session, fp);
     return rc;
@@ -1855,6 +2033,8 @@ int memberPutHandler(Session *session)
     char *dsname = NULL;
     char *member = NULL;
     char dataset[MAX_QUALIFIED_DSN] = {0};
+    char etag[ETAG_SIZE] = {0};
+    const char *etag_hdr = NULL;
     FILE *fp = NULL;
     const char *content_length_str = NULL;
     const char *transfer_encoding = NULL;
@@ -1939,6 +2119,13 @@ int memberPutHandler(Session *session)
         return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
             CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
             ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+    }
+
+    /* If-Match, before anything is opened for output (issue #152). A missing
+       data set is a 404 rather than a 412 -- it is the more specific answer,
+       and it is why this sits after the catalog check. */
+    if (check_if_match(session, dataset, -1) < 0) {
+        return 0;
     }
 
     fp = fopen(dataset, member_mode);
@@ -2199,6 +2386,18 @@ int memberPutHandler(Session *session)
     session_fclose(session, fp);
     fp = NULL;
 
+    /* ETag of the state that was just written, from a re-read of the closed
+       member -- never from the request body. The write normalizes (records
+       split at newlines, FB padded to LRECL) and the read normalizes back
+       (padding stripped, newline appended), so a stamp taken over the body
+       would not match what the next GET produces: every second save would
+       then fail its own If-Match. */
+    if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+        if (dataset_etag(session, dataset, -1, etag, sizeof(etag)) == 0) {
+            etag_hdr = etag;
+        }
+    }
+
     // Send response
     session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, 204)) < 0) {
@@ -2207,6 +2406,11 @@ int memberPutHandler(Session *session)
 
     if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
     if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
+    if (etag_hdr) {
+        if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto error;
+        if ((rc = http_printf(session->httpc,
+                "Access-Control-Expose-Headers: ETag\r\n")) < 0) goto error;
+    }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
 
     return rc;

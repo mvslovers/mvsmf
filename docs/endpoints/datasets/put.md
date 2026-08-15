@@ -22,6 +22,15 @@ or with explicit volume:
     - `text` (default): ASCII-to-EBCDIC conversion, records split at newlines
     - `binary`: Raw bytes written without conversion, split at LRECL boundaries
     - `record`: Each record preceded by 4-byte big-endian length prefix
+- `If-Match` (optional): An `ETag` from an earlier read; the write proceeds only
+  if the dataset still matches it.
+- `X-IBM-Return-Etag` (optional): `true` returns the `ETag` of the dataset as it
+  stands after the write.
+
+Both behave exactly as on the member endpoint, including the requirement to
+take the next `If-Match` from the PUT response rather than reusing the
+pre-save value — see
+[members-put.md](members-put.md#conditional-writes-optimistic-locking).
 
 ## Response
 On successful completion, this request returns HTTP status code 204 (No Content).
@@ -30,6 +39,9 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 - HTTP 400 (Bad Request)
     - Dataset is a PDS (use the member endpoint instead)
     - Missing Content-Length or Transfer-Encoding header
+- HTTP 412 (Precondition Failed)
+    - `If-Match` was supplied and the dataset no longer matches it (`reason` 10).
+      Nothing was written.
 - HTTP 500 (Internal Server Error)
     - Dataset not found or cannot be opened for writing
     - I/O error during write

@@ -23,6 +23,10 @@ or with explicit volume:
     - `text` (default): ASCII-to-EBCDIC conversion, records split at newlines
     - `binary`: Raw bytes written without conversion, split at LRECL boundaries
     - `record`: Each record preceded by 4-byte big-endian length prefix
+- `If-Match` (optional): An `ETag` from an earlier read. The write proceeds
+  only if the member still matches it (see **Conditional writes** below).
+- `X-IBM-Return-Etag` (optional): `true` returns the `ETag` of the member as
+  it stands after the write.
 
 ## Response
 On successful completion, this request returns HTTP status code 204 (No Content).
@@ -32,6 +36,10 @@ On successful completion, this request returns HTTP status code 204 (No Content)
     - Missing Content-Length or Transfer-Encoding header
 - HTTP 404 (Not Found)
     - Dataset not cataloged (`reason` 4)
+- HTTP 412 (Precondition Failed)
+    - `If-Match` was supplied and the member no longer matches it
+      (`reason` 10, `The resource was modified since the supplied ETag was
+      created`). Nothing was written.
 - HTTP 500 (Internal Server Error)
     - The dataset exists but cannot be opened for writing (I/O error)
     - I/O error during write
@@ -44,6 +52,37 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 Only a missing *dataset* is an error here. A member that does not exist yet is
 what a create looks like, and it is written normally.
+
+## Conditional writes (optimistic locking)
+
+Without `If-Match`, a PUT is last-write-wins: whoever saves last wins, and the
+edit that was overwritten is gone with no indication that it happened.
+
+`If-Match` closes that hole. Read the member with `X-IBM-Return-Etag: true`,
+keep the `ETag`, and send it back when saving. The handler re-reads the member
+and compares before opening anything for output:
+
+- Still matching → the write proceeds as normal, 204.
+- No longer matching → **412**, and nothing is written. The member on disk is
+  untouched, so the client can reload, re-apply its change and save again.
+
+Details that matter in practice:
+
+- **The check runs before the member is opened for output.** That is why a 412
+  leaves the previous content intact, unlike the "Record too long" case under
+  *Limitations*.
+- **Send `X-IBM-Return-Etag: true` on the PUT as well** if the client intends to
+  save more than once. The write normalizes what it stores (records split at
+  newlines, F/FB padded to LRECL) and the read normalizes back, so the stamp of
+  the stored member is generally *not* the stamp of the body that was sent. The
+  ETag in the PUT response is computed by re-reading the member afterwards and
+  is the one the next `If-Match` must carry. Reusing the pre-save stamp fails.
+- **Accepted forms**: bare (`If-Match: 7F3A…`), quoted (`"7F3A…"`), weak
+  (`W/"7F3A…"`), a comma-separated list of any of those, and `*`.
+- **`*` asserts only that the member exists.** On a member that does not, the
+  request fails 412 — that is the "someone deleted it while I was editing" case.
+- A **missing data set** is still 404, not 412: the more specific answer wins.
+- Without `If-Match` nothing changes; existing clients are unaffected.
 
 ## Text mode framing
 - A record ends at LF, CR or CRLF. The terminator is not part of the record.
@@ -87,6 +126,18 @@ curl -X PUT \
   -H "X-IBM-Data-Type: binary" \
   --data-binary @mypgm.bin \
   http://mvs:1080/zosmf/restfiles/ds/MIKE.LOAD.LIB\(MYPGM\)
+
+# Conditional write: read, edit, save only if nobody else did
+ETAG=$(curl -sD - -o myjob.jcl -H "X-IBM-Return-Etag: true" \
+  http://mvs:1080/zosmf/restfiles/ds/MIKE.TEST.JCL\(MYJOB\) \
+  | grep -i '^ETag:' | tr -d '\r' | sed 's/^[^ ]* //')
+
+curl -X PUT \
+  -H "If-Match: ${ETAG}" \
+  -H "X-IBM-Return-Etag: true" \
+  --data-binary @myjob.jcl \
+  http://mvs:1080/zosmf/restfiles/ds/MIKE.TEST.JCL\(MYJOB\)
+# -> 204 and a new ETag, or 412 if the member changed in the meantime
 ```
 
 ### Using Zowe CLI

@@ -21,6 +21,9 @@ or with explicit volume:
     - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
+- `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the dataset, for
+  use as `If-Match` on a later write. Identical in behaviour to the member
+  endpoint — see [members-get.md](members-get.md#etag).
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) with the dataset content.

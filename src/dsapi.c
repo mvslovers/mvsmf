@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <clibary.h>
 #include <clibwto.h>
 #include <cliblist.h>
@@ -934,6 +935,32 @@ dslist_cmp(const void *a, const void *b)
 	return strcmp((*pa)->dsn, (*pb)->dsn);
 }
 
+/* Does this entry belong to the page the client asked for?
+**
+** start= is inclusive: everything sorting before it belongs to a page the
+** client already has.  Unless the value did not fit -- then start_key is its
+** first 44 characters, no cataloged name can be the value itself, and strcmp()
+** puts a name equal to the prefix before it (the prefix ends in NUL, which
+** sorts below the character the value continues with).  Drop it too (#240).
+**
+** Both passes below ask this one question: the counting pass turns the answer
+** into the status code, the emit pass into the body.  A second copy of the rule
+** would let 206 and moreRows disagree on exactly the names #240 is about. */
+__asm__("\n&FUNC    SETC 'dslist_in_page'");
+static int
+dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,
+               int start_after)
+{
+	int cmp;
+
+	if (!ds) return 0;
+	if (!have_start) return 1;
+
+	cmp = strcmp(ds->dsn, start_key);
+
+	return !(cmp < 0 || (start_after && cmp == 0));
+}
+
 int datasetListHandler(Session *session)
 {
 	unsigned	rc		= 0;
@@ -943,6 +970,7 @@ int datasetListHandler(Session *session)
 	unsigned	maxitems	= 0;
 	unsigned	emitted		= 0;
 	unsigned	eligible	= 0;
+	int		truncated	= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
@@ -1097,11 +1125,31 @@ int datasetListHandler(Session *session)
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
 
+	/* Count the page before writing the status line.  A listing cut short by
+	** X-IBM-Max-Items answers 206 Partial content, and the status is the one
+	** part of the response that cannot be corrected once the header is out --
+	** moreRows below is decided by the same numbers, but it is decided last
+	** (#249).  Only the entries at or after start= are still fetchable, so
+	** they are what "more to come" counts.  The array is in storage and
+	** sorted already: this pass costs no I/O. */
+	if (dslist) {
+		count = array_count(&dslist);
+
+		for (i = 0; i < count; i++) {
+			if (dslist_in_page(dslist[i], start_key, have_start,
+					start_after)) {
+				eligible++;
+			}
+		}
+	}
+
+	truncated = (maxitems > 0 && eligible > maxitems);
+
 	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_resp(session->httpc, truncated ? 206 : 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
@@ -1110,30 +1158,15 @@ int datasetListHandler(Session *session)
 
 	if (!dslist) goto end;
 
-	count = array_count(&dslist);
-
 	for(i=0; i < count; i++) {
 		DSLIST *ds = dslist[i];
 
-		if (!ds) continue;
+		if (!dslist_in_page(ds, start_key, have_start, start_after)) continue;
 
-		/* start= is inclusive: everything sorting before it belongs to a
-		** page the client already has.  Unless the value did not fit --
-		** then start_key is its first 44 characters, no cataloged name
-		** can be the value itself, and strcmp() puts a name equal to the
-		** prefix before it (the prefix ends in NUL, which sorts below the
-		** character the value continues with).  Drop it too (#240). */
-		if (have_start) {
-			int cmp = strcmp(ds->dsn, start_key);
-
-			if (cmp < 0 || (start_after && cmp == 0)) continue;
-		}
-
-		/* keep counting past the page limit -- moreRows has to tell "page
-		** full" from "list exhausted", and only the entries at or after
-		** start= are still fetchable */
-		eligible++;
-		if (maxitems > 0 && emitted >= maxitems) continue;
+		/* the page is full and the counting pass already knows what is
+		** left behind it, so there is nothing to be gained from walking
+		** the rest of the array */
+		if (maxitems > 0 && emitted >= maxitems) break;
 
 		if (first) {
 			/* first time we're printing this '{' so no ',' needed */
@@ -1714,21 +1747,170 @@ json_escape_member(const unsigned char *raw, unsigned rawlen,
 	out[o] = '\0';
 }
 
+/* Walk a PDS directory once, applying start= and pattern to every entry.
+**
+** The walk stops as soon as `bound` matching members have been seen (bound 0
+** means no limit) and returns that count, so a caller can learn "the page is
+** full and at least one member is behind it" without reading the 23000 entries
+** of SYS1.SMPCDS to find out.  With `emit` set the matches are written as JSON
+** objects on the way past and the count is what was written.  Returns -1 if a
+** write failed.
+**
+** Both passes of memberListHandler() come through here.  The counting pass
+** decides the status code and the emit pass decides the body, so the rules the
+** two apply -- the blank trim of #154, the start= prefix of #240, pattern
+** before cap -- have to be one set of rules.  Kept as two copies they would
+** drift, and 206 and moreRows would then disagree about exactly the entries
+** those issues are about. */
+__asm__("\n&FUNC    SETC 'member_scan'");
+static int
+member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
+            const char *pattern_key, int have_pattern, unsigned bound, int emit)
+{
+	char		blk[PDS_DIR_BLKSIZE];
+	unsigned	seen		= 0;
+	unsigned	first		= 1;
+	int		skipping	= (start_key != NULL);
+	int		at_end		= 0;
+
+	while (!at_end) {
+		int	len;
+		int	used;
+		int	pos;
+
+		len = fread(blk, 1, sizeof(blk), fp);
+		if (len <= 0) break;
+
+		used = (int) *(unsigned short *) blk;
+
+		/* the block says how much of it is in use -- never take that at face
+		   value.  A short read or a damaged block would otherwise walk us off
+		   the end of blk[], the same class of defect as the MTT length in
+		   #176.  Clamp to what we actually read. */
+		if (used > len) used = len;
+
+		/* PDS_DIR_ENT_FIXED bytes must be present before the indicator byte
+		   at +11 can be read */
+		for (pos = 2; pos + PDS_DIR_ENT_FIXED <= used; ) {
+			int	size;
+			size_t	nlen;
+			char	member[MEMBER_ESC_SIZE];
+
+			if (memcmp(&blk[pos],
+			           "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF", 8) == 0) {
+				at_end = 1;
+				break;
+			}
+
+			size = PDS_DIR_ENT_FIXED
+			     + ((blk[pos + 11] & PDS_DIR_UDATA_MASK) * 2);
+
+			/* The directory holds the name blank padded to eight
+			   bytes; z/OSMF reports it without the padding, and a
+			   client that builds "dsn(member)" from what it was
+			   given otherwise asks for a member with a trailing
+			   blank in its name (#154).  The trimmed length serves
+			   the pattern match as well -- a name is what the
+			   client sees, so both have to agree on where it ends.
+			   A directory may hold arbitrary bytes rather than a
+			   name, and one of those ending in 0x40 is trimmed
+			   too; such an entry is \uXXXX escaped and no client
+			   can address it either way. */
+			nlen = MAX_MEMBER_NAME;
+			while (nlen > 0 && blk[pos + nlen - 1] == ' ') {
+				nlen--;
+			}
+
+			/* Skip up to the start member.  This has to happen before
+			   the cap below: otherwise the skipped entries eat the
+			   page budget and the response is an empty items array with
+			   moreRows true -- a different-looking bug.  The directory
+			   is sorted, so once we are past the key there is nothing
+			   left to compare and the flag stays off.
+
+			   start= names the first member of the page, so the match
+			   is kept -- unless the value was too long for a member
+			   name and start_key is only its first eight characters.
+			   No member can then be the value itself, and the one
+			   equal to the prefix sorts before it: the eight name
+			   bytes run out and the value carries on, and every
+			   character a client can put there sorts above the blank
+			   the name is padded with.  So that one goes as well, and
+			   the page starts after the prefix rather than at it
+			   (#240). */
+			if (skipping) {
+				int cmp = memcmp(&blk[pos], start_key,
+						MAX_MEMBER_NAME);
+
+				if (cmp < 0 || (start_after && cmp == 0)) {
+					pos += size;
+					continue;
+				}
+				skipping = 0;
+			}
+
+			/* Filter, then cap -- for the same reason the skip above
+			   comes first: a member the client did not ask for must not
+			   consume a slot of the page, or a narrow pattern answers
+			   with an empty items array and moreRows true.  Ordering
+			   also means moreRows counts matches, not directory
+			   entries. */
+			if (have_pattern) {
+				if (!member_match(&blk[pos], nlen, pattern_key)) {
+					pos += size;
+					continue;
+				}
+			}
+
+			seen++;
+
+			if (emit) {
+				json_escape_member((const unsigned char *) &blk[pos],
+					(unsigned) nlen,
+					httpx->xlate_cp037->etoa, member, sizeof(member));
+
+				if (first) {
+					/* first time we're printing this '{' so no ',' needed */
+					if (http_printf(session->httpc, "    {\n") < 0) return -1;
+					first = 0;
+				} else {
+					/* all other times we need a ',' before the '{' */
+					if (http_printf(session->httpc, "   ,{\n") < 0) return -1;
+				}
+
+				// TODO: extract user data from the entry, if X-IBM-Attributes == base
+				if (http_printf(session->httpc, "      \"member\": \"%s\"\n", member) < 0) return -1;
+				if (http_printf(session->httpc, "    }\n") < 0) return -1;
+			}
+
+			/* the page is full: for the emit pass there is nothing more
+			   to write, and for the counting pass the one match past it
+			   is the whole answer */
+			if (bound > 0 && seen >= bound) {
+				at_end = 1;
+				break;
+			}
+
+			pos += size;
+		}
+	}
+
+	return (int) seen;
+}
+
 int memberListHandler(Session *session)
 {
 	unsigned	rc		= 0;
 	unsigned	emitted		= 0;
-	unsigned	first		= 1;
 	unsigned	maxitems	= 0;
-	int		more		= 0;
-	int		at_end		= 0;
+	int		truncated	= 0;
+	int		scanned		= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
 	char		*verb		= NULL;
 
 	FILE		*fp		= NULL;
-	char		blk[PDS_DIR_BLKSIZE];
 
 	char 		*dsname		= NULL;
 
@@ -1800,6 +1982,48 @@ int memberListHandler(Session *session)
 		goto quit;
 	}
 
+	/* Counting pass.  A listing cut short by X-IBM-Max-Items answers 206
+	   Partial content, and the status line is written before the first member
+	   is -- so whether the page is full has to be settled before the directory
+	   is walked for the client (#249).  The walk stops one match past the page,
+	   so what it costs is a page and not a directory, and it is only paid when
+	   the client asked for a limit at all.
+
+	   Reading the directory twice is affordable only because of #212: the walk
+	   holds one 256-byte block, not a member array.  fopen() again rather than
+	   rewind() -- a backwards seek on a record-mode handle reopens the data set
+	   inside __fseek() anyway, by a DD name it reconstructs itself, so a second
+	   open is the same I/O with none of the guesswork.
+
+	   The upper guard keeps maxitems + 1 from wrapping: a negative or absurd
+	   X-IBM-Max-Items arrives here as UINT_MAX, the bound would come out 0 --
+	   which member_scan() reads as "no bound" -- and both passes would then run
+	   the directory end to end.  No page that large can be truncated anyway. */
+	if (maxitems > 0 && maxitems < UINT_MAX) {
+		fp = fopen(dsname, "r,record");
+		if (!fp) {
+			rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+					CATEGORY_UNEXPECTED, RC_ERROR, REASON_DATASET_NOT_FOUND,
+					ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+			goto quit;
+		}
+		session_register_file(session, fp);
+
+		scanned = member_scan(session, fp, skipping ? start_key : NULL,
+				start_after, pattern_key, have_pattern,
+				maxitems + 1, 0);
+
+		session_fclose(session, fp);
+		fp = NULL;
+
+		if (scanned < 0) {
+			rc = (unsigned) scanned;
+			goto quit;
+		}
+
+		truncated = ((unsigned) scanned > maxitems);
+	}
+
 	/* Walk the directory and emit as we go.  This used to call __listpd(),
 	   which builds the complete member array in storage first: on a data set
 	   like SYS1.SMPCDS (~23000 members) that exhausts the region, abends S878,
@@ -1824,138 +2048,32 @@ int memberListHandler(Session *session)
 	session_register_file(session, fp);
 
 	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc,200)) < 0) goto quit;
+	if ((rc = http_resp(session->httpc, truncated ? 206 : 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;	
+	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
-	while (!at_end) {
-		int	len;
-		int	used;
-		int	pos;
-
-		len = fread(blk, 1, sizeof(blk), fp);
-		if (len <= 0) break;
-
-		used = (int) *(unsigned short *) blk;
-
-		/* the block says how much of it is in use -- never take that at face
-		   value.  A short read or a damaged block would otherwise walk us off
-		   the end of blk[], the same class of defect as the MTT length in
-		   #176.  Clamp to what we actually read. */
-		if (used > len) used = len;
-
-		/* PDS_DIR_ENT_FIXED bytes must be present before the indicator byte
-		   at +11 can be read */
-		for (pos = 2; pos + PDS_DIR_ENT_FIXED <= used; ) {
-			int	size;
-			size_t	nlen;
-			char	member[MEMBER_ESC_SIZE];
-
-			if (memcmp(&blk[pos],
-			           "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF", 8) == 0) {
-				at_end = 1;
-				break;
-			}
-
-			size = PDS_DIR_ENT_FIXED
-			     + ((blk[pos + 11] & PDS_DIR_UDATA_MASK) * 2);
-
-			/* The directory holds the name blank padded to eight
-			   bytes; z/OSMF reports it without the padding, and a
-			   client that builds "dsn(member)" from what it was
-			   given otherwise asks for a member with a trailing
-			   blank in its name (#154).  The trimmed length serves
-			   the pattern match as well -- a name is what the
-			   client sees, so both have to agree on where it ends.
-			   A directory may hold arbitrary bytes rather than a
-			   name, and one of those ending in 0x40 is trimmed
-			   too; such an entry is \uXXXX escaped and no client
-			   can address it either way. */
-			nlen = MAX_MEMBER_NAME;
-			while (nlen > 0 && blk[pos + nlen - 1] == ' ') {
-				nlen--;
-			}
-
-			/* Skip up to the start member.  This has to happen before
-			   the maxitems check: otherwise the skipped entries eat the
-			   page budget and the response is an empty items array with
-			   moreRows true -- a different-looking bug.  The directory
-			   is sorted, so once we are past the key there is nothing
-			   left to compare and the flag stays off.
-
-			   start= names the first member of the page, so the match
-			   is kept -- unless the value was too long for a member
-			   name and start_key is only its first eight characters.
-			   No member can then be the value itself, and the one
-			   equal to the prefix sorts before it: the eight name
-			   bytes run out and the value carries on, and every
-			   character a client can put there sorts above the blank
-			   the name is padded with.  So that one goes as well, and
-			   the page starts after the prefix rather than at it
-			   (#240). */
-			if (skipping) {
-				int cmp = memcmp(&blk[pos], start_key,
-						sizeof(start_key));
-
-				if (cmp < 0 || (start_after && cmp == 0)) {
-					pos += size;
-					continue;
-				}
-				skipping = 0;
-			}
-
-			/* Filter, then cap -- for the same reason the skip above
-			   comes first: a member the client did not ask for must not
-			   consume a slot of the page, or a narrow pattern answers
-			   with an empty items array and moreRows true.  Ordering
-			   also means moreRows counts matches, not directory
-			   entries. */
-			if (have_pattern) {
-				if (!member_match(&blk[pos], nlen, pattern_key)) {
-					pos += size;
-					continue;
-				}
-			}
-
-			if (maxitems > 0 && emitted >= maxitems) {
-				more = 1;
-				at_end = 1;
-				break;
-			}
-
-			json_escape_member((const unsigned char *) &blk[pos],
-				(unsigned) nlen,
-				httpx->xlate_cp037->etoa, member, sizeof(member));
-
-			if (first) {
-				/* first time we're printing this '{' so no ',' needed */
-				if ((rc = http_printf(session->httpc, "    {\n")) < 0) goto quit;
-				first = 0;
-			} else {
-				/* all other times we need a ',' before the '{' */
-				if ((rc = http_printf(session->httpc, "   ,{\n")) < 0) goto quit;
-			}
-
-			// TODO: extract user data from the entry, if X-IBM-Attributes == base
-			if ((rc = http_printf(session->httpc, "      \"member\": \"%s\"\n", member)) < 0) goto quit;
-			if ((rc = http_printf(session->httpc, "    }\n")) < 0) goto quit;
-
-			emitted++;
-			pos += size;
-		}
+	scanned = member_scan(session, fp, skipping ? start_key : NULL,
+			start_after, pattern_key, have_pattern, maxitems, 1);
+	if (scanned < 0) {
+		rc = (unsigned) scanned;
+		goto quit;
 	}
+	emitted = (unsigned) scanned;
 
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
+	/* the counting pass, not this one: the two walks are seconds apart on a
+	   large directory and a member added in between must not leave the body
+	   contradicting the status line */
 	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		more ? "true" : "false")) < 0) goto quit;
+		truncated ? "true" : "false")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 

@@ -38,7 +38,13 @@ or with explicit volume:
 - `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
 
 ## Response
-On successful completion, this request returns HTTP status code 200 (OK) and a JSON object:
+A complete listing returns HTTP status code 200 (OK). A listing cut short by
+`X-IBM-Max-Items` returns **206 (Partial content)** — same body, so a client
+reading `moreRows` needs no change, but the status alone now distinguishes a
+page from a whole directory. A limit no directory reaches is a complete answer
+and stays 200.
+
+Both carry a JSON object:
 
 ```json
 {

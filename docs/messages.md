@@ -72,7 +72,7 @@ member not found, record too long) produce **no** console message.
 |---|---|---|
 | `MVSMF201E` | `UNABLE TO OPEN THE JES2 CHECKPOINT AND SPOOL DATA SETS` | JES2 is down, or mvsMF cannot open its data sets. Every job endpoint fails while this lasts. Check JES2. |
 | `MVSMF202W` | `SPOOL READ jobname(jobid) DSID n: reason` | A spool read broke **after** the first record had gone to the client, so the response was already committed to 200. The records already sent are valid; the rest is missing. `reason` is free text and stays mixed case. |
-| `MVSMF203I` | `JOB jobname(jobid) SUBMITTED` | A job entered the system through mvsMF. The audit trail for web-submitted work — `$HASP100` does not say where it came from. |
+| `MVSMF203I` | `JOB jobname(jobid) SUBMITTED` | A job entered the system through mvsMF. The audit trail for web-submitted work — `$HASP100` does not say where it came from. mvsMF's own tooling goes through the same door, so a deploy produces a short burst of these (`MBTDEPL`, `MVSMFACT`); that is not client traffic. |
 | `MVSMF204E` | `UNABLE TO OPEN THE JES2 INTERNAL READER` | `jesiropn()` failed. No job can be submitted until this clears. |
 | `MVSMF205E` | `WRITE TO THE JES2 INTERNAL READER FAILED` | A `jesirput()` failed part-way. The job is incomplete and is not queued. |
 | `MVSMF206E` | `CLOSE OF THE JES2 INTERNAL READER FAILED` | `jesircls()` failed. The job may or may not have been queued — check the JES2 queue before resubmitting. |

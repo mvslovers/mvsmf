@@ -231,6 +231,18 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **mvsmf.c**: Entry point. Registers all routes and middleware, initializes the router and HTTPD session. `identity_middleware` reads the client identity httpd already resolved (Basic/token) via the HTTPX auth export (`http_get_acee`) and sets the task ACEE — no per-request RACF login.
 - **router.c**: HTTP routing framework. Pattern-based URL matching with `{param-name}` path parameters, percent-decoding, middleware chain execution.
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
+- **etag.c**: The ETag stamp and `If-Match` parsing behind the optimistic
+  locking on data sets and members (#152). Deliberately free of MVS services so
+  it unit-tests on the host (`TSTETAG`); the record reading lives in `dsapi.c`
+  as `dataset_etag()`, next to the DCB knowledge it needs. Three rules that are
+  load-bearing and all fail silently if broken: the stamp is computed over the
+  **stored records**, never over the bytes sent (those depend on
+  `X-IBM-Data-Type`); the hash pass takes the **same `max_records` bound** the
+  send path uses, i.e. `get_fb_record_count()` for a sequential data set and
+  `-1` for a member; and the ETag a PUT returns comes from **re-reading the
+  closed resource**, never from hashing the request body — the write and read
+  paths normalize in opposite directions, so a body-derived stamp makes every
+  second save fail its own precondition.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).
@@ -277,17 +289,21 @@ Two consequences that keep getting rediscovered:
   "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
   **500**. This was tracked as #102 and closed as won't-do; do not re-open the
   reasoning from the httpd side alone.
-- **206, 412 and 429 exist in httpd's tree but not yet in the build we link
-  against.** They were added to `src/httpstat.c` by httpd#181/PR#183 (commit
-  `623f6a6`), which sits *nine commits past the `v4.0.0-dev` tag* — and
-  `mbt.lock` pins exactly that tag. `http_resp()` resolves through the httpx
-  vector into the **running** httpd, so the live server's build decides, not the
-  staged `.a`: all three need an httpd re-cut plus a deploy before they reach
-  the wire. Until then `httpresp()` answers them 500. That fallback is no longer
-  silent — an unknown code now also WTOs `HTTPD054E`, which is how a 505 going
-  out as 500 was finally noticed. Check `httpstat()` in the httpd version you
-  are actually running before sending a status this codebase does not already
-  use.
+- **206, 412 and 429 reach the wire now — but only because httpd was re-cut and
+  redeployed.** They were added to `src/httpstat.c` by httpd#181/PR#183 (commit
+  `623f6a6`), which landed *after* the original `v4.0.0-dev` artifact; that tag
+  has since been re-cut and the STC redeployed, and 412 was measured going out
+  correctly (#152). The mechanism is the part to remember: `http_resp()`
+  resolves through the httpx vector into the **running** httpd, so the live
+  server's build decides, not the staged `.a` — `make deps` alone can never
+  change which statuses are emittable, because `libhttpd.a` carries no status
+  table at all. An absent code is answered 500, and no longer silently: an
+  unknown one WTOs `HTTPD054E`, which is how a 505 going out as 500 was finally
+  noticed. **Check `httpstat()` in the httpd you are actually running** before
+  sending a status this codebase does not already use. The cheap probe is
+  `printf 'GET / HTTP/9.9\r\n\r\n' | nc <host> <port>` — the same commit fixed
+  httpd's own 505, so a `505` reply proves the build is current and a `500`
+  proves it is not.
 
 `sendErrorResponse()` (`common.c`) does not branch on status — it builds the
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code

@@ -145,6 +145,38 @@ curl -s -u $USER:$PASS -X PUT --data-binary @local.txt \
 zowe files upload ftds ./local.txt "IBMUSER.TEST.PDS(TESTMBR)"
 ```
 
+### Write a member without clobbering someone else's edit
+`GET` with `X-IBM-Return-Etag`, then `PUT` with `If-Match`
+
+A plain `PUT` is last-write-wins: if the member changed since you read it, your
+save overwrites that change and answers 204 as if nothing happened. Sending the
+ETag back makes the write conditional — 412 and nothing written if it did.
+
+```bash
+# read, keeping the stamp
+ETAG=$(curl -s -D - -o local.txt -u $USER:$PASS \
+  -H "X-IBM-Return-Etag: true" \
+  "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS(TESTMBR)" \
+  | grep -i '^ETag:' | tr -d '\r' | sed 's/^[^ ]* //')
+
+# ... edit local.txt ...
+
+# save only if nobody else did in the meantime
+curl -s -o /dev/null -w '%{http_code}\n' -u $USER:$PASS -X PUT \
+  -H "If-Match: $ETAG" -H "X-IBM-Return-Etag: true" \
+  --data-binary @local.txt \
+  "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS(TESTMBR)"
+# 204 = saved, 412 = someone else changed it; reload and re-apply
+```
+
+To save repeatedly, take the next `If-Match` from the PUT response's `ETag`,
+not from the value you read before saving — the write normalizes what it stores,
+so the pre-save stamp no longer describes the member. The same works on the
+sequential endpoint. Details in
+[endpoints/datasets/members-put.md](endpoints/datasets/members-put.md#conditional-writes-optimistic-locking).
+
+The Zowe CLI exposes no flag for either header; the SDK does.
+
 ### Delete a member
 `DELETE /zosmf/restfiles/ds/{dataset-name}({member-name})`
 

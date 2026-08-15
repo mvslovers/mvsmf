@@ -1705,13 +1705,44 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "412" "$HTTP_CODE" "etag: sequential stale If-Match is refused"
 
+HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_h8.txt -o /dev/null \
+	-X PUT -u "$AUTH" \
+	-H "Content-Type: text/plain" \
+	-H "X-IBM-Return-Etag: true" \
+	-H "If-Match: ${ETAG7}" \
+	--data-binary @/tmp/curl_ds_etag2.txt \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
+assert_http_status "204" "$HTTP_CODE" "etag: sequential current If-Match is accepted"
+
+# The round trip again, on the sequential path. It does not inherit the member
+# evidence above: the post-write stamp here is bounded by get_fb_record_count()
+# against a data set whose DSCB was just rewritten, not by the member path's
+# plain read-to-EOF. If that count disagreed with what the next GET computes,
+# the symptom would be every second save failing 412.
+ETAG8=$(get_etag /tmp/curl_ds_h8.txt)
+if [ -n "$ETAG8" ]; then
+	pass "etag: sequential PUT returns the new stamp ($ETAG8)"
+else
+	fail "etag: sequential PUT returns the new stamp" "no ETag header in response"
+fi
+
+curl -s -D /tmp/curl_ds_h9.txt -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Return-Etag: true" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
+ETAG9=$(get_etag /tmp/curl_ds_h9.txt)
+if [ "$ETAG8" = "$ETAG9" ]; then
+	pass "etag: sequential PUT stamp matches the next GET stamp"
+else
+	fail "etag: sequential PUT stamp matches the next GET stamp" "$ETAG8 vs $ETAG9"
+fi
+
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X PUT -u "$AUTH" \
 	-H "Content-Type: text/plain" \
-	-H "If-Match: ${ETAG7}" \
+	-H "If-Match: ${ETAG8}" \
 	--data-binary @/tmp/curl_ds_etag.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
-assert_http_status "204" "$HTTP_CODE" "etag: sequential current If-Match is accepted"
+assert_http_status "204" "$HTTP_CODE" "etag: sequential second save with the returned stamp"
 
 curl -s -X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)" >/dev/null 2>&1 || true
@@ -1720,7 +1751,7 @@ curl -s -X DELETE -u "$AUTH" \
 rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_h1.txt /tmp/curl_ds_h2.txt /tmp/curl_ds_h3.txt \
 	/tmp/curl_ds_h4.txt /tmp/curl_ds_h5.txt /tmp/curl_ds_h6.txt \
-	/tmp/curl_ds_h7.txt
+	/tmp/curl_ds_h7.txt /tmp/curl_ds_h8.txt /tmp/curl_ds_h9.txt
 
 # --- Cleanup: delete PDS ---
 echo ""

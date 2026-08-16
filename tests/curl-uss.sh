@@ -485,7 +485,9 @@ if [ -n "$TEST_FILE" ]; then
 		-d '{"request":"chmod","action":"set","mode":"0755"}' \
 		"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 
-	assert_http_status "501" "$HTTP_CODE" "chmod returns 501 (not implemented)"
+	# 400, not 501: the service offers one utility, so naming another is an
+	# incorrect parameter -- and 501 is not a z/OSMF status (issue #248).
+	assert_http_status "400" "$HTTP_CODE" "an unsupported utility returns 400"
 
 	echo ""
 	echo "--- Write file error cases ---"
@@ -1317,6 +1319,44 @@ else
 	echo "--- Integration tests ---"
 	skip "integration: USS_TEST_FILE not set in .env, skipping integration tests"
 fi
+
+# =========================================================================
+# Path name too long: the same condition on every verb (issue #248)
+# =========================================================================
+# uss_build_path() overflows at UFS_PATH_MAX (256), and all four handlers hit
+# it identically. GET and PUT used to answer 414 here while POST and DELETE
+# answered 400, so a client special-casing the code saw the same failure
+# differently depending on the verb -- and 414 is not a z/OSMF status at all.
+#
+# The body assertion is not decoration: httpd emits a 414 of its own when the
+# request line overruns its buffer (httpin.c), and that one carries a
+# text/plain page. Only the JSON error report proves the request reached the
+# CGI and that this is mvsMF's answer rather than the server's.
+echo ""
+echo "--- Path name too long is 400 on every verb (issue #248) ---"
+
+USS_LONG_PATH=$(printf 'a%.0s' $(seq 1 300))
+
+for USS_M in GET PUT POST DELETE; do
+	if [ "$USS_M" = "PUT" ]; then
+		BODY=$(curl -s -w '\n%{http_code}' -X PUT -u "$AUTH" -H "Expect:" \
+			--data-binary 'hello' \
+			"${BASE_URL}/zosmf/restfiles/fs/${USS_LONG_PATH}")
+	else
+		BODY=$(curl -s -w '\n%{http_code}' -X "$USS_M" -u "$AUTH" -H "Expect:" \
+			"${BASE_URL}/zosmf/restfiles/fs/${USS_LONG_PATH}")
+	fi
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+
+	assert_http_status "400" "$HTTP_CODE" "${USS_M}: an over-long path is 400"
+	if echo "$CONTENT" | grep -q "Path name too long"; then
+		pass "${USS_M}: the answer is mvsMF's, naming the reason"
+	else
+		fail "${USS_M}: the answer is mvsMF's, naming the reason" \
+			"got: $(echo "$CONTENT" | head -c 120)"
+	fi
+done
 
 # =========================================================================
 # Summary

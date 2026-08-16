@@ -65,7 +65,9 @@ utility request. The `"request"` field determines which utility to invoke.
 | `set`    | Accepted as no-op (200, no body) |
 | `remove` | Accepted as no-op (200, no body) |
 
-All other utility requests return **501 Not Implemented**.
+All other utility requests return **400 Bad Request**: the service offers
+exactly one utility, so naming another is an incorrect parameter, and 501 is
+not one of the statuses z/OSMF uses (issue #248).
 
 ## Conditional writes (If-Match)
 
@@ -110,9 +112,9 @@ off the UFS session rather than off the (absent) file handle.
 | 403    | Read-only file system (not a z/OSMF status — the `UFSD_RC_ROFS` row is open as #248) |
 | 404    | Parent directory not found |
 | 412    | `If-Match` was supplied and the file no longer matches it — including a file that no longer exists |
-| 414    | Path name too long |
+| 400    | Path name too long |
 | 500    | No space left on device or I/O error (64 KB limit) |
-| 501    | Unsupported USS utility (Content-Type: application/json with unknown request) |
+| 400    | Unsupported USS utility (Content-Type: application/json with unknown request) |
 | 503    | UFSD subsystem not available |
 
 ## Max File Size
@@ -176,7 +178,7 @@ curl -X PUT -u IBMUSER:sys1 \
 ## Limitations vs Real z/OSMF
 
 - No `Transfer-Encoding: chunked` on response (request chunked encoding is supported)
-- USS utilities limited to `chtag` — `chmod`, `chown`, `extattr` return 501
+- USS utilities limited to `chtag` — `chmod`, `chown`, `extattr` return 400
 
 ## Handler
 

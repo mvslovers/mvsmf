@@ -114,7 +114,7 @@ read of the same unchanged file.
 |--------|-----------|
 | 400    | Missing filepath or path is a directory |
 | 404    | File not found |
-| 414    | Path name too long |
+| 400    | Path name too long |
 | 500    | I/O error |
 | 503    | UFSD subsystem not available |
 

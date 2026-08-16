@@ -1940,6 +1940,129 @@ rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_c3.txt /tmp/curl_ds_c3.body /tmp/curl_ds_c4.txt \
 	/tmp/curl_ds_c5.txt /tmp/curl_ds_c6.body /tmp/curl_ds_c7.txt
 
+# =========================================================================
+# A failed PUT must not destroy what it failed to replace (issues #243, #246)
+# =========================================================================
+echo ""
+echo "--- Failed PUT preserves the previous content (issues #243, #246) ---"
+
+ATOM_SEQ="${MVSMF_USER}.CURL.ATOMSEQ"
+ATOM_PDS="${MVSMF_USER}.CURL.ATOMPDS"
+
+printf 'ORIGINAL LINE ONE\nORIGINAL LINE TWO\n' > /tmp/curl_ds_atom_good.txt
+# second line is 200 columns -- rejected by the record framing, but only after
+# the first line has already been framed as a record
+{
+	printf 'FIRST GOOD LINE\n'
+	awk 'BEGIN { while (i++ < 200) printf "X"; printf "\n" }'
+	printf 'LAST GOOD LINE\n'
+} > /tmp/curl_ds_atom_long.txt
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+HTTP_CODE2=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}")
+
+if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
+	# --- sequential: a mid-body failure (issue #243) ---
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_good.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_long.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+	assert_http_status "500" "$HTTP_CODE" "seq: over-long record is rejected"
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+		pass "seq: a rejected PUT leaves the previous content intact"
+	else
+		fail "seq: a rejected PUT leaves the previous content intact" \
+			"got: $(echo "$CONTENT" | tr '\n' '/')"
+	fi
+
+	# --- member: the same, where CLOSE is what commits (issue #243) ---
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_good.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_long.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	assert_http_status "500" "$HTTP_CODE" "member: over-long record is rejected"
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+		pass "member: a rejected PUT leaves the previous content intact"
+	else
+		fail "member: a rejected PUT leaves the previous content intact" \
+			"got: $(echo "$CONTENT" | tr '\n' '/')"
+	fi
+
+	# --- member: failure before a single body byte is read (issue #246) ---
+	# Announce a Content-Length and then close the sending half, so the very
+	# first recv() fails. This is the case that used to leave the member
+	# existing and empty; curl cannot express it, hence the raw request.
+	if command -v python3 >/dev/null 2>&1; then
+		python3 - "$MVSMF_HOST" "$MVSMF_PORT" "$AUTH" \
+			"${ATOM_PDS}(KEEPME)" >/dev/null 2>&1 <<-'PYEOF'
+			import base64, socket, sys, time
+			host, port, auth, target = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+			req = (f"PUT /zosmf/restfiles/ds/{target} HTTP/1.1\r\n"
+			       f"Host: {host}:{port}\r\n"
+			       f"Authorization: Basic {base64.b64encode(auth.encode()).decode()}\r\n"
+			       f"X-IBM-Data-Type: text\r\nContent-Length: 500\r\n\r\n")
+			s = socket.create_connection((host, port), timeout=30)
+			s.sendall(req.encode()); time.sleep(0.5); s.shutdown(socket.SHUT_WR)
+			try: s.recv(4096)
+			except Exception: pass
+			s.close()
+		PYEOF
+
+		CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+		if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+			pass "member: a PUT that dies before the body leaves the content intact"
+		else
+			fail "member: a PUT that dies before the body leaves the content intact" \
+				"got: $(echo "$CONTENT" | tr '\n' '/')"
+		fi
+	else
+		skip "member: a PUT that dies before the body (needs python3)"
+	fi
+
+	# --- the negative: an empty body must still empty the target ---
+	# The lazy open must not turn "PUT nothing" into "change nothing".
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" -H "Content-Length: 0" \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	assert_http_status "204" "$HTTP_CODE" "member: empty body is accepted"
+
+	CONTENT=$(curl -s -w '%{size_download}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	if [ "$CONTENT" = "0" ]; then
+		pass "member: an empty body still empties the member"
+	else
+		fail "member: an empty body still empties the member" \
+			"expected 0 bytes, got $CONTENT"
+	fi
+else
+	skip "failed-PUT atomicity (could not create ${ATOM_SEQ}/${ATOM_PDS})"
+fi
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+rm -f /tmp/curl_ds_atom_good.txt /tmp/curl_ds_atom_long.txt
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

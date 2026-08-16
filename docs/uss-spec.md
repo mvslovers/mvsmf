@@ -626,6 +626,14 @@ Alle offenen Fragen sind beantwortet. Diese Sektion dient als verbindliche Refer
 
 Vollständig definiert in `ufsd.h`. Verbindliches Mapping für alle Handler:
 
+> **Historisch.** Die Spalten *HTTP Status* und *z/OSMF Category* geben den
+> Entwurfsstand wieder, nicht die Implementierung. Umgesetzt wurde eine andere
+> Zuordnung: 409/507/414 sind nicht in der z/OSMF-Statusliste (#102), und die
+> Kategorien weichen ab — ISDIR ist 400/**2**, nicht 400/6. Maßgeblich ist die
+> Tabelle in `CLAUDE.md` bzw. `ufsd_rc_to_http()` / `ufsd_rc_to_category()` in
+> `src/ussapi.c`. Bis #269 war der Unterschied folgenlos, weil ein Open die
+> Zuordnung überhaupt nicht erreichte; seitdem sieht ein Client sie.
+
 | RC | UFSD Konstante | HTTP Status | z/OSMF Category | Bedeutung |
 |----|---------------|-------------|-----------------|-----------|
 | 0 | `UFSD_RC_OK` | 200/201/204 | — | Erfolg |

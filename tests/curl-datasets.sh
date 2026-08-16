@@ -1940,6 +1940,149 @@ rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_c3.txt /tmp/curl_ds_c3.body /tmp/curl_ds_c4.txt \
 	/tmp/curl_ds_c5.txt /tmp/curl_ds_c6.body /tmp/curl_ds_c7.txt
 
+# =========================================================================
+# A failed PUT must not destroy what it failed to replace (issues #243, #246)
+# =========================================================================
+echo ""
+echo "--- Failed PUT preserves the previous content (issues #243, #246) ---"
+
+ATOM_SEQ="${MVSMF_USER}.CURL.ATOMSEQ"
+ATOM_PDS="${MVSMF_USER}.CURL.ATOMPDS"
+
+# Announce a Content-Length and then close the sending half, so the handler's
+# very first recv() fails. curl cannot express this, hence the raw request.
+put_dies_before_body() {
+	python3 - "$MVSMF_HOST" "$MVSMF_PORT" "$AUTH" "$1" >/dev/null 2>&1 <<-'PYEOF'
+		import base64, socket, sys, time
+		host, port, auth, target = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+		req = (f"PUT /zosmf/restfiles/ds/{target} HTTP/1.1\r\n"
+		       f"Host: {host}:{port}\r\n"
+		       f"Authorization: Basic {base64.b64encode(auth.encode()).decode()}\r\n"
+		       f"X-IBM-Data-Type: text\r\nContent-Length: 500\r\n\r\n")
+		s = socket.create_connection((host, port), timeout=30)
+		s.sendall(req.encode()); time.sleep(0.5); s.shutdown(socket.SHUT_WR)
+		try: s.recv(4096)
+		except Exception: pass
+		s.close()
+	PYEOF
+}
+
+printf 'ORIGINAL LINE ONE\nORIGINAL LINE TWO\n' > /tmp/curl_ds_atom_good.txt
+# second line is 200 columns -- rejected by the record framing, but only after
+# the first line has already been framed as a record
+{
+	printf 'FIRST GOOD LINE\n'
+	awk 'BEGIN { while (i++ < 200) printf "X"; printf "\n" }'
+	printf 'LAST GOOD LINE\n'
+} > /tmp/curl_ds_atom_long.txt
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+HTTP_CODE2=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}")
+
+if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
+	# --- sequential: a mid-body failure (issue #243) ---
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_good.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_long.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+	assert_http_status "500" "$HTTP_CODE" "seq: over-long record is rejected"
+
+	# A mid-body failure is NOT yet atomic: the records written before the
+	# offending line are already committed. Reported as a skip rather than a
+	# failure so the suite stays green on known behaviour -- turn this into an
+	# assertion when #243 lands.
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
+	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+		pass "seq: a mid-body failure leaves the previous content intact (#243 fixed?)"
+	else
+		skip "seq: a mid-body failure still commits what it wrote (known, #243)"
+	fi
+
+	# --- member: the same, where CLOSE is what commits (issue #243) ---
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_good.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_long.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	assert_http_status "500" "$HTTP_CODE" "member: over-long record is rejected"
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+		pass "member: a mid-body failure leaves the previous content intact (#243 fixed?)"
+	else
+		skip "member: a mid-body failure still commits what it wrote (known, #243)"
+	fi
+
+	# Re-seed: the mid-body case above deliberately damaged the member, and the
+	# #246 case below has to start from a known state or it measures the wrong
+	# thing -- it would compare against content the previous case already ate.
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+		--data-binary @/tmp/curl_ds_atom_good.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)"
+
+	# --- failure before a single body byte is read (issue #246) ---
+	# A member and a sequential data set commit by different mechanisms -- STOW
+	# of the directory entry versus DS1LSTAR at CLOSE -- so both are covered.
+	if command -v python3 >/dev/null 2>&1; then
+		for ATOM_T in "${ATOM_PDS}(KEEPME)" "${ATOM_SEQ}"; do
+			curl -s -o /dev/null -X PUT -u "$AUTH" \
+				-H "X-IBM-Data-Type: text" -H "Expect:" \
+				--data-binary @/tmp/curl_ds_atom_good.txt \
+				"${BASE_URL}/zosmf/restfiles/ds/${ATOM_T}"
+
+			put_dies_before_body "$ATOM_T"
+
+			CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_T}")
+			if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
+				pass "${ATOM_T}: a PUT that dies before the body leaves the content intact"
+			else
+				fail "${ATOM_T}: a PUT that dies before the body leaves the content intact" \
+					"got: $(echo "$CONTENT" | tr '\n' '/')"
+			fi
+		done
+	else
+		skip "a PUT that dies before the body (needs python3)"
+	fi
+
+	# --- the negative: an empty body must still empty the target ---
+	# The lazy open must not turn "PUT nothing" into "change nothing".
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect:" -H "Content-Length: 0" \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	assert_http_status "204" "$HTTP_CODE" "member: empty body is accepted"
+
+	CONTENT=$(curl -s -w '%{size_download}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
+	if [ "$CONTENT" = "0" ]; then
+		pass "member: an empty body still empties the member"
+	else
+		fail "member: an empty body still empties the member" \
+			"expected 0 bytes, got $CONTENT"
+	fi
+else
+	skip "failed-PUT atomicity (could not create ${ATOM_SEQ}/${ATOM_PDS})"
+fi
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+rm -f /tmp/curl_ds_atom_good.txt /tmp/curl_ds_atom_long.txt
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

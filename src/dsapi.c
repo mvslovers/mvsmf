@@ -591,17 +591,56 @@ static int parse_data_type(const char *data_type) {
  * eff_lrecl is the caller's LRECL, or BLKSIZE where RECFM=U leaves LRECL 0.
  */
 __asm__("\n&FUNC    SETC 'rec_content_max'");
-static size_t record_content_max(FILE *fp, size_t eff_lrecl, int is_undefined)
+/* recfm rather than a FILE *: the write handlers now learn the DCB from a
+   read-mode open and do not have an output handle yet when they need this. */
+static size_t record_content_max(int recfm, size_t eff_lrecl, int is_undefined)
 {
     if (is_undefined) {
         return eff_lrecl;
     }
 
-    if ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
+    if ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
         return eff_lrecl > 4 ? eff_lrecl - 4 : 0;
     }
 
     return eff_lrecl;
+}
+
+/* Open the write target, but not before there is something to put in it.
+ *
+ * fopen(..., "w") truncates a sequential data set the moment it is called, and
+ * for a PDS member it is CLOSE that stows the new directory entry over the old
+ * one. Either way the destruction is committed by the mechanics of the write,
+ * not by its success -- so opening up front means a PUT that fails while
+ * reading the body, or before it reads a single byte, destroys content the
+ * request never managed to replace (#246, #243).
+ *
+ * Deferring the open to the first framed record keeps the previous content
+ * intact for every failure up to that point, which is the whole class #246 is
+ * about. It does not make a mid-body failure atomic: once the first record is
+ * written the old content is gone, and that half needs staging (#243).
+ *
+ * The caller must also call this on the success path when no record was ever
+ * written -- a PUT with an empty body has to empty the target, not leave it
+ * alone.
+ *
+ * Returns 0 when *fp is usable, -1 when the open failed (WTO already issued).
+ */
+static int open_write_target(Session *session, FILE **fp, const char *target,
+                             const char *mode)
+{
+    if (*fp) {
+        return 0;
+    }
+
+    *fp = fopen(target, mode);
+    if (!*fp) {
+        wtof(MSG_DS_OPEN_WRITE, target, errno);
+        return -1;
+    }
+
+    session_register_file(session, *fp);
+    return 0;
 }
 
 /* Helper function to write a complete record.
@@ -721,6 +760,31 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
     
     (*line_count)++;
     return 0;
+}
+
+/* write_record() against a target that is opened on first use.
+ *
+ * Every write call site goes through here so that no path can reach fwrite()
+ * without having proven, one record earlier, that the body was readable. See
+ * open_write_target() for why the open cannot happen up front.
+ *
+ * An open failure and a write failure are both -1: the WTO from
+ * open_write_target() carries which one it was, and the caller's client-facing
+ * message stays the write-side one either way -- from the client's side a
+ * target it cannot be written to is not a distinction it can act on.
+ */
+static int write_record_open(Session *session, FILE **fp, const char *target,
+                             const char *mode, char *record_buffer,
+                             size_t record_length, size_t *total_written,
+                             int *line_count, int data_type,
+                             size_t content_max)
+{
+    if (open_write_target(session, fp, target, mode) < 0) {
+        return -1;
+    }
+
+    return write_record(session, *fp, record_buffer, record_length,
+                        total_written, line_count, data_type, content_max);
 }
 
 /*
@@ -1332,6 +1396,9 @@ int datasetPutHandler(Session *session)
     char *rec = NULL;
     size_t rec_len = 0;
     int data_type;
+    int recfm = 0;
+    int lrecl = 0;
+    int blksize = 0;
 
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
@@ -1387,7 +1454,10 @@ int datasetPutHandler(Session *session)
         snprintf(mode_str, sizeof(mode_str), "%s", "wb");
     }
 
-    /* Verify dataset exists - do not auto-create with wrong DCB (issue #65) */
+    /* Verify dataset exists - do not auto-create with wrong DCB (issue #65).
+       The same handle also supplies the DCB the record framing needs, so that
+       the target does not have to be opened for output to learn its own record
+       length -- see open_write_target() (issue #246). */
     {
         FILE *chk = fopen(dsname, "r");
         if (!chk) {
@@ -1395,6 +1465,9 @@ int datasetPutHandler(Session *session)
                 CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
                 ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
         }
+        recfm = chk->recfm;
+        lrecl = chk->lrecl;
+        blksize = chk->blksize;
         fclose(chk);
     }
 
@@ -1403,19 +1476,11 @@ int datasetPutHandler(Session *session)
         return 0;
     }
 
-    fp = fopen(dsname, mode_str);
-    if (!fp) {
-        wtof(MSG_DS_OPEN_WRITE, dsname, errno);
-        return handle_error(session, ERR_IO, "Cannot open dataset for writing");
-    }
-    session_register_file(session, fp);
-
     /* For RECFM=U (undefined record format), lrecl is 0. Use blksize instead. */
-    is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
-    eff_lrecl = is_undefined ? (size_t)fp->blksize : (size_t)fp->lrecl;
-    content_max = record_content_max(fp, eff_lrecl, is_undefined);
+    is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
+    eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
+    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
     if (eff_lrecl == 0 || content_max == 0) {
-        session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
     // NOTE: record_buffer is not tracked by session for ESTAE recovery.
@@ -1466,7 +1531,7 @@ int datasetPutHandler(Session *session)
                             memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                             record_pos = eff_lrecl;
                         }
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing final record");
@@ -1476,7 +1541,7 @@ int datasetPutHandler(Session *session)
                     /* Text: a body whose last line has no terminator. Nothing
                        is pending when it ended on one, so a trailing newline
                        does not add a phantom record. */
-                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
@@ -1520,7 +1585,7 @@ int datasetPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -1550,7 +1615,7 @@ int datasetPutHandler(Session *session)
                         return handle_error(session, ERR_IO, "Record too long");
 
                     case RECLINE_RECORD:
-                        if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -1593,7 +1658,7 @@ int datasetPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -1608,7 +1673,7 @@ int datasetPutHandler(Session *session)
                     memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                     record_pos = eff_lrecl;
                 }
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -1636,7 +1701,7 @@ int datasetPutHandler(Session *session)
                     return handle_error(session, ERR_IO, "Record too long");
 
                 case RECLINE_RECORD:
-                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -1650,7 +1715,7 @@ int datasetPutHandler(Session *session)
 
             /* A last line without a terminator is still a record */
             if (recline_flush(&rl, &rec, &rec_len)) {
-                if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -1661,6 +1726,16 @@ int datasetPutHandler(Session *session)
 
     free(record_buffer);
     record_buffer = NULL;
+
+    /* The body was read in full. If it held no record at all, the target still
+       has to be emptied -- PUT with an empty body is a truncate, and the lazy
+       open would otherwise leave the previous content in place. This is the one
+       place the open happens without a record behind it, and by here nothing
+       can still fail on the read side. */
+    if (!fp && open_write_target(session, &fp, dsname, mode_str) < 0) {
+        return handle_error(session, ERR_IO, "Cannot open dataset for writing");
+    }
+
     session_fclose(session, fp);
     fp = NULL;
 
@@ -2205,6 +2280,9 @@ int memberPutHandler(Session *session)
     char *rec = NULL;
     size_t rec_len = 0;
     int data_type;
+    int recfm = 0;
+    int lrecl = 0;
+    int blksize = 0;
 
     // Validate parameters
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
@@ -2280,23 +2358,50 @@ int memberPutHandler(Session *session)
         return 0;
     }
 
-    fp = fopen(dataset, member_mode);
-    if (!fp) {
-        wtof(MSG_DS_OPEN_WRITE, dataset, errno);
-        /* member = NULL: a member that does not exist yet is a create, not an
-           error - only a missing data set is */
-        return send_open_failure(session, dsname, NULL,
-            "Cannot open dataset member for writing");
-    }
-    session_register_file(session, fp);
+    /* Size the record buffer from the DCB, exactly as the sequential handler
+       does. It used to be a fixed 1024-byte array on the stack while the binary
+       path bounded its reads by fp->lrecl -- a PDS with LRECL > 1024 therefore
+       overran it (issue #198). For RECFM=U, lrecl is 0; use blksize.
 
-    /* Size the record buffer from the member's DCB, exactly as the sequential
-       handler does. It used to be a fixed 1024-byte array on the stack while
-       the binary path bounded its reads by fp->lrecl -- a PDS with LRECL > 1024
-       therefore overran it (issue #198). For RECFM=U, lrecl is 0; use blksize. */
-    is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
-    eff_lrecl = is_undefined ? (size_t)fp->blksize : (size_t)fp->lrecl;
-    content_max = record_content_max(fp, eff_lrecl, is_undefined);
+       Where the DCB comes from depends on whether there is anything to lose.
+
+       An existing member supplies it from a read-mode open, and the output open
+       is then deferred to the first framed record so that a failed body read
+       cannot stow an empty member over it (issue #246).
+
+       A member that does not exist yet is a create: nothing can be lost, so the
+       output open happens here and supplies the DCB itself. The PDS is
+       deliberately NOT asked instead -- opening it by name reads the directory,
+       whose 256-byte blocks would size every record wrong, and a create would
+       then accept records the data set cannot hold (measured: an 81-column line
+       into an LRECL=80 PDS answered 204). The cost is that a failed create can
+       still leave an empty member behind; that is a stray name, not lost data,
+       and it belongs with the staging work in #243. */
+    {
+        FILE *chk = fopen(dataset, "r");
+        if (chk) {
+            recfm = chk->recfm;
+            lrecl = chk->lrecl;
+            blksize = chk->blksize;
+            fclose(chk);
+        } else {
+            /* member = NULL: a member that does not exist yet is a create, not
+               an error - only a missing data set is */
+            if (open_write_target(session, &fp, dataset, member_mode) < 0) {
+                return send_open_failure(session, dsname, NULL,
+                    "Cannot open dataset member for writing");
+            }
+            recfm = fp->recfm;
+            lrecl = fp->lrecl;
+            blksize = fp->blksize;
+        }
+    }
+
+    is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
+    eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
+    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
+    /* fp is already open on the create path, so these two still have to close
+       it; session_fclose() ignores a NULL, which is the existing-member case. */
     if (eff_lrecl == 0 || content_max == 0) {
         session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
@@ -2347,7 +2452,7 @@ int memberPutHandler(Session *session)
                         // Pad to full LRECL for fixed-length binary records
                         memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                         record_pos = eff_lrecl;
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing final record");
@@ -2356,7 +2461,7 @@ int memberPutHandler(Session *session)
                 } else if (recline_flush(&rl, &rec, &rec_len)) {
                     /* Text: only a last line without a terminator is pending
                        here -- a body ending in a newline adds no record. */
-                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
@@ -2400,7 +2505,7 @@ int memberPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -2428,7 +2533,7 @@ int memberPutHandler(Session *session)
                         return handle_error(session, ERR_IO, "Record too long");
 
                     case RECLINE_RECORD:
-                        if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -2471,7 +2576,7 @@ int memberPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -2484,7 +2589,7 @@ int memberPutHandler(Session *session)
             if (record_pos > 0) {
                 memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                 record_pos = eff_lrecl;
-                if (write_record(session, fp, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -2510,7 +2615,7 @@ int memberPutHandler(Session *session)
                     return handle_error(session, ERR_IO, "Record too long");
 
                 case RECLINE_RECORD:
-                    if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -2524,7 +2629,7 @@ int memberPutHandler(Session *session)
 
             /* A last line without a terminator is still a record */
             if (recline_flush(&rl, &rec, &rec_len)) {
-                if (write_record(session, fp, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -2535,6 +2640,15 @@ int memberPutHandler(Session *session)
 
     free(record_buffer);
     record_buffer = NULL;
+
+    /* Same as the sequential handler: a body that held no record still has to
+       leave the member empty, so the lazy open is forced here once the body has
+       been read in full. */
+    if (!fp && open_write_target(session, &fp, dataset, member_mode) < 0) {
+        return send_open_failure(session, dsname, NULL,
+            "Cannot open dataset member for writing");
+    }
+
     session_fclose(session, fp);
     fp = NULL;
 

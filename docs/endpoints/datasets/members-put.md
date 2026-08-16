@@ -101,10 +101,19 @@ Details that matter in practice:
 
 ## Limitations
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
-- A rejected upload does not leave the previous member content in place. The
-  member is opened for output before the body is read, so on "Record too long"
-  the records written up to that line are already stored and the previous
-  content is gone.
+- A request that fails **before its first record is framed** leaves the member
+  exactly as it was — a dropped connection, a body that never arrives, a body
+  whose very first line is over-long. The member is not opened for output until
+  there is a record to put in it, and it is CLOSE that stows the new directory
+  entry over the old one, so an unopened member is an untouched member
+  (issue #246).
+- A request that fails **after** that point still does not roll back. On
+  "Record too long" halfway through a body, the records written up to that line
+  are stored and the previous content is gone. Making a mid-body failure atomic
+  needs the member staged under a temporary name and renamed on success, which
+  is open as issue #243.
+- An empty body is a truncate, not a no-op: `Content-Length: 0` empties the
+  member.
 
 There is no fixed upper bound on the record size: the write buffer is sized
 from the dataset's own DCB (LRECL, or BLKSIZE for RECFM=U). Records above

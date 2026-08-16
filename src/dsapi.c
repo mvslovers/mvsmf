@@ -2363,32 +2363,47 @@ int memberPutHandler(Session *session)
        path bounded its reads by fp->lrecl -- a PDS with LRECL > 1024 therefore
        overran it (issue #198). For RECFM=U, lrecl is 0; use blksize.
 
-       The DCB comes from a read-mode open so that the member does not have to
-       be opened for output before the body has proven readable (issue #246).
-       An existing member supplies it directly; for a member that does not exist
-       yet -- a create -- the read fails and the PDS itself is asked instead.
-       Nothing is at risk in that case, but the DCB is needed all the same. */
+       Where the DCB comes from depends on whether there is anything to lose.
+
+       An existing member supplies it from a read-mode open, and the output open
+       is then deferred to the first framed record so that a failed body read
+       cannot stow an empty member over it (issue #246).
+
+       A member that does not exist yet is a create: nothing can be lost, so the
+       output open happens here and supplies the DCB itself. The PDS is
+       deliberately NOT asked instead -- opening it by name reads the directory,
+       whose 256-byte blocks would size every record wrong, and a create would
+       then accept records the data set cannot hold (measured: an 81-column line
+       into an LRECL=80 PDS answered 204). The cost is that a failed create can
+       still leave an empty member behind; that is a stray name, not lost data,
+       and it belongs with the staging work in #243. */
     {
         FILE *chk = fopen(dataset, "r");
-        if (!chk) {
-            chk = fopen(dsname, "r");
-        }
-        if (!chk) {
+        if (chk) {
+            recfm = chk->recfm;
+            lrecl = chk->lrecl;
+            blksize = chk->blksize;
+            fclose(chk);
+        } else {
             /* member = NULL: a member that does not exist yet is a create, not
                an error - only a missing data set is */
-            return send_open_failure(session, dsname, NULL,
-                "Cannot open dataset member for writing");
+            if (open_write_target(session, &fp, dataset, member_mode) < 0) {
+                return send_open_failure(session, dsname, NULL,
+                    "Cannot open dataset member for writing");
+            }
+            recfm = fp->recfm;
+            lrecl = fp->lrecl;
+            blksize = fp->blksize;
         }
-        recfm = chk->recfm;
-        lrecl = chk->lrecl;
-        blksize = chk->blksize;
-        fclose(chk);
     }
 
     is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
     content_max = record_content_max(recfm, eff_lrecl, is_undefined);
+    /* fp is already open on the create path, so these two still have to close
+       it; session_fclose() ignores a NULL, which is the existing-member case. */
     if (eff_lrecl == 0 || content_max == 0) {
+        session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
     /* NOTE: same as the sequential handler -- record_buffer is not tracked by
@@ -2396,6 +2411,7 @@ int memberPutHandler(Session *session)
        eff_lrecl per occurrence, and abends are rare. */
     record_buffer = calloc(1, eff_lrecl);
     if (!record_buffer) {
+        session_fclose(session, fp);
         return handle_error(session, ERR_MEMORY, "Memory allocation failed");
     }
     recline_init(&rl, record_buffer, content_max);

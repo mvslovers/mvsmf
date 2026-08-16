@@ -384,6 +384,18 @@ else
 	fail "deleted directory is gone" "expected non-zero rc, got 0"
 fi
 
+# --- ETag / optimistic locking (issue #264) ---
+echo ""
+echo "--- ETag: optimistic locking (issue #264) ---"
+
+# Same gap as on the data set side: the z/OSMF SDK carries an ETag through its
+# USS upload/download options, but the CLI exposes no flag for either, so
+# `zowe files upload ftu` cannot be given an If-Match and `zowe files download
+# uss-file` cannot be asked for an ETag. The coverage lives in
+# tests/curl-uss.sh instead. Recorded as a skip rather than left out, so the
+# gap stays visible if a later CLI version does expose it.
+skip "etag: X-IBM-Return-Etag / If-Match (no Zowe CLI flag — see curl-uss.sh)"
+
 # =========================================================================
 # Cleanup
 # =========================================================================

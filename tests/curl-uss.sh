@@ -498,16 +498,260 @@ if [ -n "$TEST_FILE" ]; then
 	echo ""
 	echo "--- Write to directory path ---"
 
+	# Its own directory, not TEST_DIR. TEST_DIR defaults to "/", which the
+	# wildcard captures as the empty string -- the handler's missing-path
+	# guard then answers 400 before ever reaching UFSD, so the assertion
+	# passed without testing ISDIR at all.
+	DIR_FIXTURE="${TEST_FILE}.dirtest"
+	cleanup_recursive "$DIR_FIXTURE"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
+	assert_http_status "201" "$HTTP_CODE" "write-to-dir: create the fixture"
+
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 		-X PUT -u "$AUTH" \
 		-H "Content-Length: 10" \
 		-d "some data!" \
-		"${BASE_URL}/zosmf/restfiles/fs${TEST_DIR}")
+		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
 
-	assert_http_status "400" "$HTTP_CODE" "write to directory returns 400 (ISDIR)"
+	# 404, not the 400 the UFSD_RC_ISDIR row of the mapping table in
+	# CLAUDE.md promises: ufs_fopen() returns NULL for a directory, so the
+	# handler has no ISDIR to report and falls into its "cannot open"
+	# branch. Tracked as issue #269 -- asserted here as it actually behaves,
+	# so the day it is fixed this test says so.
+	assert_http_status "404" "$HTTP_CODE" "write to directory returns 404"
+
+	# The empty path is a different 400, and worth holding separately so the
+	# two cannot be confused again.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "some data!" \
+		"${BASE_URL}/zosmf/restfiles/fs/")
+
+	assert_http_status "400" "$HTTP_CODE" "write to an empty path returns 400"
 
 	# Cleanup
 	cleanup "$WRITE_FILE"
+	cleanup_recursive "$DIR_FIXTURE"
+
+	# -----------------------------------------------------------------
+	# ETag / optimistic locking (issue #264)
+	#
+	# Its own file: the section rewrites the content several times and
+	# compares stamps across those writes, so sharing WRITE_FILE with the
+	# blocks above would make a failure here look like a write failure there.
+	# -----------------------------------------------------------------
+
+	echo ""
+	echo "--- ETag: optimistic locking (issue #264) ---"
+
+	ETAG_FILE="${TEST_FILE}.etagtest"
+	cleanup "$ETAG_FILE"
+
+	# Pull the ETag out of a response header dump. Case-insensitive, CR
+	# stripped: curl writes the header block verbatim, MVS sends CRLF.
+	get_etag() {
+		grep -i '^ETag:' "$1" | tr -d '\r' | sed 's/^[Ee][Tt][Aa][Gg]:[ ]*//'
+	}
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "LINE ONE AND LINE TWO" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" "etag: seed the file"
+
+	# An ETag costs an extra read pass, so it is opt-in: no header, no ETag.
+	curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	if [ -z "$(get_etag /tmp/curl_uss_h1.txt)" ]; then
+		pass "etag: a plain GET returns no ETag"
+	else
+		fail "etag: a plain GET returns no ETag" \
+			"got $(get_etag /tmp/curl_uss_h1.txt)"
+	fi
+
+	curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG1=$(get_etag /tmp/curl_uss_h1.txt)
+	if [ -n "$ETAG1" ]; then
+		pass "etag: X-IBM-Return-Etag returns one ($ETAG1)"
+	else
+		fail "etag: X-IBM-Return-Etag returns one" "no ETag header in response"
+	fi
+
+	if echo "$ETAG1" | grep -qE '^[0-9A-F]{16}$'; then
+		pass "etag: the value is 16 uppercase hex digits"
+	else
+		fail "etag: the value is 16 uppercase hex digits" "got '$ETAG1'"
+	fi
+
+	# Stability: an unstable stamp 412s saves that should have succeeded.
+	curl -s -o /dev/null -D /tmp/curl_uss_h2.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG2=$(get_etag /tmp/curl_uss_h2.txt)
+	if [ "$ETAG1" = "$ETAG2" ]; then
+		pass "etag: an unchanged file stamps the same twice"
+	else
+		fail "etag: an unchanged file stamps the same twice" "$ETAG1 vs $ETAG2"
+	fi
+
+	# The stamp is over the stored bytes, so the read mode cannot change it.
+	# Text and binary differ in the codepage translation on the way out; if
+	# that reached the hash, a client reading text could not write binary.
+	curl -s -o /dev/null -D /tmp/curl_uss_h3.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		-H "X-IBM-Data-Type: binary" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG3=$(get_etag /tmp/curl_uss_h3.txt)
+	if [ "$ETAG1" = "$ETAG3" ]; then
+		pass "etag: text and binary reads stamp alike"
+	else
+		fail "etag: text and binary reads stamp alike" "$ETAG1 vs $ETAG3"
+	fi
+
+	# A stale If-Match must be refused, and must not have written anything.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: 0000000000000000" \
+		-d "OVERWRITTEN" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "412" "$HTTP_CODE" "etag: a stale If-Match is refused"
+
+	BODY=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	if echo "$BODY" | grep -q "LINE ONE AND LINE TWO"; then
+		pass "etag: the refused write left the file untouched"
+	else
+		fail "etag: the refused write left the file untouched" \
+			"content is now '$BODY'"
+	fi
+
+	# The current stamp is accepted, and the PUT hands back the new one.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-D /tmp/curl_uss_h4.txt \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: ${ETAG1}" \
+		-H "X-IBM-Return-Etag: true" \
+		-d "LINE ONE AND LINE TWO CHANGED" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" "etag: a current If-Match is accepted"
+
+	ETAG4=$(get_etag /tmp/curl_uss_h4.txt)
+	if [ -n "$ETAG4" ] && [ "$ETAG4" != "$ETAG1" ]; then
+		pass "etag: the PUT returns the new stamp ($ETAG4)"
+	else
+		fail "etag: the PUT returns the new stamp" "got '$ETAG4', was '$ETAG1'"
+	fi
+
+	# The PUT stamp comes from re-reading the closed file, so it must equal
+	# what the next GET computes. If it did not, every second save would 412.
+	curl -s -o /dev/null -D /tmp/curl_uss_h5.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG5=$(get_etag /tmp/curl_uss_h5.txt)
+	if [ "$ETAG4" = "$ETAG5" ]; then
+		pass "etag: the PUT stamp matches the next GET stamp"
+	else
+		fail "etag: the PUT stamp matches the next GET stamp" "$ETAG4 vs $ETAG5"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: ${ETAG4}" \
+		-d "LINE ONE AND LINE TWO" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" \
+		"etag: a second save with the returned stamp"
+
+	# The forms clients actually send: quoted and weak validators.
+	curl -s -o /dev/null -D /tmp/curl_uss_h6.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG6=$(get_etag /tmp/curl_uss_h6.txt)
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: \"${ETAG6}\"" \
+		-d "QUOTED FORM" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" "etag: a quoted If-Match is accepted"
+
+	curl -s -o /dev/null -D /tmp/curl_uss_h7.txt -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	ETAG7=$(get_etag /tmp/curl_uss_h7.txt)
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: W/\"${ETAG7}\"" \
+		-d "WEAK FORM" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" "etag: a weak If-Match is accepted"
+
+	# "*" asserts only that the file exists.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: *" \
+		-d "WILDCARD FORM" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" \
+		"etag: If-Match: * on an existing file is accepted"
+
+	# ... and on a path that is not there it fails. A PUT creates, so there
+	# is no 404 to compete with: the precondition is the whole answer.
+	MISSING_FILE="${TEST_FILE}.etagmissing"
+	cleanup "$MISSING_FILE"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: *" \
+		-d "SHOULD NOT BE CREATED" \
+		"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
+	assert_http_status "412" "$HTTP_CODE" \
+		"etag: If-Match: * on a missing file is refused"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
+	assert_http_status "404" "$HTTP_CODE" \
+		"etag: the refused write created nothing"
+
+	# Adding If-Match must not change how a directory is answered: the same
+	# 404 as the unconditional write above, not 412. Needs a real directory
+	# -- see the write-to-directory block above for why TEST_DIR will not do.
+	ETAG_DIR="${TEST_FILE}.etagdir"
+	cleanup_recursive "$ETAG_DIR"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
+	assert_http_status "201" "$HTTP_CODE" "etag: create the directory fixture"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-H "If-Match: *" \
+		-d "some data!" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
+	assert_http_status "404" "$HTTP_CODE" \
+		"etag: If-Match on a directory answers as the plain write does"
+
+	cleanup_recursive "$ETAG_DIR"
+
+	# A write with no If-Match is unconditional, as before the feature.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "UNCONDITIONAL" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" \
+		"etag: a write without If-Match is unconditional"
+
+	cleanup "$ETAG_FILE"
+	rm -f /tmp/curl_uss_h1.txt /tmp/curl_uss_h2.txt /tmp/curl_uss_h3.txt \
+		/tmp/curl_uss_h4.txt /tmp/curl_uss_h5.txt /tmp/curl_uss_h6.txt \
+		/tmp/curl_uss_h7.txt
 else
 	echo ""
 	echo "--- Write file tests ---"

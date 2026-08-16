@@ -235,17 +235,33 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
   locking on data sets and members (#152), and the same predicate answering
   `If-None-Match` on the read side (#263 — a match means 412 on a write, 304 on
   a read, wildcard included; there is no inverted variant).
+  It also carries the USS side (#264 — `X-IBM-Return-Etag` and `If-Match` on
+  `/restfiles/fs/{*filepath}`; no `If-None-Match` there yet).
   Deliberately free of MVS services so
-  it unit-tests on the host (`TSTETAG`); the record reading lives in `dsapi.c`
-  as `dataset_etag()`, next to the DCB knowledge it needs. Three rules that are
+  it unit-tests on the host (`TSTETAG`); the reading lives with the knowledge
+  it needs — `dataset_etag()` in `dsapi.c` next to the DCB handling,
+  `uss_etag()` in `ussapi.c` next to the UFS handling. Three rules that are
   load-bearing and all fail silently if broken: the stamp is computed over the
-  **stored records**, never over the bytes sent (those depend on
-  `X-IBM-Data-Type`); the hash pass takes the **same `max_records` bound** the
-  send path uses, i.e. `get_fb_record_count()` for a sequential data set and
-  `-1` for a member; and the ETag a PUT returns comes from **re-reading the
-  closed resource**, never from hashing the request body — the write and read
-  paths normalize in opposite directions, so a body-derived stamp makes every
-  second save fail its own precondition.
+  **stored bytes**, never over the bytes sent (those depend on
+  `X-IBM-Data-Type`, and on USS also on the IBM-1047 translation); the hash
+  pass takes the **same bound** the send path uses, i.e.
+  `get_fb_record_count()` for a sequential data set and `-1` for a member; and
+  the ETag a PUT returns comes from **re-reading the closed resource**, never
+  from hashing the request body — the write and read paths normalize in
+  opposite directions, so a body-derived stamp makes every second save fail its
+  own precondition.
+
+  The two resource kinds fold content in differently and must not be mixed:
+  `etag_update()` includes each record's length (data sets — the same bytes
+  re-split are a different resource), `etag_update_raw()` does not (USS — a
+  byte stream, where the read buffer size is an artefact and must not reach the
+  value). On USS the precondition also runs *before* the truncating `"w"` open,
+  which is why a directory is probed with `ufs_stat()` and falls through to the
+  write path rather than being reported as a stale 412 — adding `If-Match` must
+  not change how a non-file path is answered. That answer is **404**, not the
+  400 the `UFSD_RC_ISDIR` row below promises: `ufs_fopen()` returns NULL for a
+  directory in either mode, so there is no ISDIR to map. Measured on the stand;
+  open as #269.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).

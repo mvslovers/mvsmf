@@ -9,11 +9,17 @@
 
 #include "ussapi.h"
 #include "common.h"
+#include "etag.h"
 #include "httpcgi.h"
 
 // Data type constants
 #define USS_DATA_TYPE_TEXT   1
 #define USS_DATA_TYPE_BINARY 2
+
+// Wording deliberately identical to the data set path (ERR_MSG_ETAG_MISMATCH
+// in dsapi_err.h): one condition, one message, whichever resource it is about.
+#define USS_MSG_ETAG_MISMATCH \
+	"The resource was modified since the supplied ETag was created"
 
 // Forward declarations
 static int uss_extract_json_string(const char *json, const char *key,
@@ -154,6 +160,136 @@ uss_build_path(char *buf, size_t bufsz, const char *captured)
 	return buf;
 }
 
+
+//
+// uss_etag — compute the ETag of a USS file (issue #264)
+//
+// One extra read pass, opened and closed here. Both callers go through this
+// function -- the GET before it sends its headers, the PUT before it opens for
+// output and again after the file is closed -- so there is one definition of
+// the stamp and no way for the read side and the write side to drift apart.
+//
+// Three properties this depends on:
+//
+//   - The bytes are hashed exactly as stored. No translation: the payload the
+//     GET sends is IBM-1047-translated in text mode and raw in binary mode, so
+//     stamping what goes on the wire would give one file two stamps. The same
+//     reason the PUT stamps by re-reading the closed file rather than by
+//     hashing the request body it has just translated.
+//
+//   - etag_update_raw(), not etag_update(). A USS file is a byte stream; the
+//     chunking below is the reader's business and must not reach the value.
+//     See etag.h.
+//
+//   - It never runs while the same file is open elsewhere in the handler.
+//     Open-hash-close, then open for the body.
+//
+// Returns 0 with out filled. On failure returns -1 and sets *ufs_rc to the
+// UFSD diagnosis, which the caller needs: a path that is a directory is a
+// different answer from a path that is not there (see uss_check_if_match).
+//
+
+#define USS_ETAG_BUFSZ 1024
+
+__asm__("\n&FUNC    SETC 'uss_etag'");
+static int
+uss_etag(UFS *ufs, const char *path, char *out, size_t outlen, int *ufs_rc)
+{
+	ETAGCTX  ctx;
+	UFSFILE *fp;
+	char     buf[USS_ETAG_BUFSZ];
+	UINT32   n;
+
+	*ufs_rc = UFSD_RC_NOFILE;
+
+	fp = ufs_fopen(ufs, path, "r");
+	if (!fp) {
+		return -1;
+	}
+
+	if (fp->error != UFSD_RC_OK) {
+		*ufs_rc = fp->error;
+		ufs_fclose(&fp);
+		return -1;
+	}
+
+	etag_init(&ctx);
+	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
+		etag_update_raw(&ctx, buf, n);
+	}
+
+	// A read that stopped short leaves a stamp over a prefix of the file,
+	// which would compare unequal to itself on the next attempt. Fail
+	// instead: no stamp is better than an unstable one.
+	if (ufs_ferror(fp)) {
+		*ufs_rc = (fp->error != UFSD_RC_OK) ? fp->error : UFSD_RC_IO;
+		ufs_fclose(&fp);
+		return -1;
+	}
+
+	*ufs_rc = UFSD_RC_OK;
+	ufs_fclose(&fp);
+
+	return etag_final(&ctx, out, outlen);
+}
+
+//
+// uss_check_if_match — enforce an If-Match precondition before a write (#264)
+//
+// Returns 0 when the write may proceed -- either no If-Match was sent, or it
+// still matches. Returns -1 when an error response has already been sent, in
+// which case the caller must return without writing anything.
+//
+// A file that cannot be read fails the precondition rather than falling
+// through to the write: the client is asserting "the state I read is still
+// there", and a file since deleted is exactly the case that assertion exists
+// to catch. That covers "If-Match: *" too -- the wildcard asserts existence.
+//
+// A directory is the exception, and it falls through instead. Adding If-Match
+// to a request must not change how a path that is not a file is answered, and
+// this check runs before the open that answers it. Note that answer is 404,
+// not the 400 the UFSD mapping table would suggest: ufs_fopen() returns NULL
+// for a directory in either mode, with no ISDIR to report. Measured, not
+// assumed -- see issue #269.
+//
+// The probe is ufs_stat(), which reads metadata without an open. If it cannot
+// answer, the precondition fails: 412 and no write is the safe direction.
+//
+
+__asm__("\n&FUNC    SETC 'uss_ck_ifmatch'");
+static int
+uss_check_if_match(Session *session, UFS *ufs, const char *path)
+{
+	const char *if_match;
+	char        current[ETAG_SIZE];
+	int         urc = UFSD_RC_OK;
+
+	if_match = getHeaderParam(session, "If-Match");
+	if (!if_match) {
+		return 0;
+	}
+
+	if (uss_etag(ufs, path, current, sizeof(current), &urc) < 0) {
+		UFSDLIST st;
+
+		memset(&st, 0, sizeof(st));
+		if (ufs_stat(ufs, path, &st) == UFSD_RC_OK && st.attr[0] == 'd') {
+			return 0;  /* let the write path answer it */
+		}
+
+		sendErrorResponse(session, 412, 4, 8, 1,
+			USS_MSG_ETAG_MISMATCH, NULL, 0);
+		return -1;
+	}
+
+	if (!etag_matches(if_match, current)) {
+		sendErrorResponse(session, 412, 4, 8, 1,
+			USS_MSG_ETAG_MISMATCH, NULL, 0);
+		return -1;
+	}
+
+	return 0;
+}
 
 //
 // Default max items for directory listing
@@ -477,6 +613,8 @@ int ussGetHandler(Session *session)
 	UFSFILE *fp = NULL;
 	char buf[USS_READ_BUFSZ];
 	UINT32 n;
+	char etag[ETAG_SIZE] = {0};
+	const char *etag_hdr = NULL;
 
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
@@ -497,6 +635,21 @@ int ussGetHandler(Session *session)
 	ufs = uss_get_ufs(session);
 	if (!ufs) {
 		return -1;
+	}
+
+	// ETag, if asked for (issue #264). Before the file is opened for the
+	// body: one handle on a path at a time, and the value has to be known
+	// before the first response byte goes out anyway. That costs a second
+	// read pass over the file, which is why it is opt-in.
+	//
+	// A file that cannot be hashed simply gets no ETag here; the open below
+	// then produces the real diagnosis rather than this pass guessing at one.
+	if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+		int urc = UFSD_RC_OK;
+
+		if (uss_etag(ufs, abspath, etag, sizeof(etag), &urc) == 0) {
+			etag_hdr = etag;
+		}
 	}
 
 	// Open file for reading
@@ -528,6 +681,14 @@ int ussGetHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if (etag_hdr) {
+		if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto quit;
+		/* ETag is not a CORS-safelisted response header: without this a
+		   cross-origin client gets null from headers.get("ETag") and
+		   cannot tell that apart from a server with no ETag support. */
+		if ((rc = http_printf(session->httpc,
+			"Access-Control-Expose-Headers: ETag\r\n")) < 0) goto quit;
+	}
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	// Stream file content in chunks
@@ -683,6 +844,8 @@ int ussPutHandler(Session *session)
 	UFS *ufs = NULL;
 	UFSFILE *fp = NULL;
 	UINT32 written;
+	char etag[ETAG_SIZE] = {0};
+	const char *etag_hdr = NULL;
 
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
@@ -727,6 +890,16 @@ int ussPutHandler(Session *session)
 		return -1;
 	}
 
+	// If-Match, before the file is opened for output (issue #264). The "w"
+	// open truncates, so a precondition checked after it would already have
+	// destroyed the content it exists to protect. The body is read first
+	// regardless -- leaving it in the socket would break the connection for
+	// the next request on it.
+	if (uss_check_if_match(session, ufs, abspath) < 0) {
+		free(body);
+		return 0;
+	}
+
 	// Open file for writing (creates if not exists)
 	fp = ufs_fopen(ufs, abspath, "w");
 	if (!fp) {
@@ -764,8 +937,35 @@ int ussPutHandler(Session *session)
 		goto quit;
 	}
 
-	// Success — 204 No Content
-	rc = sendDefaultHeaders(session, 204, HTTP_CONTENT_TYPE_NONE, 0);
+	// Close before stamping: the write-behind buffer is only flushed here,
+	// so a stamp taken with the file still open would hash a stale tail.
+	ufs_fclose(&fp);
+	fp = NULL;
+
+	// ETag of the state just written (issue #264), from re-reading the closed
+	// file -- never from hashing the request body. The body has been
+	// translated in place by now, and one definition of the stamp is what
+	// makes the value a PUT returns usable as the next If-Match.
+	if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+		int urc = UFSD_RC_OK;
+
+		if (uss_etag(ufs, abspath, etag, sizeof(etag), &urc) == 0) {
+			etag_hdr = etag;
+		}
+	}
+
+	// Success — 204 No Content. Hand-rolled rather than via
+	// sendDefaultHeaders(), which has nowhere to put the ETag.
+	session->headers_sent = 1;
+	if ((rc = http_resp(session->httpc, 204)) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
+	if (etag_hdr) {
+		if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto quit;
+		if ((rc = http_printf(session->httpc,
+			"Access-Control-Expose-Headers: ETag\r\n")) < 0) goto quit;
+	}
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 quit:
 	if (fp) {

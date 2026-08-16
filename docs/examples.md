@@ -321,6 +321,35 @@ curl -s -u $USER:$PASS -X PUT --data-binary @local.txt \
 zowe files upload ftu ./local.txt "/tmp/hello.txt"
 ```
 
+### Write a file without clobbering someone else's edit
+`GET` with `X-IBM-Return-Etag`, then `PUT` with `If-Match`
+
+The same optimistic locking the data set endpoints have, on USS files. A plain
+`PUT` is last-write-wins; sending the stamp back makes the write conditional.
+
+```bash
+# read, keeping the stamp
+ETAG=$(curl -s -D - -o local.txt -u $USER:$PASS \
+  -H "X-IBM-Return-Etag: true" \
+  "$BASE/zosmf/restfiles/fs/tmp/hello.txt" \
+  | grep -i '^ETag:' | tr -d '\r' | sed 's/^[^ ]* //')
+
+# ... edit local.txt ...
+
+# save only if nobody else did in the meantime
+curl -s -o /dev/null -w '%{http_code}\n' -u $USER:$PASS -X PUT \
+  -H "If-Match: $ETAG" -H "X-IBM-Return-Etag: true" \
+  --data-binary @local.txt \
+  "$BASE/zosmf/restfiles/fs/tmp/hello.txt"
+# 204 = saved, 412 = someone else changed it; reload and re-apply
+```
+
+Take the next `If-Match` from the PUT response's `ETag`, as on the data set
+side. A text read and a binary read of the same file give the same stamp — it
+is computed over the stored bytes, before any codepage translation. There is no
+`If-None-Match` on this endpoint yet. Details in
+[endpoints/uss/put.md](endpoints/uss/put.md#conditional-writes-if-match).
+
 ### Create a file or directory
 `POST /zosmf/restfiles/fs/{filepath}`
 

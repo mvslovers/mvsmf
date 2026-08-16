@@ -113,6 +113,58 @@ main(void)
 		CHECK(strcmp(a, b) != 0, "AB|C and A|BC do not stamp alike");
 	}
 
+	printf("\n--- #264: a byte stream stamps independently of chunking ---\n");
+	{
+		/* uss_etag() reads a file with a fixed buffer, so the same content
+		   arrives as whatever chunks the size and the UFS block layout
+		   produce. etag_update_raw() must therefore fold bytes only: if the
+		   chunk lengths reached the CRC, one buffer size would stamp a file
+		   differently from another, and a client's If-Match would fail
+		   against content nobody changed. */
+		const char whole[] = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG";
+		size_t     len = sizeof(whole) - 1;
+		ETAGCTX    ctx;
+		size_t     off;
+		size_t     cut[] = { 7, 13, 23 };
+		int        i;
+
+		etag_init(&ctx);
+		etag_update_raw(&ctx, whole, len);
+		etag_final(&ctx, a, sizeof(a));
+
+		etag_init(&ctx);
+		off = 0;
+		for (i = 0; i < 3 && off < len; i++) {
+			size_t n = (cut[i] < len - off) ? cut[i] : len - off;
+			etag_update_raw(&ctx, whole + off, n);
+			off += n;
+		}
+		etag_update_raw(&ctx, whole + off, len - off);
+		etag_final(&ctx, b, sizeof(b));
+
+		CHECK(strcmp(a, b) == 0,
+			"one buffer and 7|13|23|rest stamp the same bytes alike");
+
+		/* Byte-for-byte, though, it must still be a content stamp. */
+		etag_init(&ctx);
+		etag_update_raw(&ctx, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DO", len - 1);
+		etag_final(&ctx, b, sizeof(b));
+		CHECK(strcmp(a, b) != 0, "a byte removed changes the stamp");
+
+		etag_init(&ctx);
+		etag_update_raw(&ctx, "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOD", len);
+		etag_final(&ctx, b, sizeof(b));
+		CHECK(strcmp(a, b) != 0, "a byte changed changes the stamp");
+
+		/* The two folds are different definitions on purpose -- mixing them
+		   within one computation would silently produce a third. */
+		etag_init(&ctx);
+		etag_update(&ctx, whole, len);
+		etag_final(&ctx, b, sizeof(b));
+		CHECK(strcmp(a, b) != 0,
+			"the record fold and the raw fold are distinct stamps");
+	}
+
 	printf("\n--- #152: an empty resource still stamps ---\n");
 	{
 		ETAGCTX ctx;

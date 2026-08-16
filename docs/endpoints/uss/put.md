@@ -97,17 +97,18 @@ the opposite ordering from a GET, where a missing path is **404** before any
 conditional header is looked at, because the more specific answer wins.
 
 A path that *is* a directory answers exactly as it would without `If-Match`:
-**404**. Adding a precondition does not change how a non-file path is reported.
-That 404 is itself a deviation from the `UFSD_RC_ISDIR` → 400 row of the error
-mapping — `ufs_fopen()` returns NULL for a directory in either mode, so the
-handler has no ISDIR to report — tracked separately as issue #269.
+**400** (`UFSD_RC_ISDIR`). Adding a precondition does not change how a non-file
+path is reported. It was 404 on both sides until issue #269 — `ufs_fopen()`
+returns NULL for a directory in either mode, and the diagnosis has to be read
+off the UFS session rather than off the (absent) file handle.
 
 ## Error Responses
 
 | Status | Condition |
 |--------|-----------|
-| 400    | Missing filepath or invalid utility request |
-| 404    | Cannot open file for writing (parent directory not found, or the path is a directory — see #269) |
+| 400    | Missing filepath, invalid utility request, or the path is a directory |
+| 403    | Read-only file system (not a z/OSMF status — the `UFSD_RC_ROFS` row is open as #248) |
+| 404    | Parent directory not found |
 | 412    | `If-Match` was supplied and the file no longer matches it — including a file that no longer exists |
 | 414    | Path name too long |
 | 500    | No space left on device or I/O error (64 KB limit) |

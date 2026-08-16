@@ -92,6 +92,37 @@ ufsd_rc_message(int rc)
 }
 
 //
+// uss_open_rc — the diagnosis for a ufs_fopen() that returned NULL (issue #269)
+//
+// A failed open reports through the UFS session, not through the file handle:
+// libufs stores the server's rc in the UFS handle and returns NULL, so the
+// `fp->error` check that follows every open in this file only ever sees an
+// error on a handle that was opened successfully — which is none.
+//
+// A directory is the case that made this visible. UFSD answers ISDIR for an
+// open of one in either mode (ufsd#fil.c, read and write alike), so the whole
+// mapping table above was unreachable from an open and every failure came back
+// as 404 "not found" — including ROFS, NOSPACE and NOINODES.
+//
+// ufs_fopen() has two NULL returns that never reach the server and so leave
+// last_rc at whatever an earlier call put there: a path too long for the
+// request block, and a reply too short to hold a descriptor. Neither is
+// distinguishable from here. Only the "nothing was recorded" case is caught —
+// it keeps the 404 this code answered before — so a stale value can still name
+// the wrong error on a request that was failing either way. The path that
+// leads there is a name of 252 characters or more; see uss_build_path().
+//
+
+__asm__("\n&FUNC    SETC 'uss_open_rc'");
+static int
+uss_open_rc(UFS *ufs)
+{
+	int urc = ufs_last_rc(ufs);
+
+	return (urc == UFSD_RC_OK) ? UFSD_RC_NOFILE : urc;
+}
+
+//
 // UFS session helper — uses HTTPD-managed session via http_get_ufs()
 //
 
@@ -247,13 +278,14 @@ uss_etag(UFS *ufs, const char *path, char *out, size_t outlen, int *ufs_rc)
 //
 // A directory is the exception, and it falls through instead. Adding If-Match
 // to a request must not change how a path that is not a file is answered, and
-// this check runs before the open that answers it. Note that answer is 404,
-// not the 400 the UFSD mapping table would suggest: ufs_fopen() returns NULL
-// for a directory in either mode, with no ISDIR to report. Measured, not
-// assumed -- see issue #269.
+// this check runs before the open that answers it. That answer is 400 ISDIR
+// since #269; whatever it becomes, it is the write path's to give.
 //
-// The probe is ufs_stat(), which reads metadata without an open. If it cannot
-// answer, the precondition fails: 412 and no write is the safe direction.
+// The probe is ufs_stat(), which reads metadata without an open. Deliberately
+// not ufs_last_rc(): the open here failed for its own reasons, and a stale rc
+// would silently skip a precondition rather than merely misname an error. If
+// the probe cannot answer, the precondition fails: 412 and no write is the
+// safe direction.
 //
 
 __asm__("\n&FUNC    SETC 'uss_ck_ifmatch'");
@@ -652,11 +684,14 @@ int ussGetHandler(Session *session)
 		}
 	}
 
-	// Open file for reading
+	// Open file for reading. A NULL handle carries no error of its own —
+	// the diagnosis is on the session (issue #269).
 	fp = ufs_fopen(ufs, abspath, "r");
 	if (!fp) {
-		rc = sendErrorResponse(session, 404, 6, 8, 1,
-			"File not found or is a directory", NULL, 0);
+		int urc = uss_open_rc(ufs);
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
 		return rc;
 	}
 
@@ -900,11 +935,14 @@ int ussPutHandler(Session *session)
 		return 0;
 	}
 
-	// Open file for writing (creates if not exists)
+	// Open file for writing (creates if not exists). A NULL handle carries no
+	// error of its own — the diagnosis is on the session (issue #269).
 	fp = ufs_fopen(ufs, abspath, "w");
 	if (!fp) {
-		rc = sendErrorResponse(session, 404, 6, 8, 1,
-			"Cannot open file for writing", NULL, 0);
+		int urc = uss_open_rc(ufs);
+		rc = sendErrorResponse(session,
+			ufsd_rc_to_http(urc), ufsd_rc_to_category(urc), 8, 1,
+			ufsd_rc_message(urc), NULL, 0);
 		goto quit;
 	}
 

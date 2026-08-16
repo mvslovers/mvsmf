@@ -258,10 +258,11 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
   value). On USS the precondition also runs *before* the truncating `"w"` open,
   which is why a directory is probed with `ufs_stat()` and falls through to the
   write path rather than being reported as a stale 412 — adding `If-Match` must
-  not change how a non-file path is answered. That answer is **404**, not the
-  400 the `UFSD_RC_ISDIR` row below promises: `ufs_fopen()` returns NULL for a
-  directory in either mode, so there is no ISDIR to map. Measured on the stand;
-  open as #269.
+  not change how a non-file path is answered. That answer is the **400 ISDIR**
+  the row below promises — since #269, and it stays `ufs_stat()` here on
+  purpose: the write path may read its diagnosis off `ufs_last_rc()`, but a
+  stale value in *this* check would skip a precondition silently, which is the
+  one failure the feature exists to prevent.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).

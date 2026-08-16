@@ -346,16 +346,11 @@ if [ -n "$TEST_FILE_EXISTS" ]; then
 
 	assert_http_status "404" "$HTTP_CODE" "read non-existent file returns 404"
 
-	RESP=$(curl -s -w '\n%{http_code}' \
-		-u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/fs${TEST_DIR}")
-	HTTP_CODE=$(echo "$RESP" | tail -1)
-
-	if [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "404" ]; then
-		pass "read directory as file returns error (HTTP $HTTP_CODE)"
-	else
-		fail "read directory as file" "expected HTTP 400 or 404, got $HTTP_CODE"
-	fi
+	# Reading a directory as a file is asserted in the "Directory as a file
+	# path" block below, not here: this section needs USS_TEST_FILE to be
+	# present on the target, and the directory case needs only a fixture it
+	# makes itself. Aiming it at TEST_DIR was what hid issue #269 -- see the
+	# comment there.
 else
 	echo ""
 	echo "--- Read file tests ---"
@@ -496,7 +491,7 @@ if [ -n "$TEST_FILE" ]; then
 	echo "--- Write file error cases ---"
 
 	echo ""
-	echo "--- Write to directory path ---"
+	echo "--- Directory as a file path ---"
 
 	# Its own directory, not TEST_DIR. TEST_DIR defaults to "/", which the
 	# wildcard captures as the empty string -- the handler's missing-path
@@ -517,12 +512,35 @@ if [ -n "$TEST_FILE" ]; then
 		-d "some data!" \
 		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
 
-	# 404, not the 400 the UFSD_RC_ISDIR row of the mapping table in
-	# CLAUDE.md promises: ufs_fopen() returns NULL for a directory, so the
-	# handler has no ISDIR to report and falls into its "cannot open"
-	# branch. Tracked as issue #269 -- asserted here as it actually behaves,
-	# so the day it is fixed this test says so.
-	assert_http_status "404" "$HTTP_CODE" "write to directory returns 404"
+	# 400 ISDIR, the row the mapping table in CLAUDE.md always promised.
+	# Answered 404 until issue #269: ufs_fopen() returns NULL for a directory
+	# rather than a handle carrying the error, so the diagnosis has to be
+	# read off the session with ufs_last_rc(), not off the handle.
+	assert_http_status "400" "$HTTP_CODE" "write to directory returns 400 (ISDIR)"
+
+	# The GET side of the same NULL open, on the same fixture. It lives here
+	# rather than with the read tests because those need USS_TEST_FILE to be
+	# present on the target and this needs only a directory it makes itself.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
+
+	assert_http_status "400" "$HTTP_CODE" "read directory as file returns 400 (ISDIR)"
+
+	# Neither answer may swallow a genuine 404: a path that is simply absent
+	# is still not found, on both verbs.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}.nosuch")
+
+	assert_http_status "404" "$HTTP_CODE" "read a missing path still returns 404"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "x" \
+		"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}.nosuch/file.txt")
+
+	assert_http_status "404" "$HTTP_CODE" "write below a missing parent still returns 404"
 
 	# The empty path is a different 400, and worth holding separately so the
 	# two cannot be confused again.
@@ -719,8 +737,10 @@ if [ -n "$TEST_FILE" ]; then
 		"etag: the refused write created nothing"
 
 	# Adding If-Match must not change how a directory is answered: the same
-	# 404 as the unconditional write above, not 412. Needs a real directory
-	# -- see the write-to-directory block above for why TEST_DIR will not do.
+	# 400 ISDIR as the unconditional write above, not 412. Needs a real
+	# directory -- see the write-to-directory block for why TEST_DIR will not
+	# do. It was 404 on both sides before issue #269; what matters here is
+	# that the two stay identical, whatever the write path answers.
 	ETAG_DIR="${TEST_FILE}.etagdir"
 	cleanup_recursive "$ETAG_DIR"
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
@@ -735,7 +755,7 @@ if [ -n "$TEST_FILE" ]; then
 		-H "If-Match: *" \
 		-d "some data!" \
 		"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
-	assert_http_status "404" "$HTTP_CODE" \
+	assert_http_status "400" "$HTTP_CODE" \
 		"etag: If-Match on a directory answers as the plain write does"
 
 	cleanup_recursive "$ETAG_DIR"

@@ -71,6 +71,8 @@ endpoints have it (#263), USS is a follow-up.
 |--------|-----------|
 | 400    | Missing filepath or path is a directory |
 | 404    | File not found |
+| 414    | Path name too long |
+| 500    | I/O error |
 | 503    | UFSD subsystem not available |
 
 ## Max File Size

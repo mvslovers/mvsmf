@@ -309,7 +309,26 @@ nicer answer, and even when httpd happily puts it on the wire.
 503 Service unavailable
 ```
 
-Two consequences that keep getting rediscovered:
+**The list bounds which codes are permitted; it does not mandate one per
+condition.** Where the documented example and the reference implementation
+disagree, follow the implementation — that is what clients are written against,
+and it can now be measured (see **Checking behaviour against a real z/OSMF**).
+Two codes turn on this:
+
+- **204 belongs to the bodiless replies** — deletes, rename, the USS utilities —
+  and mvsMF emits it there (`dsapi.c:2943`, `dsapi.c:2992`, `ussapi.c:1374`).
+  The list also describes it for "no data sets or files match the filter
+  criteria, or the specified partitioned data set has no members", but real
+  z/OSMF answers **200 with an empty `items` array** in every one of those
+  cases, including a partitioned data set with zero members. Empty listings stay
+  200 (#266, measured, closed won't-do).
+- **206 is the unresolved twin.** #249/PR#265 adopted it for a listing truncated
+  by `X-IBM-Max-Items`, on the same documented wording — but real z/OSMF answers
+  **200 with `moreRows: true`** there, and emits no 206 on the files service at
+  all. mvsMF and its reference currently disagree; open as **#274**. Do not cite
+  #249 as settled precedent.
+
+Two further consequences that keep getting rediscovered:
 
 - **409 Conflict, 414 URI Too Long and 507 Insufficient Storage are not in the
   list.** httpd gained all three in httpd#28/PR#56, and a live probe confirms a
@@ -336,6 +355,37 @@ Two consequences that keep getting rediscovered:
 `sendErrorResponse()` (`common.c`) does not branch on status — it builds the
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
 here fails silently, on the wire only.
+
+### Checking behaviour against a real z/OSMF (`zxp`) — READ-ONLY
+
+**This is a real IBM system. We treat it with respect.** Appending
+`--zosmf-p zxp` to any Zowe CLI call reaches a live IBM z/OSMF (version 29 /
+z/OS 05.29.00) — the very thing mvsMF clones. It turns conformance arguments
+into measurements: #266 and #274 were both settled on it in an afternoon after
+weeks of reading the spec.
+
+**The rule is read-only.** `list`, `view`, `download` — nothing else, and only
+as much of it as the question needs. Do not sweep the catalog, do not poll, do
+not leave anything behind.
+
+**Anything that writes must be explained and asked for, every single time.**
+Create, upload, write, rename, delete, submit — no exception, no "just a small
+test data set", and no carrying a permission over from a previous question. Say
+exactly what will be created, where, and how it gets cleaned up; then wait for
+an answer. A permission granted for one probe covers that probe only.
+
+Zowe CLI does not print the HTTP status on success and the profile is HTTPS, so
+`tests/trace-zowe.sh` cannot see inside it. To read the exact status line, load
+the profile through the SDK and use `client.response.statusCode`:
+`ProfileInfo.readProfilesFromDisk()` → `mergeArgsForProfile(attrs,
+{getSecureVals: true})` → `ProfileInfo.createSession()` pulls the credentials
+from the OS credential store without ever printing them.
+
+Two things met on the way: a member `pattern=` longer than 8 characters is
+rejected `400 {"category":1,"rc":4,"reason":13,"message":"pattern"}` — that is
+the member-name limit, not an empty result. And z/OSMF emits `moreRows` **only
+when true**, plus a `totalRows` mvsMF does not have yet (`dsapi.c:1221`,
+`dsapi.c:2090`).
 
 ### Operator Messages (WTO) — the catalog is closed
 

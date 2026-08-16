@@ -346,9 +346,25 @@ curl -s -o /dev/null -w '%{http_code}\n' -u $USER:$PASS -X PUT \
 
 Take the next `If-Match` from the PUT response's `ETag`, as on the data set
 side. A text read and a binary read of the same file give the same stamp — it
-is computed over the stored bytes, before any codepage translation. There is no
-`If-None-Match` on this endpoint yet. Details in
+is computed over the stored bytes, before any codepage translation. Details in
 [endpoints/uss/put.md](endpoints/uss/put.md#conditional-writes-if-match).
+
+### Re-read a USS file only if it changed
+`GET` with `If-None-Match`
+
+```bash
+# 304 while it still holds the state $ETAG describes, 200 with the content once
+# it does not
+curl -s -o local.txt -w '%{http_code}\n' -u $USER:$PASS \
+  -H "If-None-Match: $ETAG" \
+  "$BASE/zosmf/restfiles/fs/tmp/hello.txt"
+```
+
+As on the data set side: `*` matches any file that exists and so answers 304,
+both answers carry the `ETag` even without `X-IBM-Return-Etag`, and what it
+saves is the transfer rather than the read. A missing path is still 404 and a
+directory still 400 — the more specific answer wins. Details in
+[endpoints/uss/get.md](endpoints/uss/get.md#conditional-reads-if-none-match).
 
 ### Create a file or directory
 `POST /zosmf/restfiles/fs/{filepath}`

@@ -768,10 +768,173 @@ if [ -n "$TEST_FILE" ]; then
 	assert_http_status "204" "$HTTP_CODE" \
 		"etag: a write without If-Match is unconditional"
 
+	# -----------------------------------------------------------------
+	# ETag: conditional reads / If-None-Match (issue #271)
+	#
+	# The read half of the same stamp. Shares ETAG_FILE with the block
+	# above deliberately: the value a write returns and the value a read
+	# compares against have to be the same one, and a section of its own
+	# would hide a drift between them behind a fresh fixture.
+	# -----------------------------------------------------------------
+
+	echo ""
+	echo "--- ETag: conditional reads / If-None-Match (issue #271) ---"
+
+	# One value drives every check below: the stamp the file returns right
+	# now. The read half computes its own stamp for the comparison, so if
+	# that pass ever drifted from the one behind X-IBM-Return-Etag, it would
+	# surface here as a 200 where a 304 was asked for -- which is why the two
+	# are hashed in one pass.
+	curl -s -D /tmp/curl_uss_c1.txt -o /dev/null -u "$AUTH" \
+		-H "X-IBM-Return-Etag: true" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
+	CETAG=$(get_etag /tmp/curl_uss_c1.txt)
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' \
+		-D /tmp/curl_uss_c2.txt -o /tmp/curl_uss_c2.body \
+		-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "304" "$HTTP_CODE" "cond: a current If-None-Match is 304"
+
+	# A body is the one thing the status promises not to send.
+	if [ ! -s /tmp/curl_uss_c2.body ]; then
+		pass "cond: the 304 carries no body"
+	else
+		fail "cond: the 304 carries no body" \
+			"got $(wc -c < /tmp/curl_uss_c2.body) bytes"
+	fi
+
+	# The ETag rides along without X-IBM-Return-Etag being sent: a client on
+	# If-None-Match is already speaking the protocol, and the stamp had to be
+	# computed to answer at all.
+	if [ "$(get_etag /tmp/curl_uss_c2.txt)" = "$CETAG" ]; then
+		pass "cond: the 304 carries the ETag it confirmed"
+	else
+		fail "cond: the 304 carries the ETag it confirmed" \
+			"got '$(get_etag /tmp/curl_uss_c2.txt)', expected '$CETAG'"
+	fi
+
+	# The forms clients send, and the wildcard. "*" fails the If-None-Match
+	# condition whenever a representation exists (RFC 9110 13.1.2), and a
+	# failed condition on a GET is a 304 -- the opposite reading, "only if it
+	# does not exist", is the conditional-create semantic of a PUT.
+	for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
+		"\"0000000000000000\", \"${CETAG}\"" "*"; do
+		HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+			-H "If-None-Match: ${FORM}" \
+			"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+		assert_http_status "304" "$HTTP_CODE" \
+			"cond: If-None-Match ${FORM} is 304"
+	done
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' \
+		-D /tmp/curl_uss_c3.txt -o /tmp/curl_uss_c3.body -u "$AUTH" \
+		-H "If-None-Match: 0000000000000000" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "200" "$HTTP_CODE" "cond: a stale If-None-Match is 200"
+
+	if [ -s /tmp/curl_uss_c3.body ]; then
+		pass "cond: the 200 still carries the content"
+	else
+		fail "cond: the 200 still carries the content" "empty body"
+	fi
+
+	# The miss carries the stamp as well, without X-IBM-Return-Etag being
+	# sent -- If-None-Match alone now widens the pass that computes it. A
+	# reader polling on that header would otherwise receive the changed
+	# content and no validator to ask about the next change with.
+	if [ "$(get_etag /tmp/curl_uss_c3.txt)" = "$CETAG" ]; then
+		pass "cond: the 200 carries the current ETag too"
+	else
+		fail "cond: the 200 carries the current ETag too" \
+			"got '$(get_etag /tmp/curl_uss_c3.txt)', expected '$CETAG'"
+	fi
+
+	# The stamp is over the stored bytes, so it does not depend on
+	# X-IBM-Data-Type -- and neither does the 304 it answers. The stamp above
+	# came from a text read; this one asks in binary.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		-H "X-IBM-Data-Type: binary" \
+		-H "If-None-Match: ${CETAG}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "304" "$HTTP_CODE" "cond: a binary read is 304 too"
+
+	# 304 has to be a statement about the current content, not about the
+	# header having been seen once. Change the file and the same stamp must
+	# stop matching.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -u "$AUTH" \
+		-d "CHANGED UNDERNEATH THE POLL" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "204" "$HTTP_CODE" "cond: rewrite the file"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_uss_c4.txt -o /dev/null \
+		-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "200" "$HTTP_CODE" "cond: a changed file is 200 again"
+
+	# ... and the stamp it hands back is the new one, which is what lets the
+	# poll continue from here without a second request.
+	CETAGNEW=$(get_etag /tmp/curl_uss_c4.txt)
+	if [ -n "$CETAGNEW" ] && [ "$CETAGNEW" != "$CETAG" ]; then
+		pass "cond: the 200 after a change carries the new stamp ($CETAGNEW)"
+	else
+		fail "cond: the 200 after a change carries the new stamp" \
+			"got '$CETAGNEW', was '$CETAG'"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		-H "If-None-Match: ${CETAGNEW}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	assert_http_status "304" "$HTTP_CODE" "cond: the new stamp is 304 in turn"
+
+	# Nothing to be fresh about: the 404 is the more specific answer and wins.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		-H "If-None-Match: *" \
+		"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
+	assert_http_status "404" "$HTTP_CODE" "cond: a missing file is 404, not 304"
+
+	# A directory is the case where the plain wildcard reading gives the wrong
+	# answer: it exists, so "*" would be 304 -- but a directory has no
+	# representation to hand back and the unconditional GET answers 400 ISDIR
+	# (issue #269). Adding If-None-Match must not change that.
+	cleanup_recursive "$ETAG_DIR"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		-d '{"type":"directory"}' \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
+	assert_http_status "201" "$HTTP_CODE" "cond: create the directory fixture"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		-H "If-None-Match: *" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
+	assert_http_status "400" "$HTTP_CODE" \
+		"cond: If-None-Match on a directory answers as the plain read does"
+
+	cleanup_recursive "$ETAG_DIR"
+
+	# A bodiless response is framed by its header block alone. If that framing
+	# were wrong the next request on the same connection would hang or read the
+	# previous response's tail -- curl reuses the connection when both URLs are
+	# given in one invocation, so a second 304 here is the evidence.
+	CODES=$(curl -s --max-time 30 -o /dev/null -w '%{http_code} ' -u "$AUTH" \
+		-H "If-None-Match: ${CETAGNEW}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}" \
+		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+	if [ "$CODES" = "304 304 " ]; then
+		pass "cond: a second request on the same connection still answers"
+	else
+		fail "cond: a second request on the same connection still answers" \
+			"got '$CODES', expected '304 304 '"
+	fi
+
 	cleanup "$ETAG_FILE"
 	rm -f /tmp/curl_uss_h1.txt /tmp/curl_uss_h2.txt /tmp/curl_uss_h3.txt \
 		/tmp/curl_uss_h4.txt /tmp/curl_uss_h5.txt /tmp/curl_uss_h6.txt \
-		/tmp/curl_uss_h7.txt
+		/tmp/curl_uss_h7.txt /tmp/curl_uss_c1.txt /tmp/curl_uss_c2.txt \
+		/tmp/curl_uss_c2.body /tmp/curl_uss_c3.txt /tmp/curl_uss_c3.body \
+		/tmp/curl_uss_c4.txt
 else
 	echo ""
 	echo "--- Write file tests ---"

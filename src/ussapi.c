@@ -647,6 +647,8 @@ int ussGetHandler(Session *session)
 	UINT32 n;
 	char etag[ETAG_SIZE] = {0};
 	const char *etag_hdr = NULL;
+	const char *if_none_match;
+	int want_etag;
 
 	// Get filepath from path variable and build absolute path
 	raw_path = getPathParam(session, "filepath");
@@ -674,12 +676,32 @@ int ussGetHandler(Session *session)
 	// before the first response byte goes out anyway. That costs a second
 	// read pass over the file, which is why it is opt-in.
 	//
+	// One pass serves both halves of the protocol -- the value returned for
+	// X-IBM-Return-Etag and the comparison for If-None-Match (issue #271).
+	// Hashing twice would be two chances for the two answers to disagree.
+	//
 	// A file that cannot be hashed simply gets no ETag here; the open below
 	// then produces the real diagnosis rather than this pass guessing at one.
-	if (etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"))) {
+	// That is what keeps a directory answering 400 ISDIR instead of taking the
+	// 304 branch on "If-None-Match: *" -- uss_etag() fails on it, so there is
+	// no stamp to match. Deliberately no ufs_stat() probe like the write side
+	// has (uss_check_if_match): there a failed hash means 412, so the probe is
+	// load-bearing; here it already means "no ETag, let the open diagnose it".
+	if_none_match = getHeaderParam(session, "If-None-Match");
+	want_etag = etag_requested(getHeaderParam(session, "X-IBM-Return-Etag"));
+
+	if (if_none_match || want_etag) {
 		int urc = UFSD_RC_OK;
 
 		if (uss_etag(ufs, abspath, etag, sizeof(etag), &urc) == 0) {
+			if (if_none_match && etag_matches(if_none_match, etag)) {
+				return send_not_modified(session, etag);
+			}
+			// Either header means the client wants the validator, and this
+			// branch is only reached when one of them was sent -- so the
+			// stamp goes out on the miss too. Without it a reader polling on
+			// If-None-Match alone would get the changed content and no way to
+			// ask about the next change.
 			etag_hdr = etag;
 		}
 	}

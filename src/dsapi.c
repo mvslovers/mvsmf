@@ -53,7 +53,6 @@ static int dataset_etag(Session *session, const char *dataset,
                         long max_records, char *out, size_t outlen);
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
-static int send_not_modified(Session *session, const char *etag);
 
 // Helper functions for memory management
 static void cleanup_resources(char* buffer, FILE* fp) {
@@ -380,42 +379,6 @@ check_if_match(Session *session, const char *dataset, long max_records)
 	}
 
 	return 0;
-}
-
-/* Answer a conditional read whose If-None-Match still holds (issue #263).
- *
- * No body and no Content-Type: the client keeps the representation it already
- * has, and a 304 that described a payload it is not sending would only invite
- * a client to believe there is one. The other headers mirror what the 200
- * would have carried, which is what RFC 9110 asks a 304 to do.
- *
- * The ETag goes out even when the request did not ask for one with
- * X-IBM-Return-Etag. That looks like it contradicts the opt-in, and does not:
- * a client sending If-None-Match is already speaking the ETag protocol, and
- * the stamp had to be computed to answer at all. Withholding it would only
- * cost the client its confirmation of which state it is now holding.
- */
-__asm__("\n&FUNC    SETC 'send_notmod'");
-static int
-send_not_modified(Session *session, const char *etag)
-{
-	int rc;
-
-	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc,
-			HTTP_STATUS_NOT_MODIFIED)) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Cache-Control: no-store\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Pragma: no-cache\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
-
-	return rc;
 }
 
 // Helper function for error handling

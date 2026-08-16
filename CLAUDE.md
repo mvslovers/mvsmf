@@ -236,7 +236,9 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
   `If-None-Match` on the read side (#263 — a match means 412 on a write, 304 on
   a read, wildcard included; there is no inverted variant).
   It also carries the USS side (#264 — `X-IBM-Return-Etag` and `If-Match` on
-  `/restfiles/fs/{*filepath}`; no `If-None-Match` there yet).
+  `/restfiles/fs/{*filepath}` — and #271, which brought `If-None-Match` there
+  too; the 304 response itself is `send_not_modified()` in `common.c`, hoisted
+  out of `dsapi.c` when USS became its second caller).
   Deliberately free of MVS services so
   it unit-tests on the host (`TSTETAG`); the reading lives with the knowledge
   it needs — `dataset_etag()` in `dsapi.c` next to the DCB handling,
@@ -263,6 +265,12 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
   purpose: the write path may read its diagnosis off `ufs_last_rc()`, but a
   stale value in *this* check would skip a precondition silently, which is the
   one failure the feature exists to prevent.
+
+  The **read** side needs no such probe and must not grow one: a failed hash
+  there already means "no ETag, let the open below diagnose it", so a directory
+  reaches the same 400 ISDIR it would without the header, and a missing file
+  the same 404. That is what keeps `If-None-Match: *` — which is a 304 for any
+  file that exists — from turning either of them into a 304.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).

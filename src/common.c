@@ -202,6 +202,28 @@ quit:
 	return irc;
 }
 
+int
+send_not_modified(Session *session, const char *etag)
+{
+	int rc;
+
+	session->headers_sent = 1;
+	if ((rc = http_resp(session->httpc,
+			HTTP_STATUS_NOT_MODIFIED)) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Cache-Control: no-store\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Pragma: no-cache\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
+
+	return rc;
+}
+
 //
 // Read raw data from socket, one byte at a time.
 // Works around the MVS 3.8j TCP/IP ring buffer bug that corrupts data

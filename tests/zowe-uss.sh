@@ -396,6 +396,10 @@ echo "--- ETag: optimistic locking (issue #264) ---"
 # gap stays visible if a later CLI version does expose it.
 skip "etag: X-IBM-Return-Etag / If-Match (no Zowe CLI flag — see curl-uss.sh)"
 
+# The read half (#271) is further out of reach: the SDK has no If-None-Match
+# option at all, so a 304 cannot be provoked through the CLI even indirectly.
+skip "etag: If-None-Match / 304 (no Zowe CLI or SDK option — see curl-uss.sh)"
+
 # =========================================================================
 # Cleanup
 # =========================================================================

@@ -1,5 +1,7 @@
 #include <clibary.h>
 #include <clibdscb.h>
+#include <clibecb.h>
+#include <clibenv.h>
 #include <clibgrt.h>
 #include <clibjes2.h>
 #include <cliblist.h>
@@ -139,6 +141,171 @@ static int testJesAbend(Session *session) {
   __asm__ volatile("  DC	H'0'");
 
   return 0; /* not reached */
+}
+
+/* --- fn=storage (issue #287) --------------------------------------------
+ * Sample the address space's free storage, so the degradation that ends in
+ * S80A can be measured between load runs instead of reconstructed from a
+ * console log that has already rolled out of the Master Trace Table.
+ *
+ * Two numbers, answering different questions:
+ *
+ *   largest  the biggest contiguous block GETMAIN would hand out right now.
+ *            httpd LINKs MVSMF fresh per request and libc370's C startup
+ *            takes an *unconditional* GETMAIN of STG_LINK_STACK bytes for
+ *            the main stack, so once `largest` drops below that the next
+ *            request cannot start -- S80A, before mvsMF's ESTAE exists.
+ *   total    everything still free, counted in blocks of >= STG_GRAN
+ *            (&total=1 only; see the warning on stg_comb()).
+ *
+ * `total` flat while `largest` shrinks is the fragmentation signature; both
+ * falling together is an ordinary leak.  Either number alone cannot tell the
+ * two apart, which is the whole reason the comb exists.
+ *
+ * Both are measured from *inside* a CGI request, so this task's own
+ * STG_LINK_STACK is already carved out of what is being reported, and each
+ * sample is itself one more LINK.  Read the numbers accordingly.
+ *
+ * Probing uses the register form of GETMAIN/FREEMAIN, issued inline: MVSMF
+ * is RENT, and the list forms (GETMAIN VC and friends) build their parameter
+ * list in the code stream and store into it -- an S0C4 here.  The register
+ * form is register setup plus SVC 10, which is also why the size has to be
+ * bisected: VC would report the largest available block in one call, the R
+ * form only ever answers yes or no.
+ *
+ * libc370's getmain() is deliberately not used: it WTOs on every failed
+ * request, and a bisect fails by design on about half its probes -- that
+ * would feed the instrument's own noise into the Master Trace Table that
+ * consapi.c reads back out.
+ */
+#define STG_GRAN       4096u          /* probe resolution                   */
+#define STG_MAX        0x00FFF000u    /* 16 MB - 4 K: the 24-bit ceiling    */
+/* What one LINK actually asks for, per libc370 asm/@@crt0.asm: STACKLEN
+ * (X'040088' = 262280, the whole STACK area, not just MAINSTK's 65536F) plus
+ * L'CLIBPPA+7, then ANDed with X'00FFFFF8' -- rounded *down* to a doubleword,
+ * which is why it lands on X'0400B8' and not one word higher.  262144 is the
+ * round number this was first written against and it is too low: a largest
+ * block between the two reads "fits" and does not. */
+#define STG_LINK_STACK 262328u        /* X'0400B8' */
+#define STG_COMB_MAX   256            /* blocks the &total=1 comb may hold  */
+#define STG_SIZES_MAX  32             /* block sizes reported in the JSON   */
+
+/* Conditional GETMAIN.  Returns NULL on any non-zero return code -- never
+ * abends, never writes a message. */
+__asm__("\n&FUNC	SETC 'stg_getmain'");
+static void *stg_getmain(unsigned lv, unsigned sp) {
+  int rc = 0;
+  void *r1 = (void *)0;
+
+  __asm__("GETMAIN RC,LV=(%2),SP=(%3)\n\t"
+          "LR\t%0,15\n\t"
+          "LR\t%1,1"
+          : "=r"(rc), "=r"(r1)
+          : "r"(lv), "r"(sp)
+          : "0", "1", "14", "15");
+
+  return rc ? (void *)0 : r1;
+}
+
+/* Conditional FREEMAIN.  Returns the return code: a non-zero one means this
+ * probe just leaked what it took, which the caller reports rather than
+ * swallows. */
+__asm__("\n&FUNC	SETC 'stg_freemain'");
+static int stg_freemain(void *addr, unsigned lv, unsigned sp) {
+  int rc = 0;
+
+  __asm__("FREEMAIN RC,A=(%1),LV=(%2),SP=(%3)\n\t"
+          "LR\t%0,15"
+          : "=r"(rc)
+          : "r"(addr), "r"(lv), "r"(sp)
+          : "0", "1", "14", "15");
+
+  return rc;
+}
+
+/* Largest obtainable block, bisected to STG_GRAN.  `hi` is a size known (or
+ * assumed) to fail; the return value is the largest multiple of STG_GRAN
+ * that succeeded, 0 if not even one page is left.  Every probe gives its
+ * block straight back, so the subpool is left exactly as it was found. */
+__asm__("\n&FUNC	SETC 'stg_largest'");
+static unsigned stg_largest(unsigned sp, unsigned hi, int *probes,
+                            int *free_errors) {
+  unsigned lo = 0; /* largest size known to succeed */
+
+  while (hi - lo > STG_GRAN) {
+    unsigned mid = (lo + (hi - lo) / 2) & ~(STG_GRAN - 1);
+    void *p;
+
+    if (mid <= lo)
+      break;
+
+    (*probes)++;
+    p = stg_getmain(mid, sp);
+    if (p) {
+      if (stg_freemain(p, mid, sp) != 0)
+        (*free_errors)++;
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  return lo;
+}
+
+/* Total free storage, by taking the largest block over and over until
+ * nothing of STG_GRAN is left, then giving all of it back.
+ *
+ * WARNING: for the length of the loop this task holds every free byte in the
+ * subpool.  A request arriving in that window fails its startup GETMAIN --
+ * S80A, and per mvslovers/httpd#154 that abend leaks storage permanently,
+ * i.e. the instrument would corrupt the very quantity it measures.  Sample
+ * with &total=1 only between load runs, never during one.
+ *
+ * Nothing here may allocate between the take loop and the give-back loop.
+ * The block table is on the stack for that reason (and because MVSMF is
+ * RENT), which is what bounds it at STG_COMB_MAX. */
+__asm__("\n&FUNC	SETC 'stg_comb'");
+static void stg_comb(unsigned sp, unsigned *sizes, int max_sizes, int *nsizes,
+                     unsigned *total, int *nblocks, int *truncated,
+                     int *probes, int *free_errors) {
+  void *addr[STG_COMB_MAX];
+  unsigned len[STG_COMB_MAX];
+  unsigned hi = STG_MAX + STG_GRAN;
+  unsigned sum = 0;
+  int n = 0;
+  int i;
+
+  while (n < STG_COMB_MAX) {
+    unsigned sz = stg_largest(sp, hi, probes, free_errors);
+    void *p;
+
+    if (sz < STG_GRAN)
+      break;
+
+    p = stg_getmain(sz, sp);
+    if (!p)
+      break; /* lost the race against another task; stop with what we hold */
+
+    addr[n] = p;
+    len[n] = sz;
+    sum += sz;
+    hi = sz + STG_GRAN; /* nothing left can be larger than this block */
+    n++;
+  }
+
+  *truncated = (n == STG_COMB_MAX);
+  *nblocks = n;
+  *total = sum;
+
+  *nsizes = (n < max_sizes) ? n : max_sizes;
+  for (i = 0; i < *nsizes; i++)
+    sizes[i] = len[i];
+
+  while (n-- > 0) {
+    if (stg_freemain(addr[n], len[n], sp) != 0)
+      (*free_errors)++;
+  }
 }
 
 int testHandler(Session *session) {
@@ -514,6 +681,179 @@ int testHandler(Session *session) {
         ret ? "non-null" : "NULL", len,
         (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
 
+    /* --- fn=env (does the CGI see httpd's //SYSENV?) --------------- */
+    /* The abend test hook is gated on getenv("MVSMF_ABEND_TEST"), which only
+     * works because httpd and the CGI share one CLIBGRT -- the CGI reads the
+     * environment httpd's @@START loaded from //SYSENV. When that gate does
+     * not open there are two indistinguishable causes: the DD/member was not
+     * in place at server start, or the CGI is not seeing httpd's environment
+     * at all. Listing what this CGI actually has separates them: names but no
+     * MVSMF_* means the member was empty at start; an empty list means the
+     * environment is not shared.
+     *
+     * Names are always safe to show; values are not (httpd's environment is
+     * the server operator's, not the caller's), so only MVSMF_* values are
+     * printed -- those are our own test flags and carry no secrets.
+     *
+     * Read grt->grtenv, which is where the environment actually lives. The
+     * __envvar/__envsiz pair exported by clibenv.h is a legacy symbol that
+     * stays 0 (libc370 @@envvar.c), so reading it reports an empty
+     * environment no matter what is loaded -- a false negative that reads
+     * exactly like "the CGI does not see httpd's environment". getenv()
+     * resolves through __findenv() -> __grtget()->grtenv (@@finden.c:18), so
+     * walking that array answers the same question getenv() does. */
+  } else if (strcmp(fn, "env") == 0) {
+    CLIBGRT *grt = __grtget();
+    unsigned count = (grt && grt->grtenv) ? arraycount(&grt->grtenv) : 0;
+    unsigned i;
+    int shown = 0;
+
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"env\", \"grt\": \"%s\","
+                     " \"grtenv\": \"%s\", \"count\": %u, \"items\": [",
+                     grt ? "non-null" : "NULL",
+                     (grt && grt->grtenv) ? "non-null" : "NULL", count);
+    if (rc < 0)
+      goto quit;
+
+    for (i = 0; i < count; i++) {
+      __ENVVAR *ev = (__ENVVAR *)grt->grtenv[i];
+      const char *name;
+
+      if (!ev || !ev->name)
+        continue;
+      name = ev->name;
+
+      if (strncmp(name, "MVSMF_", 6) == 0) {
+        rc = http_printf(session->httpc,
+                         "%s{ \"name\": \"%s\", \"value\": \"%s\" }",
+                         shown ? ", " : " ", name, ev->value ? ev->value : "");
+      } else {
+        rc = http_printf(session->httpc, "%s{ \"name\": \"%s\" }",
+                         shown ? ", " : " ", name);
+      }
+      if (rc < 0)
+        goto quit;
+      shown++;
+    }
+
+    rc = http_printf(session->httpc, " ] }\n");
+
+    /* --- fn=storage (free storage sample, issue #287) -------------- */
+  } else if (strcmp(fn, "storage") == 0) {
+    char *spv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_SP");
+    char *totalv =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_TOTAL");
+    char *holdv =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_HOLD");
+    int spn = spv ? atoi(spv) : 0;
+    unsigned sp = (unsigned)spn;
+    int want_total = totalv && (totalv[0] == '1' || totalv[0] == 'y' ||
+                                totalv[0] == 'Y');
+    /* &hold=<seconds> (cap 10): after measuring, KEEP the largest block
+     * allocated for that long before freeing it.  Concurrent requests must
+     * then start their 262328-byte C stack in what remains -- which is how
+     * both halves of the #287 fragmentation claim get proven live: a request
+     * that fails U0801 while the holes are the only space left proves the
+     * failure signature AND that a fenced-off hole cannot hold a stack.
+     *
+     * This is deliberate fault injection against a live server, so it is
+     * gated exactly like fn=abend: without MVSMF_ABEND_TEST in the server
+     * environment the parameter is ignored and reported as such. */
+    int hold = holdv ? atoi(holdv) : 0;
+    int hold_denied = 0;
+
+    if (hold < 0)
+      hold = 0;
+    if (hold > 10)
+      hold = 10;
+    if (hold && !abend_test_enabled()) {
+      hold = 0;
+      hold_denied = 1;
+    }
+
+    if (spn < 0 || spn > 127) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"storage\", \"error\": \"sp must be 0..127;"
+                       " subpools above 127 need supervisor state\" }\n");
+    } else {
+      unsigned largest;
+      unsigned sizes[STG_SIZES_MAX];
+      unsigned total = 0;
+      int probes = 0, free_errors = 0;
+      int nblocks = 0, nsizes = 0, truncated = 0;
+      char largest_at[16] = "";
+      char stack_at[16] = "";
+      void *p;
+      int i;
+
+      /* This request's own stack: where in the region the current LINK
+       * landed, and hence which end of it the 262 K came out of. */
+      sprintf(stack_at, "0x%06X", (unsigned)(unsigned long)&probes);
+
+      largest = stg_largest(sp, STG_MAX + STG_GRAN, &probes, &free_errors);
+      if (largest) {
+        p = stg_getmain(largest, sp);
+        if (p) {
+          sprintf(largest_at, "0x%06X", (unsigned)(unsigned long)p);
+          if (hold) {
+            ECB ecb = 0;
+            /* BINTVL is in hundredths of a second.  A failed timer (negative
+             * rc) means no wait happened -- fine here, the block is simply
+             * given back at once and `held` reports what really occurred. */
+            if (ecb_timed_wait(&ecb, (unsigned)hold * 100u, 1) < 0)
+              hold = 0;
+          }
+          if (stg_freemain(p, largest, sp) != 0)
+            free_errors++;
+        }
+      }
+
+      if (want_total)
+        stg_comb(sp, sizes, STG_SIZES_MAX, &nsizes, &total, &nblocks,
+                 &truncated, &probes, &free_errors);
+
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"storage\", \"sp\": %u, \"largest\": %u,"
+                       " \"largest_at\": \"%s\", \"link_stack\": %u,"
+                       " \"granularity\": %u, \"stack_at\": \"%s\"",
+                       sp, largest, largest_at, STG_LINK_STACK, STG_GRAN,
+                       stack_at);
+      if (rc < 0)
+        goto quit;
+
+      if (want_total) {
+        rc = http_printf(session->httpc,
+                         ", \"total\": %u, \"blocks\": %d,"
+                         " \"truncated\": %s, \"sizes\": [",
+                         total, nblocks, truncated ? "true" : "false");
+        if (rc < 0)
+          goto quit;
+
+        for (i = 0; i < nsizes; i++) {
+          rc = http_printf(session->httpc, "%s%u", i > 0 ? ", " : "",
+                           sizes[i]);
+          if (rc < 0)
+            goto quit;
+        }
+
+        rc = http_printf(session->httpc, "]");
+        if (rc < 0)
+          goto quit;
+      }
+
+      if (hold || hold_denied) {
+        rc = http_printf(session->httpc, ", \"held\": %d, \"hold_denied\": %s",
+                         hold, hold_denied ? "true" : "false");
+        if (rc < 0)
+          goto quit;
+      }
+
+      rc = http_printf(session->httpc, ", \"probes\": %d, \"free_errors\": %d"
+                                       " }\n",
+                       probes, free_errors);
+    }
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -525,6 +865,8 @@ int testHandler(Session *session) {
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
         " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
         " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","
+        " \"?fn=storage&sp=0&total=0|1&hold=N (free storage sample; total=1 briefly holds all"
+        " of it; hold=N keeps the largest block N seconds -- needs MVSMF_ABEND_TEST=1)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\""

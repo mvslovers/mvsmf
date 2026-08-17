@@ -484,6 +484,14 @@ curl -u U:P 'http://host:port/zosmf/test?fn=listds&level=SYS1&filter=SYS1.MAC*'
 curl -u U:P 'http://host:port/zosmf/test?fn=locate&dsn=SYS1.MACLIB'
 ```
 
+`fn=storage` is the free-storage sample behind #287 — largest contiguous block
+in a subpool, and with `&total=1` the total and the block-size distribution.
+The threshold it exists to watch is **262144**, the unconditional GETMAIN
+libc370's C startup makes on every LINK: once the largest block is below that,
+the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
+*all* free storage, so it must be sampled between load runs, never during one.
+See [docs/storage-probe.md](docs/storage-probe.md).
+
 ### Known Platform Bugs
 
 The MVS 3.8j TCP/IP stack has a ring buffer bug that corrupts data when a multi-byte `recv()` call spans the internal buffer wrap-around point. Corrupted reads return replayed data from earlier in the stream. Single-byte `recv()` calls are not affected because they never cross the boundary.

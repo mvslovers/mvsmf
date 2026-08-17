@@ -1,0 +1,11 @@
+suite loop started Sa.  8 Aug. 2026 22:15:20 CEST
+22:15:46 pass 1 curl-datasets 26s :: ========================================  Results: 85 passed, 0 failed, 0 skipped (85 total) ======================================== 
+22:16:00 pass 1 curl-jobs 14s :: ========================================  Results: 87 passed, 0 failed, 1 skipped (88 total) ======================================== 
+22:16:25 pass 2 curl-datasets 25s :: ========================================  Results: 85 passed, 0 failed, 0 skipped (85 total) ======================================== 
+22:16:39 pass 2 curl-jobs 14s :: ========================================  Results: 87 passed, 0 failed, 1 skipped (88 total) ======================================== 
+22:17:06 pass 3 curl-datasets 27s :: ========================================  Results: 85 passed, 0 failed, 0 skipped (85 total) ======================================== 
+22:17:20 pass 3 curl-jobs 14s :: ========================================  Results: 87 passed, 0 failed, 1 skipped (88 total) ======================================== 
+22:17:47 pass 4 curl-datasets 27s :: ========================================  Results: 85 passed, 0 failed, 0 skipped (85 total) ======================================== 
+22:18:00 pass 4 curl-jobs 13s :: ========================================  Results: 87 passed, 0 failed, 1 skipped (88 total) ======================================== 
+22:18:28 pass 5 curl-datasets 28s :: ========================================  Results: 85 passed, 0 failed, 0 skipped (85 total) ======================================== 
+22:18:43 pass 5 curl-jobs 15s :: ========================================  Results: 87 passed, 0 failed, 1 skipped (88 total) ======================================== 

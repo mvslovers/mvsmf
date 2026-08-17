@@ -34,16 +34,26 @@
 /** @brief EBCDIC newline (NEL) - used by CP037 A2E for ASCII LF (0x0A) */
 #define EBCDIC_NEL 0x15
 
-/** @brief HTTP status codes */
+/** @brief HTTP status codes
+ *
+ * z/OSMF enumerates the status codes its API uses, and mvsMF is a clone of it:
+ * 200, 204, 206, 304, 400, 401, 404, 405, 412, 413, 429, 500, 503. Do not add a
+ * constant here for a code outside that set, however much better it reads --
+ * 409, 414 and 507 were declined in #102, and 410 and 403 were removed again in
+ * #250 after being introduced. httpd can put all of them on the wire; that is
+ * not the constraint.
+ *
+ * 201 is the one code below that is outside the list and still correct: the
+ * reference implementation was measured answering 201 to a data set create, so
+ * it is what a clone does (#248).
+ */
 #define HTTP_STATUS_OK 200                    /**< Success */
-#define HTTP_STATUS_CREATED 201               /**< Resource created */
-#define HTTP_STATUS_ACCEPTED 202              /**< Request accepted */
+#define HTTP_STATUS_CREATED 201               /**< Resource created - see above */
+#define HTTP_STATUS_ACCEPTED 202              /**< Request accepted - unused */
 #define HTTP_STATUS_NOT_MODIFIED 304          /**< If-None-Match still current */
 #define HTTP_STATUS_BAD_REQUEST 400           /**< Invalid parameters */
 #define HTTP_STATUS_UNAUTHORIZED 401          /**< Unauthorized */
-#define HTTP_STATUS_FORBIDDEN 403             /**< Forbidden */
 #define HTTP_STATUS_NOT_FOUND 404             /**< Resource not found */
-#define HTTP_STATUS_GONE 410                  /**< Resource existed, is gone */
 #define HTTP_STATUS_PRECONDITION_FAILED 412   /**< If-Match ETag no longer current */
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500 /**< Server error */
 #define HTTP_STATUS_SERVICE_UNAVAILABLE 503  /**< Service unavailable */

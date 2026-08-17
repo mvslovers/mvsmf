@@ -35,8 +35,10 @@ answer 404 the same way `GET /jobs/{name}/{id}` does.
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing required parameters (jobname/jobid)
-- HTTP 403 (Forbidden)
-    - No permission (e.g. attempt to delete HTTPD itself)
+    - Refusing to purge a started task, `reason` `REASON_STC_PURGE` — e.g. an
+      attempt to delete HTTPD itself. This answered 403 until #250; 403 is not
+      a z/OSMF status, and the refusal is about what was asked for rather than
+      about who asked.
 - HTTP 404 (Not Found)
     - Job not found. This also covers a jobid JES2 rejects as malformed —
       on 3.8j anything outside `JOB00001`–`JOB09999`, e.g. `JOB99999`, or a

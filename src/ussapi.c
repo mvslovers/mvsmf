@@ -38,9 +38,13 @@ static int uss_extract_json_string(const char *json, const char *key,
 // rather than 507, and "name too long" is 400 rather than 414. Closed as
 // won't-do in #102; do not re-open it from the httpd side alone.
 //
-// UFSD_RC_ROFS -> 403 is the one row still outside that list, and it is open in
-// #248: there is no read-only file system on the reference implementation to
-// measure it against, so it needs deciding on its own terms.
+// UFSD_RC_ROFS answers 400 for the same reason, decided in #250 together with
+// the 410 that used to come back for purged spool output. It could not be
+// settled by measurement -- a read-only file system is a UFSD condition, and
+// the reference has no equivalent state to provoke -- so it followed the rule
+// the other rows follow rather than becoming a second exception. Category 4
+// still separates it from the other bad requests. The row is unreachable in
+// practice today: UFSD has no read-only mount, so nothing produces this rc.
 //
 
 __asm__("\n&FUNC    SETC 'ufsd_rc_to_http'");
@@ -59,7 +63,7 @@ ufsd_rc_to_http(int rc)
 	case UFSD_RC_BADFD:       return 500;
 	case UFSD_RC_NOTEMPTY:    return 400;  /* not 409: not a z/OSMF status */
 	case UFSD_RC_NAMETOOLONG: return 400;  /* not 414: not a z/OSMF status */
-	case UFSD_RC_ROFS:        return 403;  /* outside the list too -- #248 */
+	case UFSD_RC_ROFS:        return 400;  /* not 403: not a z/OSMF status */
 	default:                  return 500;
 	}
 }

@@ -109,7 +109,7 @@ off the UFS session rather than off the (absent) file handle.
 | Status | Condition |
 |--------|-----------|
 | 400    | Missing filepath, invalid utility request, or the path is a directory |
-| 403    | Read-only file system (not a z/OSMF status — the `UFSD_RC_ROFS` row is open as #248) |
+| 400    | Read-only file system |
 | 404    | Parent directory not found |
 | 412    | `If-Match` was supplied and the file no longer matches it — including a file that no longer exists |
 | 400    | Path name too long |

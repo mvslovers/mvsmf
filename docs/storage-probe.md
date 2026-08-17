@@ -80,6 +80,15 @@ Sampled over a run, the two numbers separate the two hypotheses:
    leaked storage into the address space, and every later sample from that
    server is suspect. Restart before continuing.
 4. `truncated: true` means `total` is a lower bound.
+5. **A sample is not cheap.** Measured on `mvsdev`: ~5–7 s, against ~2.5 s for
+   an ordinary CGI request and 0.05 s for a static document. GETMAIN and
+   FREEMAIN of multi-megabyte areas are not free under Hercules, and the
+   bisect does about a dozen of them. That is why the sampling script has an
+   `EVERY` knob and does not sample per request.
+
+What it does *not* cost is storage: 100 static requests plus four `total=1`
+samples returned byte-identical numbers, and six samples back to back with no
+load between them did too. The noise floor is zero, so any movement is signal.
 
 ## Sampling protocol (issue #287)
 

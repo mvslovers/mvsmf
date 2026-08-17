@@ -43,6 +43,12 @@ EVERY="${EVERY:-50}"
 # Class -> URL.  Keep the payloads small: this measures per-request storage,
 # not throughput, and a large response only adds noise.
 #   static   plain httpd document, no CGI -- the control
+#   dm       httpd's OWN display module: a per-request LINK that is not
+#            MVSMF.  This is the discriminator.  If dm pays what the mvsMF
+#            classes pay, the consumer is in httpd's per-request module
+#            handling and the fix ticket belongs there; if dm is clean, it is
+#            in MVSMF's own startup or exit path.  Needs MOD=HTTPDM in
+#            DD:HTTPDPRM (see the root CLAUDE.md).
 #   info     cheapest CGI handler
 #   probe    the sampler itself, to quantify what the instrument costs
 #   datasets member read
@@ -51,6 +57,7 @@ EVERY="${EVERY:-50}"
 url_for() {
     case "$1" in
     static)   echo "/probe.txt" ;;
+    dm)       echo "/.dm?m=10&l=16" ;;
     info)     echo "/zosmf/info" ;;
     probe)    echo "/zosmf/test?fn=storage" ;;
     datasets) echo "/zosmf/restfiles/ds/${DS_MEMBER:-SYS1.PARMLIB(IEASYS00)}" ;;
@@ -60,7 +67,7 @@ url_for() {
     esac
 }
 
-CLASSES="${*:-static info probe datasets uss jobs static}"
+CLASSES="${*:-static dm info datasets uss jobs static}"
 
 # One sample -> "largest total blocks".  Parsed with sed rather than a JSON
 # tool so this runs anywhere curl does.
@@ -69,6 +76,10 @@ sample() {
     largest=$(echo "$out" | sed -n 's/.*"largest": \([0-9]*\).*/\1/p')
     total=$(echo "$out" | sed -n 's/.*"total": \([0-9]*\).*/\1/p')
     blocks=$(echo "$out" | sed -n 's/.*"blocks": \([0-9]*\).*/\1/p')
+    # probes rises with the block count, so a sample is not a fixed-cost
+    # request: carry it through, or a shifting sampler footprint is
+    # indistinguishable from load-class signal.
+    probes=$(echo "$out" | sed -n 's/.*"probes": \([0-9]*\).*/\1/p')
     errs=$(echo "$out" | sed -n 's/.*"free_errors": \([0-9]*\).*/\1/p')
     if [ -z "$largest" ]; then
         echo "SAMPLE FAILED: $out" >&2
@@ -80,15 +91,15 @@ sample() {
         echo "free_errors=$errs -- the probe leaked; restart the server" >&2
         return 1
     fi
-    echo "$largest $total ${blocks:-0}"
+    echo "$largest $total ${blocks:-0} ${probes:-0}"
 }
 
-emit() { printf '%s,%s,%s,%s,%s,%s\n' "$1" "$2" "$3" "$4" "$5" "$6"; }
+emit() { printf '%s,%s,%s,%s,%s,%s,%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7"; }
 
 echo "# base=$BASE count=$COUNT every=$EVERY"
 echo "# build=$(curl -s -u "$CRED" "$BASE/zosmf/test?fn=version" |
               sed -n 's/.*"build": "\([^"]*\)".*/\1/p')"
-emit class requests largest total blocks seconds
+emit class requests largest total blocks probes seconds
 
 s=$(sample) || exit 1
 emit baseline 0 $s 0

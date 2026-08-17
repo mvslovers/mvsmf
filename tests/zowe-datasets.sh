@@ -153,6 +153,22 @@ assert_json_field_exists() {
 	fi
 }
 
+assert_json_field_absent() {
+	local json="$1"
+	local expr="$2"
+	local label="$3"
+	local present
+	# the expression is a has() test, not a value read: jq -r on an absent key
+	# and on a literal null both print "null", so reading the value cannot tell
+	# "omitted" from "present and null" -- and only the first is what z/OSMF does
+	present=$(echo "$json" | jq -r "$expr" 2>/dev/null) || present="?"
+	if [ "$present" = "false" ]; then
+		pass "$label (key absent)"
+	else
+		fail "$label" "expected the key to be absent, got present=$present"
+	fi
+}
+
 # =========================================================================
 # Cleanup helper
 # =========================================================================
@@ -406,16 +422,15 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 			"returnedRows=$ROWS moreRows=$MORE"
 	fi
 
-	# and the negative: a limit the directory does not reach is complete (200)
+	# and the negative: a limit the directory does not reach is a complete
+	# listing, which carries no moreRows key at all (#279). Zowe has to cope
+	# with the field being absent -- it is written against a reference that
+	# omits it, and this is where that would show.
 	RC=0
 	OUTPUT=$(run_zowe_json files list am "$TEST_PDS" --max 100) || RC=$?
 	assert_rc 0 "$RC" "list PDS members (max-items=100, complete)"
-	MORE=$(echo "$OUTPUT" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""
-	if [ "$MORE" = "false" ]; then
-		pass "member list max-items=100: moreRows=false"
-	else
-		fail "member list max-items=100: moreRows=false" "got '$MORE'"
-	fi
+	assert_json_field_absent "$OUTPUT" '.data.apiResponse | has("moreRows")' \
+		"member list max-items=100: no moreRows"
 
 	run_zowe files delete ds "${TEST_PDS}(PAGEMBR)" -f >/dev/null 2>&1
 fi

@@ -27,6 +27,10 @@ HTTP status code 200 (OK), whether the listing is complete or was cut short by
 That is what real z/OSMF does; it emits no 206 on the files service at all
 (issue #274).
 
+**`moreRows` appears only when it is `true`.** A complete listing carries no
+such key, again matching the reference (issue #279) — so read the field as a
+flag, not as a value to compare against `false`.
+
 The body is a JSON object:
 
 ```json
@@ -46,7 +50,6 @@ The body is a JSON object:
         }
     ],
     "returnedRows": 0,
-    "moreRows": false,
     "JSONversion": 1
 }
 ```
@@ -109,7 +112,6 @@ zowe files list data-set "MIKE.**"
         }
     ],
     "returnedRows": 1,
-    "moreRows": false,
     "JSONversion": 1
 }
 ```

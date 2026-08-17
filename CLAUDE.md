@@ -406,8 +406,15 @@ from the OS credential store without ever printing them.
 Two things met on the way: a member `pattern=` longer than 8 characters is
 rejected `400 {"category":1,"rc":4,"reason":13,"message":"pattern"}` — that is
 the member-name limit, not an empty result. And z/OSMF emits `moreRows` **only
-when true**, plus a `totalRows` mvsMF does not have yet (`dsapi.c:1221`,
-`dsapi.c:2090`).
+when true** — mvsMF followed suit in #279, on all three listings and the USS
+stat reply, so a complete listing now carries no `moreRows` key at all.
+
+`totalRows` is the piece still missing, and it is narrower than it looks: the
+reference emits it on the **file** list (`totalRows: 39` for `/`), and on a
+complete data set or member list it emits neither `totalRows` nor `moreRows` —
+measured, keys `["JSONversion","items","returnedRows"]`. mvsMF matches that
+today by accident rather than by decision; the open TODOs sit at `dsapi.c:1284`
+and `dsapi.c:2145` and are about `X-IBM-Attributes` `,total`.
 
 ### Operator Messages (WTO) — the catalog is closed
 

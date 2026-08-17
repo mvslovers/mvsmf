@@ -451,7 +451,8 @@ uss_stat_file(Session *session, UFS *ufs, const char *path)
 		"  ],\n"
 		"  \"returnedRows\": 1,\n"
 		"  \"totalRows\": 1,\n"
-		"  \"moreRows\": false,\n"
+		/* no moreRows: a stat reply is one row and complete by
+		   construction, and the key is emitted only when true (#279) */
 		"  \"JSONversion\": 1\n"
 		"}\n",
 		path, entry->attr, entry->filesize,
@@ -593,8 +594,10 @@ int ussListHandler(Session *session)
 	   whole directory and this is exact -- for the client's limit and for
 	   USS_LIST_DEFAULT_MAX_ITEMS alike, which truncates the same way. */
 	more = (maxitems > 0 && emitted < total);
-	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		more ? "true" : "false")) < 0) goto quit;
+	/* only when true -- see the note in datasetListHandler() (#279) */
+	if (more) {
+		if ((rc = http_printf(session->httpc, "  \"moreRows\": true,\n")) < 0) goto quit;
+	}
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "}\n")) < 0) goto quit;
 

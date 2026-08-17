@@ -131,6 +131,22 @@ assert_json_field_exists() {
 	fi
 }
 
+assert_json_field_absent() {
+	local json="$1"
+	local expr="$2"
+	local label="$3"
+	local present
+	# the expression is a has() test, not a value read: jq -r on an absent key
+	# and on a literal null both print "null", so reading the value cannot tell
+	# "omitted" from "present and null" -- and only the first is what z/OSMF does
+	present=$(echo "$json" | jq -r "$expr" 2>/dev/null) || present="?"
+	if [ "$present" = "false" ]; then
+		pass "$label (key absent)"
+	else
+		fail "$label" "expected the key to be absent, got present=$present"
+	fi
+}
+
 assert_json_field_gte() {
 	local json="$1"
 	local field="$2"
@@ -222,17 +238,18 @@ else
 fi
 
 # The status stays 200 either way -- a truncated listing carries the fact in
-# moreRows and nowhere else (#274). What totalRows decides here is only which
-# value moreRows must have.
+# moreRows and nowhere else (#274), and a complete one carries no moreRows key
+# at all (#279). What totalRows decides here is only which of the two applies.
 assert_http_status "200" "$HTTP_CODE" "list with max-items=2"
 if [ -n "$TOTAL_ROWS" ] && [ "$TOTAL_ROWS" -gt 2 ] 2>/dev/null; then
 	assert_json_field "$BODY" ".moreRows" "true" "list max-items: moreRows is true when truncated"
 else
-	assert_json_field "$BODY" ".moreRows" "false" "list max-items: moreRows is false when complete"
+	assert_json_field_absent "$BODY" 'has("moreRows")' \
+		"list max-items: no moreRows when complete"
 fi
 
 # a limit nothing reaches is a complete listing: the header being present does
-# not make moreRows true
+# not make moreRows appear
 RESP=$(curl -s -w '\n%{http_code}' \
 	-u "$AUTH" \
 	-H "X-IBM-Max-Items: 10000" \
@@ -241,7 +258,8 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 
 assert_http_status "200" "$HTTP_CODE" "list with max-items above the entry count"
-assert_json_field "$BODY" ".moreRows" "false" "list max-items=10000: moreRows is false"
+assert_json_field_absent "$BODY" 'has("moreRows")' \
+	"list max-items=10000: no moreRows"
 
 echo ""
 echo "--- List with X-IBM-Max-Items: 0 ---"
@@ -254,7 +272,8 @@ HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
 
 assert_http_status "200" "$HTTP_CODE" "list with max-items=0 (unlimited)"
-assert_json_field "$BODY" ".moreRows" "false" "list unlimited: moreRows is false"
+assert_json_field_absent "$BODY" 'has("moreRows")' \
+	"list unlimited: no moreRows"
 
 echo ""
 echo "--- List error cases ---"
@@ -296,6 +315,19 @@ if [ -n "$TEST_FILE_EXISTS" ]; then
 		pass "stat query: name contains full path"
 	else
 		fail "stat query: name does not contain full path ${TEST_FILE}"
+	fi
+
+	# a stat reply is one row and complete by construction, so it carries no
+	# moreRows key either -- it used to hardcode false (#279)
+	assert_json_field_absent "$BODY" 'has("moreRows")' \
+		"stat query: no moreRows"
+
+	# the JSON has to stay parseable after a key was dropped from the middle
+	# of the object: a stale comma is exactly what this would produce
+	if echo "$BODY" | jq -e . >/dev/null 2>&1; then
+		pass "stat query: response is valid JSON"
+	else
+		fail "stat query: response is valid JSON" "jq rejected the body"
 	fi
 fi
 

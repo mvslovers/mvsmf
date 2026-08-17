@@ -1282,8 +1282,14 @@ end:
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		(emitted < eligible) ? "true" : "false")) < 0) goto quit;
+	/* Only when true.  z/OSMF omits the key on a complete listing rather than
+	** answering false, measured on version 29 for all three listings (#279),
+	** and an absent key is what a client testing the field already reads as
+	** "no more rows".  JSONversion follows unconditionally, so the comma above
+	** stands either way. */
+	if (emitted < eligible) {
+		if ((rc = http_printf(session->httpc, "  \"moreRows\": true,\n")) < 0) goto quit;
+	}
 
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
@@ -2137,8 +2143,10 @@ int memberListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
-		truncated ? "true" : "false")) < 0) goto quit;
+	/* only when true -- see the note in datasetListHandler() (#279) */
+	if (truncated) {
+		if ((rc = http_printf(session->httpc, "  \"moreRows\": true,\n")) < 0) goto quit;
+	}
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "} \n")) < 0) goto quit;
 

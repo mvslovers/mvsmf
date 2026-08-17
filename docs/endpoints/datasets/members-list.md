@@ -53,12 +53,14 @@ The body is a JSON object:
         }
     ],
     "returnedRows": 0,
-    "moreRows": false,
     "JSONversion": 1
 }
 ```
 
-`moreRows` is `true` only when the list was cut short by `X-IBM-Max-Items`.
+**`moreRows` appears only when the list was cut short by `X-IBM-Max-Items`**,
+and is `true` when it does. A complete listing carries no such key, matching the
+reference (issue #279) — so read the field as a flag, not as a value to compare
+against `false`.
 
 ## Large directories
 
@@ -172,7 +174,6 @@ curl -H 'X-IBM-Max-Items: 100' \
         { "member": "LINKJOB" }
     ],
     "returnedRows": 3,
-    "moreRows": false,
     "JSONversion": 1
 }
 ```

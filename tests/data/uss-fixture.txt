@@ -1,0 +1,11 @@
+mvsMF USS test fixture -- uploaded by tests/curl-uss.sh, do not edit casually.
+The read assertions compare against these exact bytes.
+
+Line 3 carries the characters CP037 and IBM-1047 disagree about:
+  brackets  [ ]
+  circumflex  ^
+  exclamation  !
+  and the rest of the set: @ # $ | ~ \ { } `
+
+A text-mode round-trip that picks the wrong table mangles precisely those and
+nothing else, which is why they are here rather than in a comment.

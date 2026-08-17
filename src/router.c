@@ -2,6 +2,7 @@
 #include <string.h>
 #include <clibwto.h>
 #include <clibtry.h>
+#include <clibjes2.h>
 
 #include "router.h"
 #include "common.h"
@@ -218,6 +219,41 @@ void session_fclose(Session *session, FILE *fp)
     fclose(fp);
 }
 
+__asm__("\n&FUNC    SETC 'ses_reg_jes'");
+int session_register_jes(Session *session, JES *jes)
+{
+    if (!session || !jes) return -1;
+    if (session->open_jes) {
+        // one slot, and no path opens two at a time -- see router.h. Say so
+        // rather than overwrite, which would leak the handle in the slot.
+        wtof(MSG_JES_TRACKED);
+        return -1;
+    }
+    session->open_jes = jes;
+    return 0;
+}
+
+__asm__("\n&FUNC    SETC 'ses_jesclose'");
+void session_jesclose(Session *session, JES **jes)
+{
+    if (!jes || !*jes) return;
+    if (session && session->open_jes == *jes) {
+        session->open_jes = NULL;
+    }
+    jesclose(jes);
+}
+
+// Thunk for ESTAE-protected jesclose() during recovery.
+// Returns 0 on success; a secondary abend is caught by try().
+__asm__("\n&FUNC    SETC 'safe_jesclose'");
+static int safe_jesclose_thunk(JES *jes)
+{
+    JES *local = jes;
+
+    jesclose(&local);
+    return 0;
+}
+
 // Thunk for ESTAE-protected fclose during recovery.
 // Returns 0 on success; a secondary abend is caught by try().
 __asm__("\n&FUNC    SETC 'safe_fclose'");
@@ -250,6 +286,19 @@ void session_cleanup(Session *session)
         }
     }
     session->open_file_count = 0;
+
+    // The JES handle holds the JES2 spool data sets. Left open it costs the
+    // address space their DCBs for good, and an abend inside jesjob() is
+    // exactly the case that skips the handler's own jesclose() (issue #286).
+    if (session->open_jes) {
+        JES *jes = session->open_jes;
+
+        session->open_jes = NULL;
+        wtof(MSG_RECOVERY_JES);
+        if (try(safe_jesclose_thunk, jes) != 0) {
+            wtof(MSG_RECOVERY_JES_ABEND);
+        }
+    }
 
     // UFS session lifecycle is managed by HTTPD (http_get_ufs).
     // HTTPD's worker ESTAE handles cleanup on abend.

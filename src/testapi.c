@@ -106,6 +106,41 @@ static int testAbend(Session *session) {
   return 0; /* not reached */
 }
 
+/* fn=jesabend -- abend with a JES handle open, the shape of issue #282.
+ *
+ * fn=abend proves the ESTAE catches; this proves the catch also releases the
+ * JES2 spool data sets. Recovery must answer with MVSMF908I; without the
+ * registration in session_register_jes() the handle is simply lost and the DCBs
+ * stay open for the life of the address space (issue #286).
+ */
+__asm__("\n&FUNC	SETC 'testJesAbend'");
+static int testJesAbend(Session *session) {
+  JES *jes = NULL;
+
+  if (!abend_test_enabled()) {
+    return sendErrorResponse(
+        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
+        REASON_SERVER_ERROR,
+        "fn=jesabend is disabled. Set MVSMF_ABEND_TEST=1 in the server "
+        "environment to enable the ESTAE recovery test hook.",
+        NULL, 0);
+  }
+
+  jes = jesopen();
+  if (!jes) {
+    return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                             CATEGORY_SERVICE, RC_SEVERE, REASON_SERVER_ERROR,
+                             "jesopen() failed, nothing to leak", NULL, 0);
+  }
+  session_register_jes(session, jes);
+
+  wtof(MSG_ABEND_TEST);
+
+  __asm__ volatile("  DC	H'0'");
+
+  return 0; /* not reached */
+}
+
 int testHandler(Session *session) {
   int rc = 0;
   char *fn = NULL;
@@ -119,6 +154,9 @@ int testHandler(Session *session) {
    * its 500 recovery response after failed() retries. */
   if (strcmp(fn, "abend") == 0)
     return testAbend(session);
+
+  if (strcmp(fn, "jesabend") == 0)
+    return testJesAbend(session);
 
   session->headers_sent = 1;
   if ((rc = http_resp(session->httpc, 200)) < 0)
@@ -205,6 +243,7 @@ int testHandler(Session *session) {
 
     if (step >= 1) {
       jes = jesopen();
+      session_register_jes(session, jes);
       http_printf(session->httpc, "step1 jesopen -> %s\r\n",
                   jes ? "OK" : "NULL");
     }
@@ -274,8 +313,7 @@ int testHandler(Session *session) {
 
     if (jobs)
       jesjobfr(&jobs);
-    if (jes)
-      jesclose(&jes);
+    session_jesclose(session, &jes);
 
     rc = http_printf(session->httpc, "DONE step=%d\r\n", step);
 

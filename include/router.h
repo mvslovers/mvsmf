@@ -95,6 +95,12 @@ struct session {
     // Resource tracking for ESTAE abend recovery
     FILE *open_files[MAX_SESSION_FILES];  /**< Tracked FILE handles */
     int open_file_count;                  /**< Number of tracked files */
+    /* One slot, not a table: no request path opens two JES handles at a time.
+       jobRecordsHandler comes closest and its two are sequential, the first
+       closed before the second is opened. Registering a second while one is
+       held is therefore a bug, and session_register_jes() says so rather than
+       overwriting the slot and leaking what was in it (issue #286). */
+    struct jes *open_jes;                 /**< Tracked JES spool handle */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**
@@ -170,10 +176,24 @@ void session_unregister_file(Session *session, FILE *fp) asm("RTR0007");
 void session_fclose(Session *session, FILE *fp) asm("RTR0008");
 
 /**
+ * @brief Register the JES spool handle for ESTAE recovery cleanup
+ * @return 0 on success, -1 if a handle is already registered
+ */
+int session_register_jes(Session *session, struct jes *jes) asm("RTR0010");
+
+/**
+ * @brief Unregister and close the tracked JES handle
+ *
+ * Takes JES ** because jesclose() nulls the caller's pointer, and the quit
+ * paths test it afterwards.
+ */
+void session_jesclose(Session *session, struct jes **jes) asm("RTR0011");
+
+/**
  * @brief Close all tracked resources (ESTAE recovery)
  *
- * Closes all registered FILE handles, UFS file handles and UFS sessions.
- * Called by the router after catching a handler abend.
+ * Closes all registered FILE handles, the JES spool handle, UFS file handles
+ * and UFS sessions. Called by the router after catching a handler abend.
  */
 void session_cleanup(Session *session) asm("RTR0009");
 

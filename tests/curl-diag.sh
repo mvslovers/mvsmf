@@ -102,6 +102,32 @@ this suite must run against a production-like server with it UNSET."
 fi
 
 # =========================================================================
+# 3. fn=jesabend is guarded the same way
+#
+# It abends with a JES handle open, so on the ENABLED path recovery has to
+# close it (MVSMF908I) instead of leaking the JES2 spool DCBs -- issue #286.
+# Here, as above, only the guard is asserted: the enabled path is exercised
+# by hand against a server that sets MVSMF_ABEND_TEST.
+# =========================================================================
+echo ""
+echo "--- fn=jesabend guard (expect DISABLED in production) ---"
+RESP=$(get_fn jesabend)
+CODE=$(echo "$RESP" | tail -1)
+
+if [ "$CODE" = "400" ]; then
+	pass "fn=jesabend disabled -> HTTP 400"
+
+	echo ""
+	echo "--- server still serving after guarded fn=jesabend ---"
+	CODE2=$(get_fn version | tail -1)
+	assert_http_status "200" "$CODE2" "server alive after fn=jesabend (fn=version)"
+else
+	fail "fn=jesabend disabled -> HTTP 400" \
+		"got HTTP '${CODE}'. If 500, MVSMF_ABEND_TEST is set on the server: \
+this suite must run against a production-like server with it UNSET."
+fi
+
+# =========================================================================
 # summary
 # =========================================================================
 echo ""

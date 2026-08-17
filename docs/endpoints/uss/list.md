@@ -40,7 +40,6 @@ GET /zosmf/restfiles/fs?path=<filepath>
   ],
   "returnedRows": 1,
   "totalRows": 1,
-  "moreRows": false,
   "JSONversion": 1
 }
 ```
@@ -63,11 +62,15 @@ GET /zosmf/restfiles/fs?path=<filepath>
 When `X-IBM-Max-Items` is set and the directory contains more entries:
 - `returnedRows` = number of items in the response
 - `totalRows` = total entries in the directory (excluding `.` and `..`)
-- `moreRows` = `true` when results were truncated
+- `moreRows` = `true` when results were truncated, **and absent otherwise**
 
 **The status is 200 either way** — a truncated listing is carried in `moreRows`
 and nowhere else. That is what real z/OSMF does; it emits no 206 on the files
 service at all (issue #274).
+
+**`moreRows` appears only when it is `true`**, on a directory listing and on the
+single-item stat reply alike, again matching the reference (issue #279) — so
+read the field as a flag, not as a value to compare against `false`.
 
 The 1000-entry default cap works the same way: a directory larger than that,
 listed without the header, answers 200 with `moreRows: true`.
@@ -124,7 +127,6 @@ Returns a single-item list with the full path in the `name` field:
   ],
   "returnedRows": 1,
   "totalRows": 1,
-  "moreRows": false,
   "JSONversion": 1
 }
 ```

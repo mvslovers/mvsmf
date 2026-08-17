@@ -118,6 +118,22 @@ assert_json_field_exists() {
 	fi
 }
 
+assert_json_field_absent() {
+	local json="$1"
+	local expr="$2"
+	local label="$3"
+	local present
+	# the expression is a has() test, not a value read: jq -r on an absent key
+	# and on a literal null both print "null", so reading the value cannot tell
+	# "omitted" from "present and null" -- and only the first is what z/OSMF does
+	present=$(echo "$json" | jq -r "$expr" 2>/dev/null) || present="?"
+	if [ "$present" = "false" ]; then
+		pass "$label (key absent)"
+	else
+		fail "$label" "expected the key to be absent, got present=$present"
+	fi
+}
+
 # =========================================================================
 # Cleanup helper — delete datasets ignoring errors
 # =========================================================================
@@ -380,19 +396,16 @@ else
 fi
 
 # The other half: the header alone does not make a listing partial. A limit
-# nothing reaches is a complete answer and moreRows stays false.
+# nothing reaches is a complete answer, and a complete answer carries no
+# moreRows key at all (#279).
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	-H "X-IBM-Max-Items: 1000" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-if [ "$HTTP_CODE" = "200" ] &&
-   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
-	pass "max-items above the row count stays 200"
-else
-	fail "max-items above the row count stays 200" \
-		"got HTTP $HTTP_CODE moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
-fi
+assert_http_status "200" "$HTTP_CODE" "max-items above the row count stays 200"
+assert_json_field_absent "$CONTENT" 'has("moreRows")' \
+	"max-items above the row count: no moreRows"
 
 # --- List datasets (start=) ---
 #
@@ -454,17 +467,18 @@ else
 			"${BASE_URL}/zosmf/restfiles/ds/${D}"
 	done
 
-	# past the last name is an empty page, not a full one -- and moreRows
-	# must not claim there is more to fetch
+	# past the last name is an empty page, not a full one -- and nothing may
+	# claim there is more to fetch, which since #279 means no moreRows key
 	CONTENT=$(curl -s -u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=ZZZZZZZZ")
-	if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ] &&
-	   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+	if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ]; then
 		pass "start= beyond the last dataset returns an empty page"
 	else
 		fail "start= beyond the last dataset returns an empty page" \
-			"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+			"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)"
 	fi
+	assert_json_field_absent "$CONTENT" 'has("moreRows")' \
+		"start= beyond the last dataset: no moreRows"
 
 	# --- over-long start= (issue #240) ---
 	#
@@ -590,7 +604,8 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list PDS members"
 assert_json_field_exists "$CONTENT" '.items[0].member' "member list has member field"
-assert_json_field "$CONTENT" '.moreRows' "false" "member list: moreRows false when complete"
+assert_json_field_absent "$CONTENT" 'has("moreRows")' \
+	"member list: no moreRows when complete"
 
 # Names come back as z/OSMF reports them, without the directory's blank padding
 # (#154). A padded name makes a client build "dsn(member )" for the follow-up
@@ -684,13 +699,14 @@ fi
 
 CONTENT=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=ZZZZZZZZ")
-if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ] &&
-   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ]; then
 	pass "start= beyond the last member returns an empty page"
 else
 	fail "start= beyond the last member returns an empty page" \
-		"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+		"returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)"
 fi
+assert_json_field_absent "$CONTENT" 'has("moreRows")' \
+	"start= beyond the last member: no moreRows"
 
 # --- List PDS members (pattern=) ---
 #
@@ -758,13 +774,14 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ] &&
-   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "$TOTAL" ] &&
-   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
-	pass "max-items equal to the member count: moreRows=false"
+   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "$TOTAL" ]; then
+	pass "max-items equal to the member count returns every member"
 else
-	fail "max-items equal to the member count: moreRows=false" \
-		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) of $TOTAL moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+	fail "max-items equal to the member count returns every member" \
+		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) of $TOTAL"
 fi
+assert_json_field_absent "$CONTENT" 'has("moreRows")' \
+	"max-items equal to the member count: no moreRows"
 
 # an over-long pattern is rejected, not quietly cut down to size: a truncated
 # pattern selects a different set of members, and answering 200 with that list

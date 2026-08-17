@@ -693,23 +693,38 @@ int testHandler(Session *session) {
      * Names are always safe to show; values are not (httpd's environment is
      * the server operator's, not the caller's), so only MVSMF_* values are
      * printed -- those are our own test flags and carry no secrets. */
+   * Read `grt->grtenv`, which is where the environment actually lives -- the
+   * `__envvar`/`__envsiz` pair exported by clibenv.h is a legacy symbol that
+   * stays 0 (libc370 `@@envvar.c`), so reading it reports an empty
+   * environment no matter what is loaded.  `getenv()` goes through
+   * `__findenv()` -> `__grtget()->grtenv` (`@@finden.c:18`), so this walks the
+   * same array getenv() answers from. */
   } else if (strcmp(fn, "env") == 0) {
-    int i;
+    CLIBGRT *grt = __grtget();
+    unsigned count = (grt && grt->grtenv) ? arraycount(&grt->grtenv) : 0;
+    unsigned i;
     int shown = 0;
 
     rc = http_printf(session->httpc,
-                     "{ \"fn\": \"env\", \"count\": %d, \"items\": [", __envsiz);
+                     "{ \"fn\": \"env\", \"grt\": \"%s\","
+                     " \"grtenv\": \"%s\", \"count\": %u, \"items\": [",
+                     grt ? "non-null" : "NULL",
+                     (grt && grt->grtenv) ? "non-null" : "NULL", count);
     if (rc < 0)
       goto quit;
 
-    for (i = 0; i < __envsiz && __envvar && __envvar[i]; i++) {
-      const char *name = __envvar[i]->name ? __envvar[i]->name : "";
-      int ours = (strncmp(name, "MVSMF_", 6) == 0);
+    for (i = 0; i < count; i++) {
+      __ENVVAR *ev = (__ENVVAR *)grt->grtenv[i];
+      const char *name;
 
-      if (ours) {
-        rc = http_printf(session->httpc, "%s{ \"name\": \"%s\", \"value\": \"%s\" }",
-                         shown ? ", " : " ", name,
-                         __envvar[i]->value ? __envvar[i]->value : "");
+      if (!ev || !ev->name)
+        continue;
+      name = ev->name;
+
+      if (strncmp(name, "MVSMF_", 6) == 0) {
+        rc = http_printf(session->httpc,
+                         "%s{ \"name\": \"%s\", \"value\": \"%s\" }",
+                         shown ? ", " : " ", name, ev->value ? ev->value : "");
       } else {
         rc = http_printf(session->httpc, "%s{ \"name\": \"%s\" }",
                          shown ? ", " : " ", name);

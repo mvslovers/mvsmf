@@ -1097,6 +1097,36 @@ test_purge_not_found() {
 	done
 }
 
+test_purge_started_task() {
+	echo ""
+	echo "--- Purge Job: a started task is refused (issue #250) ---"
+
+	# Asking to purge a running STC must answer 400 with REASON_STC_PURGE (5).
+	# It was 403 until #250; 403 is not a z/OSMF status, and the refusal is
+	# about what was asked for rather than about who asked.
+	#
+	# Aiming this at the live server looks reckless and is not: the refusal
+	# does not come from mvsMF. jescanj() reports CANJ_ICAN because JES2 itself
+	# holds the STC non-cancelable -- measured directly, "$C S<id>" answers
+	# "$HASP000 HTTPD NON-CANCELABLE". mvsMF only maps that rc to a status, so
+	# a regression in the mapping cannot turn this request into a real purge.
+	local resp jobid
+	jobid=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*&prefix=HTTPD*" \
+		| sed '$d' \
+		| jq -r 'map(select(.status == "ACTIVE")) | .[0].jobid // empty' 2>/dev/null)
+
+	if [ -z "$jobid" ]; then
+		skip "purge a started task (no ACTIVE HTTPD STC to aim at)"
+		return
+	fi
+
+	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/HTTPD/${jobid}")
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "purge a started task is refused (${jobid})"
+	assert_json_field "$BODY" '.reason' "5" "purge STC: reason 5 (REASON_STC_PURGE)"
+}
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -1151,6 +1181,7 @@ test_spool_records_invalid_ddid
 # Purge tests (last, since it removes the test job)
 test_purge_job
 test_purge_not_found
+test_purge_started_task
 
 # Optional cleanup
 if [ "$DO_CLEANUP" -eq 1 ] && [ "$SETUP_DONE" -eq 1 ]; then

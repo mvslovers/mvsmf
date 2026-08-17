@@ -1008,8 +1008,9 @@ dslist_cmp(const void *a, const void *b)
 ** sorts below the character the value continues with).  Drop it too (#240).
 **
 ** Both passes below ask this one question: the counting pass turns the answer
-** into the status code, the emit pass into the body.  A second copy of the rule
-** would let 206 and moreRows disagree on exactly the names #240 is about. */
+** into eligible, the emit pass into the items.  A second copy of the rule would
+** let moreRows and the list itself disagree on exactly the names #240 is
+** about. */
 __asm__("\n&FUNC    SETC 'dslist_in_page'");
 static int
 dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,

@@ -20,6 +20,29 @@
 #include "testapi.h"
 #include "router.h"
 
+/* C stack size for this module, read by libc370's @@crt0/@@crt1 through the
+ * WXTRN @@STKLEN (issue #290).  Without it the startup takes the default:
+ * STACKLEN X'040088' + L'CLIBPPA+7, rounded down to a doubleword = 262328
+ * bytes of CONTIGUOUS subpool 0 -- and httpd re-LINKs this module on every
+ * single request, so that quarter megabyte is demanded per request.
+ *
+ * That demand is what the degradation in #287 runs into.  The address space
+ * does not run out of storage; it runs out of a 262328-byte contiguous piece,
+ * because concurrency episodes fence off holes of about one stack each
+ * (mvslovers/httpd#195).  At 64 K the request fits in every hole that
+ * mechanism produces -- a fenced-off ~256 K hole holds four of these instead
+ * of none -- so the failure stops being terminal rather than merely rarer.
+ *
+ * 65536 + 55 rounds down to 65584 bytes actually GETMAINed.  httpd itself has
+ * run on this value since long before mvsMF existed (httpd.c:22), but that is
+ * its main task, not this call chain: the sizing is justified by the test
+ * suites, not by httpd's precedent.  /zosmf/test?fn=storage reports the live
+ * figure out of PPASTKLN, so the probe follows any change made here.
+ *
+ * Written by nobody: @@crt0 only loads it, so it stays legal in a RENT
+ * module. */
+unsigned __stklen = 64 * 1024;
+
 /* httpd has already resolved the client credential (Basic/token) before
  * dispatching to this CGI; ACEE(0) means no credential resolved. Reject
  * here rather than trusting httpd's MOD= login flag, which today is a

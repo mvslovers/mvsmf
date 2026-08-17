@@ -79,17 +79,31 @@ or a watch that keys on `S80A` is looking for the wrong event.** The upside is
 that a `U0801` is now positive proof it was the startup stack, where an `S80A`
 could have come from anywhere in the address space.
 
-**There is a knob, and mvsMF does not use it.** `@@crt0` reads a `WXTRN`
-`@@STKLEN` and takes that value instead of the default (minimum 4096); from C
-it is simply a global `unsigned __stklen`. **httpd sets it** — `httpd.c:22`,
-`64*1024` — and runs a whole server on it. mvsMF, ftpd, ufsd, lua370, rexx370,
-httplua and httprexx do not, so each of them asks for the full 262328 per
-LINK. For the one module httpd re-LINKs on *every request*, that is a
-four-fold difference in the contiguous demand this page exists to measure.
-Whether mvsMF's handlers fit in 64 K is an open question — httpd's main task
-is not the same call chain — but it is measurable, and it is a much more
-surgical lever than hunting the abend. The knob is declared in no libc370
-header; you only learn about it by reading `@@crt0.asm`.
+**mvsMF sets `__stklen` to 64 K (#290), so its figure is 65584.** `@@crt0`
+reads a `WXTRN` `@@STKLEN` and takes that instead of the default (minimum
+4096); from C it is a plain global `unsigned __stklen` (`mvsmf.c`). httpd has
+done the same since long before mvsMF existed (`httpd.c:22`); ftpd, ufsd,
+lua370, rexx370, httplua and httprexx still take the 262328 default.
+
+This matters most for mvsMF because httpd re-LINKs it on *every request*. The
+point is not the 4× smaller demand but that it changes the failure mode:
+concurrency fences off free holes of roughly one stack each
+(mvslovers/httpd#195), and a 65584-byte request fits in holes that a
+262328-byte one cannot use at all. Measured both ways with `&hold=` against
+the same fragmented space — **8 of 8 requests failed before the change, 8 of
+8 succeeded after it.**
+
+`link_stack` is read from `PPASTKLN`, the length `@@crt0`/`@@crt1` actually
+GETMAINed (`ST R8,PPASTKLN`), so it follows `__stklen` and cannot drift from
+it.
+
+**Stack headroom, since a too-small stack overruns rather than failing
+cleanly:** the deepest recursion in the code is `uss_recursive_delete()`, at
+`UFS_PATH_MAX` (256) bytes of path buffer per level. `UFS_PATH_MAX` also caps
+how deep a tree can be built (~119 levels of `/d`), and a tree at that
+ceiling walks without trouble — the recursion stops on path length with a
+clean 400, not on stack. 50 levels plus a file at the bottom deletes in one
+204. The path limit is the binding constraint, not the stack.
 
 Sampled over a run, the two numbers separate the two hypotheses:
 

@@ -19,17 +19,15 @@ GET
   itself, and one equal to the prefix sorts before it (issue #240).
 
 ## Request Headers
-- `X-IBM-Max-Items` (optional): Maximum number of items to return. Value `0` means unlimited (default behavior). When the result set is truncated, `moreRows` is set to `true` and the status is **206** rather than 200.
+- `X-IBM-Max-Items` (optional): Maximum number of items to return. Value `0` means unlimited (default behavior). When the result set is truncated, `moreRows` is set to `true`.
 
 ## Response
-A complete listing returns HTTP status code 200 (OK). A listing cut short by
-`X-IBM-Max-Items` returns **206 (Partial content)** — the body is identical in
-shape, so a client that reads `moreRows` needs no change, but one that keys off
-the status can now tell a page from a whole list. The header being present is
-not what makes the response partial: a limit no listing reaches is a complete
-answer and stays 200.
+HTTP status code 200 (OK), whether the listing is complete or was cut short by
+`X-IBM-Max-Items` — the truncation is carried in `moreRows` and nowhere else.
+That is what real z/OSMF does; it emits no 206 on the files service at all
+(issue #274).
 
-Both carry a JSON object:
+The body is a JSON object:
 
 ```json
 {

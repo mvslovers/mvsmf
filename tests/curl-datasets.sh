@@ -361,10 +361,9 @@ BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-# a listing cut short by X-IBM-Max-Items is partial content, not a complete
-# answer: a client keying off the status could not otherwise tell the two
-# apart (#249)
-assert_http_status "206" "$HTTP_CODE" "list datasets (max-items=1)"
+# a listing cut short by X-IBM-Max-Items stays 200 and says so in moreRows --
+# that is what real z/OSMF does, measured (#274)
+assert_http_status "200" "$HTTP_CODE" "list datasets (max-items=1)"
 
 RETURNED=$(echo "$CONTENT" | jq '.returnedRows' 2>/dev/null) || RETURNED=0
 if [ "$RETURNED" -eq 1 ] 2>/dev/null; then
@@ -380,9 +379,8 @@ else
 	fail "moreRows=true when truncated" "expected true, got $MORE_ROWS"
 fi
 
-# The other half of #249, and the half a "send 206 when max-items is set"
-# implementation would get wrong: the header alone does not make a response
-# partial. A limit nothing reaches is a complete listing and stays 200.
+# The other half: the header alone does not make a listing partial. A limit
+# nothing reaches is a complete answer and moreRows stays false.
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
 	-H "X-IBM-Max-Items: 1000" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
@@ -659,7 +657,7 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null)
 
-if [ "$HTTP_CODE" = "206" ] &&
+if [ "$HTTP_CODE" = "200" ] &&
    [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
    [ "$(echo "$LIST" | head -1)" = "MBRC" ] &&
    [ "$(echo "$LIST" | sed -n 2p)" = "MBRF1" ] &&
@@ -736,13 +734,36 @@ CONTENT=$(echo "$BODY" | sed '$d')
 LIST=$(echo "$CONTENT" | jq -r '.items[].member' 2>/dev/null |
 	tr '\n' ' ' | sed 's/ *$//')
 
-if [ "$HTTP_CODE" = "206" ] && [ "$LIST" = "MBRA MBRB" ] &&
+if [ "$HTTP_CODE" = "200" ] && [ "$LIST" = "MBRA MBRB" ] &&
    [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "2" ] &&
    [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
 	pass "pattern= with max-items=2 fills the page with matches only"
 else
 	fail "pattern= with max-items=2 fills the page with matches only" \
 		"got HTTP $HTTP_CODE items='$LIST' moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
+fi
+
+# A page that is exactly full is not truncated. The walk looks one match past
+# the page to tell those two apart, and a walk bounded at the page instead
+# cannot: it returns the limit either way, and every directory whose member
+# count equals the limit would report moreRows true (#274). The limit is read
+# off an unlimited listing rather than hardcoded, so adding members above does
+# not quietly turn this into the truncated case again.
+TOTAL=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member" |
+	jq -r '.returnedRows' 2>/dev/null)
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H "X-IBM-Max-Items: ${TOTAL}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "$TOTAL" ] &&
+   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "false" ]; then
+	pass "max-items equal to the member count: moreRows=false"
+else
+	fail "max-items equal to the member count: moreRows=false" \
+		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) of $TOTAL moreRows=$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)"
 fi
 
 # an over-long pattern is rejected, not quietly cut down to size: a truncated
@@ -862,7 +883,7 @@ else
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
 
-	if [ "$HTTP_CODE" = "206" ] &&
+	if [ "$HTTP_CODE" = "200" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.returnedRows')" = "10" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.items | length')" = "10" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.moreRows')" = "true" ]; then
@@ -872,10 +893,10 @@ else
 			"got HTTP $HTTP_CODE returnedRows=$(echo "$CONTENT" | jq -r '.returnedRows') moreRows=$(echo "$CONTENT" | jq -r '.moreRows')"
 	fi
 
-	# The counting pass walks the directory a second time, so this is where a
-	# large directory would show it: the page must still be the first 10
-	# members and the walk must still stop one match past them, not read
-	# 23000 entries twice. A timeout here is the regression.
+	# This is where a large directory shows whether the walk still stops one
+	# match past the page: with start= applied first it must return the first
+	# 10 members behind the key and give up there, not read 23000 entries.
+	# A timeout here is the regression.
 	START=$(date +%s)
 	BODY=$(curl -s -w '\n%{http_code}' -m 180 -u "$AUTH" -H 'X-IBM-Max-Items: 10' \
 		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member?start=A")
@@ -883,7 +904,7 @@ else
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
 
-	if [ "$HTTP_CODE" = "206" ] &&
+	if [ "$HTTP_CODE" = "200" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.returnedRows')" = "10" ]; then
 		pass "max-items=10 with start= on ${BIG_PDS} (${ELAPSED}s)"
 	else

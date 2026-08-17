@@ -374,11 +374,11 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 		fail "member names are returned unpadded" "got: $NAMES"
 	fi
 
-	# A truncated member list answers 206 rather than 200 (#249), and the
-	# assertion that matters is that Zowe still treats it as success: the
-	# status is what its RestClient decides on, so a client that rejected 206
-	# would fail here with the body perfectly well-formed. The dataset list
-	# above covers the same ground for the other handler.
+	# A truncated member list is a 200 carrying moreRows true (#274), and what
+	# is asserted here is that the fact survives Zowe's own parsing -- the
+	# status says nothing about it, so moreRows is the only thing a client has
+	# to go on. The dataset list above covers the same ground for the other
+	# handler.
 	#
 	# A second member has to exist first. With only TESTMBR in the directory
 	# max-items=1 is not a truncation at all, the response is a plain 200, and
@@ -395,7 +395,7 @@ if [ "$MEMBER_WRITE_OK" -eq 1 ]; then
 
 	RC=0
 	OUTPUT=$(run_zowe_json files list am "$TEST_PDS" --max 1) || RC=$?
-	assert_rc 0 "$RC" "list PDS members (max-items=1, HTTP 206)"
+	assert_rc 0 "$RC" "list PDS members (max-items=1, truncated)"
 
 	ROWS=$(echo "$OUTPUT" | jq -r '.data.apiResponse.returnedRows' 2>/dev/null) || ROWS=0
 	MORE=$(echo "$OUTPUT" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""

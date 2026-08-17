@@ -207,12 +207,12 @@ else
 	fail "list: testfile.txt present" "not found in listing"
 fi
 
-# A truncated listing answers 206 rather than 200 (#249). What is asserted here
-# is that Zowe still treats it as success -- the status is what its RestClient
-# decides on, so a client rejecting 206 fails here with a well-formed body.
+# A truncated listing is a 200 carrying moreRows true (#274). What is asserted
+# here is that the fact survives Zowe's own parsing -- the status says nothing
+# about it, so moreRows is the only thing a client has to go on.
 RC=0
 OUTPUT_MAX=$(run_zowe_json files list uss-files "${TEST_DIR}" --max 1) || RC=$?
-assert_rc 0 "$RC" "list USS directory (max-items=1, HTTP 206)"
+assert_rc 0 "$RC" "list USS directory (max-items=1, truncated)"
 
 MORE=$(echo "$OUTPUT_MAX" | jq -r '.data.apiResponse.moreRows' 2>/dev/null) || MORE=""
 if [ "$MORE" = "true" ]; then

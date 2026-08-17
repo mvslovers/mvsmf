@@ -1008,8 +1008,9 @@ dslist_cmp(const void *a, const void *b)
 ** sorts below the character the value continues with).  Drop it too (#240).
 **
 ** Both passes below ask this one question: the counting pass turns the answer
-** into the status code, the emit pass into the body.  A second copy of the rule
-** would let 206 and moreRows disagree on exactly the names #240 is about. */
+** into eligible, the emit pass into the items.  A second copy of the rule would
+** let moreRows and the list itself disagree on exactly the names #240 is
+** about. */
 __asm__("\n&FUNC    SETC 'dslist_in_page'");
 static int
 dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,
@@ -1034,7 +1035,6 @@ int datasetListHandler(Session *session)
 	unsigned	maxitems	= 0;
 	unsigned	emitted		= 0;
 	unsigned	eligible	= 0;
-	int		truncated	= 0;
 
 	char		*method		= NULL;
 	char		*path		= NULL;
@@ -1189,13 +1189,11 @@ int datasetListHandler(Session *session)
 	maxitems_str = getHeaderParam(session, "X-IBM-Max-Items");
 	if (maxitems_str) maxitems = (unsigned) atoi(maxitems_str);
 
-	/* Count the page before writing the status line.  A listing cut short by
-	** X-IBM-Max-Items answers 206 Partial content, and the status is the one
-	** part of the response that cannot be corrected once the header is out --
-	** moreRows below is decided by the same numbers, but it is decided last
-	** (#249).  Only the entries at or after start= are still fetchable, so
-	** they are what "more to come" counts.  The array is in storage and
-	** sorted already: this pass costs no I/O. */
+	/* Count what the client could still fetch.  The emit loop below stops at
+	** the page and would otherwise have nothing to compare against: only the
+	** entries at or after start= are reachable, so they are what "more to
+	** come" counts.  The array is in storage and sorted already, so this pass
+	** costs no I/O. */
 	if (dslist) {
 		count = array_count(&dslist);
 
@@ -1207,10 +1205,11 @@ int datasetListHandler(Session *session)
 		}
 	}
 
-	truncated = (maxitems > 0 && eligible > maxitems);
-
+	/* A listing cut short by X-IBM-Max-Items stays 200 and says so in
+	** moreRows -- measured against z/OSMF 29, which answers 200 for every
+	** truncation and emits no 206 on the files service at all (#274). */
 	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc, truncated ? 206 : 200)) < 0) goto quit;
+	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
@@ -1841,31 +1840,37 @@ json_escape_member(const unsigned char *raw, unsigned rawlen,
 	out[o] = '\0';
 }
 
-/* Walk a PDS directory once, applying start= and pattern to every entry.
+/* Walk a PDS directory once, applying start= and pattern to every entry, and
+** write the matches out as JSON objects on the way past.
 **
-** The walk stops as soon as `bound` matching members have been seen (bound 0
-** means no limit) and returns that count, so a caller can learn "the page is
-** full and at least one member is behind it" without reading the 23000 entries
-** of SYS1.SMPCDS to find out.  With `emit` set the matches are written as JSON
-** objects on the way past and the count is what was written.  Returns -1 if a
-** write failed.
+** `page` is what the client asked for (0 means no limit): that many matches are
+** written, and the walk then looks one further before it stops.  So the return
+** value is up to page + 1, and a caller reading page + 1 knows the page is full
+** and at least one member is behind it -- without reading the 23000 entries of
+** SYS1.SMPCDS to find out.  Returns -1 if a write failed.
 **
-** Both passes of memberListHandler() come through here.  The counting pass
-** decides the status code and the emit pass decides the body, so the rules the
-** two apply -- the blank trim of #154, the start= prefix of #240, pattern
-** before cap -- have to be one set of rules.  Kept as two copies they would
-** drift, and 206 and moreRows would then disagree about exactly the entries
-** those issues are about. */
+** Looking one past the page is the whole trick, and dropping it fails silently:
+** a walk bounded at `page` returns `page` whether or not anything follows, so a
+** directory holding exactly as many members as the limit would report moreRows
+** true.  The extra match is counted and deliberately not emitted. */
 __asm__("\n&FUNC    SETC 'member_scan'");
 static int
 member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
-            const char *pattern_key, int have_pattern, unsigned bound, int emit)
+            const char *pattern_key, int have_pattern, unsigned page)
 {
 	char		blk[PDS_DIR_BLKSIZE];
 	unsigned	seen		= 0;
 	unsigned	first		= 1;
+	unsigned	bound		= 0;	/* 0 = walk the whole directory */
 	int		skipping	= (start_key != NULL);
 	int		at_end		= 0;
+
+	/* The upper guard keeps page + 1 from wrapping: a negative or absurd
+	   X-IBM-Max-Items arrives here as UINT_MAX, the bound would come out 0 --
+	   which the loop reads as "no bound" -- and the walk would stop at the
+	   first member.  No page that large can be truncated anyway, so walking it
+	   all is the right answer for that value. */
+	if (page > 0 && page < UINT_MAX) bound = page + 1;
 
 	while (!at_end) {
 		int	len;
@@ -1958,7 +1963,10 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 
 			seen++;
 
-			if (emit) {
+			/* Everything up to the page goes out; the one match past
+			   it is counted and not written -- it is what tells the
+			   caller more members follow. */
+			if (page == 0 || seen <= page) {
 				json_escape_member((const unsigned char *) &blk[pos],
 					(unsigned) nlen,
 					httpx->xlate_cp037->etoa, member, sizeof(member));
@@ -1977,9 +1985,8 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 				if (http_printf(session->httpc, "    }\n") < 0) return -1;
 			}
 
-			/* the page is full: for the emit pass there is nothing more
-			   to write, and for the counting pass the one match past it
-			   is the whole answer */
+			/* the page is full and one match past it has been seen:
+			   nothing left to write, and nothing left to learn */
 			if (bound > 0 && seen >= bound) {
 				at_end = 1;
 				break;
@@ -2076,48 +2083,6 @@ int memberListHandler(Session *session)
 		goto quit;
 	}
 
-	/* Counting pass.  A listing cut short by X-IBM-Max-Items answers 206
-	   Partial content, and the status line is written before the first member
-	   is -- so whether the page is full has to be settled before the directory
-	   is walked for the client (#249).  The walk stops one match past the page,
-	   so what it costs is a page and not a directory, and it is only paid when
-	   the client asked for a limit at all.
-
-	   Reading the directory twice is affordable only because of #212: the walk
-	   holds one 256-byte block, not a member array.  fopen() again rather than
-	   rewind() -- a backwards seek on a record-mode handle reopens the data set
-	   inside __fseek() anyway, by a DD name it reconstructs itself, so a second
-	   open is the same I/O with none of the guesswork.
-
-	   The upper guard keeps maxitems + 1 from wrapping: a negative or absurd
-	   X-IBM-Max-Items arrives here as UINT_MAX, the bound would come out 0 --
-	   which member_scan() reads as "no bound" -- and both passes would then run
-	   the directory end to end.  No page that large can be truncated anyway. */
-	if (maxitems > 0 && maxitems < UINT_MAX) {
-		fp = fopen(dsname, "r,record");
-		if (!fp) {
-			rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
-					CATEGORY_UNEXPECTED, RC_ERROR, REASON_DATASET_NOT_FOUND,
-					ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
-			goto quit;
-		}
-		session_register_file(session, fp);
-
-		scanned = member_scan(session, fp, skipping ? start_key : NULL,
-				start_after, pattern_key, have_pattern,
-				maxitems + 1, 0);
-
-		session_fclose(session, fp);
-		fp = NULL;
-
-		if (scanned < 0) {
-			rc = (unsigned) scanned;
-			goto quit;
-		}
-
-		truncated = ((unsigned) scanned > maxitems);
-	}
-
 	/* Walk the directory and emit as we go.  This used to call __listpd(),
 	   which builds the complete member array in storage first: on a data set
 	   like SYS1.SMPCDS (~23000 members) that exhausts the region, abends S878,
@@ -2141,8 +2106,13 @@ int memberListHandler(Session *session)
 	   SCRATCH enqueue forever, costing a worker permanently (#217). */
 	session_register_file(session, fp);
 
+	/* A listing cut short by X-IBM-Max-Items stays 200 and carries the fact in
+	   moreRows -- measured against z/OSMF 29, which answers 200 for every
+	   truncation and emits no 206 on the files service at all (#274).  That is
+	   also what lets this handler settle the question in the walk below rather
+	   than reading the directory a second time before the header goes out. */
 	session->headers_sent = 1;
-	if ((rc = http_resp(session->httpc, truncated ? 206 : 200)) < 0) goto quit;
+	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
@@ -2153,19 +2123,20 @@ int memberListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
 	scanned = member_scan(session, fp, skipping ? start_key : NULL,
-			start_after, pattern_key, have_pattern, maxitems, 1);
+			start_after, pattern_key, have_pattern, maxitems);
 	if (scanned < 0) {
 		rc = (unsigned) scanned;
 		goto quit;
 	}
-	emitted = (unsigned) scanned;
+
+	/* the walk looks one match past the page, so what it saw and what it wrote
+	   part company exactly when there is more to come */
+	truncated = (maxitems > 0 && (unsigned) scanned > maxitems);
+	emitted   = truncated ? maxitems : (unsigned) scanned;
 
 	if ((rc = http_printf(session->httpc, "  ],\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"returnedRows\": %d,\n", emitted)) < 0) goto quit;
 	// TODO: add totalRows if X-IBM-Attributes has ',total'
-	/* the counting pass, not this one: the two walks are seconds apart on a
-	   large directory and a member added in between must not leave the body
-	   contradicting the status line */
 	if ((rc = http_printf(session->httpc, "  \"moreRows\": %s,\n",
 		truncated ? "true" : "false")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "  \"JSONversion\": 1\n")) < 0) goto quit;

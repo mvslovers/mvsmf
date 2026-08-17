@@ -1,5 +1,6 @@
 #include <clibary.h>
 #include <clibdscb.h>
+#include <clibenv.h>
 #include <clibgrt.h>
 #include <clibjes2.h>
 #include <cliblist.h>
@@ -678,6 +679,47 @@ int testHandler(Session *session) {
         " \"value\": \"%s\" }\n",
         ret ? "non-null" : "NULL", len,
         (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
+
+    /* --- fn=env (does the CGI see httpd's //SYSENV?) --------------- */
+    /* The abend test hook is gated on getenv("MVSMF_ABEND_TEST"), which only
+     * works because httpd and the CGI share one CLIBGRT -- the CGI reads the
+     * environment httpd's @@START loaded from //SYSENV. When that gate does
+     * not open there are two indistinguishable causes: the DD/member was not
+     * in place at server start, or the CGI is not seeing httpd's environment
+     * at all. Listing what this CGI actually has separates them: names but no
+     * MVSMF_* means the member was empty at start; an empty list means the
+     * environment is not shared.
+     *
+     * Names are always safe to show; values are not (httpd's environment is
+     * the server operator's, not the caller's), so only MVSMF_* values are
+     * printed -- those are our own test flags and carry no secrets. */
+  } else if (strcmp(fn, "env") == 0) {
+    int i;
+    int shown = 0;
+
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"env\", \"count\": %d, \"items\": [", __envsiz);
+    if (rc < 0)
+      goto quit;
+
+    for (i = 0; i < __envsiz && __envvar && __envvar[i]; i++) {
+      const char *name = __envvar[i]->name ? __envvar[i]->name : "";
+      int ours = (strncmp(name, "MVSMF_", 6) == 0);
+
+      if (ours) {
+        rc = http_printf(session->httpc, "%s{ \"name\": \"%s\", \"value\": \"%s\" }",
+                         shown ? ", " : " ", name,
+                         __envvar[i]->value ? __envvar[i]->value : "");
+      } else {
+        rc = http_printf(session->httpc, "%s{ \"name\": \"%s\" }",
+                         shown ? ", " : " ", name);
+      }
+      if (rc < 0)
+        goto quit;
+      shown++;
+    }
+
+    rc = http_printf(session->httpc, " ] }\n");
 
     /* --- fn=storage (free storage sample, issue #287) -------------- */
   } else if (strcmp(fn, "storage") == 0) {

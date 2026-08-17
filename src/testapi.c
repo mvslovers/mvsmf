@@ -692,13 +692,15 @@ int testHandler(Session *session) {
      *
      * Names are always safe to show; values are not (httpd's environment is
      * the server operator's, not the caller's), so only MVSMF_* values are
-     * printed -- those are our own test flags and carry no secrets. */
-   * Read `grt->grtenv`, which is where the environment actually lives -- the
-   * `__envvar`/`__envsiz` pair exported by clibenv.h is a legacy symbol that
-   * stays 0 (libc370 `@@envvar.c`), so reading it reports an empty
-   * environment no matter what is loaded.  `getenv()` goes through
-   * `__findenv()` -> `__grtget()->grtenv` (`@@finden.c:18`), so this walks the
-   * same array getenv() answers from. */
+     * printed -- those are our own test flags and carry no secrets.
+     *
+     * Read grt->grtenv, which is where the environment actually lives. The
+     * __envvar/__envsiz pair exported by clibenv.h is a legacy symbol that
+     * stays 0 (libc370 @@envvar.c), so reading it reports an empty
+     * environment no matter what is loaded -- a false negative that reads
+     * exactly like "the CGI does not see httpd's environment". getenv()
+     * resolves through __findenv() -> __grtget()->grtenv (@@finden.c:18), so
+     * walking that array answers the same question getenv() does. */
   } else if (strcmp(fn, "env") == 0) {
     CLIBGRT *grt = __grtget();
     unsigned count = (grt && grt->grtenv) ? arraycount(&grt->grtenv) : 0;

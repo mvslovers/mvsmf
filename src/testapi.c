@@ -1,5 +1,6 @@
 #include <clibary.h>
 #include <clibdscb.h>
+#include <clibecb.h>
 #include <clibenv.h>
 #include <clibgrt.h>
 #include <clibjes2.h>
@@ -743,10 +744,33 @@ int testHandler(Session *session) {
     char *spv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_SP");
     char *totalv =
         (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_TOTAL");
+    char *holdv =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_HOLD");
     int spn = spv ? atoi(spv) : 0;
     unsigned sp = (unsigned)spn;
     int want_total = totalv && (totalv[0] == '1' || totalv[0] == 'y' ||
                                 totalv[0] == 'Y');
+    /* &hold=<seconds> (cap 10): after measuring, KEEP the largest block
+     * allocated for that long before freeing it.  Concurrent requests must
+     * then start their 262328-byte C stack in what remains -- which is how
+     * both halves of the #287 fragmentation claim get proven live: a request
+     * that fails U0801 while the holes are the only space left proves the
+     * failure signature AND that a fenced-off hole cannot hold a stack.
+     *
+     * This is deliberate fault injection against a live server, so it is
+     * gated exactly like fn=abend: without MVSMF_ABEND_TEST in the server
+     * environment the parameter is ignored and reported as such. */
+    int hold = holdv ? atoi(holdv) : 0;
+    int hold_denied = 0;
+
+    if (hold < 0)
+      hold = 0;
+    if (hold > 10)
+      hold = 10;
+    if (hold && !abend_test_enabled()) {
+      hold = 0;
+      hold_denied = 1;
+    }
 
     if (spn < 0 || spn > 127) {
       rc = http_printf(session->httpc,
@@ -772,6 +796,14 @@ int testHandler(Session *session) {
         p = stg_getmain(largest, sp);
         if (p) {
           sprintf(largest_at, "0x%06X", (unsigned)(unsigned long)p);
+          if (hold) {
+            ECB ecb = 0;
+            /* BINTVL is in hundredths of a second.  A failed timer (negative
+             * rc) means no wait happened -- fine here, the block is simply
+             * given back at once and `held` reports what really occurred. */
+            if (ecb_timed_wait(&ecb, (unsigned)hold * 100u, 1) < 0)
+              hold = 0;
+          }
           if (stg_freemain(p, largest, sp) != 0)
             free_errors++;
         }
@@ -806,6 +838,13 @@ int testHandler(Session *session) {
         }
 
         rc = http_printf(session->httpc, "]");
+        if (rc < 0)
+          goto quit;
+      }
+
+      if (hold || hold_denied) {
+        rc = http_printf(session->httpc, ", \"held\": %d, \"hold_denied\": %s",
+                         hold, hold_denied ? "true" : "false");
         if (rc < 0)
           goto quit;
       }

@@ -1541,23 +1541,31 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		}
 	}
 
-	/* close internal reader and retrieve jobid */
-	rc = jesircls(intrdr);
-	if (rc < 0) {
-		wtof(MSG_INTRDR_CLOSE);
-		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
-						ERR_MSG_SERVER_ERROR, NULL, 0);
-		goto quit;
-	}
+	/* Close internal reader and retrieve jobid.  jesircl2() copies the
+	   feedback out between the ENDREQ and the close -- the old read of
+	   intrdr->rpl.rplrbar after jesircls() fetched from the freed VSFILE
+	   (#296).  The handle is gone even when the close reports an error,
+	   so drop the pointer right away; the old error path handed the dead
+	   handle to jesircls() a second time at quit:. */
+	{
+		unsigned char jobid_raw[8];
 
-	strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
-	jobid[JOBID_STR_SIZE] = '\0';
+		rc = jesircl2(intrdr, jobid_raw);
+		intrdr = NULL;
+		if (rc < 0) {
+			wtof(MSG_INTRDR_CLOSE);
+			sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+							CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+							ERR_MSG_SERVER_ERROR, NULL, 0);
+			goto quit;
+		}
+
+		memcpy(jobid, jobid_raw, JOBID_STR_SIZE);
+		jobid[JOBID_STR_SIZE] = '\0';
+	}
 
 	wtof(MSG_JOB_SUBMITTED, jobname, jobid);
 	rc = 0;
-
-	intrdr = NULL;
 
 quit:
 	if (intrdr) {
@@ -2159,20 +2167,28 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
         }
     }
 
-    rc = jesircls(intrdr);
-	if (rc < 0) {
-        wtof(MSG_INTRDR_CLOSE);
-        goto quit;
-    }
+    /* jesircl2() copies the jobid out between the ENDREQ and the close --
+       the old read of intrdr->rpl.rplrbar after jesircls() fetched from the
+       freed VSFILE (#296).  The handle is gone even on a close error, so
+       drop the pointer right away instead of letting quit: close it again. */
+    {
+        unsigned char jobid_raw[8];
 
-    strncpy(jobid, (const char *)intrdr->rpl.rplrbar, JOBID_STR_SIZE);
-    jobid[JOBID_STR_SIZE] = '\0';
+        rc = jesircl2(intrdr, jobid_raw);
+        intrdr = NULL;
+        if (rc < 0) {
+            wtof(MSG_INTRDR_CLOSE);
+            goto quit;
+        }
+
+        memcpy(jobid, jobid_raw, JOBID_STR_SIZE);
+        jobid[JOBID_STR_SIZE] = '\0';
+    }
 
     wtof(MSG_JOB_SUBMITTED, jobname, jobid);
     rc = 0;
 
-	intrdr = NULL; 
-    
+
 quit:
 	// Close internal reader if it was still opened
 	if (intrdr)	 {

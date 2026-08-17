@@ -28,7 +28,7 @@ in the request paths.
 | `sp` | subpool probed (`&sp=`, 0–127; default 0 — the one the C startup uses) |
 | `largest` | largest contiguous block GETMAIN would hand out **right now**, bytes |
 | `largest_at` | where that block starts — tells you which end of the region is still open |
-| `link_stack` | 262144, the unconditional GETMAIN libc370's C startup makes per LINK |
+| `link_stack` | 262328, the contiguous subpool-0 GETMAIN libc370's C startup makes per LINK |
 | `granularity` | 4096; `largest` is a multiple of it, so it is accurate to ±4 K |
 | `stack_at` | address of a local in this request — where this LINK's own stack landed |
 | `probes` | GETMAIN calls the bisect needed (≈12 without `total=1`) |
@@ -46,11 +46,38 @@ With `&total=1`, four more fields:
 ## How to read it
 
 `link_stack` is the threshold everything turns on. httpd loads the CGI fresh
-per request, and libc370's C startup (`@@crt0`) takes an **unconditional**
-`GETMAIN` of 262144 bytes for the main stack — since libc370#81 every other
-GETMAIN in libc370 is conditional and returns NULL, so an S80A can only be
-that one. When `largest` falls below 262144, the next request cannot start:
-`HTTPD908E … S80A`, before mvsMF's ESTAE exists to catch anything.
+per request, and libc370's C startup (`@@crt0`) takes **262328 contiguous
+bytes of subpool 0** for it — `STACKLEN` (X'040088', the whole STACK area, not
+just `MAINSTK`) plus `L'CLIBPPA+7`, rounded *down* to a doubleword by
+`N R8,=X'00FFFFF8'`. When `largest` falls below that, the next request cannot
+start, before mvsMF's ESTAE exists to catch anything.
+
+**What the failure looks like has changed.** That GETMAIN used to be
+unconditional, which is where the `S80A` in this investigation's history comes
+from — an abend raised inside the SVC, naming neither the requester nor the
+size. libc370#108/#110 made it conditional, so it now fails by name:
+
+```
+U0801   @@CRT0 - No storage for C stack
+```
+
+This is not a future state to wait for: the string is already in the MVSMF
+built here (`grep` it in EBCDIC — `strings` will not find it). **An instrument
+or a watch that keys on `S80A` is looking for the wrong event.** The upside is
+that a `U0801` is now positive proof it was the startup stack, where an `S80A`
+could have come from anywhere in the address space.
+
+**There is a knob, and mvsMF does not use it.** `@@crt0` reads a `WXTRN`
+`@@STKLEN` and takes that value instead of the default (minimum 4096); from C
+it is simply a global `unsigned __stklen`. **httpd sets it** — `httpd.c:22`,
+`64*1024` — and runs a whole server on it. mvsMF, ftpd, ufsd, lua370, rexx370,
+httplua and httprexx do not, so each of them asks for the full 262328 per
+LINK. For the one module httpd re-LINKs on *every request*, that is a
+four-fold difference in the contiguous demand this page exists to measure.
+Whether mvsMF's handlers fit in 64 K is an open question — httpd's main task
+is not the same call chain — but it is measurable, and it is a much more
+surgical lever than hunting the abend. The knob is declared in no libc370
+header; you only learn about it by reading `@@crt0.asm`.
 
 Sampled over a run, the two numbers separate the two hypotheses:
 

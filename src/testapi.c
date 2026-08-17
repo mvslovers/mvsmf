@@ -178,7 +178,13 @@ static int testJesAbend(Session *session) {
  */
 #define STG_GRAN       4096u          /* probe resolution                   */
 #define STG_MAX        0x00FFF000u    /* 16 MB - 4 K: the 24-bit ceiling    */
-#define STG_LINK_STACK 262144u        /* libc370 crt0 MAINSTK: 65536F       */
+/* What one LINK actually asks for, per libc370 asm/@@crt0.asm: STACKLEN
+ * (X'040088' = 262280, the whole STACK area, not just MAINSTK's 65536F) plus
+ * L'CLIBPPA+7, then ANDed with X'00FFFFF8' -- rounded *down* to a doubleword,
+ * which is why it lands on X'0400B8' and not one word higher.  262144 is the
+ * round number this was first written against and it is too low: a largest
+ * block between the two reads "fits" and does not. */
+#define STG_LINK_STACK 262328u        /* X'0400B8' */
 #define STG_COMB_MAX   256            /* blocks the &total=1 comb may hold  */
 #define STG_SIZES_MAX  32             /* block sizes reported in the JSON   */
 

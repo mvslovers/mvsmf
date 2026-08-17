@@ -40,7 +40,7 @@ No response body.
 |--------|-----------|
 | 400    | Missing filepath, path too long, or directory not empty without recursive |
 | 404    | File or directory not found |
-| 403    | Read-only file system |
+| 400    | Read-only file system |
 | 500    | I/O error or other server error |
 | 503    | UFSD subsystem not available |
 

@@ -336,6 +336,16 @@ Two further consequences that keep getting rediscovered:
   "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
   **500**. This was tracked as #102 and closed as won't-do; do not re-open the
   reasoning from the httpd side alone.
+- **There are no sanctioned exceptions, and two were tried.** 410 Gone for
+  purged spool output (#187) and 403 for a read-only file system both went in as
+  "a case z/OSMF has no code for", and both came back out in #250. The reason to
+  know this is the argument that produced them, because it is a good one and it
+  will come again: mvsMF can detect states the reference cannot, so no reference
+  behaviour exists to copy. What settled it is that the reference stays inside
+  its own list even where a better code exists — a missing job answers **400**,
+  not 404, measured. A distinction worth keeping goes in the error report's
+  `reason` and `message`, where it costs no conformance; `REASON_SPOOL_GONE` is
+  the worked example.
 - **206, 412 and 429 reach the wire now — but only because httpd was re-cut and
   redeployed.** They were added to `src/httpstat.c` by httpd#181/PR#183 (commit
   `623f6a6`), which landed *after* the original `v4.0.0-dev` artifact; that tag
@@ -538,10 +548,13 @@ z/OSMF: `POST /zosmf/restfiles/ds/<new PDS>` answers **201** with an empty body.
 The list bounds which codes are permitted, it does not mandate one per
 condition — see **Checking behaviour against a real z/OSMF**.
 
-**One row is still unresolved:** `UFSD_RC_ROFS → 403`, open in #248. It cannot
-be settled the same way: a read-only file system is a UFSD condition, so there
-is nothing on the reference implementation to measure it against without
-mounting one. Decide it on its own terms.
+**`UFSD_RC_ROFS → 400` since #250.** It used to be 403, the last row outside the
+list. It could not be settled by measurement — a read-only file system is a UFSD
+condition and the reference has no equivalent state to provoke — so it was
+decided together with the 410 that used to come back for purged spool output,
+and both followed the list rather than becoming sanctioned exceptions. Category
+4 still separates it. The row is unreachable in practice: UFSD has no read-only
+mount, so nothing produces this rc today.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|
@@ -556,7 +569,7 @@ mounting one. Decide it on its own terms.
 | 56 | UFSD_RC_BADFD    | 500 | 10 | Bad file descriptor |
 | 60 | UFSD_RC_NOTEMPTY | 400 | 4  | Directory not empty |
 | 64 | UFSD_RC_NAMETOOLONG | 400 | 2 | Path name too long |
-| 68 | UFSD_RC_ROFS     | 403 | 4  | Read-only file system |
+| 68 | UFSD_RC_ROFS     | 400 | 4  | Read-only file system |
 
 ### I/O Pattern for File Read
 

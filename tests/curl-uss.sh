@@ -1145,11 +1145,13 @@ if [ -n "$TEST_FILE" ]; then
 		-d '{"type":"file"}' \
 		"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
 
-	# UFSD returns ROFS (read-only filesystem) for paths outside writable mounts
-	if [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "404" ]; then
+	# UFSD returns ROFS (read-only filesystem) for paths outside writable
+	# mounts, which maps to 400 since #250 -- it was 403 before. A missing
+	# parent is a 404. Either is a correct refusal here.
+	if [ "$HTTP_CODE" = "400" ] || [ "$HTTP_CODE" = "404" ]; then
 		pass "create in non-existent parent returns error (HTTP $HTTP_CODE)"
 	else
-		fail "create in non-existent parent" "expected HTTP 403 or 404, got $HTTP_CODE"
+		fail "create in non-existent parent" "expected HTTP 400 or 404, got $HTTP_CODE"
 	fi
 
 	# Cleanup

@@ -930,7 +930,9 @@ test_spool_records_stale_checkpoint() {
 	# PDDB, record count and all, while its tracks are reallocated. Reading it
 	# lands on a foreign block and yields nothing. Before #187 that came back
 	# as an empty 200, indistinguishable from an empty data set; it must now be
-	# 410 Gone.
+	# a 404 carrying reason 10 (REASON_SPOOL_GONE). It was 410 Gone between
+	# #187 and #250, where the status was aligned to the z/OSMF list and the
+	# distinction moved into the error report.
 	#
 	# A purge cannot be provoked from the API (purging the job removes it from
 	# the checkpoint entirely, which is a 404), so this walks whatever the
@@ -938,7 +940,8 @@ test_spool_records_stale_checkpoint() {
 	# tasks: SYSLOG spins its log to a SYSOUT class, a printer drains and
 	# purges it, and the checkpointed PDDB keeps advertising it. The invariant
 	# asserted for every spool file that advertises records is: never an empty
-	# 200 - either the records come back, or the loss is reported as 410.
+	# 200 - either the records come back, or the loss is reported as a 404 with
+	# reason 10.
 	#
 	# The job list does not return STCs, so SYSLOG is located through the
 	# internal /zosmf/test?fn=syslog probe (jobid + dsid/record-count per DD)
@@ -999,13 +1002,22 @@ test_spool_records_stale_checkpoint() {
 					detail="${detail} id=${id}:empty-200"
 				fi
 				;;
-			410)
+			404)
+				# 404, not the 410 this used to be (#250). The status no
+				# longer says "this was a loss", so the reason code has to:
+				# REASON_SPOOL_GONE is 10, and without it a 404 here would
+				# be indistinguishable from an ordinary wrong-DD miss --
+				# which is exactly the information the status used to carry.
 				gone=$((gone + 1))
-				local cat
+				local cat rsn
 				cat=$(echo "$BODY" | jq -r '.category // empty' 2>/dev/null)
+				rsn=$(echo "$BODY" | jq -r '.reason // empty' 2>/dev/null)
 				if [ -z "$cat" ]; then
 					bad=$((bad + 1))
-					detail="${detail} id=${id}:410-without-error-body"
+					detail="${detail} id=${id}:404-without-error-body"
+				elif [ "$rsn" != "10" ]; then
+					bad=$((bad + 1))
+					detail="${detail} id=${id}:404-reason-${rsn}-not-SPOOL_GONE"
 				fi
 				;;
 			*)
@@ -1016,7 +1028,7 @@ test_spool_records_stale_checkpoint() {
 	done
 
 	if [ "$bad" -eq 0 ]; then
-		pass "${jobname}(${jobid}): ${checked} spool file(s) with records, none empty-200 (${gone} reported 410 Gone)"
+		pass "${jobname}(${jobid}): ${checked} spool file(s) with records, none empty-200 (${gone} reported purged)"
 	else
 		fail "${jobname}(${jobid}): spool files with records must never be an empty 200" \
 			"${detail# }"

@@ -315,7 +315,8 @@ jobRecordsHandler(Session *session)
 
 		/* do_print_sysout() owns the response from here on: it holds the
 		   headers back until the first spool line is ready, so an outcome
-		   with no output at all can still answer 410 or 500 (issue #187) */
+		   with no output at all can still answer 404 or 500 (issue #187,
+		   status revised in #250) */
 		rc = do_print_sysout(session, job, (unsigned)ddid_val);
 		if (rc < 0) {
 			goto quit;
@@ -417,7 +418,11 @@ jobPurgeHandler(Session *session)
 		}
 		break;
 	case CANJ_ICAN:
-		sendErrorResponse(session, HTTP_STATUS_FORBIDDEN, CATEGORY_SERVICE,
+		/* Refusing to purge a started task. This answered 403 until #250; that
+		   is not a z/OSMF status, and the refusal is about what was asked for
+		   rather than about who asked, so 400 is the honest code. REASON_STC_PURGE
+		   is what tells the client which refusal this is. */
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE,
 							NULL, 0);
 		break;
@@ -619,8 +624,18 @@ do_print_sysout_why(int prc, const JESPRST *st, unsigned records)
 	return NULL;
 }
 
-/* HTTP status for an outcome that produced no output at all. 410 is reserved
-   for the one case that really is a loss - see do_print_sysout_why(). */
+/* HTTP status for an outcome that produced no output at all.
+ *
+ * The purged case answers 404, not the 410 Gone it used to (#187, reversed in
+ * #250). 410 said more -- the checkpoint promised records the spool no longer
+ * holds, which is a loss rather than a wrong DD name -- but it is not one of
+ * the status codes z/OSMF uses, and a measurement of the reference settled
+ * that the list is kept even where a nicer code exists: real z/OSMF answers a
+ * missing job 400, never 404, rather than reaching outside its own set.
+ *
+ * Nothing is lost by the client that reads the body: REASON_SPOOL_GONE and
+ * ERR_MSG_SPOOL_GONE still separate this from an ordinary miss, and they were
+ * always where the detail lived. See do_print_sysout_why(). */
 __asm__("\n&FUNC	SETC 'do_print_sysout_status'");
 static int
 do_print_sysout_status(int prc, const JESPRST *st, unsigned records)
@@ -630,7 +645,7 @@ do_print_sysout_status(int prc, const JESPRST *st, unsigned records)
 	}
 
 	if (st->reason == JESPR_FOREIGN && records) {
-		return HTTP_STATUS_GONE;
+		return HTTP_STATUS_NOT_FOUND;
 	}
 
 	return do_print_sysout_why(prc, st, records)
@@ -672,7 +687,7 @@ do_print_sysout_line(const char *line, unsigned linelen, void *arg)
 /*
  * Streams one spool dataset (dsid) and owns the whole response for it: the
  * 200 headers are emitted by the callback on the first line, so an outcome
- * that never produces a line can still answer 410 or 500 instead of an empty
+ * that never produces a line can still answer 404 or 500 instead of an empty
  * 200 (issue #187). Once a line has gone out the status is committed - a walk
  * that then goes wrong is logged for the operator, not turned into an error
  * body, because the records already sent are valid.
@@ -785,10 +800,14 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 		goto quit;
 	}
 
-	if (status == HTTP_STATUS_GONE) {
+	/* The purged case. do_print_sysout_status() returns only OK, NOT_FOUND and
+	   INTERNAL_SERVER_ERROR, so NOT_FOUND identifies it unambiguously -- and
+	   REASON_SPOOL_GONE is what tells a client this was a loss rather than a
+	   name it got wrong, now that the status no longer does (#250). */
+	if (status == HTTP_STATUS_NOT_FOUND) {
 		snprintf(msg, sizeof(msg), ERR_MSG_SPOOL_GONE,
 				(char *) job->jobname, (char *) job->jobid, bad_dsid);
-		rc = sendErrorResponse(session, HTTP_STATUS_GONE, CATEGORY_SERVICE,
+		rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
 						RC_WARNING, REASON_SPOOL_GONE, msg, NULL, 0);
 		goto quit;
 	}

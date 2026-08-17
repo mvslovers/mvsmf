@@ -22,7 +22,7 @@ GET /zosmf/restfiles/fs?path=<filepath>
 |-------------------|----------|---------|-------------|
 | `X-IBM-Max-Items` | No       | 1000    | Maximum items to return. 0 = unlimited |
 
-## Response (200 OK, or 206 when truncated by `X-IBM-Max-Items`)
+## Response (200 OK)
 
 ```json
 {
@@ -64,23 +64,19 @@ When `X-IBM-Max-Items` is set and the directory contains more entries:
 - `returnedRows` = number of items in the response
 - `totalRows` = total entries in the directory (excluding `.` and `..`)
 - `moreRows` = `true` when results were truncated
-- the status is **206 (Partial content)** rather than 200
 
-A limit no directory reaches is a complete listing and stays 200 — the header
-being present is not what makes the response partial.
+**The status is 200 either way** — a truncated listing is carried in `moreRows`
+and nowhere else. That is what real z/OSMF does; it emits no 206 on the files
+service at all (issue #274).
 
-**The default limit does not produce 206.** With no `X-IBM-Max-Items` the
-handler still caps the listing at 1000 entries and still sets `moreRows`, but
-that limit is the server's, not the client's, and z/OSMF ties 206 to a request
-that *contained* the header. A directory of more than 1000 entries listed
-without the header therefore answers 200 with `moreRows: true`.
+The 1000-entry default cap works the same way: a directory larger than that,
+listed without the header, answers 200 with `moreRows: true`.
 
 ## Response Status
 
 | Status | Condition |
 |--------|-----------|
-| 200    | Complete listing (also a listing capped by the 1000-entry default) |
-| 206    | Listing cut short by `X-IBM-Max-Items` |
+| 200    | Listing returned — complete or truncated, see `moreRows` |
 
 ## Error Responses
 

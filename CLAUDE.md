@@ -322,11 +322,21 @@ Two codes turn on this:
   z/OSMF answers **200 with an empty `items` array** in every one of those
   cases, including a partitioned data set with zero members. Empty listings stay
   200 (#266, measured, closed won't-do).
-- **206 is the unresolved twin.** #249/PR#265 adopted it for a listing truncated
-  by `X-IBM-Max-Items`, on the same documented wording — but real z/OSMF answers
-  **200 with `moreRows: true`** there, and emits no 206 on the files service at
-  all. mvsMF and its reference currently disagree; open as **#274**. Do not cite
-  #249 as settled precedent.
+- **206 went the same way, after briefly going the other.** #249/PR#265 adopted
+  it for a listing truncated by `X-IBM-Max-Items`, on the documented wording —
+  and #274 took it back out: real z/OSMF answers **200 with `moreRows: true`**
+  there and emits no 206 on the files service at all, not even for a
+  record-range read. Truncation is carried in `moreRows` and nowhere else, so
+  **mvsMF emits no 206 anywhere**. Do not cite #249; it was measured wrong.
+
+  The removal also deleted work rather than only adjusting it: the status was
+  the sole reason `memberListHandler` and `ussListHandler` measured the page
+  before the header went out, so both second walks went with it. What is left
+  of that shape is load-bearing — `member_scan()` walks one match *past* the
+  page and emits only up to it, because a walk bounded at the page returns the
+  limit whether or not anything follows, and a directory holding exactly as
+  many members as the limit would then report `moreRows: true`. That failure is
+  silent and its test is the equal-to-the-count case in `curl-datasets.sh`.
 
 Two further consequences that keep getting rediscovered:
 
@@ -347,7 +357,9 @@ Two further consequences that keep getting rediscovered:
   `reason` and `message`, where it costs no conformance; `REASON_SPOOL_GONE` is
   the worked example.
 - **206, 412 and 429 reach the wire now — but only because httpd was re-cut and
-  redeployed.** They were added to `src/httpstat.c` by httpd#181/PR#183 (commit
+  redeployed** (206 is emittable, and unused since #274; the entry is about what
+  httpd can send, not about what mvsMF sends). They were added to
+  `src/httpstat.c` by httpd#181/PR#183 (commit
   `623f6a6`), which landed *after* the original `v4.0.0-dev` artifact; that tag
   has since been re-cut and the STC redeployed, and 412 was measured going out
   correctly (#152). The mechanism is the part to remember: `http_resp()`

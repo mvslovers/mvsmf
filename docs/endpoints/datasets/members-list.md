@@ -38,13 +38,12 @@ or with explicit volume:
 - `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
 
 ## Response
-A complete listing returns HTTP status code 200 (OK). A listing cut short by
-`X-IBM-Max-Items` returns **206 (Partial content)** — same body, so a client
-reading `moreRows` needs no change, but the status alone now distinguishes a
-page from a whole directory. A limit no directory reaches is a complete answer
-and stays 200.
+HTTP status code 200 (OK), whether the listing is complete or was cut short by
+`X-IBM-Max-Items` — the truncation is carried in `moreRows` and nowhere else.
+That is what real z/OSMF does; it emits no 206 on the files service at all
+(issue #274).
 
-Both carry a JSON object:
+The body is a JSON object:
 
 ```json
 {

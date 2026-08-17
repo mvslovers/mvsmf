@@ -10,10 +10,22 @@ them pushes its own evidence out of the buffer.
 GET /zosmf/test?fn=storage
 GET /zosmf/test?fn=storage&total=1
 GET /zosmf/test?fn=storage&sp=1
+GET /zosmf/test?fn=storage&hold=8      (fault injection -- gated, see below)
 ```
 
 Read-only, Basic-Auth like the rest of `/zosmf/test`, and it changes nothing
 in the request paths.
+
+`&hold=<seconds>` (cap 10) keeps the largest block allocated for that long
+before freeing it, so concurrent requests must start their 262328-byte C
+stack in whatever else is free. This is how the fragmentation claim was
+proven live instead of by arithmetic: with only the two fenced-off holes
+(measured 262144 and 258048) available, **8 of 8 concurrent requests failed
+to start** — `HTTPD908E EXTERNAL PROGRAM MVSMF failed with U0801 ABEND` /
+`@@CRT1 - No storage for C stack` on the console, `503` at the client. It is
+deliberate fault injection against a live server, so it is gated exactly like
+`fn=abend`: without `MVSMF_ABEND_TEST=1` in the server environment the
+parameter is ignored and the reply carries `hold_denied: true`.
 
 ## What it reports
 

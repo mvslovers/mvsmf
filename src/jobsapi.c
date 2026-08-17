@@ -139,6 +139,7 @@ jobListHandler(Session *session)
 	process_job_list_filters(session, &filter, &jesfilt, status, sizeof(status));
 
 	jes = jesopen();
+	session_register_jes(session, jes);
 	if (!jes) {
 		wtof(MSG_JES_UNAVAILABLE);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_VSAM,
@@ -183,9 +184,7 @@ quit:
 		freeJsonBuilder(builder);
 	}
 
-	if (jes) {
-		jesclose(&jes);
-	}
+	session_jesclose(session, &jes);
 
 	return 0;
 }
@@ -706,6 +705,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	JESPRST st;
 
 	JES *jes = jesopen();
+	session_register_jes(session, jes);
 	if (!jes) {
 		wtof(MSG_JES_UNAVAILABLE);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
@@ -824,9 +824,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	rc = sendDefaultHeaders(session, HTTP_STATUS_OK, "text/plain", 0);
 
 quit:
-	if (jes) {
-		jesclose(&jes);
-	}
+	session_jesclose(session, &jes);
 
 	return rc;
 }
@@ -1139,6 +1137,9 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 	JESJOB **joblist = NULL;
 	JESFILT jesfilt = FILTER_JOBID;
 	const char *filter = jobid;
+	/* declared here, not at the jesopen() below: the early exit for a missing
+	   path variable jumps over that line, and quit: reads this pointer */
+	JES *jes = NULL;
 
 	if (out_joblist) {
 		*out_joblist = NULL;
@@ -1148,12 +1149,15 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 		goto quit;
 	}
 
-	JES *jes = jesopen();
+	jes = jesopen();
+	session_register_jes(session, jes);
 	if (!jes) {
 		wtof(MSG_JES_UNAVAILABLE);
 		goto quit;
 	}
 
+	/* the abend of #282 lands in here, which is why the handle is registered
+	   above rather than merely closed at quit: -- that label is not reached */
 	joblist = jesjob(jes, filter, jesfilt, 1);
 	if (!joblist) {
 		goto quit;
@@ -1181,9 +1185,7 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 	}
 
 quit:
-	if (jes) {
-		jesclose(&jes);
-	}
+	session_jesclose(session, &jes);
 
 	if (out_joblist) {
 		*out_joblist = joblist;

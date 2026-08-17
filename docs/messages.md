@@ -89,6 +89,9 @@ member not found, record too long) produce **no** console message.
 | `MVSMF905W` | `RECOVERY FCLOSE ABENDED FOR SLOT n` | The recovery close abended in turn. The DD stays allocated and its storage stays held for the life of the address space. |
 | `MVSMF906W` | `FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY` | `/zosmf/test?fn=abend` is about to abend the worker **on purpose**. Only reachable with `MVSMF_ABEND_TEST=1` in the server environment. Not a fault. |
 | `MVSMF907I` | `ENV[n] "name"="value"` | CGI environment dump, one line per variable. Only written when `logging_middleware` is registered — it is not by default. A developer aid, not an operator message. |
+| `MVSMF908I` | `RECOVERY CLOSING THE JES SPOOL HANDLE` | Recovery is closing the JES2 spool handle an abending handler left open. Informational; it accompanies a `MVSMF901E`. Its absence after a jobs-API abend is the leak of issue #286. |
+| `MVSMF909W` | `RECOVERY JESCLOSE ABENDED, SPOOL DATA SETS STAY OPEN` | The recovery `jesclose()` abended in turn. The JES2 spool data sets stay allocated and their storage stays held for the life of the address space. |
+| `MVSMF910W` | `SESSION ALREADY HOLDS A JES HANDLE, THIS ONE NOT TRACKED` | A request opened a second JES handle while the first was still held. No path does this today; the second handle is not closed if the handler abends. Report it — it means a code change broke the one-at-a-time assumption in `Session`. |
 
 ## Adding a message
 

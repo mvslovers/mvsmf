@@ -135,6 +135,15 @@
 /** MVSMF907I CGI environment dump; only written when logmw is registered */
 #define MSG_ENV_DUMP		"MVSMF907I ENV[%u] \"%s\"=\"%s\""
 
+/** MVSMF908I recovery is closing the JES spool handle a handler left open */
+#define MSG_RECOVERY_JES	"MVSMF908I RECOVERY CLOSING THE JES SPOOL HANDLE"
+
+/** MVSMF909W the recovery jesclose() abended in turn; the spool stays open */
+#define MSG_RECOVERY_JES_ABEND	"MVSMF909W RECOVERY JESCLOSE ABENDED, SPOOL DATA SETS STAY OPEN"
+
+/** MVSMF910W a second JES handle was opened while one was still held */
+#define MSG_JES_TRACKED		"MVSMF910W SESSION ALREADY HOLDS A JES HANDLE, THIS ONE NOT TRACKED"
+
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted
  * into an uppercase literal.

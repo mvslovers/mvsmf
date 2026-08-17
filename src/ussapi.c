@@ -28,6 +28,20 @@ static int uss_extract_json_string(const char *json, const char *key,
 //
 // UFSD RC → HTTP status mapping
 //
+// Several rows below answer with a status that is not the most precise one HTTP
+// offers. That is deliberate and it is not an httpd limitation: httpd learned
+// 409, 414 and 507 in httpd#28/PR#56, and a live probe confirmed a CGI-set 414
+// reaches the client unchanged. The constraint is z/OSMF, which enumerates the
+// status codes its API uses -- 200, 204, 206, 304, 400, 401, 404, 405, 412,
+// 413, 429, 500, 503 -- and mvsMF is a clone of it. "Already exists" and "not
+// empty" are therefore 400 rather than 409, "no space" and "no inodes" are 500
+// rather than 507, and "name too long" is 400 rather than 414. Closed as
+// won't-do in #102; do not re-open it from the httpd side alone.
+//
+// UFSD_RC_ROFS -> 403 is the one row still outside that list, and it is open in
+// #248: there is no read-only file system on the reference implementation to
+// measure it against, so it needs deciding on its own terms.
+//
 
 __asm__("\n&FUNC    SETC 'ufsd_rc_to_http'");
 static int
@@ -36,16 +50,16 @@ ufsd_rc_to_http(int rc)
 	switch (rc) {
 	case UFSD_RC_OK:          return 200;
 	case UFSD_RC_NOFILE:      return 404;
-	case UFSD_RC_EXIST:       return 400;  /* 409 not supported by HTTPD */
+	case UFSD_RC_EXIST:       return 400;  /* not 409: not a z/OSMF status */
 	case UFSD_RC_NOTDIR:      return 400;
 	case UFSD_RC_ISDIR:       return 400;
-	case UFSD_RC_NOSPACE:     return 500;  /* 507 not supported by HTTPD */
-	case UFSD_RC_NOINODES:    return 500;  /* 507 not supported by HTTPD */
+	case UFSD_RC_NOSPACE:     return 500;  /* not 507: not a z/OSMF status */
+	case UFSD_RC_NOINODES:    return 500;  /* not 507: not a z/OSMF status */
 	case UFSD_RC_IO:          return 500;
 	case UFSD_RC_BADFD:       return 500;
-	case UFSD_RC_NOTEMPTY:    return 400;  /* 409 not supported by HTTPD */
-	case UFSD_RC_NAMETOOLONG: return 400;  /* 414 not supported by HTTPD */
-	case UFSD_RC_ROFS:        return 403;
+	case UFSD_RC_NOTEMPTY:    return 400;  /* not 409: not a z/OSMF status */
+	case UFSD_RC_NAMETOOLONG: return 400;  /* not 414: not a z/OSMF status */
+	case UFSD_RC_ROFS:        return 403;  /* outside the list too -- #248 */
 	default:                  return 500;
 	}
 }
@@ -658,7 +672,7 @@ int ussGetHandler(Session *session)
 	}
 
 	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
-		return sendErrorResponse(session, 414, 2, 8, 1,
+		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Path name too long", NULL, 0);
 	}
 
@@ -827,7 +841,7 @@ uss_handle_chtag(Session *session, const char *filepath, const char *body)
 //
 // USS utilities dispatcher — called when PUT has Content-Type: application/json.
 // Dispatches by the "request" field in the JSON body.
-// Currently only "chtag" is implemented; all others return 501.
+// Currently only "chtag" is implemented; any other utility is a 400.
 //
 
 __asm__("\n&FUNC    SETC 'uss_utilities'");
@@ -873,10 +887,13 @@ uss_handle_utilities(Session *session, const char *filepath)
 		return rc;
 	}
 
-	// All other utilities: not implemented
+	// Any other utility: 400, not 501. The service offers exactly one utility,
+	// so a request naming another one is an incorrect parameter -- and 501 is
+	// not a z/OSMF status in any case (see ufsd_rc_to_http above). Category 2
+	// for the same reason the other bad requests in this function use it.
 	if (free_body) free(body);
-	return sendErrorResponse(session, 501, 10, 8, 1,
-		"USS utility not implemented", NULL, 0);
+	return sendErrorResponse(session, 400, 2, 8, 1,
+		"Unsupported utility request", NULL, 0);
 }
 
 //
@@ -912,7 +929,7 @@ int ussPutHandler(Session *session)
 	}
 
 	if (!uss_build_path(abspath, sizeof(abspath), raw_path)) {
-		return sendErrorResponse(session, 414, 2, 8, 1,
+		return sendErrorResponse(session, 400, 2, 8, 1,
 			"Path name too long", NULL, 0);
 	}
 

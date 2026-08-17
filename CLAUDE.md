@@ -524,26 +524,24 @@ int ussXxxHandler(Session *session) {
 Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` mapping functions
 in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
 
-**Note:** most of the table below is correct as it stands — see **HTTP Status
-Codes** above. EXIST/NOTEMPTY map to 400 and NOSPACE/NOINODES to 500 not because
-httpd lacks 409/507 (it has both), but because the z/OSMF status list does not
-contain them. The same holds for NAMETOOLONG → 400: the two
-`sendErrorResponse(..., 414, ...)` calls still in `ussapi.c` are the deviation,
-not the mapping.
+**Note:** the table below is correct as it stands — see **HTTP Status Codes**
+above. EXIST/NOTEMPTY map to 400 and NOSPACE/NOINODES to 500 not because httpd
+lacks 409/507 (it has both), but because the z/OSMF status list does not contain
+them. Same for NAMETOOLONG → 400, and since #248 every handler agrees with it:
+the 414s that used to sit in `ussGetHandler` and `ussPutHandler` are gone, as is
+the 501 for an unsupported USS utility (now 400 — the service offers one
+utility, so naming another is an incorrect parameter).
 
-**One row is unresolved:** `UFSD_RC_ROFS → 403`. 403 is not in the z/OSMF list
-either, and neither is the 201 this codebase returns for created resources
-(`dsapi.c:2597`, `ussapi.c:960`). Both are open in #248.
+**201 for a created resource is correct** (`dsapi.c:2597`, `ussapi.c:960`),
+even though it is absent from the enumerated list. Measured against a real
+z/OSMF: `POST /zosmf/restfiles/ds/<new PDS>` answers **201** with an empty body.
+The list bounds which codes are permitted, it does not mandate one per
+condition — see **Checking behaviour against a real z/OSMF**.
 
-The open question there was whether the enumerated list is exhaustive for the
-whole API or whether the per-service reference pages add codes. For the
-files/data set service that is now answered: **its own status list is identical
-to the general one** — same thirteen codes, no 201, no 403. So the
-"per-service pages add codes" escape hatch does not apply here, and both values
-are deviations by the same reasoning that keeps 409/414/507 out. What that page
-does not settle on its own is whether a per-*endpoint* success table may still
-document 201 for a create; 201 is also client-visible in a way an error code is
-not, so decide it separately from ROFS.
+**One row is still unresolved:** `UFSD_RC_ROFS → 403`, open in #248. It cannot
+be settled the same way: a read-only file system is a UFSD condition, so there
+is nothing on the reference implementation to measure it against without
+mounting one. Decide it on its own terms.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

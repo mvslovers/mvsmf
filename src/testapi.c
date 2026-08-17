@@ -6,6 +6,7 @@
 #include <clibjes2.h>
 #include <cliblist.h>
 #include <clibmtt.h>
+#include <clibppa.h>
 #include <clibwto.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -152,7 +153,7 @@ static int testJesAbend(Session *session) {
  *
  *   largest  the biggest contiguous block GETMAIN would hand out right now.
  *            httpd LINKs MVSMF fresh per request and libc370's C startup
- *            takes an *unconditional* GETMAIN of STG_LINK_STACK bytes for
+ *            takes a GETMAIN of the C stack (link_stack, from PPASTKLN) for
  *            the main stack, so once `largest` drops below that the next
  *            request cannot start -- S80A, before mvsMF's ESTAE exists.
  *   total    everything still free, counted in blocks of >= STG_GRAN
@@ -162,8 +163,8 @@ static int testJesAbend(Session *session) {
  * falling together is an ordinary leak.  Either number alone cannot tell the
  * two apart, which is the whole reason the comb exists.
  *
- * Both are measured from *inside* a CGI request, so this task's own
- * STG_LINK_STACK is already carved out of what is being reported, and each
+ * Both are measured from *inside* a CGI request, so this task's own C stack
+ * is already carved out of what is being reported, and each
  * sample is itself one more LINK.  Read the numbers accordingly.
  *
  * Probing uses the register form of GETMAIN/FREEMAIN, issued inline: MVSMF
@@ -186,7 +187,16 @@ static int testJesAbend(Session *session) {
  * which is why it lands on X'0400B8' and not one word higher.  262144 is the
  * round number this was first written against and it is too low: a largest
  * block between the two reads "fits" and does not. */
-#define STG_LINK_STACK 262328u        /* X'0400B8' */
+/* Measured, not recomputed: @@crt0/@@crt1 store the length they GETMAINed in
+ * PPASTKLN (`ST R8,PPASTKLN`), so this reports what this very task's stack
+ * actually cost and follows any `__stklen` change (mvsmf.c, #290) with no
+ * second source of truth to drift.  0 when the PPA is unreachable. */
+__asm__("\n&FUNC	SETC 'stg_link_stack'");
+static unsigned stg_link_stack(void) {
+  CLIBPPA *ppa = __ppaget();
+
+  return ppa ? ppa->ppastkln : 0;
+}
 #define STG_COMB_MAX   256            /* blocks the &total=1 comb may hold  */
 #define STG_SIZES_MAX  32             /* block sizes reported in the JSON   */
 
@@ -817,7 +827,7 @@ int testHandler(Session *session) {
                        "{ \"fn\": \"storage\", \"sp\": %u, \"largest\": %u,"
                        " \"largest_at\": \"%s\", \"link_stack\": %u,"
                        " \"granularity\": %u, \"stack_at\": \"%s\"",
-                       sp, largest, largest_at, STG_LINK_STACK, STG_GRAN,
+                       sp, largest, largest_at, stg_link_stack(), STG_GRAN,
                        stack_at);
       if (rc < 0)
         goto quit;

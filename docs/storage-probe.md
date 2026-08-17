@@ -76,6 +76,16 @@ Sampled over a run, the two numbers separate the two hypotheses:
    corrupt what it measures. Sample with `total=1` **between** load runs,
    never during one. The default (no `total`) holds its largest probe for
    microseconds only.
+
+   **"Between runs" is weaker than it sounds, and stops being enough near the
+   cliff.** curl returns before httpd has finished releasing the worker, so a
+   sample taken right after a request can still overlap that request's
+   262 K stack — measured: occasional samples read ~262144–307200 low and
+   recover on the next one. That overlap is harmless with megabytes free. It
+   is not harmless once `largest` approaches `link_stack`: the comb takes
+   every free byte, and the in-flight request's startup GETMAIN is
+   unconditional, so the instrument can fire the very abend it is watching
+   for. Below roughly 1 MB, sample without `total=1`.
 3. **`free_errors` is not decoration.** Anything but 0 means this probe just
    leaked storage into the address space, and every later sample from that
    server is suspect. Restart before continuing.

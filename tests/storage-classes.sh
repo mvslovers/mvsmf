@@ -58,6 +58,7 @@ url_for() {
     case "$1" in
     static)   echo "/probe.txt" ;;
     dm)       echo "/.dm?m=10&l=16" ;;
+    dsrv)     echo "/.dsrv?target=HTTPD" ;;
     info)     echo "/zosmf/info" ;;
     probe)    echo "/zosmf/test?fn=storage" ;;
     datasets) echo "/zosmf/restfiles/ds/${DS_MEMBER:-SYS1.PARMLIB(IEASYS00)}" ;;

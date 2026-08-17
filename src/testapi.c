@@ -864,6 +864,61 @@ int testHandler(Session *session) {
                        probes, free_errors);
     }
 
+    /* --- fn=intrdr (internal-reader open/close cycles, issue #294) -- */
+  } else if (strcmp(fn, "intrdr") == 0) {
+    /* Bisect for mvslovers/libc370#115: a job submit permanently costs the
+     * address space one 4 K page (mvslovers/httpd#195).  This runs only the
+     * open/close half -- jesiropn() dynallocs a fresh INTRDR SYSOUT DD and
+     * opens the JES2 ACB, jesircls() ENDREQs and closes it -- and never
+     * writes a record, so JES2 discards the input and no job is created.
+     *
+     * Deliberately NO storage measurement in here: sample from outside with
+     * fn=storage&total=1 around this call, so the request-subpool reclaim
+     * (#175) runs between the cycles and the measurement -- the same
+     * conditions under which the submit page was shown to survive.
+     *
+     * An open failure stops the loop: every further cycle would fail the
+     * same way, and each attempt costs a dynalloc.  A close rc is counted
+     * but stops nothing -- jesircls() releases the handle regardless. */
+    char *nv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_N");
+    int want = nv ? atoi(nv) : 1;
+    int ok = 0;
+    int open_rc = 0;
+    int close_errors = 0;
+    int first_close_rc = 0;
+    int i;
+
+    if (want < 1)
+      want = 1;
+    if (want > 25)
+      want = 25;
+
+    for (i = 0; i < want; i++) {
+      VSFILE *ir = NULL;
+      int crc;
+
+      open_rc = jesiropn(&ir);
+      if (open_rc || !ir) {
+        if (!open_rc)
+          open_rc = -1; /* NULL handle with rc 0: report it as a failure */
+        break;
+      }
+
+      crc = jesircls(ir);
+      if (crc) {
+        close_errors++;
+        if (!first_close_rc)
+          first_close_rc = crc;
+      }
+      ok++;
+    }
+
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"intrdr\", \"cycles\": %d, \"ok\": %d,"
+                     " \"open_rc\": %d, \"close_errors\": %d,"
+                     " \"first_close_rc\": %d }\n",
+                     want, ok, open_rc, close_errors, first_close_rc);
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -877,6 +932,7 @@ int testHandler(Session *session) {
         " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","
         " \"?fn=storage&sp=0&total=0|1&hold=N (free storage sample; total=1 briefly holds all"
         " of it; hold=N keeps the largest block N seconds -- needs MVSMF_ABEND_TEST=1)\","
+        " \"?fn=intrdr&n=1..25      (internal-reader open/close cycles, no records; libc370#115 bisect)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\""

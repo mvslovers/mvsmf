@@ -1075,7 +1075,15 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	rc = addJsonString(builder, "status", stat_str);
 	/* build retcode from JCTCNVRC completion info:
 	   after execution  (high byte 0x77): bits 12-23 = system ABEND, bits 0-11 = max CC
-	   before execution (converter RC):   4 = JCL error, 8 = I/O error, 36 = abend */
+	   before execution (converter RC):   4 = JCL error, 8 = I/O error, 36 = abend
+
+	   The 0x77 form is not architected. It is written by usermod SYZJ2001
+	   (SYZYGY1A, COPYed into HASPSSSM at sequence T2269950), which walks the
+	   SCT chain and stores the highest SCTSEXEC, stamping the high byte "as
+	   ours". Both that store and JES2's own JCTJTFLG/JCTJTCC writes sit
+	   behind HASPSSSM's `CLI JCTTSUAF,0 / BE HJE005` -- so a job submitted
+	   without NOTIFY leaves every one of these fields at zero and gets a
+	   null retcode. See docs/endpoints/jobs/status.md. */
 	const char *retcode = NULL;
 	char retcode_buf[16];
 	if (job->q_type & (_OUTPUT | _HARDCPY)) {
@@ -1086,14 +1094,34 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 			unsigned int maxcc =  comp        & 0xFFF;
 			if (abend) {
 				snprintf(retcode_buf, sizeof(retcode_buf), "ABEND S%03X", abend);
+				retcode = retcode_buf;
 			} else if ((job->jtflg & JESJOB_ABD) && maxcc) {
 				snprintf(retcode_buf, sizeof(retcode_buf), "ABEND U%04d", maxcc);
+				retcode = retcode_buf;
+			} else if (job->jtflg == JESJOB_JF) {
+				/* JCTJTFLG carrying nothing but "JOB FAILED" means the job
+				   died before any step produced a code: HASPSSSM sets that
+				   bit at T2269500 with the comment SET JCL ERROR FLAG, on
+				   the SSOBJBSL (job select) path -- an allocation failure,
+				   IEF453I JOB FAILED - JCL ERROR. The completion word is a
+				   truthful 0x77000000 there, because the highest condition
+				   code over the steps that ran really is zero: no step ran.
+				   Reporting that as CC 0000 makes a failed job look clean.
+
+				   The test is equality, not a mask, and it is the usermod's
+				   own: SYZYGY1B (HASPPRPU) guards its "- MAX COND CODE nnnn"
+				   line with `CLI JCTJTFLG,JCTJTJF / BE` and prints nothing
+				   when the byte is exactly the JF bit. A COND failure has
+				   JF|CF (measured: 0xC0) and keeps its condition code. */
+				retcode = "JCL ERROR";
 			} else {
 				snprintf(retcode_buf, sizeof(retcode_buf), "CC %04d", maxcc);
+				retcode = retcode_buf;
 			}
-			retcode = retcode_buf;
 		} else if (comp == 4 || comp == 8 || comp == 36) {
-			/* JCL converter error */
+			/* JCL converter error: the job never reached an initiator, so
+			   the converter's own return code is still in the field
+			   (IEF452I JOB NOT RUN - JCL ERROR). */
 			retcode = "JCL ERROR";
 		}
 	}

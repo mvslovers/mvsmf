@@ -34,6 +34,60 @@ every console message mvsMF can write.
 - An MVS 3.8j system (TK4‑, TK5, MVSCE, or local Hercules)
 - **httpd** ≥ `4.0.0-dev` installed and configured — the console services need
   the `cgictx` API introduced in the httpd 4.x line
+- JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`
+
+#### The `SYZJ201` usermod
+
+Stock MVS 3.8j records no job completion code where JES2 can be asked for it.
+`SYZJ201` (source member `SYZYGY1A`, `COPY`ed into `HASPSSSM`) closes that gap:
+at job termination it takes the highest step completion code and stores it in
+`JCTCNVRC`, stamped with a `0x77` marker. That field is what mvsMF decodes into
+`"CC 0000"`, `"ABEND S806"` and friends.
+
+Without it, **`retcode` is `null` for every job**, however the job ended.
+Clients that poll for a completion code — `zowe jobs submit --wait-for-output`,
+Zowe Explorer's job monitor — never see one.
+
+It ships in [`usermods/SYZJ2001.jcl`](https://github.com/MVS-sysgen/sysgen/blob/main/usermods/SYZJ2001.jcl)
+of the MVS-sysgen project, which installs **two** SYSMODs: `SYZJ201` is the one
+mvsMF needs, and `SYZJ202` (`SYZYGY1B` into `HASPPRPU`) only adds the
+`- MAX COND CODE nnnn` text to the `$HASP395` job-log line. Installing both is
+the normal case.
+
+**The SMF exit `IEFACTRT` is *not* required**, and the one you are most likely
+to have cannot help even if you assume it is. `SYZYGY1A` reads `JCTJSTAT`,
+`JCTACODE` and the SCT chain directly and never touches `SCTNSMSG`, so nothing
+in an SMF exit feeds it. Two `IEFACTRT` variants are in circulation:
+
+- **`JLM0001`** — what MVS/CE installs (`++MOD(IEFACTRT)` against FMID
+  `EBB1102`, no JES2 change). It is a **reporting exit only**: it references no
+  `JCT`, no `SCT`, no `JCTCNVRC`, and writes nothing back anywhere. All it
+  produces is the `IEFACTRT` job-log line and the step-statistics block.
+- **CBT tape 887** — passes codes back to JES2 through `SCTNSMSG`/`JMRUCOM`.
+  That is an *alternative* route to a completion code, not a companion to
+  `SYZJ201`, and mvsMF reads neither of the fields it sets.
+
+**Do not read the job-log line as evidence.** `IEFACTRT` prints the step's
+return code — `/00012/` — from its own parameter list, whether or not the value
+ever reaches the JCT. A job without `NOTIFY` shows `/00012/` in the log and
+still answers `"retcode": null`; the line is the exit reporting, not the system
+recording.
+
+Check whether the usermod is applied:
+
+```jcl
+//LIST    EXEC SMPAPP
+//SMPCNTL  DD  *
+  LIST CDS SYSMOD(SYZJ201) .
+/*
+```
+
+`TYPE = USERMOD` with `STATUS = REC  APP` means it is installed. RC 04 and an
+empty list means it is not.
+
+**One caveat survives the usermod:** it runs only for jobs whose card carries
+`NOTIFY`, because `HASPSSSM` gates the whole block on it. See
+[Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install
 

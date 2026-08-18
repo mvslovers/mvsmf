@@ -1,0 +1,27 @@
+# Test JCL
+
+Fixtures used by `tests/curl-jobs.sh` and by hand.
+
+| file | job ends as | `JCTCNVRC` | `JCTJTFLG` | `retcode` |
+|---|---|---|---|---|
+| `iefbr14.jcl` | clean | `77000000` | `00` | `CC 0000` |
+| `condfail.jcl` | `IEF451I ENDED BY CC 0012` | `7700000C` | `C0` | `CC 0012` |
+| `abendjob.jcl` | `IEF450I ABEND S806` | `77806000` | `20` | `ABEND S806` |
+| `jclerror.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` | `00000004` | `00` | `JCL ERROR` |
+| `allocpds.jcl` | allocates the test PDS | — | — | — |
+
+The four above are the regression set for the `retcode` decoding (#305) —
+between them they cover every branch of it. Read the raw fields back with
+`/zosmf/test?fn=job&jobname=NAME`.
+
+A fifth case has no fixture because it is site-specific: a job whose step
+fails **allocation** (`IEF245I INCONSISTENT UNIT NAME AND VOLUME SERIAL`,
+`IEF453I JOB FAILED - JCL ERROR`) leaves `JCTCNVRC` at `77000000` — identical
+to a clean run — and is distinguished only by `JCTJTFLG` = `80`. Provoke one
+by requesting a UNIT/VOLUME pair the target system does not have.
+
+**Every card here carries `NOTIFY`, and that is load-bearing.** Without it
+JES2 writes none of these fields and `retcode` is `null` regardless of how
+the job ended — see `docs/endpoints/jobs/status.md`.
+
+`largejcl.jcl` is a 130 KB body for the submit path, not part of the matrix.

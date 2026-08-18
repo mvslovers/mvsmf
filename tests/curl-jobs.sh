@@ -336,6 +336,90 @@ test_submit_notify_sysuid_trailing_param() {
 	fi
 }
 
+test_submit_without_notify_gets_retcode() {
+	echo ""
+	echo "--- Submit Job: card without NOTIFY still reports a retcode (issue #307) ---"
+
+	# HASPSSSM gates every write to JCTCNVRC/JCTJTFLG/JCTJTCC on "CLI JCTTSUAF,0",
+	# so a job whose card carries no NOTIFY used to record no completion code at
+	# all and answered "retcode": null however it ended. mvsMF now injects
+	# NOTIFY=<caller> onto the continuation card it already generates for
+	# USER=/PASSWORD=. The fixture ends CC 0012, so a plain non-null assertion
+	# would not be enough -- the value itself has to arrive.
+	local jcl
+	jcl=$(cat "${JCL_DIR}/nonotify.jcl")
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit JCL without NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "retcode for job submitted without NOTIFY (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0012" \
+			"retcode for job submitted without NOTIFY"
+	else
+		skip "retcode for job submitted without NOTIFY (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_submit_jobcard_too_long() {
+	echo ""
+	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
+
+	# process_jobcard() has to append a comma to the last job card line to
+	# continue onto the USER=/PASSWORD= card it generates, and cannot once the
+	# line reaches column 70. That used to be reported as "No valid JOB card
+	# found in submitted JCL", which sends people looking for a missing card.
+	# It now has its own message and reason code 12.
+	local head="//OVRFLOW  JOB (ACCT),'"
+	local tail="',CLASS=A"
+	local pad=$((70 - ${#head} - ${#tail}))
+	local name
+	name=$(printf '%*s' "$pad" '' | tr ' ' 'X')
+
+	local card="${head}${name}${tail}"
+	if [ "${#card}" -ne 70 ]; then
+		fail "JOB card too long fixture" "built a ${#card}-column card, expected 70"
+		return
+	fi
+
+	local jcl
+	jcl=$(printf '%s\n%s\n' "$card" '//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "submit JOB card with no room for injection"
+	assert_json_field "$BODY" '.reason' "12" "JOB card too long reason code"
+
+	local msg
+	msg=$(echo "$BODY" | jq -r '.message' 2>/dev/null) || msg=""
+	case "$msg" in
+		*"too long"*) pass "JOB card too long message (\"$msg\")" ;;
+		*)            fail "JOB card too long message" "got '$msg'" ;;
+	esac
+}
+
 test_submit_invalid_intrdr_header() {
 	echo ""
 	echo "--- Submit Job: invalid X-IBM-Intrdr-Mode header ---"
@@ -1146,6 +1230,8 @@ fi
 test_submit_inline_jcl
 test_submit_inline_jcl_with_intrdr_headers
 test_submit_notify_sysuid_trailing_param
+test_submit_without_notify_gets_retcode
+test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type
 test_submit_large_jcl

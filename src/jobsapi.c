@@ -42,6 +42,13 @@
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
 #define DSNAME_STR_SIZE  44     // the +1 for null termination will be added on initialization
 
+/* process_jobcard() failure codes. Both are reported as 400, but with
+   different messages: the two conditions were indistinguishable to the client
+   before, and a card that is merely too long read as one with no JOB statement
+   at all (#130). Success returns the new line count, which is always > 0. */
+#define JOBCARD_ERR_NO_CARD		(-1)	/* no JOB statement in the input */
+#define JOBCARD_ERR_TOO_LONG	(-2)	/* rewritten card exceeds 72 columns */
+
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 #define MIN_JES_SYSOUT_DSID 	  2
@@ -84,6 +91,7 @@ static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
 static char* tokenize(char *str, const char *delim, char **saveptr);
 static int process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                           const char *user, const char *password);
+static char *find_notify_operand(char *line);
 static int get_caller_credentials(Session *session, char *user, size_t user_len,
                                   char *password, size_t password_len);
 
@@ -1573,6 +1581,12 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 
 		rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
 		memset(password, 0, sizeof(password));   /* scrub; it now lives on the card */
+		if (rc == JOBCARD_ERR_TOO_LONG) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+							RC_ERROR, REASON_JOBCARD_TOO_LONG,
+							ERR_MSG_JOBCARD_TOO_LONG, NULL, 0);
+			goto quit;
+		}
 		if (rc < 0) {
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 							RC_ERROR, REASON_INVALID_REQUEST,
@@ -1941,6 +1955,62 @@ get_caller_credentials(Session *session, char *user, size_t user_len,
 	return 0;
 }
 
+/*
+ * Locate the NOTIFY keyword on a job card line, or NULL when the line has none.
+ *
+ * A bare strstr() will not do. "NOTIFY" also occurs inside the quoted
+ * programmer-name field -- //J JOB (ACCT),'NOTIFY ME' -- and the '=' a caller
+ * then looks for is the one belonging to some later operand, so the card reads
+ * as carrying a NOTIFY it does not have. That misreading is silent in both
+ * directions: it makes the &SYSUID rewrite consider the wrong text, and it
+ * suppresses the injection below for a card that needs it.
+ *
+ * So require the keyword to start at an operand boundary (the blank after the
+ * JOB verb, a comma, or the blanks of a continuation card), to sit outside
+ * quotes, and to be followed by '='. Apostrophe doubling needs no special case:
+ * '' toggles the quote state twice and leaves it where it was.
+ */
+__asm__("\n&FUNC    SETC 'find_notify_operand'");
+static char *
+find_notify_operand(char *line)
+{
+    int in_quotes = 0;
+    int at_operand = 1;
+    char *pp = NULL;
+
+    if (!line) {
+        return NULL;
+    }
+
+    for (pp = line; *pp != '\0'; pp++) {
+        if (*pp == '\'') {
+            in_quotes = !in_quotes;
+            at_operand = 0;
+            continue;
+        }
+
+        if (in_quotes) {
+            continue;
+        }
+
+        if (at_operand && strncmp(pp, "NOTIFY", 6) == 0) {
+            const char *qq = pp + 6;
+
+            while (*qq == ' ') {
+                qq++;
+            }
+
+            if (*qq == '=') {
+                return pp;
+            }
+        }
+
+        at_operand = (*pp == ',' || *pp == ' ');
+    }
+
+    return NULL;
+}
+
 __asm__("\n&FUNC    SETC 'process_jobcard'");
 static int
 process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass, 
@@ -1950,30 +2020,31 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     int start_idx = -1;
     int end_idx = -1;
     int notify_replaced = 0;
+    int notify_present = 0;
 
     if (!lines || num_lines <= 0 || !jobname || !jobclass || !user) {
-        return rc;
+        return JOBCARD_ERR_NO_CARD;
     }
 
     if (!password) {
-        return rc;
+        return JOBCARD_ERR_NO_CARD;
     }
 
     // Find the job card range
     find_job_card_range(lines, num_lines, &start_idx, &end_idx);
     if (start_idx < 0 || end_idx < 0) {
-        return rc;
+        return JOBCARD_ERR_NO_CARD;
     }
 
     // Extract jobname from first line (columns 3-10)
     const char *first_line = lines[start_idx];
     if (!first_line) {
-        return rc;
+        return JOBCARD_ERR_NO_CARD;
     }
 
     size_t first_line_len = strlen(first_line);
     if (first_line_len < 3) {
-        return rc;
+        return JOBCARD_ERR_NO_CARD;
     }
 
     int ii = 0;
@@ -1991,15 +2062,21 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     // Process job card lines in-place: replace NOTIFY=&SYSUID
     for (ii = start_idx; ii <= end_idx; ii++) {
         if (!lines[ii]) {
-            return -1;
+            return JOBCARD_ERR_NO_CARD;
         }
 
         // Replace &SYSUID with actual user if present and not already replaced
-        if (!notify_replaced) {
-            char *notify_start = strstr(lines[ii], "NOTIFY");
+        {
+            char *notify_start = find_notify_operand(lines[ii]);
             if (notify_start) {
                 char *equals = strchr(notify_start, '=');
-                if (equals) {
+
+                /* Note the NOTIFY whatever its value: the injection below must
+                   not add a second one to a card that already names a userid,
+                   and only the &SYSUID form is rewritten here. */
+                notify_present = 1;
+
+                if (equals && !notify_replaced) {
                     // Skip any whitespace after the equals sign
                     char *sysuid = equals + 1;
                     while (*sysuid == ' ') sysuid++;
@@ -2037,7 +2114,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                             if (*real_end) {
                                 rc = snprintf(after, sizeof(after), ",%s", real_end);
                                 if (rc < 0 || rc >= sizeof(after)) {
-                                    return -1;
+                                    return JOBCARD_ERR_TOO_LONG;
                                 }
                             }
                         }
@@ -2059,7 +2136,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
                         rc = snprintf(lines[ii], 72, "%sNOTIFY=%s%s",
                                     before, user, after);
                         if (rc < 0 || rc >= 72) {
-                            return -1;
+                            return JOBCARD_ERR_TOO_LONG;
                         }
                         lines[ii][80] = '\0';
                         notify_replaced = 1;
@@ -2076,7 +2153,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
             }
             if (len > 0 && lines[ii][len-1] != ',') {
                 if (len >= 70) {
-                    return -1;
+                    return JOBCARD_ERR_TOO_LONG;
                 }
                 lines[ii][len++] = ',';
                 lines[ii][len] = '\0';
@@ -2095,11 +2172,44 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
      * "GENERATED BY MVSMF" marker -- one card like usermod ZP60034's IKJEFF10
      * ("GENERATED BY IKJEFF10"). PASSWORD= is the last operand, so the blank
      * before the marker ends the operand field and the rest is a JCL comment;
-     * JES2 masks the password in listings while the marker remains. */
-    rc = snprintf(lines[end_idx + 1], 72,
-                  "//         USER=%s,PASSWORD=%s   GENERATED BY MVSMF", user, password);
-    if (rc < 0 || rc >= 72) {
-        return -1;
+     * JES2 masks the password in listings while the marker remains.
+     *
+     * NOTIFY= joins it when the submitted card carried none (#307). It has to
+     * go *before* USER=, not after PASSWORD=, for two reasons: it must not
+     * displace PASSWORD= from the end of the operand field, on which the
+     * masking above depends -- and the card has no room for it at the end.
+     * Worst case is 11 (//+9 blanks) + 7 + 8 (NOTIFY=userid) + 6 + 8 (,USER=)
+     * + 10 + 8 (,PASSWORD=) = 58 of the 71 usable columns, which leaves 13 for
+     * the marker; the long one needs 21. So the marker shortens exactly when
+     * a NOTIFY is injected, and a card that already has one is emitted
+     * byte-for-byte as before.
+     *
+     * Why inject at all: HASPSSSM gates every write to JCTCNVRC/JCTJTFLG/
+     * JCTJTCC on CLI JCTTSUAF,0, so a job submitted without NOTIFY records no
+     * completion code anywhere and reports "retcode": null however it ended.
+     * No z/OSMF client adds NOTIFY -- on z/OS none needs to -- so without this
+     * "zowe jobs submit --wait-for-output" never finishes. */
+    {
+        char notify[32] = {0};
+
+        if (!notify_present) {
+            rc = snprintf(notify, sizeof(notify), "NOTIFY=%s,", user);
+            if (rc < 0 || (size_t)rc >= sizeof(notify)) {
+                return JOBCARD_ERR_TOO_LONG;
+            }
+        }
+
+        rc = snprintf(lines[end_idx + 1], 72,
+                      "//         %sUSER=%s,PASSWORD=%s   GENERATED BY MVSMF",
+                      notify, user, password);
+        if (rc < 0 || rc >= 72) {
+            rc = snprintf(lines[end_idx + 1], 72,
+                          "//         %sUSER=%s,PASSWORD=%s   BY MVSMF",
+                          notify, user, password);
+        }
+        if (rc < 0 || rc >= 72) {
+            return JOBCARD_ERR_TOO_LONG;
+        }
     }
 
     return num_lines + 1;
@@ -2204,6 +2314,12 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 
     rc = process_jobcard(lines, num_lines, jobname, jobclass, user, password);
     memset(password, 0, sizeof(password));   /* scrub; it now lives on the card */
+    if (rc == JOBCARD_ERR_TOO_LONG) {
+        sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+                        RC_ERROR, REASON_JOBCARD_TOO_LONG,
+                        ERR_MSG_JOBCARD_TOO_LONG, NULL, 0);
+        goto quit;
+    }
     if (rc < 0) {
         sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
                         RC_ERROR, REASON_INVALID_REQUEST,

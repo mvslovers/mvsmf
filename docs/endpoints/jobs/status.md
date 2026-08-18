@@ -57,7 +57,7 @@ The `retcode` field is derived from `JCTCNVRC` in the JES2 Job Control Table (JC
 
 That write-back is not part of MVS. It comes from JES2 usermod **`SYZJ201`** (source member `SYZYGY1A`), and mvsMF reports `null` for every job on a system without it — see [Prerequisites](../../../README.md#the-syzj201-usermod), which also covers why the `IEFACTRT` SMF exit is *not* required.
 
-### `retcode` is null for jobs submitted without `NOTIFY`
+### `retcode` needs `NOTIFY` — which mvsMF now adds for you
 
 `SYZYGY1A` is COPYed into `HASPSSSM` at sequence `T2269950` — inside the block guarded by
 
@@ -70,13 +70,12 @@ so it runs only for a job whose card carries `NOTIFY`. The same guard covers JES
 
 Measured, two jobs differing only in the job card: with `NOTIFY` the RC 12 arrives as `JCTCNVRC=7700000C` → `"CC 0012"`; without it the field stays `00000000` → `null`, although the step ran and returned 12 either way.
 
-**Workaround:** Add `NOTIFY=&SYSUID` (or a specific userid) to the job card:
+No z/OSMF client adds `NOTIFY` — on z/OS none needs to — so this made `retcode` null for essentially every job submitted through the API, and `zowe jobs submit --wait-for-output` polls until `retcode` is non-null and so never returned. Since #307, **`PUT /zosmf/restjobs/jobs` adds `NOTIFY=<authenticated userid>` to any card that carries none**, on the same continuation card it already generates for `USER=`/`PASSWORD=`; see [Submit Job → Limitations](submit.md#limitations). A card that already names a `NOTIFY` is untouched.
 
-```jcl
-//MYJOB  JOB (ACCT),'DESC',CLASS=A,MSGCLASS=A,NOTIFY=&SYSUID
-```
+Two consequences worth knowing:
 
-This affects clients like Zowe CLI that use `--wait-for-output`, which polls job status until `retcode` is non-null.
+- The submitting user gets a TSO notification per job. That is the cost of the supported path; there is no way to have the completion code recorded without it.
+- A job that reaches MVS by any other route — a card punched to the internal reader by another program, a job submitted from TSO without `NOTIFY` — still reports `null`. The gate is JES2's, and mvsMF can only rewrite what it submits itself.
 
 ### A job that failed before any step ran reports `JCL ERROR`
 

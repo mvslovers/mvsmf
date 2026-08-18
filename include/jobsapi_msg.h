@@ -49,6 +49,7 @@
 #define REASON_JES_BUSY 9             /**< JES2 resources busy */
 #define REASON_SPOOL_GONE 10          /**< Spool dataset purged by JES2 */
 #define REASON_SPOOL_READ 11          /**< Spool read failed or truncated */
+#define REASON_JOBCARD_TOO_LONG 12    /**< JOB card leaves no room for the injected operands */
 
 /** @brief Error message for JES2 busy */
 #define ERR_MSG_JES_BUSY "JES2 subsystem is busy, please retry"
@@ -56,6 +57,16 @@
 /** @brief Error message for spool output JES2 has already purged */
 #define ERR_MSG_SPOOL_GONE                                                     \
   "Spool output for job '%.8s(%.8s)' DD id %u is no longer on the spool"
+
+/** @brief Error message for a JOB card the injected operands no longer fit on
+
+    mvsMF rewrites the JOB card of every submitted job: NOTIFY= (when the card
+    carries none), USER= and PASSWORD=. A card whose own operands leave under
+    72 columns for those is rejected. Before #307 this was reported as "no
+    valid JOB card found", which sent people looking for a missing card (#130). */
+#define ERR_MSG_JOBCARD_TOO_LONG                                               \
+  "JOB card too long: no room left for the NOTIFY, USER and PASSWORD "         \
+  "operands mvsMF adds"
 
 /** @brief Error message for a spool read that failed or was truncated */
 #define ERR_MSG_SPOOL_READ                                                     \

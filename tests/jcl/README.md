@@ -20,8 +20,15 @@ fails **allocation** (`IEF245I INCONSISTENT UNIT NAME AND VOLUME SERIAL`,
 to a clean run — and is distinguished only by `JCTJTFLG` = `80`. Provoke one
 by requesting a UNIT/VOLUME pair the target system does not have.
 
-**Every card here carries `NOTIFY`, and that is load-bearing.** Without it
-JES2 writes none of these fields and `retcode` is `null` regardless of how
-the job ended — see `docs/endpoints/jobs/status.md`.
+**Every card in the regression set carries `NOTIFY`, and that is load-bearing.**
+Without it JES2 writes none of these fields, because `HASPSSSM` gates them all
+on `CLI JCTTSUAF,0` — see `docs/endpoints/jobs/status.md`.
+
+`nonotify.jcl` is the one fixture that deliberately has no `NOTIFY`, and it is
+not part of the matrix above — its raw fields have not been measured. Its point
+is that a job submitted through `PUT /zosmf/restjobs/jobs` reports a `retcode`
+at all, which it can only do if mvsMF injected a `NOTIFY` on submit (#307). It
+runs IDCAMS on a bogus command, so the expected answer is `CC 0012`; submitted
+by any other route it reports `null`.
 
 `largejcl.jcl` is a 130 KB body for the submit path, not part of the matrix.

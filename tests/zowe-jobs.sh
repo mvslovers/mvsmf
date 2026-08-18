@@ -301,6 +301,40 @@ test_submit_notify_sysuid_trailing_param() {
 	fi
 }
 
+test_submit_without_notify_wait_for_output() {
+	echo ""
+	echo "--- Submit Job: --wait-for-output on a card without NOTIFY (issue #307) ---"
+
+	# The motivating case. HASPSSSM records a job's completion code only behind
+	# "CLI JCTTSUAF,0", so a card without NOTIFY used to answer "retcode": null
+	# for the whole life of the job -- and --wait-for-output polls until retcode
+	# is non-null, so this command never returned. mvsMF now injects
+	# NOTIFY=<caller> onto the card it already generates for USER=/PASSWORD=.
+	# Nothing here adds NOTIFY: that is the point.
+	local tmpfile
+	tmpfile=$(mktemp /tmp/mvsmf-nonotify-XXXXXX.jcl)
+	printf '%s\n%s\n' \
+		"//NONOTFY  JOB (ACCT),'NO NOTIFY TEST',CLASS=A,MSGCLASS=H" \
+		'//STEP1    EXEC PGM=IEFBR14' > "$tmpfile"
+
+	local output rc=0
+	output=$(run_zowe_json jobs submit local-file "$tmpfile" --wait-for-output) || rc=$?
+	rm -f "$tmpfile"
+
+	assert_rc 0 "$rc" "submit without NOTIFY --wait-for-output"
+
+	if [ $rc -eq 0 ]; then
+		assert_json_field "$output" '.data.retcode' "CC 0000" \
+			"retcode after --wait-for-output without NOTIFY"
+
+		local ji
+		ji=$(echo "$output" | jq -r '.data.jobid')
+		if [ "$ji" != "null" ]; then
+			run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+		fi
+	fi
+}
+
 test_submit_large_jcl() {
 	echo ""
 	echo "--- Submit Job: large JCL (>2500 lines, issue #39) ---"
@@ -555,6 +589,7 @@ fi
 # Submit tests
 test_submit_local_file
 test_submit_notify_sysuid_trailing_param
+test_submit_without_notify_wait_for_output
 test_submit_large_jcl
 test_submit_from_dataset
 

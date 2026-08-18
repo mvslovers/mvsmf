@@ -715,11 +715,11 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
         default:
             // Text mode - convert from ASCII to EBCDIC
 
-            /* Backstop only: recline_put() already rejects a line longer than
-               content_max with "Record too long", so this cannot normally
-               fire. It stays as the last line of defence against a caller
-               and this function disagreeing about the limit -- which is
-               precisely how issue #198 happened. */
+            /* Backstop only: recline_put() already caps a line at content_max
+               (truncating the overflow, #243), so this cannot normally fire.
+               It stays as the last line of defence against a caller and this
+               function disagreeing about the limit -- which is precisely how
+               issue #198 happened. */
             if (content_max && record_length > content_max) {
                 record_length = content_max;
             }
@@ -1592,11 +1592,6 @@ int datasetPutHandler(Session *session)
                     bytes_read++;
 
                     switch (recline_put(&rl, c, &rec, &rec_len)) {
-                    case RECLINE_TOOLONG:
-                        free(record_buffer);
-                        session_fclose(session, fp);
-                        return handle_error(session, ERR_IO, "Record too long");
-
                     case RECLINE_RECORD:
                         if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
@@ -1678,11 +1673,6 @@ int datasetPutHandler(Session *session)
                 bytes_remaining--;
 
                 switch (recline_put(&rl, c, &rec, &rec_len)) {
-                case RECLINE_TOOLONG:
-                    free(record_buffer);
-                    session_fclose(session, fp);
-                    return handle_error(session, ERR_IO, "Record too long");
-
                 case RECLINE_RECORD:
                     if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
@@ -1721,6 +1711,18 @@ int datasetPutHandler(Session *session)
 
     session_fclose(session, fp);
     fp = NULL;
+
+    /* An over-long record is truncated to the record length and the body is
+       written in full; the request then fails. Measured against real z/OSMF
+       version 29 (#243): a body whose second of three lines is 200 characters
+       lands in an FB/80 target as three records of 5, 80 and 6, and answers
+       500. Reporting it here rather than at the offending byte is the point --
+       aborting mid-body loses every record after it, and the previous content
+       is already gone either way, because the reference does not stage. */
+    if (rl.truncated) {
+        return handle_error(session, ERR_IO,
+            "Record truncated to the record length of the data set");
+    }
 
     /* ETag of the state just written -- see the member handler for why this
        is a re-read and not a hash of the request body. */
@@ -2484,11 +2486,6 @@ int memberPutHandler(Session *session)
                     bytes_read++;
 
                     switch (recline_put(&rl, c, &rec, &rec_len)) {
-                    case RECLINE_TOOLONG:
-                        free(record_buffer);
-                        session_fclose(session, fp);
-                        return handle_error(session, ERR_IO, "Record too long");
-
                     case RECLINE_RECORD:
                         if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                             free(record_buffer);
@@ -2566,11 +2563,6 @@ int memberPutHandler(Session *session)
                 bytes_remaining--;
 
                 switch (recline_put(&rl, c, &rec, &rec_len)) {
-                case RECLINE_TOOLONG:
-                    free(record_buffer);
-                    session_fclose(session, fp);
-                    return handle_error(session, ERR_IO, "Record too long");
-
                 case RECLINE_RECORD:
                     if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
                         free(record_buffer);
@@ -2608,6 +2600,18 @@ int memberPutHandler(Session *session)
 
     session_fclose(session, fp);
     fp = NULL;
+
+    /* An over-long record is truncated to the record length and the body is
+       written in full; the request then fails. Measured against real z/OSMF
+       version 29 (#243): a body whose second of three lines is 200 characters
+       lands in an FB/80 target as three records of 5, 80 and 6, and answers
+       500. Reporting it here rather than at the offending byte is the point --
+       aborting mid-body loses every record after it, and the previous content
+       is already gone either way, because the reference does not stage. */
+    if (rl.truncated) {
+        return handle_error(session, ERR_IO,
+            "Record truncated to the record length of the data set");
+    }
 
     /* ETag of the state that was just written, from a re-read of the closed
        member -- never from the request body. The write normalizes (records

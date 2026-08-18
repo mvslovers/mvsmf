@@ -69,7 +69,7 @@ and compares before opening anything for output:
 Details that matter in practice:
 
 - **The check runs before the member is opened for output.** That is why a 412
-  leaves the previous content intact, unlike the "Record too long" case under
+  leaves the previous content intact, unlike the truncation case under
   *Limitations*.
 - **Send `X-IBM-Return-Etag: true` on the PUT as well** if the client intends to
   save more than once. The write normalizes what it stores (records split at
@@ -86,13 +86,15 @@ Details that matter in practice:
 
 ## Text mode framing
 - A record ends at LF, CR or CRLF. The terminator is not part of the record.
-- A line of exactly LRECL characters is accepted. Only a longer line is
-  rejected, with "Record too long"; it is never silently split across two
+- A line of exactly LRECL characters is accepted. A longer line is **truncated
+  to LRECL** — the overflow is discarded, the record is written, the rest of the
+  body is written after it, and the request then answers 500 "Record truncated
+  to the record length of the data set". It is never silently split across two
   records. Until issue #233 the usable length was LRECL-2, so 80-column source
   could not be uploaded into an FB80 library at all.
 - For RECFM=V the usable line length is LRECL-4: the record descriptor word is
   not content. A longer line used to be split into a second record without
-  notice and is now rejected.
+  notice, and is now truncated like any other.
 - A blank line is written as a record of blanks — it used to disappear (#233).
 - A body whose last line carries no terminator still produces that record, and
   a body ending in a newline does not gain a trailing blank one.
@@ -101,17 +103,19 @@ Details that matter in practice:
 
 ## Limitations
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
-- A request that fails **before its first record is framed** leaves the member
-  exactly as it was — a dropped connection, a body that never arrives, a body
-  whose very first line is over-long. The member is not opened for output until
-  there is a record to put in it, and it is CLOSE that stows the new directory
-  entry over the old one, so an unopened member is an untouched member
-  (issue #246).
-- A request that fails **after** that point still does not roll back. On
-  "Record too long" halfway through a body, the records written up to that line
-  are stored and the previous content is gone. Making a mid-body failure atomic
-  needs the member staged under a temporary name and renamed on success, which
-  is open as issue #243.
+- A request that produces **no record at all** leaves the member exactly as it
+  was — a dropped connection, a body that never arrives. The member is not
+  opened for output until there is a record to put in it, and it is CLOSE that
+  stows the new directory entry over the old one, so an unopened member is an
+  untouched member (issue #246). An over-long first line is no longer such a
+  case: it is truncated to LRECL and written like any other record.
+- **A failed write does not roll back, and real z/OSMF does not roll back
+  either.** Measured on version 29 (#243): a body whose second of three lines is
+  200 characters lands in an FB/80 member as three records of 5, 80 and 6, the
+  previous content replaced, and answers 500. A rejected PUT to a member that
+  did not exist yet also leaves the member behind, on both. mvsMF matches that.
+  Staging under a temporary name would spend a directory entry per write and
+  would not buy conformance, because there is nothing to conform to.
 - An empty body is a truncate, not a no-op: `Content-Length: 0` empties the
   member.
 

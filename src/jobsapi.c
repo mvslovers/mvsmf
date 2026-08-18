@@ -75,6 +75,7 @@ static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, co
 static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
+static int open_intrdr(Session *session, VSFILE **intrdr);
 static int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length, 
                               char *jobname, char *jobid, char *jobclass);
 static const char *extract_file_value(char *json, size_t len);
@@ -466,16 +467,6 @@ int jobSubmitHandler(Session *session)
 		goto quit;
 	}
 
-	/* open internal reader */
-	rc = jesiropn(&intrdr);
-	if (rc < 0) {
-		wtof(MSG_INTRDR_OPEN);
-		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_SERVICE,
-						RC_SEVERE, REASON_SERVER_ERROR,
-						"Failed to open internal reader", NULL, 0);
-		goto quit;
-	}
-
 	/* read request content */
 	rc = read_request_content(session, &data, &data_size);
 	if (rc < 0) {
@@ -515,6 +506,11 @@ int jobSubmitHandler(Session *session)
 					goto quit;
 				}
 
+				if (open_intrdr(session, &intrdr) < 0) {
+					rc = -1;
+					goto quit;
+				}
+
 				/* file_value is already EBCDIC after atoe conversion */
 				rc = submit_file(session, intrdr, file_value,
 								jobname, jobid, &jobclass);
@@ -526,6 +522,11 @@ int jobSubmitHandler(Session *session)
 			}
 		} else {
 			/* text/plain or absent: inline JCL submission */
+			if (open_intrdr(session, &intrdr) < 0) {
+				rc = -1;
+				goto quit;
+			}
+
 			rc = submit_jcl_content(session, intrdr, data, data_size,
 									jobname, jobid, &jobclass);
 			intrdr = NULL; /* submit_jcl_content handles intrdr lifecycle */
@@ -1324,6 +1325,35 @@ int validate_intrdr_headers(Session *session)
     }
 
     return 0;
+}
+
+/* Open the internal reader, as late on the path as the request allows.
+ *
+ * jesiropn() dynallocs an INTRDR SYSOUT DD and opens the JES2 ACB, and
+ * nothing in mvsMF reclaims either one if the request abends before the
+ * close: the session tracker knows FILE and JES handles, not VSFILE. So the
+ * open belongs after everything that can still reject the request. It used
+ * to sit before read_request_content(), which held both resources across a
+ * byte-at-a-time read of a body that can be megabytes, and paid a full
+ * open/close cycle for every request that turned out to submit nothing --
+ * an unsupported Content-Type, a body that would not read, a JSON document
+ * with no "file" member (issue #300).
+ *
+ * Returns 0 with *intrdr usable, -1 with the 500 already sent.
+ */
+__asm__("\n&FUNC    SETC 'open_intrdr'");
+static
+int open_intrdr(Session *session, VSFILE **intrdr)
+{
+	if (jesiropn(intrdr) < 0) {
+		wtof(MSG_INTRDR_OPEN);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_SERVICE,
+						RC_SEVERE, REASON_SERVER_ERROR,
+						"Failed to open internal reader", NULL, 0);
+		return -1;
+	}
+
+	return 0;
 }
 
 __asm__("\n&FUNC	SETC 'extract_file_value'");

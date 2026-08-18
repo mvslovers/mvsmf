@@ -22,6 +22,22 @@
 #     --cleanup  Delete test PDS after tests
 # =========================================================================
 
+# When a skip is right, and when it is a failure wearing a disguise
+# ---------------------------------------------------------------------------
+# A skip is right when the precondition is something this suite did not create
+# and cannot: other jobs on the system, a data set that only exists on one
+# stand, an ACTIVE started task, a client capability (python3, a Zowe CLI flag),
+# or a defect with a ticket behind it.
+#
+# A skip is wrong -- and reports a broken run as green -- when the precondition
+# is something this suite created through the very API under test, or was
+# explicitly asked to create with --setup. Its absence then means that API
+# misbehaved, and that has to be red. This is #304: the dataset-submit path went
+# unexercised for months behind exactly such a skip.
+#
+# Downstream skips ("no submitted job") are fine as they are: they only fire
+# after an assertion has already failed, so the run is red regardless.
+
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -137,6 +153,18 @@ run_zowe_json() {
 	output=$(zowe "$@" --rfj "${ZOWE_CONN[@]}" 2>&1 </dev/null) || rc=$?
 	echo "$output"
 	return $rc
+}
+
+# A precondition that --setup was supposed to establish is a failure when
+# --setup was requested, and only a skip when it was not. Reporting it as a skip
+# either way is what let a broken setup look green (#304).
+missing_precondition() {
+	local label="$1" reason="$2"
+	if [ "$DO_SETUP" -eq 1 ]; then
+		fail "$label" "$reason (--setup was requested)"
+	else
+		skip "$label ($reason)"
+	fi
 }
 
 assert_rc() {
@@ -397,7 +425,7 @@ test_submit_from_dataset() {
 	echo "--- Submit Job: from dataset ---"
 
 	if ! have_test_pds; then
-		skip "submit from dataset (no ${TEST_PDS} - run with --setup)"
+		missing_precondition "submit from dataset" "no ${TEST_PDS}"
 		return
 	fi
 
@@ -424,7 +452,7 @@ test_submit_from_dataset_without_notify() {
 	# submit_file() is a separate caller of process_jobcard() from the inline
 	# path, so the NOTIFY injection has to be shown on this one too.
 	if ! have_test_pds; then
-		skip "dataset submit without NOTIFY (no ${TEST_PDS} - run with --setup)"
+		missing_precondition "dataset submit without NOTIFY" "no ${TEST_PDS}"
 		return
 	fi
 
@@ -648,7 +676,13 @@ echo "========================================"
 
 # Optional setup
 if [ "$DO_SETUP" -eq 1 ]; then
-	setup_test_pds || true
+	# A setup that was explicitly asked for and then failed is a failure. It used
+	# to be swallowed here, after which every test depending on it took its skip
+	# branch and the run still reported green -- which is how the dataset-submit
+	# path went unexercised for months (#304).
+	if ! setup_test_pds; then
+		fail "setup: create the test PDS" "--setup was requested and setup failed"
+	fi
 fi
 
 # Submit tests

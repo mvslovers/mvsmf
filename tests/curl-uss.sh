@@ -247,7 +247,10 @@ if [ "$FIRST_ITEM" != "null" ] && [ -n "$FIRST_ITEM" ]; then
 	assert_json_field_exists "$BODY" '.items[0].inode' "list: item has inode"
 	assert_json_field_exists "$BODY" '.items[0].links' "list: item has links"
 else
-	skip "list: no items returned, skipping field checks"
+	# ${TEST_DIR} is created by this suite and a directory always carries at
+	# least . and .. -- an empty items array means the list under test lost
+	# them, which a skip would hide (#304).
+	fail "list: item field checks" "the listing of ${TEST_DIR} returned no items"
 fi
 
 echo ""

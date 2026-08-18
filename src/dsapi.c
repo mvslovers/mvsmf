@@ -205,6 +205,13 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		return rc;
 	}
 
+	/* No Content-Length above, so httpd frames the body chunked, and its
+	   chunked path is all-or-error -- which is the only reason a bare
+	   http_send() per record used to be safe here. That dependency was
+	   invisible at the call site and one Content-Length away from silently
+	   truncating every download, so the records go through send_all() like
+	   everything else (issue #298). */
+
 	if (data_type == DATA_TYPE_TEXT) {
 		/* Text mode: fgets + EBCDIC->ASCII + strlen for length.
 		   F/FB records are padded with EBCDIC blanks to LRECL; strip them
@@ -227,8 +234,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 				len = end + 1;
 			}
 			http_xlate((unsigned char *)buffer, len, httpx->xlate_cp037->etoa);
-			if ((rc = http_send(session->httpc,
-					(const UCHAR *)buffer, len)) < 0) {
+			if ((rc = send_all(session, (const UCHAR *)buffer, (int)len)) < 0) {
 				break;
 			}
 		}
@@ -237,8 +243,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		size_t n;
 		while ((n = fread(buffer, 1, lrecl, fp)) > 0) {
 			if (max_records >= 0 && count >= max_records) break;
-			if ((rc = http_send(session->httpc,
-					(const UCHAR *)buffer, n)) < 0) {
+			if ((rc = send_all(session, (const UCHAR *)buffer, (int)n)) < 0) {
 				break;
 			}
 			count++;
@@ -254,12 +259,10 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 			len_prefix[1] = (n >> 16) & 0xFF;
 			len_prefix[2] = (n >> 8) & 0xFF;
 			len_prefix[3] = n & 0xFF;
-			if ((rc = http_send(session->httpc,
-					(const UCHAR *)len_prefix, 4)) < 0) {
+			if ((rc = send_all(session, (const UCHAR *)len_prefix, 4)) < 0) {
 				break;
 			}
-			if ((rc = http_send(session->httpc,
-					(const UCHAR *)buffer, n)) < 0) {
+			if ((rc = send_all(session, (const UCHAR *)buffer, (int)n)) < 0) {
 				break;
 			}
 			count++;

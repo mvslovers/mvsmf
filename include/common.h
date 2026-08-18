@@ -198,6 +198,33 @@ int sendErrorResponse(Session *session, int status, int category, int rc,
 int send_not_modified(Session *session, const char *etag) asm("CMN0013");
 
 /**
+ * @brief Sends a whole buffer to the client, or fails
+ *
+ * The one raw send in mvsMF -- every streaming handler and every JSON
+ * response goes through it. Short writes are resumed and a no-progress
+ * return (0, a full socket send buffer) is paused and retried within a
+ * bounded budget, so the loop can neither spin at 100% CPU nor silently
+ * drop the tail of a record (issue #298).
+ *
+ * Do not call http_send() directly. A bare loop over it is the httpd#199
+ * defect, and a single unchecked call truncates whatever it did not send --
+ * today invisible only because those routes happen to be chunked.
+ *
+ * The buffer must already carry the bytes the client is to receive; no
+ * translation happens here.
+ *
+ * A failure leaves the client at CSTATE_DONE, which stops the handler's
+ * remaining output rather than letting each later call wait out its own
+ * budget for a peer that is gone.
+ *
+ * @param session Current session context
+ * @param buf Bytes to send
+ * @param len Number of bytes; <= 0 succeeds without sending
+ * @return 0 when everything was sent, -1 otherwise
+ */
+int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
+
+/**
  * @brief Reads the full request body into a malloc'd buffer
  *
  * Supports both Content-Length and Transfer-Encoding: chunked.

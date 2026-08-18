@@ -98,5 +98,15 @@ name = "TSTETAG"
 sources = ["test/host/tstetag.c"]
 norent = true
 
+# TSTSEND: #298 — the send loop must never advance by the return value without
+# checking it. A 0 from http_send() means "socket send buffer full, retry", and
+# `pos += rc` on it spins a worker at 100% CPU forever. Portable C (test-host);
+# the TU #includes src/sendall.c so it drives the real loop every response goes
+# through — do not list sendall.c here.
+[[test]]
+name = "TSTSEND"
+sources = ["test/host/tstsend.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

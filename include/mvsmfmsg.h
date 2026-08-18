@@ -66,6 +66,9 @@
 /** MVSMF007W the client stopped sending mid-body and the read gave up */
 #define MSG_RECV_TIMEOUT	"MVSMF007W RECEIVE TIMED OUT AFTER %d RETRIES"
 
+/** MVSMF008W the client stopped reading mid-response and the send gave up */
+#define MSG_SEND_TIMEOUT	"MVSMF008W SEND TIMED OUT AFTER %d RETRIES"
+
 /*
  * MVSMF1xx -- data sets (restfiles/ds)
  */

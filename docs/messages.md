@@ -51,6 +51,7 @@ Ranges:
 | `MVSMF005E` | `pgm MUST BE CALLED BY THE HTTPD SERVER` | MVSMF was started from TSO or batch instead of as a CGI under httpd. It returns 12. |
 | `MVSMF006E` | `STORAGE ALLOCATION FAILED FOR what` | GETMAIN/`malloc` failed. The region is too small or the address space is leaking — see the httpd notes on CGI storage. `what` names the allocation (request body, JCL text, JCL line table). |
 | `MVSMF007W` | `RECEIVE TIMED OUT AFTER n RETRIES` | A client stopped sending in the middle of a request body and the read gave up. The worker was tied up for the whole wait. Isolated occurrences are a client or network problem; a steady stream means workers are being consumed. |
+| `MVSMF008W` | `SEND TIMED OUT AFTER n RETRIES` | The mirror image on the way out: the client stopped reading, so the socket send buffer stayed full for the whole 10 second budget (100 retries of 100 ms) and the response was abandoned. The connection is dropped and the worker released — before the fix for #298 that same condition spun the worker at 100% CPU forever, so this message replaces a hang. A stopping server (`P HTTPD`) is **not** reported here; it fails the send at once and silently. |
 
 ## MVSMF1xx — data sets
 

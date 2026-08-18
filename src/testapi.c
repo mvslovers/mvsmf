@@ -917,7 +917,7 @@ int testHandler(Session *session) {
       maxcc =  comp        & 0xFFF;
       jtflg = job->jtflg;
 
-      /* exactly what process_job() would build today */
+      /* mirrors process_job() in jobsapi.c -- keep the two in step */
       if (!(job->q_type & (_OUTPUT | _HARDCPY))) {
         snprintf(retcode, sizeof(retcode), "%s", "(null)");
       } else if (hi == 0x77) {
@@ -925,6 +925,8 @@ int testHandler(Session *session) {
           snprintf(retcode, sizeof(retcode), "ABEND S%03X", abend);
         else if ((jtflg & JESJOB_ABD) && maxcc)
           snprintf(retcode, sizeof(retcode), "ABEND U%04d", maxcc);
+        else if (jtflg == JESJOB_JF)
+          snprintf(retcode, sizeof(retcode), "%s", "JCL ERROR");
         else
           snprintf(retcode, sizeof(retcode), "CC %04d", maxcc);
       } else if (comp == 4 || comp == 8 || comp == 36) {
@@ -939,7 +941,7 @@ int testHandler(Session *session) {
               " \"completion\": \"%08X\", \"comp_hi\": \"%02X\","
               " \"abend\": %u, \"maxcc\": %u,"
               " \"jtflg\": \"%02X\", \"JF\": %s, \"CF\": %s, \"ABD\": %s,"
-              " \"retcode_today\": \"%s\" }\n",
+              " \"retcode\": \"%s\" }\n",
               first ? " " : " ,",
               (char *)job->jobid,
               (unsigned)job->q_type, (unsigned)job->q_flag1,

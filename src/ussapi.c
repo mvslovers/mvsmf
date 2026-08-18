@@ -605,8 +605,6 @@ quit:
 	if (dd) {
 		ufs_dirclose(&dd);
 	}
-	if (ufs) {
-	}
 
 	return rc;
 }
@@ -751,8 +749,6 @@ int ussGetHandler(Session *session)
 quit:
 	if (fp) {
 		ufs_fclose(&fp);
-	}
-	if (ufs) {
 	}
 
 	return rc;
@@ -1022,8 +1018,6 @@ quit:
 		ufs_fclose(&fp);
 	}
 	free(body);
-	if (ufs) {
-	}
 
 	return rc;
 }
@@ -1258,9 +1252,6 @@ int ussCreateHandler(Session *session)
 	rc = sendDefaultHeaders(session, 201, HTTP_CONTENT_TYPE_NONE, 0);
 
 quit:
-	if (ufs) {
-	}
-
 	return rc;
 }
 

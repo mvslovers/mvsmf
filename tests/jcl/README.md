@@ -8,7 +8,7 @@ Fixtures used by `tests/curl-jobs.sh` and by hand.
 | `condfail.jcl` | `IEF451I ENDED BY CC 0012` | `7700000C` | `C0` | `CC 0012` |
 | `abendjob.jcl` | `IEF450I ABEND S806` | `77806000` | `20` | `ABEND S806` |
 | `jclerror.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` | `00000004` | `00` | `JCL ERROR` |
-| `allocpds.jcl` | allocates the test PDS | — | — | — |
+| `allocpds.jcl` | allocates the test PDS (`zowe-jobs.sh` only) | — | — | — |
 
 The four above are the regression set for the `retcode` decoding (#305) —
 between them they cover every branch of it. Read the raw fields back with
@@ -30,5 +30,11 @@ is that a job submitted through `PUT /zosmf/restjobs/jobs` reports a `retcode`
 at all, which it can only do if mvsMF injected a `NOTIFY` on submit (#307). It
 runs IDCAMS on a bogus command, so the expected answer is `CC 0012`; submitted
 by any other route it reports `null`.
+
+`curl-jobs.sh` no longer uses `allocpds.jcl`: it allocates the test PDS through
+the datasets API instead, because the JCL names a UNIT/VOLUME pair and
+JCL-errors on any stand that does not have it. Setup then failed, `SETUP_DONE`
+stayed 0, and every dataset-submit test skipped while the suite still reported
+green. `zowe-jobs.sh` still submits it and still has that gap.
 
 `largejcl.jcl` is a 130 KB body for the submit path, not part of the matrix.

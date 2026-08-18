@@ -134,6 +134,20 @@ assert_json_array_nonempty() {
 	fi
 }
 
+# Does the test PDS exist? The dataset-submit tests gated on "--setup ran in
+# this invocation", so they skipped whenever the PDS was already there from an
+# earlier run -- which is most of the time.
+have_test_pds() {
+	local resp
+	resp=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
+	local body status
+	status=$(echo "$resp" | tail -n1)
+	body=$(echo "$resp" | sed '$d')
+	[ "$status" = "200" ] || return 1
+	[ "$(echo "$body" | jq -r '.returnedRows' 2>/dev/null)" != "0" ]
+}
+
 # curl wrapper: returns "HTTP_STATUS\nBODY"
 do_curl() {
 	local method="$1"
@@ -178,57 +192,65 @@ setup_test_pds() {
 	echo ""
 	echo "=== SETUP: Creating test PDS ==="
 
-	# Allocate PDS by submitting allocation JCL
-	local alloc_jcl
-	alloc_jcl=$(sed "s/\${USER}/${MVSMF_USER}/g" "${JCL_DIR}/allocpds.jcl")
-
+	# Allocate the PDS through the datasets API rather than by submitting
+	# allocation JCL. The JCL named a UNIT/VOLUME pair, so it JCL-errored on any
+	# stand that does not have it -- setup then returned 1, SETUP_DONE stayed 0,
+	# and every dataset-submit test skipped while the suite still reported green.
 	local resp
-	resp=$(do_curl PUT \
-		-H "Content-Type: text/plain" \
-		--data-binary "$alloc_jcl" \
-		"${BASE_URL}/zosmf/restjobs/jobs")
-	split_response "$resp"
-
-	if [ "$HTTP_STATUS" != "200" ]; then
-		echo "  WARN: PDS allocation submit failed (HTTP $HTTP_STATUS)"
-		echo "  $BODY"
-		return 1
-	fi
-
-	local alloc_jobname alloc_jobid
-	alloc_jobname=$(echo "$BODY" | jq -r '.jobname')
-	alloc_jobid=$(echo "$BODY" | jq -r '.jobid')
-	echo "  Allocation job: ${alloc_jobname}/${alloc_jobid}"
-
-	wait_for_output "$alloc_jobname" "$alloc_jobid" || true
-
-	# Upload IEFBR14 JCL member
-	resp=$(do_curl PUT \
-		-H "Content-Type: text/plain" \
-		-H "Content-Length: $(wc -c < "${JCL_DIR}/iefbr14.jcl")" \
-		--data-binary @"${JCL_DIR}/iefbr14.jcl" \
-		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(IEFBR14)")
-	split_response "$resp"
-
-	if [ "$HTTP_STATUS" = "204" ] || [ "$HTTP_STATUS" = "200" ]; then
-		echo "  Uploaded IEFBR14 member to ${TEST_PDS}"
-		SETUP_DONE=1
+	if have_test_pds; then
+		echo "  ${TEST_PDS} already exists, reusing it"
 	else
-		echo "  WARN: Failed to upload member (HTTP $HTTP_STATUS)"
-		echo "  $BODY"
-		return 1
+		resp=$(do_curl POST \
+			-H "Content-Type: application/json" \
+			-d '{"dsorg":"PO","alcunit":"TRK","primary":1,"secondary":1,"dirblk":5,"recfm":"FB","blksize":800,"lrecl":80}' \
+			"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
+		split_response "$resp"
+
+		if [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "200" ]; then
+			echo "  WARN: PDS allocation failed (HTTP $HTTP_STATUS)"
+			echo "  $BODY"
+			return 1
+		fi
+		echo "  Allocated ${TEST_PDS}"
 	fi
+
+	local member
+	for member in IEFBR14 NONOTFY; do
+		local src
+		case "$member" in
+			IEFBR14) src="${JCL_DIR}/iefbr14.jcl" ;;
+			NONOTFY) src="${JCL_DIR}/nonotify.jcl" ;;
+		esac
+
+		resp=$(do_curl PUT \
+			-H "Content-Type: text/plain" \
+			-H "Content-Length: $(wc -c < "$src")" \
+			--data-binary @"$src" \
+			"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${member})")
+		split_response "$resp"
+
+		if [ "$HTTP_STATUS" != "204" ] && [ "$HTTP_STATUS" != "200" ]; then
+			echo "  WARN: Failed to upload ${member} (HTTP $HTTP_STATUS)"
+			echo "  $BODY"
+			return 1
+		fi
+		echo "  Uploaded ${member} to ${TEST_PDS}"
+	done
+
+	SETUP_DONE=1
 }
 
 cleanup_test_pds() {
 	echo ""
 	echo "=== CLEANUP: Deleting test PDS ==="
 
-	# Delete the member first, then the PDS
-	local resp
-	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(IEFBR14)")
-	split_response "$resp"
-	echo "  Delete member IEFBR14: HTTP $HTTP_STATUS"
+	# Delete the members first, then the PDS
+	local resp member
+	for member in IEFBR14 NONOTFY; do
+		resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${member})")
+		split_response "$resp"
+		echo "  Delete member ${member}: HTTP $HTTP_STATUS"
+	done
 
 	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
 	split_response "$resp"
@@ -500,15 +522,19 @@ test_submit_from_dataset() {
 	echo ""
 	echo "--- Submit Job: from dataset ---"
 
-	if [ "$SETUP_DONE" -eq 0 ]; then
-		skip "submit from dataset (no test PDS - run with --setup)"
+	if ! have_test_pds; then
+		skip "submit from dataset (no ${TEST_PDS} - run with --setup)"
 		return
 	fi
 
+	# The reference is //'DSN(MEMBER)' -- apostrophes around the name, inside the
+	# slashes. The form this test used, '//DSN(MEMBER)', is rejected with 400
+	# "Cannot open dataset", so it was asserting nothing even on a stand where
+	# the PDS existed.
 	local resp
 	resp=$(do_curl PUT \
 		-H "Content-Type: application/json" \
-		-d "{\"file\":\"'//${TEST_PDS}(IEFBR14)'\"}" \
+		-d "{\"file\":\"//'${TEST_PDS}(IEFBR14)'\"}" \
 		"${BASE_URL}/zosmf/restjobs/jobs")
 	split_response "$resp"
 
@@ -548,6 +574,46 @@ test_submit_large_jcl() {
 		wait_for_output "$jn" "$ji" || true
 		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 	fi
+}
+
+test_submit_from_dataset_without_notify() {
+	echo ""
+	echo "--- Submit Job: from dataset, card without NOTIFY (issue #307) ---"
+
+	# submit_file() is a separate caller of process_jobcard() from the inline
+	# path, so the injection has to be shown on this one too.
+	if ! have_test_pds; then
+		skip "dataset submit without NOTIFY (no ${TEST_PDS} - run with --setup)"
+		return
+	fi
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${TEST_PDS}(NONOTFY)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "dataset submit without NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "retcode for dataset submit without NOTIFY (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0012" \
+			"retcode for dataset submit without NOTIFY"
+	else
+		skip "retcode for dataset submit without NOTIFY (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
 test_submit_dataset_missing_file_field() {
@@ -1281,6 +1347,7 @@ test_submit_invalid_intrdr_header
 test_submit_invalid_content_type
 test_submit_large_jcl
 test_submit_from_dataset
+test_submit_from_dataset_without_notify
 test_submit_dataset_missing_file_field
 test_submit_dataset_not_found
 

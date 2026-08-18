@@ -864,6 +864,105 @@ int testHandler(Session *session) {
                        probes, free_errors);
     }
 
+    /* --- fn=job (raw JCT termination bits, issue #305) -------------- */
+    /* A job that fails allocation is reported "CC 0000": the step never ran,
+     * so no condition code was ever set, and the converter RC is 0 because
+     * the JCL passed conversion.  What MVS reports as IEF453I JOB FAILED
+     * lives in JCTJTFLG, which process_job() reads only for JESJOB_ABD.
+     * This dumps the raw bytes so the discriminator can be chosen from a
+     * measurement instead of from the header comment.  Read-only. */
+  } else if (strcmp(fn, "job") == 0) {
+    char *jn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_JOBNAME");
+    JES *jes = NULL;
+    JESJOB **jobs = NULL;
+    unsigned jc = 0;
+    unsigned ji;
+    int first = 1;
+
+    if (!jn || !*jn) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"job\", \"error\": \"jobname= required\" }\n");
+      goto quit;
+    }
+
+    jes = jesopen();
+    if (!jes) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"job\", \"error\": \"jesopen failed\" }\n");
+      goto quit;
+    }
+    session_register_jes(session, jes);
+
+    jobs = jesjob(jes, jn, FILTER_JOBNAME, 0);
+    jc = jobs ? array_count(&jobs) : 0;
+
+    if ((rc = http_printf(session->httpc,
+                          "{ \"fn\": \"job\", \"jobname\": \"%s\","
+                          " \"count\": %u, \"items\": [\n", jn, jc)) < 0)
+      goto quit_job;
+
+    for (ji = 0; ji < jc; ji++) {
+      JESJOB *job = jobs[ji];
+      unsigned comp;
+      unsigned hi, abend, maxcc;
+      unsigned char jtflg;
+      char retcode[16];
+
+      if (!job)
+        continue;
+
+      comp  = job->completion;
+      hi    = (comp >> 24) & 0xFF;
+      abend = (comp >> 12) & 0xFFF;
+      maxcc =  comp        & 0xFFF;
+      jtflg = job->jtflg;
+
+      /* exactly what process_job() would build today */
+      if (!(job->q_type & (_OUTPUT | _HARDCPY))) {
+        snprintf(retcode, sizeof(retcode), "%s", "(null)");
+      } else if (hi == 0x77) {
+        if (abend)
+          snprintf(retcode, sizeof(retcode), "ABEND S%03X", abend);
+        else if ((jtflg & JESJOB_ABD) && maxcc)
+          snprintf(retcode, sizeof(retcode), "ABEND U%04d", maxcc);
+        else
+          snprintf(retcode, sizeof(retcode), "CC %04d", maxcc);
+      } else if (comp == 4 || comp == 8 || comp == 36) {
+        snprintf(retcode, sizeof(retcode), "%s", "JCL ERROR");
+      } else {
+        snprintf(retcode, sizeof(retcode), "%s", "(null)");
+      }
+
+      if ((rc = http_printf(session->httpc,
+              "%s  { \"jobid\": \"%-8.8s\", \"q_type\": \"%02X\","
+              " \"q_flag1\": \"%02X\", \"q_flag2\": \"%02X\","
+              " \"completion\": \"%08X\", \"comp_hi\": \"%02X\","
+              " \"abend\": %u, \"maxcc\": %u,"
+              " \"jtflg\": \"%02X\", \"JF\": %s, \"CF\": %s, \"ABD\": %s,"
+              " \"retcode_today\": \"%s\" }\n",
+              first ? " " : " ,",
+              (char *)job->jobid,
+              (unsigned)job->q_type, (unsigned)job->q_flag1,
+              (unsigned)job->q_flag2, comp, hi, abend, maxcc,
+              (unsigned)jtflg,
+              (jtflg & JESJOB_JF)  ? "true" : "false",
+              (jtflg & JESJOB_CF)  ? "true" : "false",
+              (jtflg & JESJOB_ABD) ? "true" : "false",
+              retcode)) < 0)
+        goto quit_job;
+
+      first = 0;
+    }
+
+    rc = http_printf(session->httpc, " ] }\n");
+
+  quit_job:
+    if (jobs)
+      jesjobfr(&jobs);
+    session_jesclose(session, &jes);
+    if (rc < 0)
+      goto quit;
+
     /* --- fn=intrdr (internal-reader open/close cycles, issue #294) -- */
   } else if (strcmp(fn, "intrdr") == 0) {
     /* Bisect for mvslovers/libc370#115: a job submit permanently costs the
@@ -933,6 +1032,7 @@ int testHandler(Session *session) {
         " \"?fn=storage&sp=0&total=0|1&hold=N (free storage sample; total=1 briefly holds all"
         " of it; hold=N keeps the largest block N seconds -- needs MVSMF_ABEND_TEST=1)\","
         " \"?fn=intrdr&n=1..25      (internal-reader open/close cycles, no records; libc370#115 bisect)\","
+        " \"?fn=job&jobname=NAME    (raw JCT completion + JCTJTFLG bits per job; mvsmf#305)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\""

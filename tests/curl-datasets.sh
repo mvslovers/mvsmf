@@ -2178,6 +2178,75 @@ curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_atom_good.txt /tmp/curl_ds_atom_long.txt
 
+# =========================================================================
+# A client slower than the server must not fail the write (issue #247)
+# =========================================================================
+echo ""
+echo "--- Slow and Expect: 100-continue clients (issue #247) ---"
+
+SLOW_SEQ="${MVSMF_USER}.CURL.SLOWSEQ"
+
+# Deliberately NO -H "Expect:" in this section. Every other PUT in this suite
+# suppresses that header, and that workaround is exactly what hid #247 for so
+# long -- these two cases exist to keep it visible.
+#
+# Both provoke the same thing: an empty socket receive buffer at a moment the
+# handler wants a byte. httpd's sockets are non-blocking, so recv() answers
+# EWOULDBLOCK at once, and mvsMF used to read that as "client gone" and abandon
+# the write with 500 -- over a target already open for output.
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":5,"secondary":5}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
+
+if [ "$HTTP_CODE" = "201" ]; then
+	# 800 records = 64 KB, comfortably more than the socket receive buffer
+	awk 'BEGIN { while (i++ < 800) printf "%-79s\n", "SLOW CLIENT RECORD " i }' \
+		> /tmp/curl_ds_slow.txt
+
+	# --- a body arriving slower than mvsMF consumes it (~130 KB/s) ---
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" --limit-rate 32k \
+		--data-binary @/tmp/curl_ds_slow.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
+	assert_http_status "204" "$HTTP_CODE" "slow client: throttled PUT succeeds"
+
+	RECS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
+	if [ "$RECS" = "800" ]; then
+		pass "slow client: all 800 records written"
+	else
+		fail "slow client: all 800 records written" "got ${RECS}"
+	fi
+
+	# --- Expect: 100-continue, the header curl adds by itself above 1 MB ---
+	# Set explicitly so the case stays cheap: curl honours a manual header the
+	# same way, holding the body back until an interim response arrives or its
+	# 1 s expect100 timeout expires. Either way the handler's first read finds
+	# an empty buffer, which is #247 at byte zero.
+	printf 'EXPECT LINE ONE\nEXPECT LINE TWO\n' > /tmp/curl_ds_expect.txt
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+		-H "X-IBM-Data-Type: text" -H "Expect: 100-continue" \
+		--data-binary @/tmp/curl_ds_expect.txt \
+		"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
+	assert_http_status "204" "$HTTP_CODE" "Expect: 100-continue PUT succeeds"
+
+	RECS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
+	if [ "$RECS" = "2" ]; then
+		pass "Expect: 100-continue: body written in full"
+	else
+		fail "Expect: 100-continue: body written in full" "expected 2 records, got ${RECS}"
+	fi
+else
+	fail "slow client" "could not create ${SLOW_SEQ}"
+fi
+
+curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
+rm -f /tmp/curl_ds_slow.txt /tmp/curl_ds_expect.txt
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

@@ -41,6 +41,7 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Invalid internal reader parameters
+    - Unsupported `Content-Type` (anything other than `application/json` or `text/plain`)
     - Missing `file` field in JSON body
     - Failed to read request content
     - JCL memory allocation failure

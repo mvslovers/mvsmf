@@ -52,6 +52,8 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
 ## Limitations
 - USER and PASSWORD are automatically injected into the job card from the authenticated user's credentials
 - The `NOTIFY` parameter in the job card is updated with the authenticated user's ID if `&SYSUID` is present. `&SYSUID` may appear in any position on the job card (e.g. `NOTIFY=&SYSUID,REGION=0K`); parameters following it are preserved. Trailing blanks from fixed 80-column records are ignored during this rewrite.
+- **`NOTIFY` is not added when the card has none, and the submitted job then never reports a `retcode`.** MVS records a job's completion code only for jobs that requested a notify, so a card without one yields `"retcode": null` for the whole life of the job — however it ends. Clients that poll for a completion code, such as `zowe jobs submit --wait-for-output`, wait forever. Add `NOTIFY=&SYSUID` to the card to avoid it; the mechanism, and whether mvsMF should inject one, are covered in [Job Status → Limitations](status.md#retcode-is-null-for-jobs-submitted-without-notify).
+- The whole feature needs JES2 usermod **`SYZJ201`** to be installed; see [Prerequisites](../../../README.md#the-syzj201-usermod).
 
 ## Examples
 

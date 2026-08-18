@@ -11,6 +11,7 @@
 #include "httpcgi.h"
 #include "json.h"
 #include "mvsmfmsg.h"
+#include "sendall.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 
@@ -220,6 +221,121 @@ send_not_modified(Session *session, const char *etag)
 	if ((rc = http_printf(session->httpc,
 			"Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
+
+	return rc;
+}
+
+//
+// Send a whole buffer to the client (issue #298).
+//
+// Every raw send in mvsMF goes through here. The loop itself is in
+// src/sendall.c so the host test can drive the real one; what stays here are
+// the four services it needs, bound to this session. See include/sendall.h.
+//
+// Returns 0 when everything was sent, -1 otherwise.
+//
+
+__asm__("\n&FUNC    SETC 'send_op_send'");
+static int
+send_op_send(void *ctx, const unsigned char *buf, int len)
+{
+	Session *session = (Session *)ctx;
+
+	return http_send(session->httpc, (const UCHAR *)buf, len);
+}
+
+__asm__("\n&FUNC    SETC 'send_op_pause'");
+static void
+send_op_pause(void *ctx)
+{
+	unsigned ecb = 0;
+
+	(void)ctx;
+
+	// The ECB is zeroed here, on this frame, every single time. A posted
+	// ECB that outlives one wait makes every later wait return at once --
+	// the 100% CPU spin this whole file exists to remove, back again and
+	// invisible. receive_raw_data() re-zeros for the same reason.
+	(void)cthread_timed_wait((void *)&ecb, SEND_STALL_PAUSE, 0);
+}
+
+__asm__("\n&FUNC    SETC 'send_op_abort'");
+static int
+send_op_aborted(void *ctx)
+{
+	Session *session = (Session *)ctx;
+	unsigned char flag;
+
+	// The client is finished or a failed send already marked it dead:
+	// nothing more can go out, so do not wait for it.
+	if (session->httpc->state >= CSTATE_DONE) {
+		return 1;
+	}
+
+	// A stopping server must not sit out the stall budget -- shutdown waits
+	// for the workers, so every worker wait has to honor quiesce
+	// (httpd#122, #205). The macro is a volatile read and this function runs
+	// once per poll, so the byte the operator-command thread sets is picked
+	// up on the next turn -- never hoisted out of the send loop.
+	flag = http_get_flag(session->httpd);
+	if (flag & (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) {
+		return 1;
+	}
+
+	return 0;
+}
+
+__asm__("\n&FUNC    SETC 'send_op_gvup'");
+static void
+send_op_giveup(void *ctx, int stall)
+{
+	(void)ctx;
+
+	wtof(MSG_SEND_TIMEOUT, stall);
+}
+
+// RENT: read-only, so it may be static. A writable static would S0C4.
+static const SEND_OPS send_ops = {
+	send_op_send,
+	send_op_pause,
+	send_op_aborted,
+	send_op_giveup
+};
+
+__asm__("\n&FUNC    SETC 'send_all'");
+int
+send_all(Session *session, const UCHAR *buf, int len)
+{
+	int rc;
+
+	if (!session || !session->httpc) {
+		return -1;
+	}
+
+	rc = send_bytes(session, &send_ops, (const unsigned char *)buf, len);
+
+	if (rc < 0) {
+		// Drop the connection, both halves of it.
+		//
+		// CSTATE_DONE stops the handler's remaining output --
+		// http_printf() and the entry guard in send_bytes() both refuse a
+		// client at CSTATE_DONE -- instead of every later call paying its
+		// own 10 second budget for a peer that is gone (httpd#203).
+		//
+		// It does NOT close the socket, though: DONE is the normal
+		// completion state, and httpd walks DONE -> REPORT -> RESET, where
+		// httprese() keeps the connection open if keepalive is still set.
+		// That is fine for a response that finished and wrong for this one
+		// -- the body is short of the Content-Length it announced, so the
+		// next response on the socket would be appended to a truncated one
+		// and the client would read the two as a single corrupt reply.
+		// Clearing keepalive sends httprese() down its CSTATE_CLOSE branch.
+		// httpd's chunked path clears the same flag for the same reason.
+		if (session->httpc->state < CSTATE_DONE) {
+			session->httpc->state = CSTATE_DONE;
+		}
+		session->httpc->keepalive = 0;
+	}
 
 	return rc;
 }
@@ -474,21 +590,13 @@ __asm__("\n&FUNC	SETC 'send_data'");
 static int 
 send_data(Session *session, char *buf) 
 {
-	int rc = 0;
 	size_t len = strlen(buf);
-	size_t pos = 0;
 
 	http_etoa((unsigned char *)buf, len);
 
-	for (pos = 0; pos < len; pos += rc) {
-		rc = http_send(session->httpc, &buf[pos], len - pos);
-		if (rc < 0) {
-			goto quit; /* socket error */
-		}
-	}
-
-	rc = 0; /* success */
-
-quit:
-	return rc;
+	/* sendJSONResponse() sets Content-Length before this, so the response is
+	   NOT chunked -- which is precisely the mode where http_send() reports 0
+	   for a full send buffer. Every JSON response mvsMF produces lands here,
+	   so this is the normal path, not an edge case (issue #298). */
+	return send_all(session, (const UCHAR *)buf, (int)len);
 }

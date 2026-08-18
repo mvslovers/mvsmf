@@ -740,7 +740,7 @@ int ussGetHandler(Session *session)
 		if (data_type == USS_DATA_TYPE_TEXT) {
 			http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
 		}
-		rc = http_send(session->httpc, (const UCHAR *)buf, n);
+		rc = send_all(session, (const UCHAR *)buf, (int)n);
 		if (rc < 0) {
 			goto quit;
 		}

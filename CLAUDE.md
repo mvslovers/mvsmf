@@ -66,13 +66,14 @@ http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
   applies `http_etoa()` with the *server-default* table. Response headers and
   JSON bodies built with `http_printf` need no explicit call — and must not be
   pre-translated, or they get converted twice.
-- **`http_send()` does not translate.** It sends the buffer raw and expects the
-  caller to have produced ASCII already.
+- **`send_all()` does not translate.** It sends the buffer raw and expects the
+  caller to have produced ASCII already. (Neither does the `http_send()` under
+  it — which nothing outside `common.c` may call, see **Sending** below.)
 - **Raw bytes are always yours.** Every explicit `http_xlate()` in this repo sits
-  on payload crossing a boundary — outbound before `http_send()` (`dsapi.c:203`,
-  `ussapi.c:488`), inbound after reading a body or a chunk header
-  (`dsapi.c:1067`, `ussapi.c:594`), or before writing a record to a data set
-  (`dsapi.c:549`). None of them wrap a `http_printf()`.
+  on payload crossing a boundary — outbound before `send_all()` (`dsapi.c:236`,
+  `ussapi.c:741`), inbound after reading a body or a chunk header
+  (`dsapi.c:1528`, `ussapi.c:847`), or before writing a record to a data set
+  (`dsapi.c:754`). None of them wrap a `http_printf()`.
 
 So the rule is: **payload bytes are yours to translate, formatted output is
 httpd's.**
@@ -498,6 +499,45 @@ The MVS 3.8j TCP/IP stack has a ring buffer bug that corrupts data when a multi-
 
 The `receive_raw_data()` function in `jobsapi.c` works around this by reading one byte at a time from the socket (same approach as the HTTPD's `http_getc`). **Do not change `receive_raw_data()` to use larger recv sizes** — any multi-byte recv will reintroduce data corruption for large request bodies (see PR #22 and Issue #42).
 
+### Sending — `send_all()` is the only way out
+
+**Never call `http_send()` directly.** Every raw send goes through
+`send_all()` (`common.c`), which wraps the loop in `src/sendall.c`.
+
+`http_send()` returns **0** for "socket send buffer full, no progress, retry"
+— on a non-chunked response httpd's `send_raw()` reports the bytes it managed
+this call, and `EWOULDBLOCK` means none. A loop written `for (pos = 0; pos <
+len; pos += rc)` that only tests `rc < 0` therefore never terminates: `pos +=
+0`, a `send()` SVC per turn, one worker pinned at 100% CPU until the STC is
+restarted. That was #298, and it is byte-for-byte httpd#199 one level up. A
+single *unchecked* call is the other half: it silently drops whatever it did
+not send.
+
+The policy is agreed across the ecosystem and must not be re-invented per
+project: on a non-blocking socket **the application waits — 100 attempts of
+100 ms = 10 s without progress, then abandon** (httpd's `SEND_STALL_MAX` /
+`SEND_STALL_PAUSE`, mvsMF's in `include/sendall.h`, note the different unit).
+On a *blocking* socket libc370 waits instead and the application must not — see
+libc370#120 / ftpd#104. One layer per socket, never two.
+
+Three things this depends on that fail silently if broken. The ECB handed to
+`cthread_timed_wait()` is zeroed on the waiting frame **every** time; an
+already-posted ECB that outlives one wait makes every later wait return
+instantly, which is the busy spin again. The reason `send_all()` marks the
+client `CSTATE_DONE` on failure is not tidiness — without it the handler's
+error path comes straight back through `sendErrorResponse()` and pays the whole
+10 s budget again for a peer that is already gone (httpd#203). And it must
+clear `keepalive` in the same breath: `CSTATE_DONE` is *normal completion*, so
+httpd walks `DONE → REPORT → RESET` and `httprese()` reuses the socket if the
+flag is still set — appending the next response to a body that is short of the
+Content-Length it announced. A hang traded for a corrupt stream is not a fix.
+
+The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
+the real one on the host; its four MVS/httpd services are injected through
+`SEND_OPS`. Until the Hercules X'75' fix (`mvslovers/hyperion` `1a599b0d`) a
+full send buffer froze the emulated CPU rather than returning `EWOULDBLOCK`,
+which is the only reason this never fired before 2026-08-18.
+
 ### Conventions
 
 - Headers use `asm("SYMBOL")` annotations for MVS external symbol naming.
@@ -600,7 +640,8 @@ mount, so nothing produces this rc today.
 
 ### I/O Pattern for File Read
 
-`http_send()` does not translate — convert the payload before handing it over.
+`send_all()` does not translate — convert the payload before handing it over,
+and never reach past it to `http_send()` (see **Sending**).
 `USS_DATA_TYPE_TEXT` / `_BINARY` are file-local `#define`s in `src/ussapi.c`;
 `get_data_type()` derives the mode from the `X-IBM-Data-Type` header.
 
@@ -614,7 +655,7 @@ while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
         /* EBCDIC -> ASCII, IBM-1047 (USS), not CP037 */
         http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
     }
-    if (http_send(session->httpc, (const UCHAR *)buf, n) < 0) {
+    if (send_all(session, (const UCHAR *)buf, (int)n) < 0) {
         break;  /* real handlers goto their cleanup label */
     }
 }

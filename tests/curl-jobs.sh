@@ -444,6 +444,50 @@ test_submit_literal_notify_not_duplicated() {
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
+test_submit_notify_inside_programmer_name() {
+	echo ""
+	echo "--- Submit Job: NOTIFY inside the quoted programmer name (issue #307) ---"
+
+	# The case find_notify_operand() exists for. A plain strstr() finds "NOTIFY"
+	# in the programmer name and the following strchr() finds the '=' of
+	# CLASS=A, so the card reads as carrying a NOTIFY it does not have -- and
+	# the injection is then skipped for a card that needs it. The step runs
+	# clean, so a retcode of CC 0000 means the NOTIFY went in; null means the
+	# quoted text was mistaken for one.
+	local jcl
+	jcl=$(printf '%s\n%s\n' \
+		"//NOTFYQ   JOB (ACCT),'NOTIFY ME',CLASS=A,MSGCLASS=H" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit with NOTIFY in the programmer name"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "NOTIFY in programmer name not mistaken for an operand (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0000" \
+			"NOTIFY in programmer name not mistaken for an operand"
+	else
+		skip "NOTIFY in programmer name (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
 test_submit_jobcard_too_long() {
 	echo ""
 	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
@@ -1342,6 +1386,7 @@ test_submit_inline_jcl_with_intrdr_headers
 test_submit_notify_sysuid_trailing_param
 test_submit_without_notify_gets_retcode
 test_submit_literal_notify_not_duplicated
+test_submit_notify_inside_programmer_name
 test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type

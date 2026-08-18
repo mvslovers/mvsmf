@@ -393,6 +393,23 @@ test_submit_without_notify_gets_retcode() {
 		split_response "$resp"
 		assert_json_field "$BODY" '.retcode' "CC 0012" \
 			"retcode for job submitted without NOTIFY"
+
+		# The notify must name the placeholder, not the caller. A real userid
+		# queues one SYS1.BRODCAST record per job until it next logs on, and
+		# that pool fills in an afternoon -- after which every notify on the
+		# system is discarded, including those from real TSO sessions.
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files/3/records")
+		split_response "$resp"
+		case "$BODY" in
+			*'NOTIFY=$MVSMF'*) pass "injected NOTIFY names the placeholder" ;;
+			*) fail "injected NOTIFY names the placeholder" \
+			        "no NOTIFY=\$MVSMF in JESJCL" ;;
+		esac
+		case "$BODY" in
+			*"NOTIFY=${MVSMF_USER}"*) fail "injected NOTIFY must not name the caller" \
+			        "JESJCL carries NOTIFY=${MVSMF_USER}" ;;
+			*) pass "injected NOTIFY does not name the caller" ;;
+		esac
 	else
 		skip "retcode for job submitted without NOTIFY (job never reached OUTPUT)"
 	fi

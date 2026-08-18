@@ -49,6 +49,11 @@
 #define JOBCARD_ERR_NO_CARD		(-1)	/* no JOB statement in the input */
 #define JOBCARD_ERR_TOO_LONG	(-2)	/* rewritten card exceeds 72 columns */
 
+/* The userid the injected NOTIFY names (#307). Deliberately one that cannot
+   exist: a defined user would collect one SYS1.BRODCAST record per submitted
+   job. See the long comment in process_jobcard(). */
+#define JOBCARD_NOTIFY_USER		"$MVSMF"
+
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 
 #define MIN_JES_SYSOUT_DSID 	  2
@@ -2178,8 +2183,8 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
      * go *before* USER=, not after PASSWORD=, for two reasons: it must not
      * displace PASSWORD= from the end of the operand field, on which the
      * masking above depends -- and the card has no room for it at the end.
-     * Worst case is 11 (//+9 blanks) + 7 + 8 (NOTIFY=userid) + 6 + 8 (,USER=)
-     * + 10 + 8 (,PASSWORD=) = 58 of the 71 usable columns, which leaves 13 for
+     * Worst case is 11 (//+9 blanks) + 7 + 6 (NOTIFY=$MVSMF) + 6 + 8 (,USER=)
+     * + 10 + 8 (,PASSWORD=) = 56 of the 71 usable columns, which leaves 15 for
      * the marker; the long one needs 21. So the marker shortens exactly when
      * a NOTIFY is injected, and a card that already has one is emitted
      * byte-for-byte as before.
@@ -2188,12 +2193,34 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
      * JCTJTCC on CLI JCTTSUAF,0, so a job submitted without NOTIFY records no
      * completion code anywhere and reports "retcode": null however it ended.
      * No z/OSMF client adds NOTIFY -- on z/OS none needs to -- so without this
-     * "zowe jobs submit --wait-for-output" never finishes. */
+     * "zowe jobs submit --wait-for-output" never finishes.
+     *
+     * Why a placeholder and not the caller's own userid, which is what this
+     * did first: JES2 answers the notify with SE '$HASP165 ...',LOGON,USER=(x),
+     * and for a userid that HAS a SYS1.BRODCAST mail slot that queues one
+     * record per job until the user next logs on. That pool is small and fixed
+     * -- 1440 records on the reference stand -- and one afternoon of running
+     * the test suite filled it: 84 messages queued, and everything after that
+     * silently discarded, including notifies from real TSO sessions. A userid
+     * with no mail slot consumes nothing and provokes no message: measured on
+     * MVS 3.8j, two otherwise identical jobs, the one naming a defined user
+     * left a BRODCAST record and the one naming $MVSMF left none, while both
+     * recorded JCTCNVRC=7700000C. The MTT cost is identical either way (8
+     * lines per job), so nothing is traded away for it.
+     *
+     * $ is a national character, so this is a syntactically valid userid the
+     * converter accepts -- but one nobody allocates, which is the point: if
+     * the name ever became a real user, that user would start collecting the
+     * mail this exists to avoid. A caller who WANTS to be notified still can,
+     * by writing NOTIFY on the card themselves; an existing one is never
+     * touched. That is the whole reason for a placeholder rather than the real
+     * userid -- it leaves the choice with the submitter instead of making it
+     * for them in the noisier direction. */
     {
         char notify[32] = {0};
 
         if (!notify_present) {
-            rc = snprintf(notify, sizeof(notify), "NOTIFY=%s,", user);
+            rc = snprintf(notify, sizeof(notify), "NOTIFY=%s,", JOBCARD_NOTIFY_USER);
             if (rc < 0 || (size_t)rc >= sizeof(notify)) {
                 return JOBCARD_ERR_TOO_LONG;
             }

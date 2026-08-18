@@ -87,11 +87,11 @@ empty list means it is not.
 
 **One caveat survives the usermod:** it runs only for jobs whose card carries
 `NOTIFY`, because `HASPSSSM` gates the whole block on it. mvsMF therefore adds
-`NOTIFY=<authenticated userid>` to any card submitted through
-`PUT /zosmf/restjobs/jobs` that has none, which costs the submitter a TSO
-notification per job and is the only way to have the code recorded at all. A
-job that reaches JES2 by some other route still reports `null`. See
-[Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
+`NOTIFY=$MVSMF` to any card submitted through `PUT /zosmf/restjobs/jobs` that
+has none — a placeholder userid deliberately, because naming a real one queues
+a `SYS1.BRODCAST` record per job and that pool is small enough to fill in an
+afternoon. A job that reaches JES2 by some other route still reports `null`.
+See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install
 

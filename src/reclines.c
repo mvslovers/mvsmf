@@ -25,6 +25,7 @@ recline_init(RECLINE *rl, char *buf, size_t content_max)
 	rl->len         = 0;
 	rl->content_max = content_max;
 	rl->pending_lf  = 0;
+	rl->truncated   = 0;
 }
 
 #ifdef __MVS__
@@ -64,9 +65,12 @@ recline_put(RECLINE *rl, char c, char **rec, size_t *rec_len)
 	}
 
 	/* The terminator is never stored, so this counts content only: a line of
-	   exactly content_max characters fits. */
+	   exactly content_max characters fits. Past that the byte is dropped and
+	   the record is emitted short of the caller's line -- see reclines.h for
+	   why truncating beats failing here. */
 	if (rl->len >= rl->content_max) {
-		return RECLINE_TOOLONG;
+		rl->truncated = 1;
+		return RECLINE_MORE;
 	}
 
 	rl->buf[rl->len++] = c;

@@ -80,16 +80,16 @@ static void feed(const char *bytes, size_t n)
 
 	for (i = 0; i < n; i++) {
 		act = recline_put(&g_rl, bytes[i], &rec, &rec_len);
-		if (act == RECLINE_TOOLONG) {
-			g_toolong = 1;
-			return;			/* the handler fails the request here */
-		}
+		/* No early exit: an over-long line no longer stops the stream, it
+		   loses its overflow and framing continues -- which is the whole
+		   point of #243. The handlers read rl.truncated after the body. */
 		if (act == RECLINE_RECORD && g_nrec < MAX_RECS) {
 			memcpy(g_rec[g_nrec], rec, rec_len);
 			g_reclen[g_nrec] = rec_len;
 			g_nrec++;
 		}
 	}
+	g_toolong = g_rl.truncated;
 }
 
 /* The end of the body: a trailing record only if content is pending. */
@@ -163,14 +163,40 @@ int main(void)
 	CHECK(rec_is(0, line80, 80), "LRECL: all 80 columns kept");
 	CHECK(canary_intact(80), "LRECL: nothing written past the record length");
 
-	/* 3. one column too many is still rejected, and before storing anything */
+	/* 3. one column too many loses the overflow, and the record still lands.
+	 *    Measured against real z/OSMF v29 (#243): it truncates to LRECL rather
+	 *    than rejecting, and reports the truncation once at the end. */
 	feed_start(80);
 	memcpy(stream, line81, 81);
 	memcpy(stream + 81, LF, 1);
 	feed(stream, 82);
-	CHECK_EQ(g_toolong, 1, "over-long: 81 columns into LRECL=80 rejected");
-	CHECK_EQ(g_nrec, 0, "over-long: no record emitted");
+	CHECK_EQ(g_toolong, 1, "over-long: 81 columns into LRECL=80 flagged truncated");
+	CHECK_EQ(g_nrec, 1, "over-long: the record is still emitted");
+	CHECK(rec_is(0, line81, 80), "over-long: emitted at exactly 80 columns");
 	CHECK(canary_intact(80), "over-long: nothing written past the record length");
+
+	/* 3b. and the stream survives it -- everything after the over-long line
+	 *     is written, which is the half of #243 that actually lost data. The
+	 *     shape is the one measured on z/OSMF: 5 / 80 / 6. */
+	feed_start(80);
+	{
+		char   body[256];	/* the measured body is 214 bytes -- stream[] is 128 */
+		size_t n = 0;
+
+		memcpy(body + n, "ERSTE", 5);   n += 5;
+		memcpy(body + n, LF, 1);        n += 1;
+		memset(body + n, 'X', 200);     n += 200;
+		memcpy(body + n, LF, 1);        n += 1;
+		memcpy(body + n, "DRITTE", 6);  n += 6;
+		memcpy(body + n, LF, 1);        n += 1;
+		feed(body, n);
+	}
+	CHECK_EQ(g_toolong, 1, "over-long mid-body: truncation flagged");
+	CHECK_EQ(g_nrec, 3, "over-long mid-body: all three records emitted");
+	CHECK(rec_is(0, "ERSTE", 5), "over-long mid-body: first record intact");
+	CHECK_EQ((int)g_reclen[1], 80, "over-long mid-body: second record cut to 80");
+	CHECK(rec_is(2, "DRITTE", 6), "over-long mid-body: the record AFTER it survives");
+	CHECK(canary_intact(80), "over-long mid-body: nothing past the record length");
 
 	/* 4. CRLF at exactly the record length -- the CR ends it, the LF is
 	 *    swallowed and must not open a blank record */
@@ -238,7 +264,9 @@ int main(void)
 
 	feed_start(1);
 	feed("AB" LF, 3);
-	CHECK_EQ(g_toolong, 1, "LRECL=1: two columns rejected");
+	CHECK_EQ(g_toolong, 1, "LRECL=1: two columns flagged truncated");
+	CHECK_EQ(g_nrec, 1, "LRECL=1: the record still lands");
+	CHECK(rec_is(0, "A", 1), "LRECL=1: cut to the single column");
 
 	/* 12. whatever the caller computes as the usable length is what gets
 	 *     enforced -- RECFM=V passes LRECL-4, so the RDW is not spent on
@@ -248,7 +276,7 @@ int main(void)
 	feed(stream, 4);
 	CHECK_EQ(g_toolong, 0, "content_max=4: four columns accepted");
 	feed(stream, 1);
-	CHECK_EQ(g_toolong, 1, "content_max=4: the fifth column is rejected");
+	CHECK_EQ(g_toolong, 1, "content_max=4: the fifth column is dropped");
 
 	return mbt_test_summary("TSTRECL");
 }

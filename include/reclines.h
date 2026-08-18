@@ -35,16 +35,16 @@
  * compiler's (EBCDIC) character literals.
  */
 
-/* Result of recline_put(). */
+/* Result of recline_put(). There is no "too long" result: see `truncated`. */
 #define RECLINE_MORE		0	/* byte consumed, record not complete yet */
 #define RECLINE_RECORD		1	/* record complete, returned in rec/rec_len */
-#define RECLINE_TOOLONG		2	/* content would exceed content_max         */
 
 typedef struct {
 	char	*buf;			/* caller's buffer, at least content_max bytes  */
 	size_t	 len;			/* content bytes currently held in buf          */
 	size_t	 content_max;	/* usable content bytes per record, must be > 0 */
 	int	 pending_lf;		/* last byte was CR: a following LF belongs to it */
+	int	 truncated;		/* sticky: at least one record lost its overflow  */
 } RECLINE;
 
 /**
@@ -63,9 +63,16 @@ void recline_init(RECLINE *rl, char *buf, size_t content_max)	asm("MFRECINI");
  * must write that record out before feeding the next byte -- the buffer is
  * reused, and write_record() translates it in place.
  *
- * Returns RECLINE_TOOLONG when the byte would be content number
- * content_max + 1. Nothing is stored and the stream cannot be continued; the
- * caller is expected to fail the request.
+ * A byte past content_max is DISCARDED and `truncated` is set, and framing
+ * carries on to the terminator -- the record is then emitted at exactly
+ * content_max. This is what real z/OSMF does, measured on version 29: a body
+ * whose second of three lines is 200 characters lands in an FB/80 data set as
+ * three records of 5, 80 and 6, and the request answers 500 afterwards. It is
+ * deliberately not a per-byte error: aborting there loses every record after
+ * the offending one, which is the more destructive half of #243.
+ *
+ * The caller writes the records as they come and, once the whole body has
+ * been consumed, checks `truncated` to decide the response.
  *
  * Returns RECLINE_MORE otherwise; *rec and *rec_len are not touched.
  */

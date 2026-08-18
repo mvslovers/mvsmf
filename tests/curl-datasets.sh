@@ -22,6 +22,22 @@
 #   ./tests/curl-datasets.sh
 # =========================================================================
 
+# When a skip is right, and when it is a failure wearing a disguise
+# ---------------------------------------------------------------------------
+# A skip is right when the precondition is something this suite did not create
+# and cannot: other jobs on the system, a data set that only exists on one
+# stand, an ACTIVE started task, a client capability (python3, a Zowe CLI flag),
+# or a defect with a ticket behind it.
+#
+# A skip is wrong -- and reports a broken run as green -- when the precondition
+# is something this suite created through the very API under test, or was
+# explicitly asked to create with --setup. Its absence then means that API
+# misbehaved, and that has to be red. This is #304: the dataset-submit path went
+# unexercised for months behind exactly such a skip.
+#
+# Downstream skips ("no submitted job") are fine as they are: they only fire
+# after an assertion has already failed, so the run is red regardless.
+
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -420,8 +436,13 @@ ALL=$(curl -s -u "$AUTH" \
 COUNT=$(echo "$ALL" | grep -c .)
 
 if [ "$COUNT" -lt 2 ]; then
-	skip "start= returns the tail of the list (need two datasets under ${MVSMF_USER}.CURL)"
-	skip "start= beyond the last dataset (need two datasets under ${MVSMF_USER}.CURL)"
+	# This suite creates its own data sets under <user>.CURL earlier in the run,
+	# so fewer than two here means the listing under test lost them, not that
+	# the system is bare. Reporting that as a skip hides it (#304).
+	fail "start= returns the tail of the list" \
+		"the listing reported ${COUNT} data set(s) under ${MVSMF_USER}.CURL; this suite created more"
+	fail "start= beyond the last dataset" \
+		"the listing reported ${COUNT} data set(s) under ${MVSMF_USER}.CURL; this suite created more"
 else
 	SECOND=$(echo "$ALL" | sed -n 2p)
 
@@ -541,7 +562,7 @@ if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	assert_http_status "200" "$HTTP_CODE" "read dataset with volume prefix -(${VOLUME})"
 else
-	skip "read dataset with volume prefix (could not determine volume)"
+	fail "read dataset with volume prefix" "the listing reported no volume for ${TEST_SEQ} -- the value comes from the API under test"
 fi
 
 # --- Delete sequential dataset ---
@@ -580,7 +601,7 @@ if [ "$HTTP_CODE" = "201" ] && [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 		"${BASE_URL}/zosmf/restfiles/ds/-(${VOLUME})/${TEST_SEQ}")
 	assert_http_status "204" "$HTTP_CODE" "delete dataset with volume prefix -(${VOLUME})"
 else
-	skip "delete dataset with volume prefix (could not create or no volume)"
+	fail "delete dataset with volume prefix" "could not create the fixture, or the listing reported no volume for it"
 fi
 
 # --- Write PDS member ---
@@ -765,20 +786,23 @@ fi
 # count equals the limit would report moreRows true (#274). The limit is read
 # off an unlimited listing rather than hardcoded, so adding members above does
 # not quietly turn this into the truncated case again.
-TOTAL=$(curl -s -u "$AUTH" \
+# MEMBER_COUNT, not TOTAL: TOTAL is the suite's own test counter, and assigning
+# to it here reset the run tally mid-suite -- which is why the summary line read
+# "188 passed, 0 failed, 2 skipped (141 total)".
+MEMBER_COUNT=$(curl -s -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member" |
 	jq -r '.returnedRows' 2>/dev/null)
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H "X-IBM-Max-Items: ${TOTAL}" \
+BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H "X-IBM-Max-Items: ${MEMBER_COUNT}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ] &&
-   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "$TOTAL" ]; then
+   [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "$MEMBER_COUNT" ]; then
 	pass "max-items equal to the member count returns every member"
 else
 	fail "max-items equal to the member count returns every member" \
-		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) of $TOTAL"
+		"got HTTP $HTTP_CODE rows=$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null) of $MEMBER_COUNT"
 fi
 assert_json_field_absent "$CONTENT" 'has("moreRows")' \
 	"max-items equal to the member count: no moreRows"
@@ -970,7 +994,7 @@ if [ "$HTTP_CODE" = "201" ]; then
 	fi
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
 else
-	skip "list members of a sequential dataset (could not create ${LIST_SEQ})"
+	fail "list members of a sequential dataset" "could not create ${LIST_SEQ} (HTTP ${HTTP_CODE})"
 fi
 
 BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
@@ -996,7 +1020,7 @@ if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	assert_http_status "200" "$HTTP_CODE" "list members with volume prefix -(${PDS_VOLUME})"
 else
-	skip "list members with volume prefix (could not determine volume)"
+	fail "list members with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
 fi
 
 # --- Read PDS member ---
@@ -1025,7 +1049,7 @@ if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	assert_http_status "200" "$HTTP_CODE" "read member with volume prefix -(${PDS_VOLUME})"
 else
-	skip "read member with volume prefix (could not determine volume)"
+	fail "read member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
 fi
 
 # --- Write PDS member with volume prefix ---
@@ -1040,7 +1064,7 @@ if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
 		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}(VOLMBR)")
 	assert_http_status "204" "$HTTP_CODE" "write member with volume prefix -(${PDS_VOLUME})"
 else
-	skip "write member with volume prefix (could not determine volume)"
+	fail "write member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
 fi
 
 # --- Rename PDS member ---
@@ -1107,7 +1131,7 @@ if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
 		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}(VOLMBR)")
 	assert_http_status "204" "$HTTP_CODE" "delete member with volume prefix -(${PDS_VOLUME})"
 else
-	skip "delete member with volume prefix (could not determine volume)"
+	fail "delete member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
 fi
 
 # --- Delete PDS member: not found ---
@@ -1175,7 +1199,7 @@ if [ "$HTTP_CODE" = "201" ]; then
 	fi
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
 else
-	skip "member of a sequential dataset (could not create ${PROBE_SEQ})"
+	fail "member of a sequential dataset" "could not create ${PROBE_SEQ} (HTTP ${HTTP_CODE})"
 fi
 
 # writing into a dataset that does not exist. fopen("w") auto-allocates an
@@ -1296,7 +1320,7 @@ if [ "$HTTP_CODE" = "201" ]; then
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}.NOPE2")
 	assert_http_status "404" "$HTTP_CODE" "rename non-existent dataset returns 404"
 else
-	skip "rename sequential dataset (could not create source)"
+	fail "rename sequential dataset" "could not create the rename source"
 fi
 
 # =========================================================================
@@ -2114,7 +2138,7 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 			"expected 0 bytes, got $CONTENT"
 	fi
 else
-	skip "failed-PUT atomicity (could not create ${ATOM_SEQ}/${ATOM_PDS})"
+	fail "failed-PUT atomicity" "could not create ${ATOM_SEQ}/${ATOM_PDS}"
 fi
 
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true

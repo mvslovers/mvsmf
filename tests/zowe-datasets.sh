@@ -359,7 +359,10 @@ if [ "$RC" -eq 0 ]; then
 	pass "write PDS member (rc=$RC)"
 	MEMBER_WRITE_OK=1
 else
-	skip "write PDS member (known issue: member URI routing)"
+	# This was labelled a known issue with no ticket behind it, and the upload
+	# has since started working -- so the branch was dead while still able to
+	# swallow a regression silently. It is a failure now (#304).
+	fail "write PDS member" "upload to ${TEST_PDS}(TESTMBR) failed (rc=$RC)"
 	MEMBER_WRITE_OK=0
 fi
 

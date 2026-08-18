@@ -54,31 +54,6 @@ static int dataset_etag(Session *session, const char *dataset,
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
 
-// Helper functions for memory management
-static void cleanup_resources(char* buffer, FILE* fp) {
-    if (buffer) {
-        free(buffer);
-        buffer = NULL;
-    }
-    if (fp) {
-        fclose(fp);
-        fp = NULL;
-    }
-}
-
-static char* allocate_buffer(FILE* fp, int* rc) {
-    if (!fp || fp->lrecl <= 0) {
-        *rc = ERR_INVALID_PARAM;
-        return NULL;
-    }
-
-    char* buffer = calloc(1, fp->lrecl + 2);
-    if (!buffer) {
-        *rc = ERR_MEMORY;
-    }
-    return buffer;
-}
-
 // Helper function for HTTP headers
 //
 // etag is NULL unless the client asked for one with X-IBM-Return-Etag. The

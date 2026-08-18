@@ -1497,7 +1497,7 @@ for COLS in 77 78 79 80; do
 done
 
 echo ""
-echo "--- Text framing: one column too many is still rejected ---"
+echo "--- Text framing: one column too many is truncated, not refused ---"
 
 awk 'BEGIN { s = ""; while (length(s) < 81) s = s "A"; print substr(s, 1, 81) }' \
 	> /tmp/curl_ds_wide.txt
@@ -1508,11 +1508,23 @@ BODY=$(curl -s -w '\n%{http_code}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
-assert_http_status "500" "$HTTP_CODE" "an 81-column line is rejected"
-if echo "$CONTENT" | grep -qi "Record too long"; then
-	pass "the rejection names the reason (Record too long)"
+assert_http_status "500" "$HTTP_CODE" "an 81-column line reports 500"
+# The status stays 500, but the reason changed with #243: real z/OSMF truncates
+# the record to LRECL and writes it rather than refusing, so "Record too long"
+# no longer describes what happened.
+if echo "$CONTENT" | grep -qi "truncated"; then
+	pass "the failure names the truncation"
 else
-	fail "the rejection names the reason" "got: $CONTENT"
+	fail "the failure names the truncation" "got: $CONTENT"
+fi
+
+# ...and the record is there, cut to LRECL. The half of #243 that lost data was
+# that the write got abandoned instead.
+WIDE_RT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)" | sed -n 1p)
+if [ "${#WIDE_RT}" = "80" ]; then
+	pass "the over-long record landed, cut to LRECL 80"
+else
+	fail "the over-long record landed, cut to LRECL 80" "got ${#WIDE_RT} columns"
 fi
 
 echo ""
@@ -2038,6 +2050,39 @@ printf 'ORIGINAL LINE ONE\nORIGINAL LINE TWO\n' > /tmp/curl_ds_atom_good.txt
 	printf 'LAST GOOD LINE\n'
 } > /tmp/curl_ds_atom_long.txt
 
+# What the target must hold after that PUT, measured against real z/OSMF v29
+# (#243): the over-long record is truncated to LRECL and the record AFTER it is
+# written. Three records of 15, 80 and 14 -- not the previous content, which
+# the reference does not preserve either, and not a body cut short at the
+# offending line, which is what mvsMF used to leave behind.
+assert_truncated_body() {
+	local uri="$1" label="$2"
+	local body n l1 l2 l3
+	body=$(curl -s -u "$AUTH" "$uri")
+	n=$(printf '%s\n' "$body" | grep -c .)
+	l1=$(printf '%s\n' "$body" | sed -n 1p)
+	l2=$(printf '%s\n' "$body" | sed -n 2p)
+	l3=$(printf '%s\n' "$body" | sed -n 3p)
+
+	if [ "$n" != "3" ]; then
+		fail "$label" "expected 3 records, got ${n}"
+		return
+	fi
+	if [ "$l1" != "FIRST GOOD LINE" ]; then
+		fail "$label" "record 1 is '${l1}'"
+		return
+	fi
+	if [ "${#l2}" != "80" ]; then
+		fail "$label" "record 2 is ${#l2} columns, expected it cut to LRECL 80"
+		return
+	fi
+	if [ "$l3" != "LAST GOOD LINE" ]; then
+		fail "$label" "record 3 is '${l3}' -- the record after the over-long one was lost"
+		return
+	fi
+	pass "$label (3 records, the long one cut to 80, the one after it kept)"
+}
+
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
 
@@ -2060,18 +2105,10 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 		-H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_long.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
-	assert_http_status "500" "$HTTP_CODE" "seq: over-long record is rejected"
+	assert_http_status "500" "$HTTP_CODE" "seq: over-long record reports 500"
 
-	# A mid-body failure is NOT yet atomic: the records written before the
-	# offending line are already committed. Reported as a skip rather than a
-	# failure so the suite stays green on known behaviour -- turn this into an
-	# assertion when #243 lands.
-	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
-	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
-		pass "seq: a mid-body failure leaves the previous content intact (#243 fixed?)"
-	else
-		skip "seq: a mid-body failure still commits what it wrote (known, #243)"
-	fi
+	assert_truncated_body "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" \
+		"seq: over-long record truncated, body written in full"
 
 	# --- member: the same, where CLOSE is what commits (issue #243) ---
 	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
@@ -2082,14 +2119,10 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 		-H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_long.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
-	assert_http_status "500" "$HTTP_CODE" "member: over-long record is rejected"
+	assert_http_status "500" "$HTTP_CODE" "member: over-long record reports 500"
 
-	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
-	if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
-		pass "member: a mid-body failure leaves the previous content intact (#243 fixed?)"
-	else
-		skip "member: a mid-body failure still commits what it wrote (known, #243)"
-	fi
+	assert_truncated_body "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)" \
+		"member: over-long record truncated, body written in full"
 
 	# Re-seed: the mid-body case above deliberately damaged the member, and the
 	# #246 case below has to start from a known state or it measures the wrong

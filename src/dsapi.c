@@ -715,11 +715,11 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
         default:
             // Text mode - convert from ASCII to EBCDIC
 
-            /* Backstop only: recline_put() already rejects a line longer than
-               content_max with "Record too long", so this cannot normally
-               fire. It stays as the last line of defence against a caller
-               and this function disagreeing about the limit -- which is
-               precisely how issue #198 happened. */
+            /* Backstop only: recline_put() already caps a line at content_max
+               (truncating the overflow, #243), so this cannot normally fire.
+               It stays as the last line of defence against a caller and this
+               function disagreeing about the limit -- which is precisely how
+               issue #198 happened. */
             if (content_max && record_length > content_max) {
                 record_length = content_max;
             }

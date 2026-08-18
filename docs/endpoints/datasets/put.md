@@ -55,13 +55,15 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 ## Text mode framing
 - A record ends at LF, CR or CRLF. The terminator is not part of the record.
-- A line of exactly LRECL characters is accepted. Only a longer line is
-  rejected, with "Record too long"; it is never silently split across two
+- A line of exactly LRECL characters is accepted. A longer line is **truncated
+  to LRECL** — the overflow is discarded, the record is written, the rest of the
+  body is written after it, and the request then answers 500 "Record truncated
+  to the record length of the data set". It is never silently split across two
   records. Until issue #233 the usable length was LRECL-2, so 80-column source
   could not be uploaded into an FB80 dataset at all.
 - For RECFM=V the usable line length is LRECL-4: the record descriptor word is
   not content. A longer line used to be split into a second record without
-  notice and is now rejected.
+  notice, and is now truncated like any other.
 - A blank line is written as a record of blanks — it used to disappear (#233).
 - A body whose last line carries no terminator still produces that record, and
   a body ending in a newline does not gain a trailing blank one.
@@ -71,15 +73,18 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
-- A request that fails **before its first record is framed** leaves the dataset
-  exactly as it was — a dropped connection, a body that never arrives, a body
-  whose very first line is over-long. The dataset is not opened for output until
-  there is a record to put in it (issue #246).
-- A request that fails **after** that point still does not roll back. On
-  "Record too long" halfway through a body, the records written up to that line
-  are in the dataset and what was there before is gone. Making a mid-body
-  failure atomic needs the write staged elsewhere and swapped in on success,
-  which is open as issue #243.
+- A request that produces **no record at all** leaves the dataset exactly as it
+  was — a dropped connection, a body that never arrives. The dataset is not
+  opened for output until there is a record to put in it (issue #246). An
+  over-long first line is no longer such a case: it is truncated to LRECL and
+  written like any other record.
+- **A failed write does not roll back, and real z/OSMF does not roll back
+  either.** Measured on version 29 (#243): a body whose second of three lines is
+  200 characters lands in an FB/80 data set as three records of 5, 80 and 6, the
+  previous content replaced, and answers 500. mvsMF matches that. Staging the
+  write elsewhere and swapping it in would turn a PUT into
+  allocate/write/delete/rename and would not buy conformance, because there is
+  nothing to conform to.
 - An empty body is a truncate, not a no-op: `Content-Length: 0` empties the
   dataset.
 

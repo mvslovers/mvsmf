@@ -82,25 +82,34 @@ SE '$HASP165 JOB 1395  NTFYRL ENDED- MAX COND CODE 0012  ',LOGON,USER=(IBMUSER)
 
 and `LOGON` means: if that userid has a `SYS1.BRODCAST` mail slot, queue the
 message there until it next logs on. `SYS1.BRODCAST` is a fixed-size direct
-data set — 1440 records of 129 bytes on the reference stand — and every
-API-submitted job consumes one. **One afternoon of running the test suite
-filled it**: 84 messages queued, and from then on every further notify was
-discarded without a word, including those from real TSO sessions.
+data set — 1440 records of 129 bytes on the reference stand — and a defined
+notify target consumes one record per job. **84 of them accumulated in a single
+afternoon** of running this project's test suite, which is the reason to care:
+every API-submitted job would eat into that pool forever.
 
-`$MVSMF` has no mail slot, so it consumes nothing. Measured on MVS 3.8j, three
-otherwise identical jobs, `SYS1.BRODCAST` dumped with `IDCAMS PRINT` before and
-after each:
+`$MVSMF` is not a defined userid, so it consumes nothing. Measured on MVS 3.8j,
+one job per case with the whole data set dumped by `IDCAMS PRINT` in between:
 
-| `NOTIFY=` | userid defined | `JCTCNVRC` | `retcode` | BRODCAST record | MTT lines |
-|---|---|---|---|---|---|
-| `IBMUSER` | yes | `7700000C` | `CC 0012` | **yes** | 8 |
-| `MVSCE01` | yes | — | — | **yes** | 8 |
-| `NOTIFYX` | no | `7700000C` | `CC 0012` | **no** | 8 |
+| `NOTIFY=` | userid defined | `JCTCNVRC` | BRODCAST record added | MTT lines |
+|---|---|---|---|---|
+| `MVSCE01` | yes | — | **yes** (oldest of the 84 recycled) | 8 |
+| `IBMUSER` | yes | `7700000C` | no — see below | 8 |
+| `NOTIFYX` | no | `7700000C` | **no** | 8 |
 
 No `IKJ*`/`IEE*`/`IEA*` message appeared for the undefined userid in a ten
 minute window — an unknown notify target is not an error, it is a no-op. The
 MTT cost is the same in every row, so nothing is traded away: the `SE` line is
 written whether or not the target exists.
+
+**The `IBMUSER` row is unexplained and is deliberately not claimed as a
+result.** All 84 accumulated records belong to it, and at some point its
+messages simply stopped being stored — silently, with no error anywhere. What
+governs that is not established here. Nor are the records reachable the obvious
+way: `LISTBC` in batch answers `IKJ56951I NO BROADCAST MESSAGES` for records an
+`IDCAMS PRINT` of the data set plainly shows. Draining a stand that has already
+filled up is a sysprog job (`SYNC` under the `ACCOUNT` command), not something
+this API does. None of it changes the decision — the point of `$MVSMF` is not
+to manage the pool but to stay out of it.
 
 `$` is a national character, so `$MVSMF` is a valid userid as far as the
 converter is concerned — verified, it converts and records the code — while

@@ -88,9 +88,9 @@ empty list means it is not.
 **One caveat survives the usermod:** it runs only for jobs whose card carries
 `NOTIFY`, because `HASPSSSM` gates the whole block on it. mvsMF therefore adds
 `NOTIFY=$MVSMF` to any card submitted through `PUT /zosmf/restjobs/jobs` that
-has none — a placeholder userid deliberately, because naming a real one queues
-a `SYS1.BRODCAST` record per job and that pool is small enough to fill in an
-afternoon. A job that reaches JES2 by some other route still reports `null`.
+has none — a placeholder userid deliberately, because a *defined* notify target
+consumes a `SYS1.BRODCAST` mail record per job, and 84 of those piled up in a
+single afternoon of running this project's test suite. A job that reaches JES2 by some other route still reports `null`.
 See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install

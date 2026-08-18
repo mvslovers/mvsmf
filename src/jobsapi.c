@@ -2197,16 +2197,25 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
      *
      * Why a placeholder and not the caller's own userid, which is what this
      * did first: JES2 answers the notify with SE '$HASP165 ...',LOGON,USER=(x),
-     * and for a userid that HAS a SYS1.BRODCAST mail slot that queues one
-     * record per job until the user next logs on. That pool is small and fixed
-     * -- 1440 records on the reference stand -- and one afternoon of running
-     * the test suite filled it: 84 messages queued, and everything after that
-     * silently discarded, including notifies from real TSO sessions. A userid
-     * with no mail slot consumes nothing and provokes no message: measured on
-     * MVS 3.8j, two otherwise identical jobs, the one naming a defined user
-     * left a BRODCAST record and the one naming $MVSMF left none, while both
-     * recorded JCTCNVRC=7700000C. The MTT cost is identical either way (8
-     * lines per job), so nothing is traded away for it.
+     * which for a *defined* userid consumes a SYS1.BRODCAST mail record.
+     * Measured on MVS 3.8j, one job per case with the whole data set dumped by
+     * IDCAMS PRINT in between: NOTIFY=MVSCE01 added a record (and the oldest
+     * of the 84 already there was recycled to make room), while an undefined
+     * userid added none. Both recorded JCTCNVRC=7700000C, and both cost the
+     * same 8 MTT lines, so nothing is traded away for it -- the SE line is
+     * written whether or not the target exists, and an undefined target draws
+     * no IKJ/IEE/IEA message at all.
+     *
+     * Those 84 records accumulated in a single afternoon of running the test
+     * suite against this code, which is the reason to care: the pool is small
+     * and fixed (1440 records of 129 bytes on the reference stand) and every
+     * API-submitted job would eat into it forever. What happens once a user
+     * reaches its limit is *not* established here -- further messages for that
+     * userid simply stopped being stored, silently and with no error -- and
+     * LISTBC in batch reports IKJ56951I NO BROADCAST MESSAGES for records the
+     * dump plainly shows, so they are not reachable that way either. All of
+     * that is an argument for not filling it in the first place, not a
+     * mechanism this code relies on.
      *
      * $ is a national character, so this is a syntactically valid userid the
      * converter accepts -- but one nobody allocates, which is the point: if

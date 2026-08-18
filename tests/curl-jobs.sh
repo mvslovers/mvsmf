@@ -134,6 +134,20 @@ assert_json_array_nonempty() {
 	fi
 }
 
+# Does the test PDS exist? The dataset-submit tests gated on "--setup ran in
+# this invocation", so they skipped whenever the PDS was already there from an
+# earlier run -- which is most of the time.
+have_test_pds() {
+	local resp
+	resp=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
+	local body status
+	status=$(echo "$resp" | tail -n1)
+	body=$(echo "$resp" | sed '$d')
+	[ "$status" = "200" ] || return 1
+	[ "$(echo "$body" | jq -r '.returnedRows' 2>/dev/null)" != "0" ]
+}
+
 # curl wrapper: returns "HTTP_STATUS\nBODY"
 do_curl() {
 	local method="$1"
@@ -178,57 +192,65 @@ setup_test_pds() {
 	echo ""
 	echo "=== SETUP: Creating test PDS ==="
 
-	# Allocate PDS by submitting allocation JCL
-	local alloc_jcl
-	alloc_jcl=$(sed "s/\${USER}/${MVSMF_USER}/g" "${JCL_DIR}/allocpds.jcl")
-
+	# Allocate the PDS through the datasets API rather than by submitting
+	# allocation JCL. The JCL named a UNIT/VOLUME pair, so it JCL-errored on any
+	# stand that does not have it -- setup then returned 1, SETUP_DONE stayed 0,
+	# and every dataset-submit test skipped while the suite still reported green.
 	local resp
-	resp=$(do_curl PUT \
-		-H "Content-Type: text/plain" \
-		--data-binary "$alloc_jcl" \
-		"${BASE_URL}/zosmf/restjobs/jobs")
-	split_response "$resp"
-
-	if [ "$HTTP_STATUS" != "200" ]; then
-		echo "  WARN: PDS allocation submit failed (HTTP $HTTP_STATUS)"
-		echo "  $BODY"
-		return 1
-	fi
-
-	local alloc_jobname alloc_jobid
-	alloc_jobname=$(echo "$BODY" | jq -r '.jobname')
-	alloc_jobid=$(echo "$BODY" | jq -r '.jobid')
-	echo "  Allocation job: ${alloc_jobname}/${alloc_jobid}"
-
-	wait_for_output "$alloc_jobname" "$alloc_jobid" || true
-
-	# Upload IEFBR14 JCL member
-	resp=$(do_curl PUT \
-		-H "Content-Type: text/plain" \
-		-H "Content-Length: $(wc -c < "${JCL_DIR}/iefbr14.jcl")" \
-		--data-binary @"${JCL_DIR}/iefbr14.jcl" \
-		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(IEFBR14)")
-	split_response "$resp"
-
-	if [ "$HTTP_STATUS" = "204" ] || [ "$HTTP_STATUS" = "200" ]; then
-		echo "  Uploaded IEFBR14 member to ${TEST_PDS}"
-		SETUP_DONE=1
+	if have_test_pds; then
+		echo "  ${TEST_PDS} already exists, reusing it"
 	else
-		echo "  WARN: Failed to upload member (HTTP $HTTP_STATUS)"
-		echo "  $BODY"
-		return 1
+		resp=$(do_curl POST \
+			-H "Content-Type: application/json" \
+			-d '{"dsorg":"PO","alcunit":"TRK","primary":1,"secondary":1,"dirblk":5,"recfm":"FB","blksize":800,"lrecl":80}' \
+			"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
+		split_response "$resp"
+
+		if [ "$HTTP_STATUS" != "201" ] && [ "$HTTP_STATUS" != "200" ]; then
+			echo "  WARN: PDS allocation failed (HTTP $HTTP_STATUS)"
+			echo "  $BODY"
+			return 1
+		fi
+		echo "  Allocated ${TEST_PDS}"
 	fi
+
+	local member
+	for member in IEFBR14 NONOTFY; do
+		local src
+		case "$member" in
+			IEFBR14) src="${JCL_DIR}/iefbr14.jcl" ;;
+			NONOTFY) src="${JCL_DIR}/nonotify.jcl" ;;
+		esac
+
+		resp=$(do_curl PUT \
+			-H "Content-Type: text/plain" \
+			-H "Content-Length: $(wc -c < "$src")" \
+			--data-binary @"$src" \
+			"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${member})")
+		split_response "$resp"
+
+		if [ "$HTTP_STATUS" != "204" ] && [ "$HTTP_STATUS" != "200" ]; then
+			echo "  WARN: Failed to upload ${member} (HTTP $HTTP_STATUS)"
+			echo "  $BODY"
+			return 1
+		fi
+		echo "  Uploaded ${member} to ${TEST_PDS}"
+	done
+
+	SETUP_DONE=1
 }
 
 cleanup_test_pds() {
 	echo ""
 	echo "=== CLEANUP: Deleting test PDS ==="
 
-	# Delete the member first, then the PDS
-	local resp
-	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(IEFBR14)")
-	split_response "$resp"
-	echo "  Delete member IEFBR14: HTTP $HTTP_STATUS"
+	# Delete the members first, then the PDS
+	local resp member
+	for member in IEFBR14 NONOTFY; do
+		resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${member})")
+		split_response "$resp"
+		echo "  Delete member ${member}: HTTP $HTTP_STATUS"
+	done
 
 	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
 	split_response "$resp"
@@ -336,6 +358,195 @@ test_submit_notify_sysuid_trailing_param() {
 	fi
 }
 
+test_submit_without_notify_gets_retcode() {
+	echo ""
+	echo "--- Submit Job: card without NOTIFY still reports a retcode (issue #307) ---"
+
+	# HASPSSSM gates every write to JCTCNVRC/JCTJTFLG/JCTJTCC on "CLI JCTTSUAF,0",
+	# so a job whose card carries no NOTIFY used to record no completion code at
+	# all and answered "retcode": null however it ended. mvsMF now injects
+	# NOTIFY=<caller> onto the continuation card it already generates for
+	# USER=/PASSWORD=. The fixture ends CC 0012, so a plain non-null assertion
+	# would not be enough -- the value itself has to arrive.
+	local jcl
+	jcl=$(cat "${JCL_DIR}/nonotify.jcl")
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit JCL without NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "retcode for job submitted without NOTIFY (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0012" \
+			"retcode for job submitted without NOTIFY"
+
+		# The notify must name the placeholder, not the caller. A real userid
+		# queues one SYS1.BRODCAST record per job until it next logs on, and
+		# that pool fills in an afternoon -- after which every notify on the
+		# system is discarded, including those from real TSO sessions.
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files/3/records")
+		split_response "$resp"
+		case "$BODY" in
+			*'NOTIFY=$MVSMF'*) pass "injected NOTIFY names the placeholder" ;;
+			*) fail "injected NOTIFY names the placeholder" \
+			        "no NOTIFY=\$MVSMF in JESJCL" ;;
+		esac
+		case "$BODY" in
+			*"NOTIFY=${MVSMF_USER}"*) fail "injected NOTIFY must not name the caller" \
+			        "JESJCL carries NOTIFY=${MVSMF_USER}" ;;
+			*) pass "injected NOTIFY does not name the caller" ;;
+		esac
+	else
+		skip "retcode for job submitted without NOTIFY (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_submit_literal_notify_not_duplicated() {
+	echo ""
+	echo "--- Submit Job: card with a literal NOTIFY keeps exactly one (issue #307) ---"
+
+	# The failure mode of the injection: a card that already names a userid must
+	# not get a second NOTIFY, or JES2 rejects the statement with a duplicate
+	# keyword and the job never runs. The existing fixtures all write
+	# NOTIFY=&SYSUID, which takes the rewrite branch instead of the presence
+	# test, so this is the only case that exercises the flag.
+	local jcl
+	jcl=$(printf '%s\n%s\n' \
+		"//DUPNOTF  JOB (ACCT),'DUP NOTIFY',CLASS=A,NOTIFY=${MVSMF_USER}" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit card with a literal NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "literal NOTIFY not duplicated (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		# A second NOTIFY would show up here as "JCL ERROR", not "CC 0000".
+		assert_json_field "$BODY" '.retcode' "CC 0000" \
+			"literal NOTIFY not duplicated"
+	else
+		skip "literal NOTIFY not duplicated (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_submit_notify_inside_programmer_name() {
+	echo ""
+	echo "--- Submit Job: NOTIFY inside the quoted programmer name (issue #307) ---"
+
+	# The case find_notify_operand() exists for. A plain strstr() finds "NOTIFY"
+	# in the programmer name and the following strchr() finds the '=' of
+	# CLASS=A, so the card reads as carrying a NOTIFY it does not have -- and
+	# the injection is then skipped for a card that needs it. The step runs
+	# clean, so a retcode of CC 0000 means the NOTIFY went in; null means the
+	# quoted text was mistaken for one.
+	local jcl
+	jcl=$(printf '%s\n%s\n' \
+		"//NOTFYQ   JOB (ACCT),'NOTIFY ME',CLASS=A,MSGCLASS=H" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit with NOTIFY in the programmer name"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "NOTIFY in programmer name not mistaken for an operand (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0000" \
+			"NOTIFY in programmer name not mistaken for an operand"
+	else
+		skip "NOTIFY in programmer name (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_submit_jobcard_too_long() {
+	echo ""
+	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
+
+	# process_jobcard() has to append a comma to the last job card line to
+	# continue onto the USER=/PASSWORD= card it generates, and cannot once the
+	# line reaches column 70. That used to be reported as "No valid JOB card
+	# found in submitted JCL", which sends people looking for a missing card.
+	# It now has its own message and reason code 12.
+	local head="//OVRFLOW  JOB (ACCT),'"
+	local tail="',CLASS=A"
+	local pad=$((70 - ${#head} - ${#tail}))
+	local name
+	name=$(printf '%*s' "$pad" '' | tr ' ' 'X')
+
+	local card="${head}${name}${tail}"
+	if [ "${#card}" -ne 70 ]; then
+		fail "JOB card too long fixture" "built a ${#card}-column card, expected 70"
+		return
+	fi
+
+	local jcl
+	jcl=$(printf '%s\n%s\n' "$card" '//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "submit JOB card with no room for injection"
+	assert_json_field "$BODY" '.reason' "12" "JOB card too long reason code"
+
+	local msg
+	msg=$(echo "$BODY" | jq -r '.message' 2>/dev/null) || msg=""
+	case "$msg" in
+		*"too long"*) pass "JOB card too long message (\"$msg\")" ;;
+		*)            fail "JOB card too long message" "got '$msg'" ;;
+	esac
+}
+
 test_submit_invalid_intrdr_header() {
 	echo ""
 	echo "--- Submit Job: invalid X-IBM-Intrdr-Mode header ---"
@@ -372,15 +583,19 @@ test_submit_from_dataset() {
 	echo ""
 	echo "--- Submit Job: from dataset ---"
 
-	if [ "$SETUP_DONE" -eq 0 ]; then
-		skip "submit from dataset (no test PDS - run with --setup)"
+	if ! have_test_pds; then
+		skip "submit from dataset (no ${TEST_PDS} - run with --setup)"
 		return
 	fi
 
+	# The reference is //'DSN(MEMBER)' -- apostrophes around the name, inside the
+	# slashes. The form this test used, '//DSN(MEMBER)', is rejected with 400
+	# "Cannot open dataset", so it was asserting nothing even on a stand where
+	# the PDS existed.
 	local resp
 	resp=$(do_curl PUT \
 		-H "Content-Type: application/json" \
-		-d "{\"file\":\"'//${TEST_PDS}(IEFBR14)'\"}" \
+		-d "{\"file\":\"//'${TEST_PDS}(IEFBR14)'\"}" \
 		"${BASE_URL}/zosmf/restjobs/jobs")
 	split_response "$resp"
 
@@ -420,6 +635,46 @@ test_submit_large_jcl() {
 		wait_for_output "$jn" "$ji" || true
 		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 	fi
+}
+
+test_submit_from_dataset_without_notify() {
+	echo ""
+	echo "--- Submit Job: from dataset, card without NOTIFY (issue #307) ---"
+
+	# submit_file() is a separate caller of process_jobcard() from the inline
+	# path, so the injection has to be shown on this one too.
+	if ! have_test_pds; then
+		skip "dataset submit without NOTIFY (no ${TEST_PDS} - run with --setup)"
+		return
+	fi
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${TEST_PDS}(NONOTFY)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "dataset submit without NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "retcode for dataset submit without NOTIFY (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0012" \
+			"retcode for dataset submit without NOTIFY"
+	else
+		skip "retcode for dataset submit without NOTIFY (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
 test_submit_dataset_missing_file_field() {
@@ -1146,10 +1401,15 @@ fi
 test_submit_inline_jcl
 test_submit_inline_jcl_with_intrdr_headers
 test_submit_notify_sysuid_trailing_param
+test_submit_without_notify_gets_retcode
+test_submit_literal_notify_not_duplicated
+test_submit_notify_inside_programmer_name
+test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type
 test_submit_large_jcl
 test_submit_from_dataset
+test_submit_from_dataset_without_notify
 test_submit_dataset_missing_file_field
 test_submit_dataset_not_found
 

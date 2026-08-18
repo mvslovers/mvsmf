@@ -119,6 +119,17 @@ run_zowe() {
 	return $rc
 }
 
+# Does the test PDS exist? The dataset-submit tests gated on "--setup ran in
+# this invocation", so they skipped whenever the PDS was already there from an
+# earlier run -- which is most of the time.
+have_test_pds() {
+	# "zowe files list data-set" exits 0 on an empty list, so the exit code says
+	# nothing -- count the rows.
+	local out
+	out=$(zowe files list data-set "${TEST_PDS}" --rfj "${ZOWE_CONN[@]}" 2>/dev/null) || return 1
+	[ "$(echo "$out" | jq -r '.data.apiResponse.items | length' 2>/dev/null)" != "0" ]
+}
+
 # Run zowe command expecting JSON output
 run_zowe_json() {
 	local output
@@ -194,50 +205,71 @@ setup_test_pds() {
 	echo ""
 	echo "=== SETUP: Creating test PDS ==="
 
-	# Submit allocation JCL
-	local alloc_jcl
-	alloc_jcl=$(sed "s/\${USER}/${MVS_USER}/g" "${JCL_DIR}/allocpds.jcl")
-
-	local tmpfile
-	tmpfile=$(mktemp /tmp/mvsmf-alloc-XXXXXX.jcl)
-	echo "$alloc_jcl" > "$tmpfile"
-
+	# Allocate through the files API rather than by submitting allocation JCL.
+	# allocpds.jcl names a UNIT/VOLUME pair, so it JCL-errors on any stand that
+	# does not have it -- setup then returned 1, SETUP_DONE stayed 0, and every
+	# dataset-submit test skipped while the suite still reported green.
 	local output rc=0
-	output=$(run_zowe_json jobs submit local-file "$tmpfile") || rc=$?
-	rm -f "$tmpfile"
 
-	if [ $rc -ne 0 ]; then
-		echo "  WARN: PDS allocation submit failed"
-		echo "  $output"
-		return 1
-	fi
-
-	local alloc_jobid
-	alloc_jobid=$(echo "$output" | jq -r '.data.jobid')
-	echo "  Allocation job: ${alloc_jobid}"
-
-	wait_for_output "$alloc_jobid" || true
-
-	# Upload IEFBR14 member
-	local upload_rc=0
-	output=$(run_zowe files upload file-to-data-set \
-		"${JCL_DIR}/iefbr14.jcl" "${TEST_PDS}(IEFBR14)" 2>&1) || upload_rc=$?
-
-	if [ $upload_rc -eq 0 ]; then
-		echo "  Uploaded IEFBR14 member to ${TEST_PDS}"
-		SETUP_DONE=1
+	if have_test_pds; then
+		echo "  ${TEST_PDS} already exists, reusing it"
 	else
-		echo "  WARN: Failed to upload member"
-		echo "  $output"
-		return 1
+		output=$(run_zowe files create data-set-partitioned "${TEST_PDS}" \
+			--allocation-space-unit TRK --primary-space 1 --secondary-space 1 \
+			--directory-blocks 5 --record-format FB --record-length 80 \
+			--block-size 800) || rc=$?
+
+		if [ $rc -ne 0 ]; then
+			echo "  WARN: PDS allocation failed"
+			echo "  $output"
+			return 1
+		fi
+		echo "  Allocated ${TEST_PDS}"
 	fi
+
+	local member src
+	for member in IEFBR14 NONOTFY; do
+		case "$member" in
+			IEFBR14) src="${JCL_DIR}/iefbr14.jcl" ;;
+			NONOTFY) src="${JCL_DIR}/nonotify.jcl" ;;
+		esac
+
+		rc=0
+		output=$(run_zowe files upload file-to-data-set \
+			"$src" "${TEST_PDS}(${member})" 2>&1) || rc=$?
+
+		if [ $rc -ne 0 ]; then
+			echo "  WARN: Failed to upload ${member}"
+			echo "  $output"
+			return 1
+		fi
+		echo "  Uploaded ${member} to ${TEST_PDS}"
+	done
+
+	SETUP_DONE=1
 }
 
 cleanup_test_pds() {
 	echo ""
 	echo "=== CLEANUP: Deleting test PDS ==="
-	run_zowe files delete data-set "${TEST_PDS}" 2>/dev/null || true
-	echo "  Deleted ${TEST_PDS}"
+	# --for-sure is not optional: without it the delete is refused and the old
+	# "2>/dev/null || true; echo Deleted" reported success either way, so the
+	# test PDS survived every run.
+	local member rc=0
+	for member in IEFBR14 NONOTFY; do
+		rc=0
+		run_zowe files delete data-set "${TEST_PDS}(${member})" --for-sure \
+			>/dev/null 2>&1 || rc=$?
+		echo "  Delete member ${member}: rc=${rc}"
+	done
+
+	rc=0
+	run_zowe files delete data-set "${TEST_PDS}" --for-sure >/dev/null 2>&1 || rc=$?
+	if [ $rc -eq 0 ]; then
+		echo "  Deleted ${TEST_PDS}"
+	else
+		echo "  WARN: failed to delete ${TEST_PDS} (rc=${rc})"
+	fi
 }
 
 # =========================================================================
@@ -301,6 +333,44 @@ test_submit_notify_sysuid_trailing_param() {
 	fi
 }
 
+test_submit_without_notify_wait_for_output() {
+	echo ""
+	echo "--- Submit Job: --wait-for-output on a card without NOTIFY (issue #307) ---"
+
+	# The motivating case. HASPSSSM records a job's completion code only behind
+	# "CLI JCTTSUAF,0", so a card without NOTIFY used to answer "retcode": null
+	# for the whole life of the job -- and --wait-for-output polls until retcode
+	# is non-null, so this command never returned. mvsMF now injects
+	# NOTIFY=<caller> onto the card it already generates for USER=/PASSWORD=.
+	# Nothing here adds NOTIFY: that is the point.
+	local tmpfile
+	tmpfile=$(mktemp /tmp/mvsmf-nonotify-XXXXXX.jcl)
+	printf '%s\n%s\n' \
+		"//NONOTFY  JOB (ACCT),'NO NOTIFY TEST',CLASS=A,MSGCLASS=H" \
+		'//STEP1    EXEC PGM=IEFBR14' > "$tmpfile"
+
+	local output rc=0
+	output=$(run_zowe_json jobs submit local-file "$tmpfile" --wait-for-output) || rc=$?
+	rm -f "$tmpfile"
+
+	# Do not assert on the exit code: what this test is about is that the
+	# command *returned* and carries a retcode. Whether Zowe exits non-zero for
+	# a particular completion code is Zowe's business, not mvsMF's, and asserting
+	# it here would report a client convention as a server fault.
+	if [ $rc -ne 0 ]; then
+		echo "  NOTE: zowe exited rc=${rc}; judging the result from the JSON"
+	fi
+
+	assert_json_field "$output" '.data.retcode' "CC 0000" \
+		"retcode after --wait-for-output without NOTIFY"
+
+	local ji
+	ji=$(echo "$output" | jq -r '.data.jobid' 2>/dev/null) || ji="null"
+	if [ "$ji" != "null" ] && [ -n "$ji" ]; then
+		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+	fi
+}
+
 test_submit_large_jcl() {
 	echo ""
 	echo "--- Submit Job: large JCL (>2500 lines, issue #39) ---"
@@ -326,8 +396,8 @@ test_submit_from_dataset() {
 	echo ""
 	echo "--- Submit Job: from dataset ---"
 
-	if [ "$SETUP_DONE" -eq 0 ]; then
-		skip "submit from dataset (no test PDS - run with --setup)"
+	if ! have_test_pds; then
+		skip "submit from dataset (no ${TEST_PDS} - run with --setup)"
 		return
 	fi
 
@@ -343,6 +413,35 @@ test_submit_from_dataset() {
 		local ji
 		ji=$(echo "$output" | jq -r '.data.jobid')
 		wait_for_output "$ji" || true
+		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+	fi
+}
+
+test_submit_from_dataset_without_notify() {
+	echo ""
+	echo "--- Submit Job: from dataset, card without NOTIFY (issue #307) ---"
+
+	# submit_file() is a separate caller of process_jobcard() from the inline
+	# path, so the NOTIFY injection has to be shown on this one too.
+	if ! have_test_pds; then
+		skip "dataset submit without NOTIFY (no ${TEST_PDS} - run with --setup)"
+		return
+	fi
+
+	local output rc=0
+	output=$(run_zowe_json jobs submit data-set "'${TEST_PDS}(NONOTFY)'" \
+		--wait-for-output) || rc=$?
+
+	if [ $rc -ne 0 ]; then
+		echo "  NOTE: zowe exited rc=${rc}; judging the result from the JSON"
+	fi
+
+	assert_json_field "$output" '.data.retcode' "CC 0012" \
+		"retcode for dataset submit without NOTIFY"
+
+	local ji
+	ji=$(echo "$output" | jq -r '.data.jobid' 2>/dev/null) || ji="null"
+	if [ "$ji" != "null" ] && [ -n "$ji" ]; then
 		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
 	fi
 }
@@ -555,8 +654,10 @@ fi
 # Submit tests
 test_submit_local_file
 test_submit_notify_sysuid_trailing_param
+test_submit_without_notify_wait_for_output
 test_submit_large_jcl
 test_submit_from_dataset
+test_submit_from_dataset_without_notify
 
 # List tests
 test_list_jobs_default

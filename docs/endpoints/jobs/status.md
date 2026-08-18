@@ -57,7 +57,7 @@ The `retcode` field is derived from `JCTCNVRC` in the JES2 Job Control Table (JC
 
 That write-back is not part of MVS. It comes from JES2 usermod **`SYZJ201`** (source member `SYZYGY1A`), and mvsMF reports `null` for every job on a system without it — see [Prerequisites](../../../README.md#the-syzj201-usermod), which also covers why the `IEFACTRT` SMF exit is *not* required.
 
-### `retcode` is null for jobs submitted without `NOTIFY`
+### `retcode` needs `NOTIFY` — which mvsMF now adds for you
 
 `SYZYGY1A` is COPYed into `HASPSSSM` at sequence `T2269950` — inside the block guarded by
 
@@ -70,13 +70,61 @@ so it runs only for a job whose card carries `NOTIFY`. The same guard covers JES
 
 Measured, two jobs differing only in the job card: with `NOTIFY` the RC 12 arrives as `JCTCNVRC=7700000C` → `"CC 0012"`; without it the field stays `00000000` → `null`, although the step ran and returned 12 either way.
 
-**Workaround:** Add `NOTIFY=&SYSUID` (or a specific userid) to the job card:
+No z/OSMF client adds `NOTIFY` — on z/OS none needs to — so this made `retcode` null for essentially every job submitted through the API, and `zowe jobs submit --wait-for-output` polls until `retcode` is non-null and so never returned. Since #307, **`PUT /zosmf/restjobs/jobs` adds `NOTIFY=$MVSMF` to any card that carries none**, on the same continuation card it already generates for `USER=`/`PASSWORD=`; see [Submit Job → Limitations](submit.md#limitations). A card that already names a `NOTIFY` is untouched.
 
-```jcl
-//MYJOB  JOB (ACCT),'DESC',CLASS=A,MSGCLASS=A,NOTIFY=&SYSUID
+### Why the notify names a placeholder and not the caller
+
+It named the caller first. JES2 answers the notify with
+
+```
+SE '$HASP165 JOB 1395  NTFYRL ENDED- MAX COND CODE 0012  ',LOGON,USER=(IBMUSER)
 ```
 
-This affects clients like Zowe CLI that use `--wait-for-output`, which polls job status until `retcode` is non-null.
+and `LOGON` means: if that userid has a `SYS1.BRODCAST` mail slot, queue the
+message there until it next logs on. `SYS1.BRODCAST` is a fixed-size direct
+data set — 1440 records of 129 bytes on the reference stand — and a defined
+notify target consumes one record per job. **84 of them accumulated in a single
+afternoon** of running this project's test suite, which is the reason to care:
+every API-submitted job would eat into that pool forever.
+
+`$MVSMF` is not a defined userid, so it consumes nothing. Measured on MVS 3.8j,
+one job per case with the whole data set dumped by `IDCAMS PRINT` in between:
+
+| `NOTIFY=` | userid defined | `JCTCNVRC` | BRODCAST record added | MTT lines |
+|---|---|---|---|---|
+| `MVSCE01` | yes | — | **yes** (oldest of the 84 recycled) | 8 |
+| `IBMUSER` | yes | `7700000C` | no — see below | 8 |
+| `NOTIFYX` | no | `7700000C` | **no** | 8 |
+
+No `IKJ*`/`IEE*`/`IEA*` message appeared for the undefined userid in a ten
+minute window — an unknown notify target is not an error, it is a no-op. The
+MTT cost is the same in every row, so nothing is traded away: the `SE` line is
+written whether or not the target exists.
+
+**The `IBMUSER` row is unexplained and is deliberately not claimed as a
+result.** All 84 accumulated records belong to it, and at some point its
+messages simply stopped being stored — silently, with no error anywhere. What
+governs that is not established here. Nor are the records reachable the obvious
+way: `LISTBC` in batch answers `IKJ56951I NO BROADCAST MESSAGES` for records an
+`IDCAMS PRINT` of the data set plainly shows. Draining a stand that has already
+filled up is a sysprog job (`SYNC` under the `ACCOUNT` command), not something
+this API does. None of it changes the decision — the point of `$MVSMF` is not
+to manage the pool but to stay out of it.
+
+`$` is a national character, so `$MVSMF` is a valid userid as far as the
+converter is concerned — verified, it converts and records the code — while
+being one nobody allocates. If it ever became a real user, that user would
+start collecting exactly the mail this avoids.
+
+Two further consequences:
+
+- **A caller who wants the notification can still have it** by writing `NOTIFY`
+  on the card. mvsMF only fills in a card that has none, so the choice stays
+  with the submitter rather than being made for them in the noisier direction.
+- A job that reaches MVS by any other route — a card punched to the internal
+  reader by another program, a job submitted from TSO without `NOTIFY` — still
+  reports `null`. The gate is JES2's, and mvsMF can only rewrite what it
+  submits itself.
 
 ### A job that failed before any step ran reports `JCL ERROR`
 

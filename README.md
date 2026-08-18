@@ -54,11 +54,24 @@ mvsMF needs, and `SYZJ202` (`SYZYGY1B` into `HASPPRPU`) only adds the
 `- MAX COND CODE nnnn` text to the `$HASP395` job-log line. Installing both is
 the normal case.
 
-**The SMF exit `IEFACTRT` is *not* required.** `SYZYGY1A` reads `JCTJSTAT`,
-`JCTACODE` and the SCT chain directly and never touches `SCTNSMSG`, so the
-CBT-tape `IEFACTRT` that passes codes back through the SCT is an alternative
-mechanism, not a prerequisite. It is worth having for its job-log statistics
-lines, but mvsMF does not read anything it produces.
+**The SMF exit `IEFACTRT` is *not* required**, and the one you are most likely
+to have cannot help even if you assume it is. `SYZYGY1A` reads `JCTJSTAT`,
+`JCTACODE` and the SCT chain directly and never touches `SCTNSMSG`, so nothing
+in an SMF exit feeds it. Two `IEFACTRT` variants are in circulation:
+
+- **`JLM0001`** — what MVS/CE installs (`++MOD(IEFACTRT)` against FMID
+  `EBB1102`, no JES2 change). It is a **reporting exit only**: it references no
+  `JCT`, no `SCT`, no `JCTCNVRC`, and writes nothing back anywhere. All it
+  produces is the `IEFACTRT` job-log line and the step-statistics block.
+- **CBT tape 887** — passes codes back to JES2 through `SCTNSMSG`/`JMRUCOM`.
+  That is an *alternative* route to a completion code, not a companion to
+  `SYZJ201`, and mvsMF reads neither of the fields it sets.
+
+**Do not read the job-log line as evidence.** `IEFACTRT` prints the step's
+return code — `/00012/` — from its own parameter list, whether or not the value
+ever reaches the JCT. A job without `NOTIFY` shows `/00012/` in the log and
+still answers `"retcode": null`; the line is the exit reporting, not the system
+recording.
 
 Check whether the usermod is applied:
 

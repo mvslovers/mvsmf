@@ -321,17 +321,21 @@ test_submit_without_notify_wait_for_output() {
 	output=$(run_zowe_json jobs submit local-file "$tmpfile" --wait-for-output) || rc=$?
 	rm -f "$tmpfile"
 
-	assert_rc 0 "$rc" "submit without NOTIFY --wait-for-output"
+	# Do not assert on the exit code: what this test is about is that the
+	# command *returned* and carries a retcode. Whether Zowe exits non-zero for
+	# a particular completion code is Zowe's business, not mvsMF's, and asserting
+	# it here would report a client convention as a server fault.
+	if [ $rc -ne 0 ]; then
+		echo "  NOTE: zowe exited rc=${rc}; judging the result from the JSON"
+	fi
 
-	if [ $rc -eq 0 ]; then
-		assert_json_field "$output" '.data.retcode' "CC 0000" \
-			"retcode after --wait-for-output without NOTIFY"
+	assert_json_field "$output" '.data.retcode' "CC 0000" \
+		"retcode after --wait-for-output without NOTIFY"
 
-		local ji
-		ji=$(echo "$output" | jq -r '.data.jobid')
-		if [ "$ji" != "null" ]; then
-			run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
-		fi
+	local ji
+	ji=$(echo "$output" | jq -r '.data.jobid' 2>/dev/null) || ji="null"
+	if [ "$ji" != "null" ] && [ -n "$ji" ]; then
+		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
 	fi
 }
 

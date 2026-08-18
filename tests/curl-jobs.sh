@@ -378,6 +378,50 @@ test_submit_without_notify_gets_retcode() {
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
+test_submit_literal_notify_not_duplicated() {
+	echo ""
+	echo "--- Submit Job: card with a literal NOTIFY keeps exactly one (issue #307) ---"
+
+	# The failure mode of the injection: a card that already names a userid must
+	# not get a second NOTIFY, or JES2 rejects the statement with a duplicate
+	# keyword and the job never runs. The existing fixtures all write
+	# NOTIFY=&SYSUID, which takes the rewrite branch instead of the presence
+	# test, so this is the only case that exercises the flag.
+	local jcl
+	jcl=$(printf '%s\n%s\n' \
+		"//DUPNOTF  JOB (ACCT),'DUP NOTIFY',CLASS=A,NOTIFY=${MVSMF_USER}" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit card with a literal NOTIFY"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "literal NOTIFY not duplicated (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		# A second NOTIFY would show up here as "JCL ERROR", not "CC 0000".
+		assert_json_field "$BODY" '.retcode' "CC 0000" \
+			"literal NOTIFY not duplicated"
+	else
+		skip "literal NOTIFY not duplicated (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
 test_submit_jobcard_too_long() {
 	echo ""
 	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
@@ -1231,6 +1275,7 @@ test_submit_inline_jcl
 test_submit_inline_jcl_with_intrdr_headers
 test_submit_notify_sysuid_trailing_param
 test_submit_without_notify_gets_retcode
+test_submit_literal_notify_not_duplicated
 test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type

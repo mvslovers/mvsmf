@@ -215,7 +215,10 @@ int send_not_modified(Session *session, const char *etag) asm("CMN0013");
  *
  * A failure leaves the client at CSTATE_DONE, which stops the handler's
  * remaining output rather than letting each later call wait out its own
- * budget for a peer that is gone.
+ * budget for a peer that is gone, and clears keepalive so the connection is
+ * closed instead of reused -- the body is short of the Content-Length it
+ * announced, so the next response on that socket would be appended to a
+ * truncated one.
  *
  * @param session Current session context
  * @param buf Bytes to send

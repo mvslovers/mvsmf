@@ -520,13 +520,17 @@ project: on a non-blocking socket **the application waits — 100 attempts of
 On a *blocking* socket libc370 waits instead and the application must not — see
 libc370#120 / ftpd#104. One layer per socket, never two.
 
-Two things this depends on that fail silently if broken. The ECB handed to
+Three things this depends on that fail silently if broken. The ECB handed to
 `cthread_timed_wait()` is zeroed on the waiting frame **every** time; an
 already-posted ECB that outlives one wait makes every later wait return
-instantly, which is the busy spin again. And the reason `send_all()` marks the
+instantly, which is the busy spin again. The reason `send_all()` marks the
 client `CSTATE_DONE` on failure is not tidiness — without it the handler's
 error path comes straight back through `sendErrorResponse()` and pays the whole
-10 s budget again for a peer that is already gone (httpd#203).
+10 s budget again for a peer that is already gone (httpd#203). And it must
+clear `keepalive` in the same breath: `CSTATE_DONE` is *normal completion*, so
+httpd walks `DONE → REPORT → RESET` and `httprese()` reuses the socket if the
+flag is still set — appending the next response to a body that is short of the
+Content-Length it announced. A hang traded for a corrupt stream is not a fix.
 
 The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
 the real one on the host; its four MVS/httpd services are injected through

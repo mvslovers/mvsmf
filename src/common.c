@@ -314,13 +314,27 @@ send_all(Session *session, const UCHAR *buf, int len)
 
 	rc = send_bytes(session, &send_ops, (const unsigned char *)buf, len);
 
-	if (rc < 0 && session->httpc->state < CSTATE_DONE) {
-		// Mark the client done, exactly as httpd's send_raw_all() does on
-		// the same failure. It is what stops the handler's remaining
-		// output -- http_printf() and the entry guard above both refuse a
+	if (rc < 0) {
+		// Drop the connection, both halves of it.
+		//
+		// CSTATE_DONE stops the handler's remaining output --
+		// http_printf() and the entry guard in send_bytes() both refuse a
 		// client at CSTATE_DONE -- instead of every later call paying its
-		// own 10 second budget for a peer that is gone.
-		session->httpc->state = CSTATE_DONE;
+		// own 10 second budget for a peer that is gone (httpd#203).
+		//
+		// It does NOT close the socket, though: DONE is the normal
+		// completion state, and httpd walks DONE -> REPORT -> RESET, where
+		// httprese() keeps the connection open if keepalive is still set.
+		// That is fine for a response that finished and wrong for this one
+		// -- the body is short of the Content-Length it announced, so the
+		// next response on the socket would be appended to a truncated one
+		// and the client would read the two as a single corrupt reply.
+		// Clearing keepalive sends httprese() down its CSTATE_CLOSE branch.
+		// httpd's chunked path clears the same flag for the same reason.
+		if (session->httpc->state < CSTATE_DONE) {
+			session->httpc->state = CSTATE_DONE;
+		}
+		session->httpc->keepalive = 0;
 	}
 
 	return rc;

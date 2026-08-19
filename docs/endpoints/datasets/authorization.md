@@ -71,8 +71,11 @@ Practical consequences when reasoning about these checks:
   section of `CLAUDE.md`.
 - `POST /zosmf/restfiles/ds/{dsn}` — allocation goes through SVC 99 rather than
   an open, so mvsMF makes no decision of its own. **RAKF still refuses it**
-  (measured), but the refusal comes back as a generic allocation failure,
-  indistinguishable from running out of space, and writes `MVSMF102E`. See #317.
+  (measured), and the refusal is deliberately indistinguishable from any other
+  allocation failure — `500 {"category":8,"rc":900,"reason":7,"message":"Dynamic
+  allocation Error"}` — because that is byte for byte what the reference answers
+  for both. See #317, and do not add an authorization body here: it would put
+  mvsMF ahead of the thing it clones.
 
 ## What a refusal looks like
 

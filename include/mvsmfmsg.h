@@ -76,8 +76,13 @@
 /** MVSMF101E fopen() for write failed; not a client error (enqueue, space, RACF) */
 #define MSG_DS_OPEN_WRITE	"MVSMF101E OPEN FOR WRITE FAILED %s ERRNO=%d"
 
-/** MVSMF102E dynamic allocation of a new data set failed */
-#define MSG_DS_ALLOC_FAILED	"MVSMF102E ALLOCATE FAILED %s RC=%d"
+/* MVSMF102E retired in #317. It fired on every failed create, and both
+ * reachable causes are the client's: a name they may not allocate under, or
+ * space/DCB parameters that do not fit. Client-caused conditions are reported
+ * in the HTTP response and nowhere else -- see the rules at the top of this
+ * file. Nothing is lost on the security side: RAKF logs its own denial.
+ * The id is burned, not reusable, so that an operator searching old logs for
+ * MVSMF102E does not find a different message wearing it. */
 
 /** MVSMF103E scratch/uncatalog failed; %s is the data set or DSN(MEMBER) */
 #define MSG_DS_DELETE_FAILED	"MVSMF103E DELETE FAILED %s RC=%d ERRNO=%d"

@@ -2384,6 +2384,42 @@ fi
 #    S913, and the client still sees the correct 500 above.
 assert_no_new_abend "$ABEND_BEFORE" "auth: a refused request performs no operation (no handler abend)"
 
+# --- Allocation failures report what z/OSMF reports (issue #317) ---
+#
+# Measured on a real z/OSMF: a create refused for authority and a create asking
+# for more space than exists BOTH answer, byte for byte,
+#
+#   500 {"category":8,"rc":900,"reason":7,"message":"Dynamic allocation Error"}
+#
+# The sameness is the contract, not a defect. mvsMF can separate the two cases
+# -- __dsalcf() answers RC=4 and RC=12 -- and must not, because the reference
+# does not. The assertion below fails if someone later "improves" it, which is
+# the whole reason it exists. (The authority half needs a second userid and
+# lives in the next section; this one covers the parameter half, which any id
+# can provoke.)
+
+echo ""
+echo "--- Allocation failure report (issue #317) ---"
+
+RESP=$(curl -s -w '\n%{http_code}' -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary '{"dsorg":"PS","alcunit":"CYL","primary":999999,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TOOBIG317")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+CONTENT=$(echo "$RESP" | sed '$d')
+ALLOC_FAIL_BODY="$CONTENT"
+
+assert_http_status "500" "$HTTP_CODE" "alloc: an impossible SPACE request fails"
+assert_json_field "$CONTENT" '.category' "8" "alloc: category matches z/OSMF"
+assert_json_field "$CONTENT" '.rc' "900" "alloc: rc matches z/OSMF"
+assert_json_field "$CONTENT" '.reason' "7" "alloc: reason matches z/OSMF"
+assert_json_field "$CONTENT" '.message' "Dynamic allocation Error" "alloc: message matches z/OSMF"
+
+# nothing may be left behind by a failed create
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TOOBIG317")
+assert_http_status "404" "$HTTP_CODE" "alloc: a failed create leaves nothing behind"
+
 # --- Non-admin refusals (needs a second, ordinary userid) ---
 #
 # The checks above run as whoever MVSMF_USER is. On a system where that is an
@@ -2463,6 +2499,27 @@ else
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
 		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
 	assert_http_status "204" "$HTTP_CODE" "auth2: delete in own qualifier"
+
+	# #317: a create refused for authority must be INDISTINGUISHABLE from the
+	# space failure above -- that is what the reference does.
+	RESP=$(curl -s -w '\n%{http_code}' -X POST -u "$AUTH2" \
+		-H "Content-Type: application/json" \
+		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.HOLE317")
+	HTTP_CODE=$(echo "$RESP" | tail -1)
+	CONTENT=$(echo "$RESP" | sed '$d')
+	assert_http_status "500" "$HTTP_CODE" "auth2: create under another user's qualifier is refused"
+
+	if [ -n "${ALLOC_FAIL_BODY:-}" ] && [ "$CONTENT" = "$ALLOC_FAIL_BODY" ]; then
+		pass "auth2: the refusal is indistinguishable from a space failure (matches z/OSMF)"
+	else
+		fail "auth2: the refusal is indistinguishable from a space failure (matches z/OSMF)" \
+			"authority body '${CONTENT}' differs from space body '${ALLOC_FAIL_BODY:-<unset>}'"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.HOLE317")
+	assert_http_status "404" "$HTTP_CODE" "auth2: the refused create created nothing"
 
 	curl -s -o /dev/null -X DELETE -u "$AUTH" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}" || true

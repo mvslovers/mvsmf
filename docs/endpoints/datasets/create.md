@@ -35,7 +35,10 @@ On successful completion, this request returns HTTP status code 201 (Created).
 - HTTP 400 (Bad Request)
     - Missing or invalid allocation parameters
 - HTTP 500 (Internal Server Error)
-    - Dataset allocation failed (e.g. dataset already exists, no space)
+    - `{"category":8,"rc":900,"reason":7,"message":"Dynamic allocation Error"}`
+      — every allocation failure, whatever the cause: the name already exists,
+      no space, parameters that do not fit, or no authority for the name. The
+      reference answers all of them identically; see the *Authorization* section.
 
 ## Authorization
 

@@ -3151,8 +3151,8 @@ int datasetDeleteHandler(Session *session)
 	if (rc != 0) {
 		wtof(MSG_DS_DELETE_FAILED, dsname, rc, errno);
 		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
-			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+			CATEGORY_SERVICE, RC_ERROR, REASON_DELETE_FAILED,
+			ERR_MSG_DELETE_FAILED, NULL, 0);
 	}
 
 	/* Send HTTP 204 No Content */
@@ -3208,8 +3208,8 @@ int memberDeleteHandler(Session *session)
 	if (rc != 0) {
 		wtof(MSG_DS_DELETE_FAILED, dataset, rc, errno);
 		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
-			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+			CATEGORY_SERVICE, RC_ERROR, REASON_DELETE_FAILED,
+			ERR_MSG_DELETE_FAILED, NULL, 0);
 	}
 
 	/* Send HTTP 204 No Content */

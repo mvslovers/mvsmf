@@ -27,7 +27,11 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 - HTTP 404 (Not Found)
     - Member not found
 - HTTP 500 (Internal Server Error)
-    - Delete operation failed
+    - `{"rc":8,"category":6,"reason":11,"message":"Dataset delete failed"}` —
+      the STOW delete failed after the member was found. The caller was authorized and the target existed, so what is left
+      is an enqueue held elsewhere or an I/O error; `MVSMF103E` carries the
+      detail to the operator. (Reason 11 since #319; it reported the allocation
+      failure's reason 2 before, which was never right for a delete.)
 
 ## Authorization
 

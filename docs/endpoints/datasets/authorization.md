@@ -95,8 +95,14 @@ reference sends. `category 4` here is measured rather than documented.
 
 The reference's own `details[]` text ends `Open 913 abend.`, because OPEN is what
 refused it. mvsMF refuses before the open, so it stops one clause earlier — it
-does not claim an abend it did not take. The variant that *does* carry the abend
-belongs to the recovery path (#315).
+does not claim an abend it did not take.
+
+**A denial OPEN catches answers the same report**, with the abend clause restored
+(#315). That happens when a pre-check and OPEN disagree, and on the handlers
+outside `dsapi.c` that have no pre-check. The console still shows `RAKF0005` and
+`MVSMF901E` there, because an abend really did happen and it costs the CGI its
+storage subpool — that is a thing an operator must know, unlike the refusal
+itself.
 
 ## The refusal is decided before existence
 

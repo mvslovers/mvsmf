@@ -156,10 +156,31 @@ int handle_request(Router *router, Session *session)
         wtof(MSG_HANDLER_ABEND, sys, usr, method, path);
         session_cleanup(session);
         if (!session->headers_sent) {
-            // the abend code is all the caller gets -- the console message
-            // stays behind on the system (#256)
-            abend_message(msg, sizeof(msg), sys, usr);
-            sendErrorResponse(session, 500, 6, 8, 99, msg, NULL, 0);
+            /* An S913 is not a failure, it is a refusal OPEN made, and the
+               reference reports it as one -- measured, a real z/OSMF answers a
+               data set it may not open with category 4 / "LMOPEN error" and the
+               explanation in details[], and takes the same S913 doing it. So
+               this is the same body a pre-check produces (#228), differing only
+               in the sentence: that one has abended and says so.
+
+               Every other abend keeps the generic report with its code (#256).
+               S213 in particular must not fall in here -- it is "cannot open
+               sequentially", not a denial. */
+            const char *denial = abend_denial_detail(sys);
+
+            if (denial) {
+                const char *details[1];
+
+                details[0] = denial;
+                sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+                    CATEGORY_AUTHORIZATION, RC_ERROR, REASON_NOT_AUTHORIZED,
+                    ERR_MSG_NOT_AUTHORIZED, details, 1);
+            } else {
+                // the abend code is all the caller gets -- the console message
+                // stays behind on the system (#256)
+                abend_message(msg, sizeof(msg), sys, usr);
+                sendErrorResponse(session, 500, 6, 8, 99, msg, NULL, 0);
+            }
         } else {
             wtof(MSG_HEADERS_SENT);
         }

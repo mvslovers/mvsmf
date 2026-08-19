@@ -45,4 +45,27 @@
  */
 void abend_message(char *buf, size_t size, unsigned sys, unsigned usr);
 
+/**
+ * The `details[]` sentence for an abend that is an authorization denial, or
+ * NULL when this abend is something else (issue #315).
+ *
+ * S913 means insufficient authority to open, and that is the whole test. Do
+ * NOT widen it to the rest of the IEC1xx family: `SYS1.STGINDEX` produces
+ * `IEC143I 213-04` / S213, which is "cannot be opened sequentially" -- a
+ * different condition that must keep the generic abend body.
+ *
+ * The text ends with the abend, unlike the sentence a pre-check produces
+ * (`ERR_MSG_DENIED_DETAIL` in common.h). That difference is deliberate and is
+ * the only one: here OPEN refused and the task really did abend, so saying so
+ * matches both the truth and the reference, whose own text reads
+ * "... Open 913 abend."  A pre-check refuses before any open and must not
+ * claim it.
+ *
+ * Returns a string literal -- no buffer, nothing writable. MVSMF is RENT and
+ * this runs in the recovery path.
+ *
+ * @param sys   system completion code, 0 for a user abend.
+ */
+const char *abend_denial_detail(unsigned sys);
+
 #endif /* ABENDMSG_H */

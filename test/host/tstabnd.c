@@ -17,6 +17,13 @@
  *      so a buffer that shrinks below the text would ship a cut-off sentence
  *      and nothing would surface it.
  *   4. A user abend renders as U0100, not as S000.
+ *   5. S913 is classified as an authorization denial and nothing else is
+ *      (#315). That one abend is a refusal OPEN made rather than a failure,
+ *      so the router answers it with the reference's authorization report
+ *      instead of the generic abend body. S213 is the trap: it comes out of
+ *      the same IEC1xx family and means "cannot be opened sequentially", so
+ *      folding it in would report an ordinary open failure as a permission
+ *      problem.
  *
  * ====================================================================
  * This test drives the REAL function: src/abendmsg.c is #included below.
@@ -110,6 +117,37 @@ int main(void)
 		abend_message(small, 10, 0xD37, 0);
 		CHECK_EQ((int) strlen(small), 9, "short buffer: truncated to fit");
 		CHECK(small[10] == (char) CANARY, "short buffer: nothing written past it");
+	}
+
+	/* 6. S913 is a denial; nothing else is (#315) */
+	{
+		const char *d = abend_denial_detail(0x913);
+
+		CHECK(d != NULL, "S913: classified as an authorization denial");
+		CHECK(d && strstr(d, "Authorization failed") != NULL,
+		      "S913: the sentence names the authorization failure");
+
+		/* The pre-check in dsapi.c refuses before any open and stops one
+		 * clause earlier. This path did abend, and the reference's own text
+		 * says so -- if the two ever became identical, one of them would be
+		 * lying about what happened. */
+		CHECK(d && strstr(d, "913 abend") != NULL,
+		      "S913: the sentence names the abend, unlike a pre-check refusal");
+
+		/* the trap: same message family, different condition */
+		CHECK(abend_denial_detail(0x213) == NULL,
+		      "S213: not a denial (cannot open sequentially)");
+		CHECK(abend_denial_detail(0x0C4) == NULL, "S0C4: not a denial");
+		CHECK(abend_denial_detail(0xD37) == NULL, "SD37: not a denial");
+		CHECK(abend_denial_detail(0x0B37) == NULL, "SB37: not a denial");
+		CHECK(abend_denial_detail(0) == NULL,
+		      "a user abend is not a denial (sys is 0)");
+
+		/* 913 must be matched as the hex completion code, not as decimal 913
+		 * -- the router derives sys with a shift and a mask, so a decimal
+		 * comparison would silently match S391 instead */
+		CHECK(abend_denial_detail(913) == NULL,
+		      "decimal 913 (S391) is not the denial code");
 	}
 
 	return mbt_test_summary("TSTABND");

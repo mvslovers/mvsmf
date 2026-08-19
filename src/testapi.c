@@ -1097,7 +1097,9 @@ int testHandler(Session *session) {
     }
     bufsize = jes->cp->hct._BUFSIZE;
 
-    jobs = jesjob(jes, jn, FILTER_JOBNAME, 0);
+    /* dd=1: without the DD list there is no PDDB to take the first MTTR
+     * from, and every dsid looks absent. */
+    jobs = jesjob(jes, jn, FILTER_JOBNAME, 1);
     count = jobs ? array_count(&jobs) : 0;
     for (ii = 0; ii < count; ii++) {
       if (jobs[ii] && strcmp((char *)jobs[ii]->jobid, ji) == 0) {

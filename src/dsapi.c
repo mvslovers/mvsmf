@@ -102,12 +102,20 @@ static int require_access(Session *session, const char *dsname, int attr)
          * request with no resolved ACEE before any handler runs. Handled anyway
          * so a future change to that gate cannot turn "no identity" into
          * "identity refused". */
-        return sendErrorResponse(session, HTTP_STATUS_UNAUTHORIZED,
+        sendErrorResponse(session, HTTP_STATUS_UNAUTHORIZED,
             CATEGORY_AUTHORIZATION, RC_ERROR, REASON_NOT_AUTHORIZED,
             ERR_MSG_NOT_AUTHORIZED, NULL, 0);
+    } else {
+        send_not_authorized(session, NULL);
     }
 
-    return send_not_authorized(session, NULL);
+    /* -1, NOT the send's return code. Both senders answer 0 when the response
+     * went out fine, so returning theirs would tell the caller "permitted" for
+     * every refusal that was successfully delivered -- the handler sends the
+     * refusal and then does the thing anyway. The client sees a correct 500,
+     * the data set is opened regardless, and the only trace is the S913 on the
+     * console. Measured exactly that way before this line existed. */
+    return -1;
 }
 
 // Helper function for HTTP headers

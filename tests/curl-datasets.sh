@@ -134,6 +134,30 @@ assert_json_field_exists() {
 	fi
 }
 
+# Count handler-abend lines currently in the Master Trace Table.
+#
+# A refusal cannot be verified from its response. The response is correct
+# either way: the gate sends the 500 and then, if it fails to stop the handler,
+# the operation runs anyway and abends at OPEN. The client sees exactly the same
+# bytes. The only observable difference is the S913 on the console -- which is
+# how that bug was found, and why this exists.
+mtt_abend_count() {
+	curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=mtt&step=3" 2>/dev/null \
+		| grep -c "HANDLER ABEND" || true
+}
+
+assert_no_new_abend() {
+	local before="$1"
+	local label="$2"
+	local after
+	after=$(mtt_abend_count)
+	if [ "$after" = "$before" ]; then
+		pass "$label"
+	else
+		fail "$label" "handler abend lines went from ${before} to ${after}: the refusal was sent but the operation ran anyway"
+	fi
+}
+
 assert_json_field_absent() {
 	local json="$1"
 	local expr="$2"
@@ -2274,6 +2298,11 @@ echo "--- Authorization: refusal and its control (issue #228) ---"
 DENY_DS="SYS1.SECURE.NOSUCH"
 ALLOW_DS="${MVSMF_USER}.CURL.NOSUCH228"
 
+# The console baseline. Every refusal below has to leave it untouched: a gate
+# that sends the refusal and then performs the operation anyway is invisible in
+# the response and shows up only here.
+ABEND_BEFORE=$(mtt_abend_count)
+
 # 1. delete: ALTER refused
 RESP=$(curl -s -w '\n%{http_code}' -X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
@@ -2347,6 +2376,13 @@ else
 	fail "auth: the refusal is decided before existence is consulted" \
 		"denied=${DENY_CODE} permitted=${ALLOW_CODE}, expected 500 and 404 on two equally absent names"
 fi
+
+# 6. The one that response assertions cannot make: a refused request must not
+#    have done the thing. If the gate returns "permitted" for a delivered
+#    refusal -- which is what happens if it hands back the send's return code,
+#    since a successful send is 0 -- the handler carries on to the open, abends
+#    S913, and the client still sees the correct 500 above.
+assert_no_new_abend "$ABEND_BEFORE" "auth: a refused request performs no operation (no handler abend)"
 
 # --- Cleanup: delete PDS ---
 echo ""

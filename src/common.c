@@ -63,6 +63,45 @@ getRequestScheme(Session *session)
 	return "http";
 }
 
+/* The headers every mvsMF response carries, in one place.
+ *
+ * Before #324 fourteen call sites across common.c, authapi.c, dsapi.c and
+ * ussapi.c each wrote their own block, and they had drifted: two sites sent
+ * Cache-Control: no-cache where the rest sent no-store, auth_send sent neither
+ * Cache-Control nor the CORS header, and Content-Length: 0 for an empty body
+ * had been fixed in auth_send only.
+ *
+ * FRAMING STAYS WITH THE CALLER and must not move in here: Content-Type,
+ * Content-Length and Transfer-Encoding depend on the status. A 204 and a 304
+ * carry no body and no Content-Length, so a shared block that emitted one
+ * would break send_not_modified() and auth_send()'s 204 path.
+ *
+ * No Access-Control-Allow-Origin. The reference z/OSMF sends no CORS header at
+ * all, the Desktop is served from this httpd and is same-origin, and the
+ * wildcard could never have helped a cross-origin client anyway: browsers
+ * reject "*" for a credentialed request, and every mvsMF route is
+ * authenticated. It protected nothing and enabled nothing. If a cross-origin
+ * browser client is ever wanted, it needs an origin allowlist and
+ * Access-Control-Allow-Credentials, not a wildcard.
+ */
+__asm__("\n&FUNC	SETC 'send_common_headers'");
+int
+send_common_headers(Session *session)
+{
+	int rc;
+
+	if ((rc = http_printf(session->httpc,
+			"Cache-Control: no-store\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Pragma: no-cache\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"X-Content-Type-Options: nosniff\r\n")) < 0) return rc;
+	if ((rc = http_printf(session->httpc,
+			"Content-Language: en\r\n")) < 0) return rc;
+
+	return rc;
+}
+
 int
 sendDefaultHeaders(Session *session, int status, const char *content_type,
 					   size_t content_length)
@@ -88,17 +127,27 @@ sendDefaultHeaders(Session *session, int status, const char *content_type,
 		if (irc < 0) {
 			goto quit;
 		}
+	} else if (!content_type || strcmp(HTTP_CONTENT_TYPE_NONE, content_type) == 0) {
+		/* Content-Length: 0 for a body-less reply, not silence -- omitting it
+		   made httpd fall back to Transfer-Encoding: chunked on a bodiless
+		   401, where the reference sends Content-Length: 0 (#324).
+
+		   The test is the content type, NOT content_length == 0: a zero length
+		   also means "streaming, length not known yet", which is how
+		   jobsapi.c:704 and :860 read spool records -- they declare
+		   text/plain with length 0 and write the body afterwards. Announcing
+		   Content-Length: 0 there would truncate the response to nothing.
+		   HTTP_CONTENT_TYPE_NONE is the unambiguous "there is no body". */
+		irc = http_printf(session->httpc, "Content-Length: 0\r\n");
+		if (irc < 0) {
+			goto quit;
+		}
 	}
 
-  	irc = http_printf(session->httpc, "Cache-Control: no-store\r\n");
-  	if (irc < 0) {
+	irc = send_common_headers(session);
+	if (irc < 0) {
 		goto quit;
- 	}
-
-  	irc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n");
-  	if (irc < 0) {
-		goto quit;
-  	}
+	}
 
   	irc = http_printf(session->httpc, "\r\n");
   	if (irc < 0) {
@@ -230,15 +279,8 @@ send_not_modified(Session *session, const char *etag)
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc,
 			HTTP_STATUS_NOT_MODIFIED)) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Cache-Control: no-store\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Pragma: no-cache\r\n")) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
+	if ((rc = send_common_headers(session)) < 0) return rc;
 	if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
-	if ((rc = http_printf(session->httpc,
-			"Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
 
 	return rc;

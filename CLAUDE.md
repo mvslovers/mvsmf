@@ -278,7 +278,7 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **ntstore.c**: Small persistent key/value store (LRU + TTL) used by the console cursors/detections; lives in the httpd per-CGI context.
 - **mvsmfctx.c**: Wires the per-CGI context (`MVSMF_CTX`) to httpd's `http_cgictx_get`, lazy-initialising the kv-store.
 - **authapi.c**: `/zosmf/services/authenticate` token login (`authLoginHandler`, `AAPI0001`) and logout (`authLogoutHandler`, `AAPI0002`). The one route `identity_middleware` lets through without a resolved credential — a failed login has no ACEE and still has to reach the handler to get the z/OSMF-shaped 401 body. Documented in `docs/endpoints/auth/`.
-- **infoapi.c**: `/zosmf/info` endpoint — the unauthenticated liveness probe clients call before they hold a credential. It does not answer that way today: `identity_middleware` exempts only `/zosmf/services/authenticate`, so a credential-less request gets 401 (measured; #324).
+- **infoapi.c**: `/zosmf/info` endpoint. Authenticated like every other route — the "unauthenticated liveness probe" it was documented as until #324 never existed: `identity_middleware` exempts only `/zosmf/services/authenticate`, and the reference z/OSMF gates its own `/zosmf/info` too (measured — 401 with `WWW-Authenticate: Basic`, on every endpoint, even for a client sending `X-CSRF-ZOSMF-HEADER`). The 401 is the conformant answer; do not add an exemption for it.
 - **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
 - *(No `xlate.c`)* — the EBCDIC/ASCII tables live in libhttpd and are reached via `httpx->xlate_*`. See **Codepage Override**.
@@ -288,7 +288,7 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 
 All endpoints are under `/zosmf/`:
 
-- `/zosmf/info` — system info (unauthenticated by design; 401s today, #324)
+- `/zosmf/info` — system info (authenticated, like the reference — see #324)
 - `/zosmf/restfiles/ds/...` — dataset + PDS member operations
 - `/zosmf/restjobs/jobs/...` — job operations
 - `/zosmf/restfiles/fs/...` — USS file operations

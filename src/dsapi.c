@@ -130,18 +130,10 @@ static int send_standard_headers(Session *session, const char* content_type,
 
     session->headers_sent = 1;
     if ((rc = http_resp(session->httpc, HTTP_OK)) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) return rc;
+    if ((rc = send_common_headers(session)) < 0) return rc;
     if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", content_type)) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) return rc;
-    if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) return rc;
     if (etag) {
         if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag)) < 0) return rc;
-        /* ETag is not a CORS-safelisted response header: without this a
-           cross-origin client gets null from headers.get("ETag") and cannot
-           tell that apart from a server that has no ETag support at all.
-           Same-origin (httpd serving the Desktop) does not need it. */
-        if ((rc = http_printf(session->httpc,
-                "Access-Control-Expose-Headers: ETag\r\n")) < 0) return rc;
     }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
 
@@ -1252,10 +1244,8 @@ int datasetListHandler(Session *session)
 	** truncation and emits no 206 on the files service at all (#274). */
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = send_common_headers(session)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
@@ -1825,11 +1815,9 @@ int datasetPutHandler(Session *session)
     }
 
     if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
-    if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
+    if ((rc = send_common_headers(session)) < 0) goto error;
     if (etag_hdr) {
         if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto error;
-        if ((rc = http_printf(session->httpc,
-                "Access-Control-Expose-Headers: ETag\r\n")) < 0) goto error;
     }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
 
@@ -2193,10 +2181,8 @@ int memberListHandler(Session *session)
 	   than reading the directory a second time before the header goes out. */
 	session->headers_sent = 1;
 	if ((rc = http_resp(session->httpc, 200)) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Cache-Control: no-store\r\n")) < 0) goto quit;
+	if ((rc = send_common_headers(session)) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "Content-Type: %s\r\n", "application/json")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Pragma: no-cache\r\n")) < 0) goto quit;
-	if ((rc = http_printf(session->httpc, "Access-Control-Allow-Origin: *\r\n")) < 0) goto quit;
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	if ((rc = http_printf(session->httpc, "{\n")) < 0) goto quit;
@@ -2739,11 +2725,9 @@ int memberPutHandler(Session *session)
     }
 
     if ((rc = http_printf(session->httpc, "Content-Type: application/json\r\n")) < 0) goto error;
-    if ((rc = http_printf(session->httpc, "Cache-Control: no-cache\r\n")) < 0) goto error;
+    if ((rc = send_common_headers(session)) < 0) goto error;
     if (etag_hdr) {
         if ((rc = http_printf(session->httpc, "ETag: %s\r\n", etag_hdr)) < 0) goto error;
-        if ((rc = http_printf(session->httpc,
-                "Access-Control-Expose-Headers: ETag\r\n")) < 0) goto error;
     }
     if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto error;
 

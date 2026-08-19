@@ -42,8 +42,12 @@
  * credentials layout. http_get_token() returns the actual byte count. */
 #define AUTH_TOKEN_BUFSIZE    64
 
-/* "LtpaToken2=" + 44 base64 chars (32-byte token) + "; Path=/" fits easily. */
-#define AUTH_COOKIE_BUFSIZE   128
+/* "LtpaToken2=" (11) + base64 of the token + the attribute tail
+ * "; Path=/; HttpOnly; SameSite=Strict" (35).  Sized for the worst case
+ * AUTH_TOKEN_BUFSIZE allows -- 64 bytes base64 to 88 chars -- because a
+ * snprintf truncation here would silently drop an attribute and take the
+ * cookie's protection with it: 11 + 88 + 35 = 134. */
+#define AUTH_COOKIE_BUFSIZE   160
 
 /* ------------------------------------------------------------------ */
 /* Build the z/OSMF login body { returnCode, reasonCode, message }.    */
@@ -119,11 +123,7 @@ auth_send(Session *session, int status, const char *set_cookie, const char *json
 		}
 	}
 
-	rc = http_printf(httpc, "Cache-Control: no-store\r\n");
-	if (rc < 0) {
-		return rc;
-	}
-	rc = http_printf(httpc, "Access-Control-Allow-Origin: *\r\n");
+	rc = send_common_headers(session);
 	if (rc < 0) {
 		return rc;
 	}
@@ -185,9 +185,21 @@ int authLoginHandler(Session *session)
 
 	/* Path=/ so the cookie is sent on the whole /zosmf API (the endpoint
 	   lives under /zosmf/services/, not root). No Secure attribute: the MVS
-	   deployment is plain HTTP and Secure would suppress the cookie. */
+	   deployment is plain HTTP and Secure would suppress the cookie.
+
+	   HttpOnly is NOT in that trade-off -- it is independent of TLS and works
+	   over plain HTTP. Without it the session token sits in document.cookie,
+	   so any XSS in the desktop lifts the whole session; that defeats #161's
+	   "no credential in the browser" goal by a second route, next to the
+	   Basic-cache one. The reference z/OSMF sends Path=/; Secure; HttpOnly.
+
+	   SameSite=Strict: every caller that needs the cookie is same-origin (the
+	   desktop is served from this httpd's DOCROOT). The cost is that a
+	   cross-site link into the desktop arrives without it and re-authenticates
+	   once; Lax would avoid that at the price of the CSRF protection. */
 	(void)snprintf(cookie, sizeof(cookie),
-	               "LtpaToken2=%s; Path=/", (char *)b64);
+	               "LtpaToken2=%s; Path=/; HttpOnly; SameSite=Strict",
+	               (char *)b64);
 
 	json = auth_body(0, 0, AUTH_MSG_SUCCESS);
 	rc = auth_send(session, HTTP_STATUS_OK, cookie, json);
@@ -218,9 +230,13 @@ int authLogoutHandler(Session *session)
 
 	/* Token invalidated: 204 No Content per the IBM logout spec; expire the
 	   cookie client-side (mirrors httpd's Sec-Token deletion). auth_send sends
-	   no body for a NULL json, and http_printf treats 204 as body-less. */
+	   no body for a NULL json, and http_printf treats 204 as body-less.
+
+	   The attributes mirror the cookie being replaced. They play no part in
+	   matching -- name, path and domain do -- but HttpOnly on the tombstone
+	   stops a script-set cookie of the same name from shadowing it. */
 	return auth_send(session, 204,
-	                 "LtpaToken2=deleted; Path=/; "
+	                 "LtpaToken2=deleted; Path=/; HttpOnly; SameSite=Strict; "
 	                 "expires=Thu, 01 Jan 1970 00:00:00 GMT",
 	                 NULL);
 }

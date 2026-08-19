@@ -46,12 +46,16 @@ infoHandler(Session *session)
 	char *value = getHeaderParam(session, "Host"); // e.g. "example.org:8080"
 	if (value) {
 		/* A Host header this handler cannot make sense of must not fail the
-		   request: /zosmf/info is the unauthenticated liveness probe every
-		   client calls first, and it used to answer an odd Host by sending
-		   nothing at all and dropping the connection (issue #175). Fall back
-		   silently and still answer 200 -- the client sent the header, so the
-		   operator has nothing to act on, and a probing client would repeat
-		   the message on every poll (issue #201).
+		   request: /zosmf/info is the first call every client makes, and it
+		   used to answer an odd Host by sending nothing at all and dropping
+		   the connection (issue #175). Fall back silently and still answer
+		   200 -- the client sent the header, so the operator has nothing to
+		   act on, and a probing client would repeat the message on every poll
+		   (issue #201).
+
+		   Not "the unauthenticated probe" it was documented as until #324:
+		   this endpoint is gated like every other, and so is the reference's
+		   (measured -- it answers 401 with WWW-Authenticate: Basic).
 
 		   This fallback is only as good as the parser's honesty about
 		   failing: a value with no host name in front of the colon used to
@@ -77,10 +81,23 @@ infoHandler(Session *session)
 		goto quit;
 	}
 
+	/* zosmf_version is a bare major, the shape the reference uses (it sends
+	   "29"); zosmf_full_version carries our real version. Clients compare
+	   the former as a STRING -- Zowe's CheckStatus.isZosVersionAtLeast does
+	   `zosmf_version >= "27"` -- so "1" sorts below every z/OSMF level and
+	   they select their most conservative code path, which is what we want.
+
+	   The literal is the MAJOR of this project's version and has to be bumped
+	   with it; it cannot be derived from VERSION without parsing the string at
+	   runtime, which is not worth a GETMAIN on every request.
+
+	   plugins is empty rather than absent: we have none, and the reference
+	   always emits the key, so an empty array is the honest match. */
 	if (addJsonString(builder, "zosmf_hostname", hostname) < 0 ||
 		addJsonString(builder, "zosmf_port", port_str) < 0 ||
-		addJsonString(builder, "zosmf_version", VERSION) < 0 ||
+		addJsonString(builder, "zosmf_version", "1") < 0 ||
 		addJsonString(builder, "zosmf_full_version", VERSION) < 0 ||
+		addJsonRaw(builder, "plugins", "[]") < 0 ||
 		addJsonString(builder, "zosmf_saf_realm", "SAFRealm") < 0 ||
 		addJsonString(builder, "api_version", "1") < 0 ||
 		addJsonString(builder, "zos_version", "MVS 3.8j") < 0) {

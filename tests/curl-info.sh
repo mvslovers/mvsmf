@@ -11,9 +11,14 @@
 #                               else X-Forwarded-Proto, else 80 (issue #175)
 #
 # A Host header this handler cannot make sense of must never fail the
-# request: /zosmf/info is the unauthenticated liveness probe every client
-# calls first. Before #175 a port-less Host answered nothing at all and
-# dropped the connection (curl exit 52 / HTTP 000).
+# request: /zosmf/info is the first call every client makes. Before #175 a
+# port-less Host answered nothing at all and dropped the connection (curl
+# exit 52 / HTTP 000).
+#
+# The endpoint is NOT unauthenticated, though it was documented as such
+# until #324 -- including in this header. Every request below therefore
+# carries -u, and the last test pins the credential-less 401 down so the
+# exemption does not get added back off a stale doc line.
 #
 # Prerequisites:
 #   - Copy .env.example to .env at the repo root and fill in
@@ -76,6 +81,13 @@ trap 'rm -f "$BODYF"' EXIT
 # Every argument is passed to curl verbatim (use one -H per header).
 info() {
 	CODE=$(curl -s -u "$AUTH" -o "$BODYF" -w '%{http_code}' "$@" "$INFO_URL")
+	BODY=$(cat "$BODYF")
+}
+
+# The same call with NO credentials at all -- not even an empty -u, which would
+# still send an Authorization header and test something else.
+info_anon() {
+	CODE=$(curl -s -o "$BODYF" -w '%{http_code}' "$@" "$INFO_URL")
 	BODY=$(cat "$BODYF")
 }
 
@@ -200,6 +212,21 @@ if [ -n "$(echo "$BODY" | jq -r '.zosmf_version // empty' 2>/dev/null)" ]; then
 else
 	fail "zosmf_version is present" "missing or empty"
 fi
+
+# =========================================================================
+# 6. Authentication is required (issue #324)
+# =========================================================================
+echo ""
+echo "--- authentication ---"
+
+# This endpoint was documented as the unauthenticated liveness probe until
+# #324 and never was one. The reference z/OSMF gates its own /zosmf/info the
+# same way -- measured: 401 with WWW-Authenticate: Basic realm="defaultRealm",
+# on every endpoint, and not dropped even for a client sending
+# X-CSRF-ZOSMF-HEADER. This test exists so the exemption does not get added
+# back by someone who finds a stale doc line.
+info_anon -H "Host: ${TEST_HOST}:${MVSMF_PORT}"
+assert_http_status "401" "$CODE" "a credential-less request is refused"
 
 # =========================================================================
 # Summary

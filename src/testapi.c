@@ -1138,7 +1138,7 @@ int testHandler(Session *session) {
 
     buf = (unsigned char *)malloc(bufsize);
     if (!buf) {
-      wtof(MSG_STORAGE_FAILED, "SPOOLBLK");
+      wtof(MSG_STORAGE_FAILED, ALLOC_SPOOL_BLOCK);
       rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
                                        " \"error\": \"out of storage\" }\n");
       goto quit_spool;

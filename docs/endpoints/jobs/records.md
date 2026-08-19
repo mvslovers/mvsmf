@@ -18,6 +18,12 @@ On successful completion, this request returns HTTP status code 200 (OK) with Co
 
 For SYSIN datasets (e.g. `JESJCLIN`), the response contains exactly `record-count` records: JES2 pre-formats a "JOB DELETED BY JES2 OR CANCELLED BY OPERATOR BEFORE EXECUTION" line into the JCLIN spool chain behind the real records, and the handler caps the output at the PDDB record count so this line does not leak into every response. SYSOUT datasets are not capped, because their record counts may lag while a job is active.
 
+`JESJCLIN` needs a second rule on top of that cap (issue #314). It holds JCL statements only — in-stream data goes to its own SYSIN data set — but the spool chain also carries a record JES2 writes behind every in-stream `DD *` card: nine binary bytes naming the DSID and the spool address of the data set that card opened, marked `0x0C` in the record header.
+
+The PDDB record count does **not** include those records; it equals the number of JCL statements, and the `JESJCL` line count. So printing one spent a slot of the cap that belonged to a card, and the listing was truncated by one card per in-stream DD. A `JESJCLIN` record that does not begin with `/` is therefore skipped, and counted neither toward the cap nor toward the output — a skip that counted would leave the displaced cards lost. The `//` null statement is a statement and is listed; the deletion line above starts with a letter and is covered by the same rule.
+
+The raw records behind this are readable with `GET /zosmf/test?fn=spool&jobname=…&jobid=…&dsid=1` — a read-only block dump including the record headers, which no response can show (the walk blank-trims each record and folds every byte below `0x40` to a blank before it reaches the wire).
+
 A spool file that exists but holds nothing returns 200 with an empty body.
 
 ## Purged spool output (HTTP 404, reason 10)

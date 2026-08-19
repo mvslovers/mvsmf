@@ -123,11 +123,7 @@ auth_send(Session *session, int status, const char *set_cookie, const char *json
 		}
 	}
 
-	rc = http_printf(httpc, "Cache-Control: no-store\r\n");
-	if (rc < 0) {
-		return rc;
-	}
-	rc = http_printf(httpc, "Access-Control-Allow-Origin: *\r\n");
+	rc = send_common_headers(session);
 	if (rc < 0) {
 		return rc;
 	}

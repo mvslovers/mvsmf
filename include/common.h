@@ -167,6 +167,19 @@ char *getHeaderParam(Session *session, const char *name) asm("CMN0003");
 const char *getRequestScheme(Session *session) asm("CMN0004");
 
 /**
+ * @brief Sends the headers every mvsMF response carries
+ *
+ * Cache-Control, Pragma, X-Content-Type-Options and Content-Language, written
+ * once for all fourteen response sites (#324). Framing stays with the caller:
+ * Content-Type, Content-Length and Transfer-Encoding depend on the status, and
+ * a 204 or 304 must carry none of them.
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ */
+int send_common_headers(Session *session) asm("CMN0016");
+
+/**
  * @brief Sends default HTTP headers for a response
  *
  * Sends standard HTTP headers including status code, content type,

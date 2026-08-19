@@ -167,6 +167,20 @@ char *getHeaderParam(Session *session, const char *name) asm("CMN0003");
 const char *getRequestScheme(Session *session) asm("CMN0004");
 
 /**
+ * @brief Sends the WWW-Authenticate challenge on a 401
+ *
+ * No-op for any other status, and withheld from a browser fetch/XHR: there the
+ * challenge makes the browser open its native credential dialog and withhold
+ * the response until it is dismissed, which bypasses the Desktop's own
+ * session-expired handling (#324, measured).
+ *
+ * @param session Current session context
+ * @param status HTTP status code about to be sent
+ * @return 0 on success, negative value on error
+ */
+int send_auth_challenge(Session *session, int status) asm("CMN0017");
+
+/**
  * @brief Sends the headers every mvsMF response carries
  *
  * Cache-Control, Pragma, X-Content-Type-Options and Content-Language, written

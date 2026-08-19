@@ -123,6 +123,14 @@ auth_send(Session *session, int status, const char *set_cookie, const char *json
 		}
 	}
 
+	/* A failed login is a 401 like any other and carries the challenge --
+	   this is the browser's most common route to the dialog, so it must not
+	   be forgotten here just because auth_send builds its own headers. */
+	rc = send_auth_challenge(session, status);
+	if (rc < 0) {
+		return rc;
+	}
+
 	rc = send_common_headers(session);
 	if (rc < 0) {
 		return rc;

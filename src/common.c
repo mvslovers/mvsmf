@@ -1,5 +1,6 @@
 #include <clibstr.h>
 #include <clibio.h>
+#include <clibsmf.h>
 #include <clibthrd.h>
 #include <clibwto.h>
 #include <errno.h>
@@ -84,6 +85,124 @@ getRequestScheme(Session *session)
  * browser client is ever wanted, it needs an origin allowlist and
  * Access-Control-Allow-Credentials, not a wildcard.
  */
+/* Is this request a scripted request from inside a browser page?
+ *
+ * Only a browser fetch/XHR is withheld the WWW-Authenticate challenge below,
+ * so this has to separate "a page's JavaScript asked" from everything else.
+ * Two independent signals, either is enough:
+ *
+ *   X-MVSMF-Client   the Desktop sends it on every apiFetch (static/js/
+ *                    systems.js). We control both ends, so it does not depend
+ *                    on what httpd chooses to pass through.
+ *   Sec-Fetch-Mode   set by the browser itself on subresource requests and by
+ *                    no CLI. "navigate" is excluded deliberately: that is a
+ *                    top-level navigation -- somebody typing the URL -- where
+ *                    the browser's own credential prompt is the useful answer,
+ *                    not an obstacle.
+ *
+ * X-CSRF-ZOSMF-HEADER is deliberately NOT used even though the Desktop sends
+ * it: Zowe and the SDKs send it too, and they must keep getting exactly what
+ * the reference sends.
+ */
+__asm__("\n&FUNC	SETC 'is_browser_fetch'");
+static
+int is_browser_fetch(Session *session)
+{
+	const char *mode;
+
+	if (getHeaderParam(session, "X-MVSMF-Client")) {
+		return 1;
+	}
+
+	mode = getHeaderParam(session, "Sec-Fetch-Mode");
+	if (mode && strcmp(mode, "navigate") != 0) {
+		return 1;
+	}
+
+	return 0;
+}
+
+/* RFC 9110 11.6.1: a 401 MUST carry a challenge, and the reference z/OSMF sends
+ * one on every endpoint -- measured, including to a client identifying itself
+ * with X-CSRF-ZOSMF-HEADER, so there is no "API client" exemption to copy.
+ *
+ * The single exception is a browser fetch, and it is not cosmetic. Measured
+ * (tests/probe-401-dialog.py): a same-origin fetch or XHR receiving a 401 with
+ * this header makes the browser open its native credential dialog AND WITHHOLD
+ * THE RESPONSE until a human dismisses it -- 6080 ms and 4805 ms in the run
+ * that settled this. The Desktop's own "session expired -> login" handling
+ * (the mvsmf:session-expired event in systems.js) never gets to run, and once
+ * the dialog is satisfied the browser caches those Basic credentials and
+ * replays them on every same-origin request, outliving the token logout that
+ * mvsmf#161 exists to make meaningful.
+ *
+ * The reference has no equivalent client: its REST API is consumed by CLIs and
+ * SDKs, and its browser clients sit behind the API Mediation Layer, which
+ * terminates authentication itself. So no client the reference serves sees a
+ * difference here.
+ *
+ * No-op for every status but 401.
+ */
+/* The Basic realm, from the SMF ID -- the same string httpd derives for its own
+ * challenges (httpd#191, src/httprlm.c).
+ *
+ * Matching it is not cosmetic. A browser caches Basic credentials under
+ * (origin, realm), and httpd and this CGI answer on the SAME origin: two
+ * different realms there are two protection spaces, so a user who satisfied
+ * one dialog is asked again by the other. A constant would be worse still --
+ * that is exactly what httpd#191 removed, because it made every system on the
+ * network advertise one shared protection space with no way for a human to
+ * tell which machine was asking.
+ *
+ * Duplicated rather than shared: httprlm() lives in the server binary, and the
+ * CGI-side httpd.a carries only the cgistart stub, so there is nothing to link
+ * against. The rules are httpd's -- copy at most 4 characters, stop at the
+ * first blank or NUL (__smfid() hands over a fixed 4-byte blank-padded field
+ * that is not terminated, so neither bound may be dropped), and never produce
+ * an empty realm, which RFC 7617 does not allow and which would collapse every
+ * protection space on the origin into one.
+ */
+#define AUTH_REALM_MAX      8
+#define AUTH_REALM_FALLBACK "MVS"
+
+__asm__("\n&FUNC	SETC 'auth_realm'");
+static
+const char *auth_realm(char *out, size_t outlen)
+{
+	const unsigned char *smfid = __smfid();
+	size_t n = 0;
+
+	while (n < 4 && n < outlen - 1 && smfid && smfid[n] && smfid[n] != ' ') {
+		out[n] = (char)smfid[n];
+		n++;
+	}
+
+	if (n == 0) {
+		strncpy(out, AUTH_REALM_FALLBACK, outlen - 1);
+		out[outlen - 1] = '\0';
+		return out;
+	}
+
+	out[n] = '\0';
+
+	return out;
+}
+
+__asm__("\n&FUNC	SETC 'send_auth_challenge'");
+int
+send_auth_challenge(Session *session, int status)
+{
+	char realm[AUTH_REALM_MAX];
+
+	if (status != HTTP_STATUS_UNAUTHORIZED || is_browser_fetch(session)) {
+		return 0;
+	}
+
+	return http_printf(session->httpc,
+			"WWW-Authenticate: Basic realm=\"%s\"\r\n",
+			auth_realm(realm, sizeof(realm)));
+}
+
 __asm__("\n&FUNC	SETC 'send_common_headers'");
 int
 send_common_headers(Session *session)
@@ -142,6 +261,11 @@ sendDefaultHeaders(Session *session, int status, const char *content_type,
 		if (irc < 0) {
 			goto quit;
 		}
+	}
+
+	irc = send_auth_challenge(session, status);
+	if (irc < 0) {
+		goto quit;
 	}
 
 	irc = send_common_headers(session);

@@ -1,3 +1,4 @@
+#include <clibb64.h>
 #include <clibstr.h>
 #include <clibio.h>
 #include <clibsmf.h>
@@ -162,6 +163,10 @@ int is_browser_fetch(Session *session)
  * an empty realm, which RFC 7617 does not allow and which would collapse every
  * protection space on the origin into one.
  */
+/* CREDTOK is 32 bytes; 64 leaves head-room without pulling in the
+ * credentials layout. http_get_token() returns the actual byte count. */
+#define SESSION_TOKEN_BUFSIZE 64
+
 #define AUTH_REALM_MAX      8
 #define AUTH_REALM_FALLBACK "MVS"
 
@@ -203,6 +208,62 @@ send_auth_challenge(Session *session, int status)
 			auth_realm(realm, sizeof(realm)));
 }
 
+/* Implicit login: hand back the session cookie when a caller authenticated
+ * with Basic and does not have one yet.
+ *
+ * The reference z/OSMF establishes its session on ANY Basic-authenticated
+ * request, not only at its login endpoint -- measured on a plain GET
+ * /zosmf/info, which answers with Set-Cookie: LtpaToken2=...; and a follow-up
+ * carrying only that cookie gets 200 and NO new Set-Cookie (#324 C1). So the
+ * rule is "mint one for a caller who arrived with credentials", not "refresh
+ * one on every response".
+ *
+ * The condition is the Authorization header, not the absence of a Cookie
+ * header: httpd consumes Cookie for its own credential resolution and does not
+ * pass it to the CGI (measured with fn=token -- Sec-Fetch-Mode arrives,
+ * Cookie does not). Authorization does arrive, and it separates the three
+ * cases exactly: Basic -> mint, cookie-only -> no Authorization, so nothing is
+ * re-issued, no credential at all -> no token to hand out anyway.
+ *
+ * The token is httpd's opaque CREDTOK, minted during that resolution before
+ * the CGI is dispatched, which is why http_get_token() has one here and not
+ * only in authLoginHandler. Same base64 and same attributes as the login
+ * endpoint's cookie -- see the comment there for why HttpOnly and SameSite are
+ * on it and Secure is not.
+ */
+__asm__("\n&FUNC	SETC 'send_session_cookie'");
+int
+send_session_cookie(Session *session)
+{
+	UCHAR token[SESSION_TOKEN_BUFSIZE];
+	unsigned char *b64 = NULL;
+	size_t b64len = 0;
+	int toklen;
+	int rc = 0;
+
+	if (!getHeaderParam(session, "Authorization")) {
+		return 0;
+	}
+
+	toklen = http_get_token(session->httpc, token, sizeof(token));
+	if (toklen <= 0) {
+		return 0;
+	}
+
+	b64 = base64_encode(token, (size_t)toklen, &b64len);
+	if (!b64) {
+		return 0;   /* no cookie is a degraded session, not a failed request */
+	}
+
+	rc = http_printf(session->httpc,
+			"Set-Cookie: LtpaToken2=%s; Path=/; HttpOnly; SameSite=Strict\r\n",
+			(char *)b64);
+
+	free(b64);
+
+	return rc;
+}
+
 __asm__("\n&FUNC	SETC 'send_common_headers'");
 int
 send_common_headers(Session *session)
@@ -217,6 +278,12 @@ send_common_headers(Session *session)
 			"X-Content-Type-Options: nosniff\r\n")) < 0) return rc;
 	if ((rc = http_printf(session->httpc,
 			"Content-Language: en\r\n")) < 0) return rc;
+
+	/* Here rather than in sendDefaultHeaders(): the streaming handlers in
+	   dsapi.c and ussapi.c write their headers through this function and
+	   never through that one, so anchoring the cookie there would hand it to
+	   a JSON reply and withhold it from a data set read in the same session. */
+	if ((rc = send_session_cookie(session)) < 0) return rc;
 
 	return rc;
 }

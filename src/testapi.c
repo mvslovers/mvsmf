@@ -92,6 +92,66 @@ static int abend_test_enabled(void) {
   return v && (v[0] == '1' || v[0] == 'Y' || v[0] == 'y');
 }
 
+/* --- fn=denyopen (issue #315) -------------------------------------------
+ * Take a real S913 through the real ESTAE, to check that the router answers a
+ * denial OPEN caught with the reference's authorization report rather than the
+ * generic abend body.
+ *
+ * It exists because #228 made the natural way unreachable. That issue's own
+ * live check was "MVSCE02 against SYS1.SECURE.CNTL(PROFILES)", which used to
+ * abend -- the pre-checks now refuse it before the fopen(), which is the entire
+ * point of them. So the only remaining way into this branch on a healthy system
+ * is to open a data set without asking first, which is what this does.
+ *
+ * That is not a hole: the branch it verifies is a safety net for the cases the
+ * pre-checks do not cover -- a pre-check and OPEN disagreeing, and the handlers
+ * outside dsapi.c -- and a net nobody can reach is a net nobody can test.
+ *
+ * Gated exactly like fn=abend: an abend costs the CGI its storage subpool
+ * (mvslovers/httpd#154), so this must never be reachable in production.
+ * Handled before any response byte is written, so headers_sent is still 0 and
+ * the router can send its recovery response.
+ */
+__asm__("\n&FUNC	SETC 'testDenyOpen'");
+static int testDenyOpen(Session *session) {
+  char *dsn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
+  FILE *fp;
+
+  if (!abend_test_enabled()) {
+    return sendErrorResponse(
+        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
+        REASON_SERVER_ERROR,
+        "fn=denyopen is disabled. Set MVSMF_ABEND_TEST=1 in the server "
+        "environment to enable the denial-recovery test hook.",
+        NULL, 0);
+  }
+
+  if (!dsn)
+    dsn = "SYS1.SECURE.CNTL(PROFILES)";
+
+  /* No authorization check on purpose -- that is what is being bypassed. If
+   * the caller may read this, nothing abends and the handle is closed again;
+   * the probe is only meaningful with an id that may not. */
+  fp = fopen(dsn, "r");
+  if (fp) {
+    fclose(fp);
+    return sendErrorResponse(
+        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
+        REASON_SERVER_ERROR,
+        "fn=denyopen: the data set opened, so nothing was denied. Use an id "
+        "that may not read it.",
+        NULL, 0);
+  }
+
+  /* fopen() returned NULL without abending: the open failed for some other
+   * reason (not cataloged, wrong DSORG). Also not what this probe is for. */
+  return sendErrorResponse(
+      session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
+      REASON_SERVER_ERROR,
+      "fn=denyopen: the open failed without abending, so it was not a denial.",
+      NULL, 0);
+}
+
 __asm__("\n&FUNC	SETC 'testAbend'");
 static int testAbend(Session *session) {
   if (!abend_test_enabled()) {
@@ -341,6 +401,9 @@ int testHandler(Session *session) {
 
   if (strcmp(fn, "jesabend") == 0)
     return testJesAbend(session);
+
+  if (strcmp(fn, "denyopen") == 0)
+    return testDenyOpen(session);
 
   session->headers_sent = 1;
   if ((rc = http_resp(session->httpc, 200)) < 0)
@@ -1125,7 +1188,8 @@ int testHandler(Session *session) {
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
-        " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\""
+        " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\","
+        " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery; needs MVSMF_ABEND_TEST=1)\""
         " ] }\n");
   }
 

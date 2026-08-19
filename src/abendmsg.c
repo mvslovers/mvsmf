@@ -12,6 +12,10 @@
 #define ABEND_D37	0xD37
 #define ABEND_E37	0xE37
 
+/* Insufficient authority to open. The one abend code that is an authorization
+ * decision rather than a failure. */
+#define ABEND_913	0x913
+
 #ifdef __MVS__
 __asm__("\n&FUNC	SETC 'abend_message'");
 #endif
@@ -36,4 +40,21 @@ abend_message(char *buf, size_t size, unsigned sys, unsigned usr)
 	} else {
 		snprintf(buf, size, "Internal server error (abend S%03X)", sys);
 	}
+}
+
+/*
+ * Whether an abend is a denial, and what to say about it. See abendmsg.h.
+ */
+#ifdef __MVS__
+__asm__("\n&FUNC	SETC 'abend_denial_detail'");
+#endif
+const char *
+abend_denial_detail(unsigned sys)
+{
+	if (sys != ABEND_913) {
+		return NULL;
+	}
+
+	return "Authorization failed - You may not use this protected data set."
+	       " Open 913 abend.";
 }

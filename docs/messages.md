@@ -83,7 +83,7 @@ member not found, record too long) produce **no** console message.
 
 | Id | Text | Meaning and action |
 |---|---|---|
-| `MVSMF901E` | `HANDLER ABEND Sxxx Unnnn FOR method path` | A handler abended and the router's ESTAE caught it. The client gets a 500 naming the abend code (issue #256). The method and path say which request did it. |
+| `MVSMF901E` | `HANDLER ABEND Sxxx Unnnn FOR method path` | A handler abended and the router's ESTAE caught it. The client gets a 500 naming the abend code (issue #256) — except for **S913**, insufficient authority to open, which is a refusal rather than a failure and is answered with the authorization report instead (#315). The message is still issued for it: an abend costs the CGI its storage subpool whatever caused it. The method and path say which request did it. |
 | `MVSMF902W` | `HEADERS ALREADY SENT, NO ERROR RESPONSE POSSIBLE` | The abend came after the response had started, so the client sees a truncated body rather than an error. Always follows a `MVSMF901E`. |
 | `MVSMF903W` | `SESSION FILE TABLE FULL, FILE NOT TRACKED` | More data sets are open in one request than `MAX_SESSION_FILES`. The untracked file is not closed if the handler abends. |
 | `MVSMF904I` | `RECOVERY CLOSING dsn (DD:ddname)` | Recovery is closing a data set the abending handler left open. Informational; it accompanies a `MVSMF901E`. |

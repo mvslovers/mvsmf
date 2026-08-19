@@ -9,7 +9,7 @@ z/OSMF-compatible REST API for MVS 3.8j. All endpoints require Basic Auth unless
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | [`/zosmf/info`](info.md) | System information (no auth required) |
+| GET | [`/zosmf/info`](info.md) | System information |
 
 ## Authentication (`/zosmf/services`)
 

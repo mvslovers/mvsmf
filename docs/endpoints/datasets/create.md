@@ -39,10 +39,17 @@ On successful completion, this request returns HTTP status code 201 (Created).
 
 ## Authorization
 
-**No explicit check.** Allocation goes through SVC 99 rather than an open, so it
-was not part of the pre-check work in issue #228 and is gated only by whatever
-the allocation itself enforces. It is the one data set-mutating operation without
-an explicit check. See [authorization.md](authorization.md).
+**No check of its own — but not unprotected.** Allocation goes through
+`__dsalcf()` (SVC 99) rather than an open, so it was not part of the pre-check
+work in #228. RAKF gates DADSM regardless: measured, an ordinary userid
+allocating under a foreign qualifier is refused, nothing is created, and
+`RAKF0005` is logged.
+
+What is wrong is the report. A refusal and a request for more space than the
+volume has answer **byte for byte the same** —
+`500 {"rc":8,"category":6,"reason":2,"message":"Dataset allocation failed"}` — so
+a client cannot tell "you may not create here" from "there is no room", and both
+also write `MVSMF102E` to the console. Tracked as #317.
 
 ## Examples
 

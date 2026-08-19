@@ -70,7 +70,9 @@ Practical consequences when reasoning about these checks:
   matches the reference implementation; see issue #229 and the *Authorization*
   section of `CLAUDE.md`.
 - `POST /zosmf/restfiles/ds/{dsn}` — allocation goes through SVC 99 rather than
-  an open. It is gated only by whatever the allocation itself enforces.
+  an open, so mvsMF makes no decision of its own. **RAKF still refuses it**
+  (measured), but the refusal comes back as a generic allocation failure,
+  indistinguishable from running out of space, and writes `MVSMF102E`. See #317.
 
 ## What a refusal looks like
 

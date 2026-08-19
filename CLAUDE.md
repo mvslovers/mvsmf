@@ -223,7 +223,7 @@ clangd provides IDE diagnostics (configured in `.clangd`).
 HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsmf.c (router setup)
   → router.c (URL decode, method parse, route match, path var extraction)
     → Middleware chain (identity_middleware in mvsmf.c; logmw.c present but disabled)
-      → API handler (dsapi.c, jobsapi.c, ussapi.c, consapi.c, infoapi.c)
+      → API handler (dsapi.c, jobsapi.c, ussapi.c, consapi.c, authapi.c, infoapi.c)
         → JSON response (json.c)
 ```
 
@@ -277,21 +277,23 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).
 - **ntstore.c**: Small persistent key/value store (LRU + TTL) used by the console cursors/detections; lives in the httpd per-CGI context.
 - **mvsmfctx.c**: Wires the per-CGI context (`MVSMF_CTX`) to httpd's `http_cgictx_get`, lazy-initialising the kv-store.
-- **infoapi.c**: `/zosmf/info` endpoint (no auth required).
+- **authapi.c**: `/zosmf/services/authenticate` token login (`authLoginHandler`, `AAPI0001`) and logout (`authLogoutHandler`, `AAPI0002`). The one route `identity_middleware` lets through without a resolved credential — a failed login has no ACEE and still has to reach the handler to get the z/OSMF-shaped 401 body. Documented in `docs/endpoints/auth/`.
+- **infoapi.c**: `/zosmf/info` endpoint — the unauthenticated liveness probe clients call before they hold a credential. It does not answer that way today: `identity_middleware` exempts only `/zosmf/services/authenticate`, so a credential-less request gets 401 (measured; #324).
 - **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
 - *(No `xlate.c`)* — the EBCDIC/ASCII tables live in libhttpd and are reached via `httpx->xlate_*`. See **Codepage Override**.
-- **testapi.c**: Internal `/zosmf/test` endpoint for exercising libc370 functions in isolation (`fn=version`, `fn=mtt`, `fn=cmd`, catalog/DSCB probes, …). The CGI launcher (`cgistart`, providing `@@START`) is autocalled from httpd's `libhttpd.a` — the old local `cgxstart.c` is excluded from the build.
+- **testapi.c**: Internal `/zosmf/test` endpoint for exercising libc370 functions in isolation (`fn=version`, `fn=mtt`, `fn=cmd`, catalog/DSCB probes, …). The CGI launcher (`cgistart`, providing `@@START`) is autocalled from httpd's `libhttpd.a`; this repo carries no launcher of its own.
 
 ### REST API Structure
 
 All endpoints are under `/zosmf/`:
 
-- `/zosmf/info` — system info (unauthenticated)
+- `/zosmf/info` — system info (unauthenticated by design; 401s today, #324)
 - `/zosmf/restfiles/ds/...` — dataset + PDS member operations
 - `/zosmf/restjobs/jobs/...` — job operations
 - `/zosmf/restfiles/fs/...` — USS file operations
 - `/zosmf/restconsoles/...` — console services (issue, collect, detections, hardcopy log)
+- `/zosmf/services/authenticate` — token login (POST) and logout (DELETE)
 
 Endpoint documentation lives in `docs/endpoints/` (with a curl & Zowe cookbook in `docs/examples.md`).
 

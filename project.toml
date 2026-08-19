@@ -22,14 +22,13 @@ cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 # Single load module: a CGI program that runs under httpd.  It includes its
 # own request router + API handlers; the CGI launcher (cgistart, providing
-# @@START) is no longer carried as a local cgxstart.c copy -- it is autocalled
-# from httpd's client library (libhttpd.a), and the http_* API is reached at
-# runtime through the httpx callback table (httpcgi.h).
+# @@START) is not carried here at all -- it is autocalled from httpd's client
+# library (libhttpd.a), and the http_* API is reached at runtime through the
+# httpx callback table (httpcgi.h).
 [[module]]
 name = "MVSMF"
 startup = "crt1"
 sources = ["src/*.c"]
-exclude = ["src/cgxstart.c"]
 
 # Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
 # norent: mbtcheck.h keeps file-static counters; a standalone test needs them

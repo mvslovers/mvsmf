@@ -112,7 +112,10 @@ int main(int argc, char **argv)
 		crt->crtapp2 = httpc;
 	}
 
-	/* TODO (mig): move this into cgxstart.c */
+	/* TODO (mig): factor this wiring out of main() into a local init helper.
+	 * The original target, a local cgxstart.c, no longer exists -- the CGI
+	 * launcher comes from libhttpd now and is shared by every CGI, so mvsMF's
+	 * own router setup cannot move there. */
 	init_router(&router);
 	init_session(&session, &router, httpd, httpc);
 

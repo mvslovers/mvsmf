@@ -271,6 +271,38 @@ info_anon_hdrs -H "X-CSRF-ZOSMF-HEADER: true"
 assert_header "WWW-Authenticate: Basic" "a z/OSMF API client still gets the challenge"
 
 # =========================================================================
+# 7. Implicit login (issue #324 C1)
+# =========================================================================
+echo ""
+echo "--- implicit login ---"
+
+# The reference establishes its session on any Basic-authenticated request,
+# not only at the login endpoint, and does not re-issue it to a caller that
+# already presents the cookie.
+HDRS=$(curl -s -D- -o /dev/null -u "$AUTH" "$INFO_URL")
+assert_header "Set-Cookie: LtpaToken2" "Basic auth hands back the session cookie"
+
+if echo "$HDRS" | grep -iq "^Set-Cookie: LtpaToken2=[^;]*; Path=/; HttpOnly; SameSite=Strict"; then
+	pass "the cookie carries Path, HttpOnly and SameSite"
+else
+	fail "the cookie carries Path, HttpOnly and SameSite" \
+		 "attributes missing -- without HttpOnly the token is readable from JS"
+fi
+
+# A caller arriving with the cookie sends no Authorization, so nothing is
+# re-issued. Absence is the assertion here.
+JAR=$(mktemp)
+curl -s -c "$JAR" -o /dev/null -u "$AUTH" "$INFO_URL"
+HDRS=$(curl -s -D- -o /dev/null -b "$JAR" "$INFO_URL")
+assert_http_status "200" "$(echo "$HDRS" | head -1 | grep -oE '[0-9]{3}')" "the cookie alone authenticates"
+assert_no_header "Set-Cookie" "no cookie is re-issued to a caller that has one"
+rm -f "$JAR"
+
+# No credential at all: there is no token to hand out.
+info_anon_hdrs
+assert_no_header "Set-Cookie" "an unauthenticated request gets no cookie"
+
+# =========================================================================
 # Summary
 # =========================================================================
 echo ""

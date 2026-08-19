@@ -5,6 +5,26 @@ z/OSMF-compatible REST API for MVS 3.8j. All endpoints require Basic Auth unless
 > **Copy-paste examples** (curl & Zowe CLI) for every endpoint:
 > [examples.md](../examples.md).
 
+## Sessions — a Basic request gets a cookie back
+
+Any request authenticated with `Authorization: Basic` is answered with
+
+```
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+```
+
+so a client that keeps cookies is in a session from its first call and need not
+resend credentials. This mirrors the reference z/OSMF, which does the same on
+any Basic-authenticated request rather than only at `/zosmf/services/authenticate`.
+
+A caller arriving **with** the cookie sends no `Authorization` header and gets
+no new `Set-Cookie` — the session is not refreshed per request. Command-line
+clients that ignore cookies are unaffected: they keep sending Basic and it keeps
+working.
+
+`POST /zosmf/services/authenticate` remains the explicit way in, and the only
+way to get the cookie without also making an API call.
+
 ## `X-MVSMF-Client` — for browser clients only
 
 A `401` carries `WWW-Authenticate: Basic realm="<SMF ID>"`, as the reference

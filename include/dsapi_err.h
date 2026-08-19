@@ -12,7 +12,9 @@
 
 // Reason codes for Category 6 (Service error)
 #define REASON_PDS_NOT_SEQUENTIAL		1	// Dataset is PDS, not sequential
-#define REASON_DATASET_ALLOC_FAILED		2	// Dataset allocation failed
+/* 2 is burned: it meant "Dataset allocation failed" in shipped responses, and
+ * was reported for failed deletes too (#319). Do not reuse it. The create path
+ * answers the reference's own report now -- see CATEGORY_DYNALLOC below. */
 #define REASON_INVALID_ALLOC_PARAMS		3	// Invalid or missing allocation parameters
 #define REASON_DATASET_NOT_FOUND		4	// Dataset not found
 #define REASON_MEMBER_NOT_FOUND			5	// PDS member not found
@@ -21,6 +23,7 @@
 #define REASON_RENAME_FAILED			8	// Rename operation failed
 #define REASON_PATTERN_TOO_LONG			9	// Member pattern longer than the handler accepts
 #define REASON_ETAG_MISMATCH			10	// If-Match precondition failed (issue #152)
+#define REASON_DELETE_FAILED			11	// Scratch/uncatalog or STOW delete failed (issue #319)
 
 /* Dynamic allocation failure -- the reference's own report, measured (#317).
  *
@@ -49,8 +52,8 @@
 
 // Error messages for Category 6
 #define ERR_MSG_PDS_NOT_SEQUENTIAL		"Dataset is a partitioned dataset (PDS). Use /ds/{dataset-name}({member-name}) to access members"
-#define ERR_MSG_DATASET_ALLOC_FAILED	"Dataset allocation failed"
 #define ERR_MSG_INVALID_ALLOC_PARAMS	"Invalid or missing allocation parameters"
+#define ERR_MSG_DELETE_FAILED		"Dataset delete failed"
 #define ERR_MSG_DATASET_NOT_FOUND	"Dataset not found"
 #define ERR_MSG_MEMBER_NOT_FOUND	"PDS member not found"
 #define ERR_MSG_INVALID_RENAME_REQUEST	"Unsupported request; only 'rename' is supported"

@@ -2384,6 +2384,90 @@ fi
 #    S913, and the client still sees the correct 500 above.
 assert_no_new_abend "$ABEND_BEFORE" "auth: a refused request performs no operation (no handler abend)"
 
+# --- Non-admin refusals (needs a second, ordinary userid) ---
+#
+# The checks above run as whoever MVSMF_USER is. On a system where that is an
+# admin, only ONE attribute is refusable (ALTER under a prefix the admin group
+# does not hold), so READ and UPDATE refusals are unreachable and the suite
+# cannot see a regression in either. Set MVSMF_USER2/MVSMF_PASS2 to an ordinary
+# userid to cover them.
+#
+# This is also the only place the refusal is verified by its EFFECT rather than
+# its answer: the target exists and holds known content, so a gate that sends
+# the refusal and performs the operation anyway is caught here even if the
+# console is not consulted.
+
+echo ""
+echo "--- Authorization: non-admin refusals (issue #228) ---"
+
+if [ -z "${MVSMF_USER2:-}" ] || [ -z "${MVSMF_PASS2:-}" ]; then
+	skip "auth: non-admin refusals (set MVSMF_USER2/MVSMF_PASS2 to enable)"
+else
+	AUTH2="${MVSMF_USER2}:${MVSMF_PASS2}"
+	VICTIM="${MVSMF_USER}.CURL.A228"
+	ABEND_BEFORE2=$(mtt_abend_count)
+
+	curl -s -o /dev/null -X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "Content-Type: text/plain" \
+		--data-binary "ORIGINAL CONTENT" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
+
+	# READ is permitted -- the generic profile grants it -- so this is the
+	# control that proves the id is not simply refused everything.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "200" "$HTTP_CODE" "auth2: read of another user's data set is permitted"
+
+	# UPDATE and ALTER on someone else's data set are not.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+		-H "Content-Type: text/plain" --data-binary "OVERWRITTEN" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "500" "$HTTP_CODE" "auth2: write to another user's data set is refused"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "500" "$HTTP_CODE" "auth2: delete of another user's data set is refused"
+
+	# The effect, which is the part the response cannot show.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "200" "$HTTP_CODE" "auth2: the refused delete did not delete"
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	if echo "$CONTENT" | grep -q "ORIGINAL CONTENT"; then
+		pass "auth2: the refused write did not write"
+	else
+		fail "auth2: the refused write did not write" "content is now: ${CONTENT}"
+	fi
+
+	assert_no_new_abend "$ABEND_BEFORE2" "auth2: no handler abend from any refusal"
+
+	# An ordinary user keeps full control of their own qualifier -- RAKF grants
+	# the owner READ/UPDATE/ALTER implicitly, which the generic DATASET * READ
+	# rule alone would not suggest. If this breaks, the checks are too strict.
+	OWN="${MVSMF_USER2}.CURL.OWN228"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH2" \
+		-H "Content-Type: application/json" \
+		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "201" "$HTTP_CODE" "auth2: create in own qualifier"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+		-H "Content-Type: text/plain" --data-binary "own data" \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "204" "$HTTP_CODE" "auth2: write in own qualifier"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "204" "$HTTP_CODE" "auth2: delete in own qualifier"
+
+	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}" || true
+fi
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

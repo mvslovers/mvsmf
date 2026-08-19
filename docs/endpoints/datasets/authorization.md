@@ -28,6 +28,41 @@ A data set rename checks the **source and the target**. Checking only the source
 would let a caller with ALTER over their own qualifier move a data set into a
 namespace they have no authority over.
 
+## What RAKF actually grants (measured, both distributions)
+
+The attribute column above is only half the picture; the other half is what the
+security manager answers. On MVS 3.8j that is RAKF, and its shipped profile set
+is nearly identical on MVS/CE and TK5:
+
+```
+DATASET *                     READ        <- everyone, on everything
+DATASET *          ADMIN      ALTER
+DATASET *          STCGROUP   ALTER
+DATASET SYS1.SECURE.*         NONE        (RAKFADM: UPDATE)
+...
+```
+
+Read that table on its own and you conclude that an ordinary user cannot write
+anywhere, and that adding an UPDATE check would break every non-admin write.
+**That conclusion is wrong**, and the reason is not in the table: RAKF grants a
+user full access to data sets under their own userid implicitly, with no profile
+line for it. Measured — `MVSCE02` gets READ, UPDATE *and* ALTER on
+`MVSCE02.TEST.DATA`, while getting READ-only on `IBMUSER.*` and `SYS1.PARMLIB`,
+and nothing at all on `SYS1.SECURE.*`.
+
+Practical consequences when reasoning about these checks:
+
+- An **admin** userid is nearly useless for testing a refusal: `ADMIN`/`RAKFADM`
+  hold ALTER through the generic profile, so only `SYS1.SECURE.*` (where RAKFADM
+  is capped at UPDATE) can refuse anything, and only for ALTER.
+- An **ordinary** userid is the one that exercises READ and UPDATE refusals.
+  `MVSMF_USER2`/`MVSMF_PASS2` in `.env` enable that section of
+  `tests/curl-datasets.sh`.
+- RAKF resolution is **not** "most specific wins": a universal `NONE` line is
+  overridden by a group grant from the *generic* profile, while a group line on
+  the specific profile does bind. Matching is by group membership across
+  profiles.
+
 ## Not authorized here
 
 - `GET /zosmf/restfiles/ds?dslevel=` — the listing reads the catalog and the

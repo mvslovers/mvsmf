@@ -108,5 +108,15 @@ name = "TSTSEND"
 sources = ["test/host/tstsend.c"]
 norent = true
 
+# TSTSPLN: #314 — JES2 writes a pointer record into JESJCLIN behind every
+# in-stream DD * card, and the PDDB record count does not include them. The
+# #158 cap counted them anyway, so the listing lost one real card off the tail
+# per in-stream DD. Portable C (test-host); the TU #includes src/spoolln.c so
+# it drives the real decision the spool walk makes — do not list spoolln.c here.
+[[test]]
+name = "TSTSPLN"
+sources = ["test/host/tstspln.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

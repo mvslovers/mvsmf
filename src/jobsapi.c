@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include <clibjes2.h>
+#include <hasppddb.h>
 #include <clibthrd.h>
 #include <clibtry.h>
 #include <clibvsam.h>
@@ -23,6 +24,7 @@
 #include "mvsmfmsg.h"
 #include "json.h"
 #include "router.h"
+#include "spoolln.h"
 
 #define INITIAL_BUFFER_SIZE 4096
 #define MAX_JOBS_LIMIT 1000
@@ -578,6 +580,15 @@ quit:
  * so capping at the PDDB count is exact; SYSOUT datasets stay uncapped
  * (their counts may lag while a job is active).
  *
+ * "Exact" holds only for records the count actually counts, which is what
+ * issue #314 turned up: JESJCLIN also carries JES2's own pointer record
+ * behind every in-stream DD * card, and the PDDB counts JCL statements
+ * only. Printing one spends a slot of the cap that a real card needed, so
+ * the listing used to lose one card off the tail per in-stream DD. Both
+ * rules now live in spool_line_action() (spoolln.c), together, because
+ * their order and the fact that a skip counts for neither of them is the
+ * whole of the fix.
+ *
  * The cap and the response target travel to the per-line callback in this
  * context struct, handed straight through jesprint()'s arg (libc370 #21/#22,
  * issue #187). Before that signature existed the cap had to ride the per-task
@@ -588,6 +599,7 @@ typedef struct spool_ctx {
 	unsigned	limit;		/* cap for the current dd (0 = no cap)     */
 	unsigned	count;		/* lines printed from the current dd       */
 	unsigned	total;		/* lines printed from all dds so far       */
+	int			jclin;		/* current dd is JESJCLIN (dsid PDBINJCL)  */
 } SPOOL_CTX;
 
 #define RC_SPOOL_CAP	(-77)	/* sentinel: cap reached, normal end */
@@ -673,9 +685,17 @@ do_print_sysout_line(const char *line, unsigned linelen, void *arg)
 	Session *session = ctx->session;	/* the httpx macro reads session->httpd */
 	int rc = 0;
 
-	/* logical end of the dataset reached - stop jesprint */
-	if (ctx->limit && ctx->count >= ctx->limit) {
-		return RC_SPOOL_CAP;
+	switch (spool_line_action(ctx->jclin, ctx->limit, ctx->count, line, linelen)) {
+	case SPOOL_LINE_STOP:
+		return RC_SPOOL_CAP;	/* logical end of the dataset */
+
+	case SPOOL_LINE_SKIP:
+		/* JES2's own record, not content. Counted nowhere: the cap budget
+		   belongs to the cards, and ctx->total means output went out. */
+		return 0;
+
+	default:
+		break;
 	}
 
 	/* headers are held back until there is something to send, so that an
@@ -733,6 +753,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	ctx.limit = 0;
 	ctx.count = 0;
 	ctx.total = 0;
+	ctx.jclin = 0;
 
 	unsigned ii = 0;
 	for (ii = 0; ii < array_count(&job->jesdd); ii++) {
@@ -772,6 +793,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 		   pre-built JES2 deletion line behind the records stays hidden */
 		ctx.limit = ((dd->flag & FLAG_SYSIN) && dd->records) ? dd->records : 0;
 		ctx.count = 0;
+		ctx.jclin = (dd->dsid == PDBINJCL);
 
 		prc = jesprint(jes, job, dd->dsid, do_print_sysout_line, &ctx, &st);
 

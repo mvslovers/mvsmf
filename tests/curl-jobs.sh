@@ -1204,6 +1204,99 @@ test_spool_records_exact_count() {
 	fi
 }
 
+test_spool_records_instream_jclin() {
+	echo ""
+	echo "--- Spool File Records: JESJCLIN with in-stream data (issue #314) ---"
+
+	# JES2 writes a 9-byte pointer record into the JCL data set behind every
+	# in-stream DD * card (header flags 0x0C, carrying the DSID and the MTTR of
+	# the SYSIN data set that card opened). The PDDB record count does not
+	# include them, so the #158 cap used to spend one slot per pointer and the
+	# listing lost one real card off its tail per in-stream DD -- measured: a
+	# 7-statement deck with three in-stream DDs answered 5 cards plus 2 binary
+	# records, with //IN3 DD * and //LAST DD DUMMY missing entirely.
+	#
+	# The deck submitted here is the reproducer: three in-stream DDs and a card
+	# AFTER the last of them, so truncation cannot hide behind the cap. The
+	# assertion that matters is the LAST line -- that is what truncation takes.
+	# test_spool_records_exact_count above cannot see this: iefbr14.jcl has no
+	# in-stream data, so it never produces a pointer record.
+
+	local jcl
+	jcl=$(cat "${JCL_DIR}/instream3.jcl")
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit in-stream JCL"
+
+	local jobname jobid
+	jobname=$(echo "$BODY" | jq -r '.jobname' 2>/dev/null)
+	jobid=$(echo "$BODY" | jq -r '.jobid' 2>/dev/null)
+
+	if [ -z "$jobid" ] || [ "$jobid" = "null" ]; then
+		fail "in-stream JCL submitted" "no jobid in response"
+		skip "JESJCLIN in-stream assertions (nothing submitted)"
+		return
+	fi
+
+	wait_for_output "$jobname" "$jobid"
+
+	local files_resp reccount
+	files_resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+	split_response "$files_resp"
+	reccount=$(echo "$BODY" | jq '[.[] | select(.ddname == "JESJCLIN")][0]["record-count"]' 2>/dev/null)
+
+	# The in-stream data sets must be there as spool files of their own -- if
+	# they are not, this deck did not do what the test assumes and every
+	# assertion below would pass for the wrong reason.
+	local instream
+	instream=$(echo "$BODY" | jq '[.[] | select(.id >= 101)] | length' 2>/dev/null)
+	if [ "$instream" = "3" ]; then
+		pass "three in-stream data sets on the spool"
+	else
+		fail "three in-stream data sets on the spool" "got ${instream}"
+	fi
+
+	resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files/1/records")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "read JESJCLIN with in-stream data"
+
+	local lines last
+	lines=$(printf '%s' "$BODY" | grep -c '' 2>/dev/null)
+	last=$(printf '%s' "$BODY" | tr -d '\r' | tail -n1)
+
+	if [ "$lines" = "$reccount" ]; then
+		pass "JESJCLIN line count equals record-count ($reccount)"
+	else
+		fail "JESJCLIN line count equals record-count" "expected $reccount, got $lines"
+	fi
+
+	if [ "$last" = "//LAST     DD DUMMY" ]; then
+		pass "JESJCLIN keeps the card after the last in-stream DD"
+	else
+		fail "JESJCLIN keeps the card after the last in-stream DD" \
+			"last line is '${last}'"
+	fi
+
+	# Every JCL statement starts with '/'; in-stream data lives in its own
+	# SYSIN data set and never here. Anything else is a JES2 record that
+	# escaped.
+	if printf '%s' "$BODY" | tr -d '\r' | grep -qv '^/'; then
+		fail "no JES2 pointer record in JESJCLIN" \
+			"a line does not start with '/'"
+	else
+		pass "no JES2 pointer record in JESJCLIN"
+	fi
+}
+
 test_spool_records_stale_checkpoint() {
 	echo ""
 	echo "--- Spool File Records: stale checkpoint entry (issue #187) ---"
@@ -1468,6 +1561,7 @@ test_spool_files_not_found
 # Spool records tests
 test_spool_records
 test_spool_records_exact_count
+test_spool_records_instream_jclin
 test_spool_records_stale_checkpoint
 test_spool_records_invalid_ddid
 

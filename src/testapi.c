@@ -1035,6 +1035,190 @@ int testHandler(Session *session) {
     if (rc < 0)
       goto quit;
 
+    /* --- fn=spool (raw spool block dump, issue #314) ---------------- */
+    /* JESJCLIN holds records that are not card images: JES2 writes a pointer
+     * record behind every in-stream DD * card, and the PDDB record count does
+     * not include them.  Nothing of that is visible through the jobs API --
+     * jesprint() hands out the record DATA only, already blank-trimmed, and
+     * esc_print()'s TR has folded every byte below 0x40 to a blank by the time
+     * it reaches the wire.  So the record header (len/flags/len2) and the
+     * binary fields of the pointer cannot be read from a response at all.
+     *
+     * This dumps the raw block chain of one dsid, header bytes included.
+     * Read-only: spool_read() is the same BDAM read jesprint() walks with, and
+     * nothing here writes to the spool or the checkpoint. */
+  } else if (strcmp(fn, "spool") == 0) {
+    char *jn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_JOBNAME");
+    char *ji = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_JOBID");
+    char *dsv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSID");
+    char *bkv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_MAXBLK");
+    char *lnv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_LEN");
+    unsigned dsid = dsv ? (unsigned)atoi(dsv) : 1;
+    unsigned maxblk = bkv ? (unsigned)atoi(bkv) : 4;
+    unsigned want = lnv ? (unsigned)atoi(lnv) : 1024;
+    JES *jes = NULL;
+    JESJOB **jobs = NULL;
+    JESJOB *job = NULL;
+    JESDD *dd = NULL;
+    unsigned char *buf = NULL;
+    unsigned bufsize = 0;
+    unsigned mttr = 0;
+    unsigned nblk = 0;
+    unsigned count = 0;
+    unsigned ii;
+    int first = 1;
+
+    if (!jn || !*jn || !ji || !*ji) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
+                                       " \"error\": \"jobname= and jobid= required\" }\n");
+      goto quit;
+    }
+
+    /* the chain is followed from the block just read, so it is bounded here
+     * as well as by jesprint()'s own JESPR_MAXBLK -- this probe reads a chain
+     * that may be exactly what is malformed */
+    if (maxblk < 1)
+      maxblk = 1;
+    if (maxblk > 16)
+      maxblk = 16;
+
+    jes = jesopen();
+    if (!jes) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
+                                       " \"error\": \"jesopen failed\" }\n");
+      goto quit;
+    }
+    session_register_jes(session, jes);
+
+    if (!jes->cp || !jes->js || !jes->js[0]) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
+                                       " \"error\": \"no checkpoint or spool handle\" }\n");
+      goto quit_spool;
+    }
+    bufsize = jes->cp->hct._BUFSIZE;
+
+    /* dd=1: without the DD list there is no PDDB to take the first MTTR
+     * from, and every dsid looks absent. */
+    jobs = jesjob(jes, jn, FILTER_JOBNAME, 1);
+    count = jobs ? array_count(&jobs) : 0;
+    for (ii = 0; ii < count; ii++) {
+      if (jobs[ii] && strcmp((char *)jobs[ii]->jobid, ji) == 0) {
+        job = jobs[ii];
+        break;
+      }
+    }
+    if (!job) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\", \"jobname\": \"%s\","
+                                       " \"jobid\": \"%s\", \"error\": \"job not found\" }\n",
+                       jn, ji);
+      goto quit_spool;
+    }
+
+    count = array_count(&job->jesdd);
+    for (ii = 0; ii < count; ii++) {
+      if (job->jesdd[ii] && job->jesdd[ii]->dsid == dsid) {
+        dd = job->jesdd[ii];
+        break;
+      }
+    }
+    if (!dd) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\", \"jobname\": \"%s\","
+                                       " \"jobid\": \"%s\", \"dsid\": %u,"
+                                       " \"error\": \"no such dsid\" }\n",
+                       jn, ji, dsid);
+      goto quit_spool;
+    }
+
+    if (!bufsize || bufsize > 32768) {
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
+                                       " \"error\": \"implausible BUFSIZE %u\" }\n",
+                       bufsize);
+      goto quit_spool;
+    }
+    if (want > bufsize)
+      want = bufsize;
+
+    buf = (unsigned char *)malloc(bufsize);
+    if (!buf) {
+      wtof(MSG_STORAGE_FAILED, ALLOC_SPOOL_BLOCK);
+      rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
+                                       " \"error\": \"out of storage\" }\n");
+      goto quit_spool;
+    }
+
+    if ((rc = http_printf(session->httpc,
+                          "{ \"fn\": \"spool\", \"jobname\": \"%s\", \"jobid\": \"%s\","
+                          " \"jobkey\": \"%08X\", \"bufsize\": %u, \"dumped\": %u,\n"
+                          "  \"dd\": { \"ddname\": \"%s\", \"dsid\": %u, \"recfm\": \"%02X\","
+                          " \"lrecl\": %u, \"records\": %u, \"mttr\": \"%08X\","
+                          " \"flag\": \"%02X\" },\n"
+                          "  \"blocks\": [\n",
+                          jn, ji, job->jobkey, bufsize, want,
+                          (char *)dd->ddname, dd->dsid, (unsigned)dd->recfm,
+                          (unsigned)dd->lrecl, dd->records, dd->mttr,
+                          (unsigned)dd->flag)) < 0)
+      goto quit_spool;
+
+    for (mttr = dd->mttr; mttr && nblk < maxblk;) {
+      unsigned next;
+      unsigned jobkey;
+      unsigned bdsid;
+      unsigned off;
+
+      if (spool_read(jes->js[0], mttr, buf, bufsize)) {
+        rc = http_printf(session->httpc, "%s { \"mttr\": \"%08X\","
+                                         " \"error\": \"spool_read failed\" }\n",
+                         first ? " " : " ,", mttr);
+        break;
+      }
+
+      /* PRBLOCK: next(4) jobkey(4) dsid(2), records start at offset 10 */
+      next = *(unsigned *)buf;
+      jobkey = *(unsigned *)(buf + 4);
+      bdsid = *(unsigned short *)(buf + 8);
+
+      if ((rc = http_printf(session->httpc,
+                            "%s { \"mttr\": \"%08X\", \"next\": \"%08X\","
+                            " \"jobkey\": \"%08X\", \"dsid\": %u, \"hex\": \"",
+                            first ? " " : " ,", mttr, next, jobkey, bdsid)) < 0)
+        goto quit_spool;
+
+      for (off = 0; off < want; off += 32) {
+        char hex[65];
+        unsigned n = (want - off) < 32 ? (want - off) : 32;
+        unsigned k;
+
+        for (k = 0; k < n; k++) {
+          sprintf(hex + (k * 2), "%02X", (unsigned)buf[off + k]);
+        }
+        hex[n * 2] = '\0';
+
+        if ((rc = http_printf(session->httpc, "%s", hex)) < 0)
+          goto quit_spool;
+      }
+
+      if ((rc = http_printf(session->httpc, "\" }\n")) < 0)
+        goto quit_spool;
+
+      first = 0;
+      nblk++;
+
+      if (next == mttr) /* a block chaining to itself would spin forever */
+        break;
+      mttr = next;
+    }
+
+    rc = http_printf(session->httpc, "  ], \"blocks_read\": %u }\n", nblk);
+
+  quit_spool:
+    if (buf)
+      free(buf);
+    if (jobs)
+      jesjobfr(&jobs);
+    session_jesclose(session, &jes);
+    if (rc < 0)
+      goto quit;
+
     /* --- fn=intrdr (internal-reader open/close cycles, issue #294) -- */
   } else if (strcmp(fn, "intrdr") == 0) {
     /* Bisect for mvslovers/libc370#115: a job submit permanently costs the
@@ -1185,6 +1369,8 @@ int testHandler(Session *session) {
         " of it; hold=N keeps the largest block N seconds -- needs MVSMF_ABEND_TEST=1)\","
         " \"?fn=intrdr&n=1..25      (internal-reader open/close cycles, no records; libc370#115 bisect)\","
         " \"?fn=job&jobname=NAME    (raw JCT completion + JCTJTFLG bits per job; mvsmf#305)\","
+        " \"?fn=spool&jobname=NAME&jobid=JOBnnnnn&dsid=1&maxblk=4&len=1024"
+        " (raw spool block dump incl. record headers; mvsmf#314)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","

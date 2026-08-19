@@ -50,6 +50,16 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
 - Binary/record mode for FB datasets uses DSCB-based record count calculation to determine exact end-of-data
 - Binary/record mode for PDS members reads until fread returns 0 (no DSCB-based limit)
 
+## Authorization
+
+Requires **READ** on the data set in class `DATASET` (issue #228). The check runs
+before any catalog, VTOC or data set access, so a refusal is indistinguishable
+from "does not exist".
+
+A refusal answers **HTTP 500** with `category 4`, `rc 8`, `reason 0` and the
+explanation in `details[]` — the shape a real z/OSMF sends; 403 is not a z/OSMF
+status. See [authorization.md](authorization.md).
+
 ## Examples
 
 ### Using curl

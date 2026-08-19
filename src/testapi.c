@@ -8,6 +8,7 @@
 #include <clibmtt.h>
 #include <clibppa.h>
 #include <clibwto.h>
+#include <racf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,6 +23,12 @@
 #ifndef BUILD_ID
 #define BUILD_ID "unknown"     /* fallback if the generated header is absent */
 #endif
+
+/* fn=checkauth reply sentinels.  Kept out of the SAF rc range (0/4/8/12...) and
+ * out of http_check_auth()'s -1 so a probe answer is never ambiguous. */
+#define PROBE_NOT_RUN   (-901)  /* this call was not made for the given &via= */
+#define PROBE_NO_ACEE   (-902)  /* unauthenticated: nothing to check against */
+#define PROBE_BAD_ATTR  (-903)  /* unknown &attr=; nothing was called at all */
 
 /* --- fn=syslog diagnostic ----------------------------------------------
  * Probe whether we can read the system log (SYSLOG) off the JES2 spool from
@@ -1020,6 +1027,86 @@ int testHandler(Session *session) {
                      " \"first_close_rc\": %d }\n",
                      want, ok, open_rc, close_errors, first_close_rc);
 
+    /* --- fn=checkauth (issue #228) --------------------------------- */
+    /* First CGI consumer of httpd's http_check_auth() vector entry, and the
+     * measurement tool for #228's attribute column. It exists before any
+     * handler is gated, for two reasons that both fail late otherwise.
+     *
+     * The vector resolves into the RUNNING httpd (httpx is
+     * http_get_httpx(session->httpd)), so a live build older than the entry
+     * makes the macro dereference past what the server actually filled. That
+     * is an abend, not a link error, and `make deps` cannot see it -- the same
+     * shape as the httpstat() lesson.
+     *
+     * And the attribute a given operation needs is a claim about what RAKF
+     * enforces, not about what this code intends. RAKF is not RACF and is not
+     * in the mvslovers org; measuring what it answers beats proposing a table.
+     *
+     * &via=raw (the default) calls libc370's racf_auth() directly -- no vector,
+     * so it cannot be taken down by the half being verified -- and shows the
+     * UNNORMALIZED SAF rc, the only way to see rc 4 ("no profile covers this")
+     * as distinct from rc 0. &via=vector adds the httpd call; &via=both runs
+     * raw first so its answer is already on the wire if the vector call dies.
+     *
+     * Read-only: RACHECK answers a question, it changes nothing. A denial does
+     * write the security log entry RAKF writes for any refusal.
+     */
+  } else if (strcmp(fn, "checkauth") == 0) {
+    char *dsn =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
+    char *cls =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_CLASS");
+    char *attrname =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_ATTR");
+    char *via =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_VIA");
+    ACEE *acee = http_get_acee(session->httpc);
+    int attr = RACF_ATTR_READ;
+    int raw_rc = PROBE_NOT_RUN;
+    int vec_rc = PROBE_NOT_RUN;
+
+    if (!dsn)
+      dsn = "SYS1.PARMLIB";
+    if (!cls)
+      cls = "DATASET";
+    if (!via)
+      via = "raw";
+    if (!attrname)
+      attrname = "read";
+
+    /* An unknown &attr= must not silently mean READ: racf_auth() maps an
+     * invalid value to ALTER, so a typo would measure the strictest attribute
+     * while the reply claimed the one that was asked for. */
+    if (strcmp(attrname, "read") == 0) {
+      attr = RACF_ATTR_READ;
+    } else if (strcmp(attrname, "update") == 0) {
+      attr = RACF_ATTR_UPDATE;
+    } else if (strcmp(attrname, "control") == 0) {
+      attr = RACF_ATTR_CONTROL;
+    } else if (strcmp(attrname, "alter") == 0) {
+      attr = RACF_ATTR_ALTER;
+    } else {
+      attr = PROBE_BAD_ATTR;
+    }
+
+    if (attr != PROBE_BAD_ATTR) {
+      if (strcmp(via, "raw") == 0 || strcmp(via, "both") == 0) {
+        raw_rc = acee ? racf_auth(acee, cls, dsn, attr) : PROBE_NO_ACEE;
+      }
+      if (strcmp(via, "vector") == 0 || strcmp(via, "both") == 0) {
+        vec_rc = http_check_auth(session->httpc, cls, dsn, attr);
+      }
+    }
+
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"checkauth\", \"class\": \"%s\","
+                     " \"resource\": \"%s\", \"attr\": \"%s\","
+                     " \"attr_value\": %d, \"via\": \"%s\","
+                     " \"acee\": \"%s\","
+                     " \"racf_auth_rc\": %d, \"http_check_auth_rc\": %d }\n",
+                     cls, dsn, attrname, attr, via,
+                     acee ? "non-null" : "NULL", raw_rc, vec_rc);
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -1036,6 +1123,7 @@ int testHandler(Session *session) {
         " \"?fn=intrdr&n=1..25      (internal-reader open/close cycles, no records; libc370#115 bisect)\","
         " \"?fn=job&jobname=NAME    (raw JCT completion + JCTJTFLG bits per job; mvsmf#305)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
+        " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\""
         " ] }\n");

@@ -181,10 +181,29 @@ sendErrorResponse(Session *session, int status, int category, int rc,
 		}
 	}
 
+	/* "details" is an ARRAY of sentences, which is what z/OSMF sends and what
+	 * a client parses. It used to be emitted as a bare string, and only
+	 * because no caller had ever passed one -- the parameter had zero users
+	 * until #228. Emitting details[0] as a string would have shipped a shape
+	 * no reference response has. */
 	if (details && details_count > 0) {
-		irc = addJsonString(builder, "details", details[0]);
+		int i;
+
+		irc = startJsonArrayKey(builder, "details");
 		if (irc < 0) {
-		goto quit;
+			goto quit;
+		}
+
+		for (i = 0; i < details_count; i++) {
+			irc = addJsonArrayString(builder, details[i]);
+			if (irc < 0) {
+				goto quit;
+			}
+		}
+
+		irc = endArray(builder);
+		if (irc < 0) {
+			goto quit;
 		}
 	}
 
@@ -223,6 +242,30 @@ send_not_modified(Session *session, const char *etag)
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) return rc;
 
 	return rc;
+}
+
+/* The z/OSMF error report for an authorization refusal (issue #228).
+ *
+ * The shape is measured, not designed -- see CATEGORY_AUTHORIZATION in
+ * common.h. The one field mvsMF already had right is the status: 500 is what
+ * the reference answers, because the reference takes the same S913 OPEN abend
+ * and says so in its own details[] text.
+ *
+ * `detail` is the caller's, because the two producers of this body cannot claim
+ * the same thing. The reference always reaches the abend; a pre-check that
+ * refuses before the fopen() has not abended, and must not say it did.
+ */
+__asm__("\n&FUNC    SETC 'send_not_authorized'");
+int
+send_not_authorized(Session *session, const char *detail)
+{
+	const char *details[1];
+
+	details[0] = detail ? detail : ERR_MSG_DENIED_DETAIL;
+
+	return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_AUTHORIZATION, RC_ERROR, REASON_NOT_AUTHORIZED,
+			ERR_MSG_NOT_AUTHORIZED, details, 1);
 }
 
 //

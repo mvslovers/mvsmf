@@ -10,6 +10,7 @@
 #include <clibio.h>
 #include <osdcb.h>
 #include <errno.h>
+#include <racf.h>
 
 #include "dsapi.h"
 #include "dsapi_err.h"
@@ -53,6 +54,69 @@ static int dataset_etag(Session *session, const char *dataset,
                         long max_records, char *out, size_t outlen);
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
+static int require_access(Session *session, const char *dsname, int attr);
+
+/* Authorization gate for a data set operation (issue #228).
+ *
+ * Every operation in this file used to authorize by accident: it ends in an
+ * fopen()/remove()/rename(), and OPEN performs a RACF check under whatever ACEE
+ * sits in ASXBSENV. That gate is real -- measured, RAKF refuses with RAKF0005
+ * and an S913 -- but the field is address-space-wide, so the identity it runs
+ * under is shared between httpd's workers and outlives an abend
+ * (mvslovers/httpd#176). http_check_auth() passes the caller's own ACEE in the
+ * parameter list to racf_auth(), which serializes set/RACHECK/restore under
+ * lock(asxb), so the decision here is race-free whatever another worker is
+ * doing to ASXBSENV.
+ *
+ * It closes ONE direction, and knowing which matters when reading this. If
+ * ASXBSENV holds a MORE privileged identity, OPEN permits what the caller may
+ * not have -- nothing catches that today, and this does. If it holds a LESS
+ * privileged one, OPEN refuses an entitled caller and the request abends; this
+ * said yes, so that case is unchanged. And because a denial leaves the client's
+ * ACEE behind (httpd#176), every denial today seeds the first case -- which is
+ * why refusing before the abend is worth more than the wire-level tidiness.
+ *
+ * The resource is the DATASET profile name. For a member operation that is the
+ * PDS, never dsname(member): RACF profiles cover data sets, and there is no
+ * member granularity to ask for.
+ *
+ * Returns 0 when permitted. On refusal the response has already been sent and
+ * the caller must return without touching the data set.
+ */
+__asm__("\n&FUNC    SETC 'require_access'");
+static int require_access(Session *session, const char *dsname, int attr)
+{
+    int rc = http_check_auth(session->httpc, "DATASET", dsname, attr);
+
+    /* The contract is 0 = permitted, 8 and up = refused, -1 = unauthenticated,
+     * with SAF rc 4 ("no profile covers the resource") normalized to 0 by
+     * httpd. Both non-zero cases are spelled out on purpose: `rc != 0` would
+     * report an unauthenticated request as a permission problem, and the
+     * natural widened idiom `rc <= 4` would read -1 as ALLOWED. */
+    if (rc == 0) {
+        return 0;
+    }
+
+    if (rc < 0) {
+        /* Unreachable by construction -- identity_middleware answers 401 for a
+         * request with no resolved ACEE before any handler runs. Handled anyway
+         * so a future change to that gate cannot turn "no identity" into
+         * "identity refused". */
+        sendErrorResponse(session, HTTP_STATUS_UNAUTHORIZED,
+            CATEGORY_AUTHORIZATION, RC_ERROR, REASON_NOT_AUTHORIZED,
+            ERR_MSG_NOT_AUTHORIZED, NULL, 0);
+    } else {
+        send_not_authorized(session, NULL);
+    }
+
+    /* -1, NOT the send's return code. Both senders answer 0 when the response
+     * went out fine, so returning theirs would tell the caller "permitted" for
+     * every refusal that was successfully delivered -- the handler sends the
+     * refusal and then does the thing anyway. The client sees a correct 500,
+     * the data set is opened regardless, and the only trace is the S913 on the
+     * console. Measured exactly that way before this line existed. */
+    return -1;
+}
 
 // Helper function for HTTP headers
 //
@@ -1299,6 +1363,18 @@ int datasetGetHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
     }
 
+    /* Authorize before anything looks at the data set (issue #228).
+       Ahead of is_pds(), not after it: is_pds() reads the catalog and the VTOC
+       (__locate + __dscbdv), so gating later would let a caller without READ
+       tell a PDS from a sequential or absent name by whether the answer is 400
+       or the refusal -- the same existence oracle the delete and rename paths
+       close by checking before their __locate().
+       Also ahead of the ETag work, because dataset_etag() opens the data set to
+       hash it, and a check after that is a check after the first read. */
+    if (require_access(session, dsname, RACF_ATTR_READ) != 0) {
+        return 0;
+    }
+
     // Reject PDS - this endpoint is for sequential datasets only
     if (is_pds(dsname)) {
         return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
@@ -1398,6 +1474,15 @@ int datasetPutHandler(Session *session)
         if (ct && strstr(ct, "application/json") != NULL) {
             return process_rename(session, dsname, NULL);
         }
+    }
+
+    /* Authorize the write once, here (issue #228). Two read-opens follow before
+       the output open -- the existence probe that keeps fopen("w") from
+       auto-allocating with the wrong DCB (#65), and check_if_match()'s ETag
+       hash -- and neither is an operation of its own, so neither gets a READ
+       check of its own. One request, one decision. */
+    if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+        return 0;
     }
 
     // Reject PDS - this endpoint is for sequential datasets only
@@ -2021,6 +2106,15 @@ int memberListHandler(Session *session)
 		goto quit;
 	}
 
+	/* Authorize before the directory is read (issue #228). This listing is
+	   unlike the dslevel one in #229: it opens the PDS with BPAM, so it has
+	   always been gated implicitly, and the explicit check replaces an accident
+	   rather than closing a hole. */
+	if (require_access(session, dsname, RACF_ATTR_READ) != 0) {
+		rc = 0;
+		goto quit;
+	}
+
 	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
 	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
 
@@ -2168,6 +2262,13 @@ int memberGetHandler(Session *session)
     // Create dataset path
     snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
 
+    /* Authorize on the PDS, not on dsname(member) (issue #228): RACF profiles
+       cover data sets, so a member read is READ on the library. Ahead of the
+       ETag work for the same reason as datasetGetHandler -- hashing opens. */
+    if (require_access(session, dsname, RACF_ATTR_READ) != 0) {
+        return 0;
+    }
+
     // Parse X-IBM-Data-Type header
     data_type_str = (char *) http_get_env(session->httpc,
         (const UCHAR *) "HTTP_X-IBM-Data-Type");
@@ -2259,6 +2360,12 @@ int memberPutHandler(Session *session)
         if (ct && strstr(ct, "application/json") != NULL) {
             return process_rename(session, dsname, member);
         }
+    }
+
+    /* UPDATE on the library (issue #228). Writing a member -- new or existing --
+       is an update of the PDS; there is no member-level profile to ask about. */
+    if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+        return 0;
     }
 
     // Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
@@ -2755,6 +2862,12 @@ process_rename(Session *session, const char *target_dsn,
 		}
 		free(body);
 
+		/* UPDATE on the library (issue #228): both the old and the new member
+		   are in target_dsn, so one check covers the whole STOW. */
+		if (require_access(session, target_dsn, RACF_ATTR_UPDATE) != 0) {
+			return 0;
+		}
+
 		rc = __renmem(target_dsn, from_member, target_member);
 		if (rc == 0) {
 			return sendDefaultHeaders(session, 204, "application/json", 0);
@@ -2787,6 +2900,19 @@ process_rename(Session *session, const char *target_dsn,
 				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
 		}
 		free(body);
+
+		/* ALTER on BOTH names (issue #228), before the locate so the 404 does
+		   not become an existence oracle for a caller who may not rename.
+		   The target is checked too, and not out of caution: gating only the
+		   source would let a caller with ALTER over their own qualifier move a
+		   data set INTO a namespace they have no authority over, which is an
+		   escalation the source check cannot see. */
+		if (require_access(session, from_dsn, RACF_ATTR_ALTER) != 0) {
+			return 0;
+		}
+		if (require_access(session, target_dsn, RACF_ATTR_ALTER) != 0) {
+			return 0;
+		}
 
 		// Verify the source data set exists
 		memset(dsn44, ' ', sizeof(dsn44));
@@ -2993,6 +3119,15 @@ int datasetDeleteHandler(Session *session)
 			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 	}
 
+	/* ALTER before the catalog is even consulted (issue #228). The order is
+	   deliberate: authorizing after the locate would make the 404 an existence
+	   oracle for anyone who may not delete the name -- they would learn whether
+	   it exists from which error came back. Authorizing first, a caller without
+	   ALTER learns nothing either way. */
+	if (require_access(session, dsname, RACF_ATTR_ALTER) != 0) {
+		return 0;
+	}
+
 	/* Check if dataset exists via catalog locate */
 	memset(dsn44, ' ', sizeof(dsn44));
 	memcpy(dsn44, dsname, strlen(dsname));
@@ -3044,6 +3179,14 @@ int memberDeleteHandler(Session *session)
 	}
 
 	snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
+
+	/* Deleting a member is a STOW against the directory, so UPDATE on the
+	   library -- not ALTER, which is the attribute for scratching the data set
+	   itself (issue #228). Before the existence probe, same oracle argument as
+	   datasetDeleteHandler. */
+	if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+		return 0;
+	}
 
 	/* Verify member exists by attempting to open it */
 	fp = fopen(dataset, "r");

@@ -93,6 +93,16 @@ from the dataset's own DCB (LRECL, or BLKSIZE for RECFM=U). Records above
 1024 bytes used to overrun a fixed conversion buffer and abend the handler
 (issue #198).
 
+## Authorization
+
+Requires **UPDATE** on the data set (ALTER on both names for a rename) in class `DATASET` (issue #228). The check runs
+before any catalog, VTOC or data set access, so a refusal is indistinguishable
+from "does not exist".
+
+A refusal answers **HTTP 500** with `category 4`, `rc 8`, `reason 0` and the
+explanation in `details[]` — the shape a real z/OSMF sends; 403 is not a z/OSMF
+status. See [authorization.md](authorization.md).
+
 ## Examples
 
 ### Using curl

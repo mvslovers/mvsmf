@@ -114,6 +114,18 @@ int addJsonRaw(JsonBuilder *builder, const char *key, const char *raw)		asm("JSO
 int startJsonArrayKey(JsonBuilder *builder, const char *key)				asm("JSON00D");
 
 /**
+ * @brief Adds a bare string element to an open array (no key).
+ *
+ * The keyed adders above cannot produce an array of plain strings -- every one
+ * of them emits "key":value -- and the arrays this builder emitted until now
+ * held objects, which startJsonObject() handles. An error report's "details"
+ * is an array of sentences, so it needs this.
+ *
+ * Escapes as addJsonStringEsc() does; a NULL value emits null.
+ */
+int addJsonArrayString(JsonBuilder *builder, const char *value)				asm("JSON00E");
+
+/**
  * @brief Starts a new JSON object
  *
  * Adds an opening brace and prepares for object members.

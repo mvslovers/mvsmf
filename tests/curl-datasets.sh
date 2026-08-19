@@ -134,6 +134,30 @@ assert_json_field_exists() {
 	fi
 }
 
+# Count handler-abend lines currently in the Master Trace Table.
+#
+# A refusal cannot be verified from its response. The response is correct
+# either way: the gate sends the 500 and then, if it fails to stop the handler,
+# the operation runs anyway and abends at OPEN. The client sees exactly the same
+# bytes. The only observable difference is the S913 on the console -- which is
+# how that bug was found, and why this exists.
+mtt_abend_count() {
+	curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=mtt&step=3" 2>/dev/null \
+		| grep -c "HANDLER ABEND" || true
+}
+
+assert_no_new_abend() {
+	local before="$1"
+	local label="$2"
+	local after
+	after=$(mtt_abend_count)
+	if [ "$after" = "$before" ]; then
+		pass "$label"
+	else
+		fail "$label" "handler abend lines went from ${before} to ${after}: the refusal was sent but the operation ran anyway"
+	fi
+}
+
 assert_json_field_absent() {
 	local json="$1"
 	local expr="$2"
@@ -2246,6 +2270,203 @@ fi
 
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_slow.txt /tmp/curl_ds_expect.txt
+
+# =========================================================================
+# Authorization (issue #228)
+# =========================================================================
+#
+# Every check below has to come in a PAIR. A refusal on its own proves nothing:
+# a gate that always denies and a gate that works look identical from one
+# request, and a gate that never runs looks identical to a permitted answer.
+# Only the contrast shows that the decision is actually being made.
+#
+# The target is deliberately a name under SYS1.SECURE.* that DOES NOT EXIST.
+# RAKF gives RAKFADM only UPDATE there, so ALTER is refused even for an admin
+# id, which is what makes the refusal reachable with ordinary test credentials.
+# And because the name does not exist, a gate that wrongly permitted would fall
+# through to the catalog lookup and answer 404 -- nothing is ever scratched, so
+# the test cannot damage the security configuration it points at.
+#
+# NOT covered here, and not coverable as an admin: a READ or UPDATE refusal.
+# The generic profile is DATASET * READ with ALTER for ADMIN/STCGROUP, so an
+# admin id is permitted for every attribute except the SYS1.SECURE.* ALTER
+# above. Those two paths need a non-admin userid.
+
+echo ""
+echo "--- Authorization: refusal and its control (issue #228) ---"
+
+DENY_DS="SYS1.SECURE.NOSUCH"
+ALLOW_DS="${MVSMF_USER}.CURL.NOSUCH228"
+
+# The console baseline. Every refusal below has to leave it untouched: a gate
+# that sends the refusal and then performs the operation anyway is invisible in
+# the response and shows up only here.
+ABEND_BEFORE=$(mtt_abend_count)
+
+# 1. delete: ALTER refused
+RESP=$(curl -s -w '\n%{http_code}' -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+CONTENT=$(echo "$RESP" | sed '$d')
+DENY_CODE="$HTTP_CODE"
+assert_http_status "500" "$HTTP_CODE" "auth: delete without ALTER is refused"
+assert_json_field "$CONTENT" '.category' "4" "auth: refusal category"
+assert_json_field "$CONTENT" '.rc' "8" "auth: refusal rc"
+assert_json_field "$CONTENT" '.reason' "0" "auth: refusal reason"
+assert_json_field "$CONTENT" '.message' "LMOPEN error" "auth: refusal message"
+
+# details is an ARRAY, which is the shape z/OSMF sends. It was emitted as a
+# bare string until #228 -- unnoticed, because nothing passed one.
+assert_json_field "$CONTENT" '.details | type' "array" "auth: details is an array"
+assert_json_field_exists "$CONTENT" '.details[0]' "auth: details carries a sentence"
+
+# The refusal must not name an abend it did not take: the reference's own text
+# ends "Open 913 abend", true where OPEN refused, false for a pre-check.
+if echo "$CONTENT" | jq -r '.details[0]' 2>/dev/null | grep -qi "abend"; then
+	fail "auth: refusal does not claim an abend" "details mentions an abend"
+else
+	pass "auth: refusal does not claim an abend"
+fi
+
+# 2. the control: same verb, a name the caller MAY alter. Must get past the
+#    gate and fail on the catalog lookup instead.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}")
+ALLOW_CODE="$HTTP_CODE"
+assert_http_status "404" "$HTTP_CODE" "auth: delete with ALTER reaches the catalog"
+
+# 3. rename INTO a protected namespace: the source is permitted, so only the
+#    target-side check can refuse this. Without it, ALTER over your own
+#    qualifier would be enough to move a data set anywhere.
+RESP=$(curl -s -w '\n%{http_code}' -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+CONTENT=$(echo "$RESP" | sed '$d')
+assert_http_status "500" "$HTTP_CODE" "auth: rename into a protected name is refused"
+assert_json_field "$CONTENT" '.category' "4" "auth: rename refusal category"
+
+# 4. control for 3: both names permitted, so it must reach the catalog.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}2")
+assert_http_status "404" "$HTTP_CODE" "auth: rename with ALTER on both names reaches the catalog"
+
+# 5. A refusal must not be distinguishable from "does not exist", or the gate
+#    becomes the existence oracle it was added to prevent.
+#
+#    Test 1 already proves it, read the other way round: DENY_DS does not exist,
+#    so if the check ran after the catalog lookup the answer would have been
+#    404. It answered the refusal, therefore the check precedes the lookup and
+#    an existing and an absent denied name are indistinguishable.
+#
+#    Deliberately NOT tested by deleting a protected data set that does exist.
+#    The only such names here belong to the RAKF configuration, and a suite that
+#    aims DELETE at the live security configuration destroys the system the day
+#    a profile change makes the gate permit it. The inference above costs
+#    nothing and risks nothing.
+#    Both names in tests 1 and 2 are absent. Only the authority differs, and the
+#    answers differ -- so the answer is decided by authority, before existence is
+#    ever consulted. A denied caller therefore learns nothing about what exists.
+if [ "$DENY_CODE" = "500" ] && [ "$ALLOW_CODE" = "404" ]; then
+	pass "auth: the refusal is decided before existence is consulted"
+else
+	fail "auth: the refusal is decided before existence is consulted" \
+		"denied=${DENY_CODE} permitted=${ALLOW_CODE}, expected 500 and 404 on two equally absent names"
+fi
+
+# 6. The one that response assertions cannot make: a refused request must not
+#    have done the thing. If the gate returns "permitted" for a delivered
+#    refusal -- which is what happens if it hands back the send's return code,
+#    since a successful send is 0 -- the handler carries on to the open, abends
+#    S913, and the client still sees the correct 500 above.
+assert_no_new_abend "$ABEND_BEFORE" "auth: a refused request performs no operation (no handler abend)"
+
+# --- Non-admin refusals (needs a second, ordinary userid) ---
+#
+# The checks above run as whoever MVSMF_USER is. On a system where that is an
+# admin, only ONE attribute is refusable (ALTER under a prefix the admin group
+# does not hold), so READ and UPDATE refusals are unreachable and the suite
+# cannot see a regression in either. Set MVSMF_USER2/MVSMF_PASS2 to an ordinary
+# userid to cover them.
+#
+# This is also the only place the refusal is verified by its EFFECT rather than
+# its answer: the target exists and holds known content, so a gate that sends
+# the refusal and performs the operation anyway is caught here even if the
+# console is not consulted.
+
+echo ""
+echo "--- Authorization: non-admin refusals (issue #228) ---"
+
+if [ -z "${MVSMF_USER2:-}" ] || [ -z "${MVSMF_PASS2:-}" ]; then
+	skip "auth: non-admin refusals (set MVSMF_USER2/MVSMF_PASS2 to enable)"
+else
+	AUTH2="${MVSMF_USER2}:${MVSMF_PASS2}"
+	VICTIM="${MVSMF_USER}.CURL.A228"
+	ABEND_BEFORE2=$(mtt_abend_count)
+
+	curl -s -o /dev/null -X POST -u "$AUTH" \
+		-H "Content-Type: application/json" \
+		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
+	curl -s -o /dev/null -X PUT -u "$AUTH" -H "Content-Type: text/plain" \
+		--data-binary "ORIGINAL CONTENT" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
+
+	# READ is permitted -- the generic profile grants it -- so this is the
+	# control that proves the id is not simply refused everything.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "200" "$HTTP_CODE" "auth2: read of another user's data set is permitted"
+
+	# UPDATE and ALTER on someone else's data set are not.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+		-H "Content-Type: text/plain" --data-binary "OVERWRITTEN" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "500" "$HTTP_CODE" "auth2: write to another user's data set is refused"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "500" "$HTTP_CODE" "auth2: delete of another user's data set is refused"
+
+	# The effect, which is the part the response cannot show.
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	assert_http_status "200" "$HTTP_CODE" "auth2: the refused delete did not delete"
+
+	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	if echo "$CONTENT" | grep -q "ORIGINAL CONTENT"; then
+		pass "auth2: the refused write did not write"
+	else
+		fail "auth2: the refused write did not write" "content is now: ${CONTENT}"
+	fi
+
+	assert_no_new_abend "$ABEND_BEFORE2" "auth2: no handler abend from any refusal"
+
+	# An ordinary user keeps full control of their own qualifier -- RAKF grants
+	# the owner READ/UPDATE/ALTER implicitly, which the generic DATASET * READ
+	# rule alone would not suggest. If this breaks, the checks are too strict.
+	OWN="${MVSMF_USER2}.CURL.OWN228"
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH2" \
+		-H "Content-Type: application/json" \
+		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "201" "$HTTP_CODE" "auth2: create in own qualifier"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+		-H "Content-Type: text/plain" --data-binary "own data" \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "204" "$HTTP_CODE" "auth2: write in own qualifier"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
+	assert_http_status "204" "$HTTP_CODE" "auth2: delete in own qualifier"
+
+	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}" || true
+fi
 
 # --- Cleanup: delete PDS ---
 echo ""

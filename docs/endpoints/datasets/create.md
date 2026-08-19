@@ -45,11 +45,20 @@ work in #228. RAKF gates DADSM regardless: measured, an ordinary userid
 allocating under a foreign qualifier is refused, nothing is created, and
 `RAKF0005` is logged.
 
-What is wrong is the report. A refusal and a request for more space than the
-volume has answer **byte for byte the same** —
-`500 {"rc":8,"category":6,"reason":2,"message":"Dataset allocation failed"}` — so
-a client cannot tell "you may not create here" from "there is no room", and both
-also write `MVSMF102E` to the console. Tracked as #317.
+A refusal and a request for more space than the volume has answer **byte for
+byte the same**, and that is correct: measured, a real z/OSMF answers both with
+
+```
+500 {"category":8,"rc":900,"reason":7,"message":"Dynamic allocation Error"}
+```
+
+mvsMF sends exactly that since #317. It *can* tell the two apart — `__dsalcf()`
+returns different codes — and deliberately does not, because the reference does
+not. Do not "improve" this into a distinct authorization error; the suite asserts
+the sameness.
+
+Nothing is written to the console for either case (#317 retired `MVSMF102E`).
+A denial still shows up as RAKF's own `RAKF0005`/`RAKF000A`.
 
 ## Examples
 

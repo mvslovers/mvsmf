@@ -22,6 +22,31 @@
 #define REASON_PATTERN_TOO_LONG			9	// Member pattern longer than the handler accepts
 #define REASON_ETAG_MISMATCH			10	// If-Match precondition failed (issue #152)
 
+/* Dynamic allocation failure -- the reference's own report, measured (#317).
+ *
+ * A real z/OSMF answers a POST that fails to allocate with
+ *
+ *   500 {"category":8,"rc":900,"reason":7,"message":"Dynamic allocation Error"}
+ *
+ * and it answers EXACTLY that whether the caller lacked authority for the name
+ * or asked for more space than exists -- byte for byte, both measured. So these
+ * are not category 6 reason codes and do not belong in the block above: they are
+ * one complete report, and the four values travel together.
+ *
+ * Do not make the two cases distinguishable here. mvsMF can tell them apart
+ * (__dsalcf() answers RC=4 for the denial and RC=12 for the space failure) and
+ * deliberately does not pass that on, because the reference does not. That is
+ * the same rule that made #228 ADD a distinct body for a read denial: there the
+ * reference draws the line, here it does not.
+ *
+ * rc 900 is not a typo and not a SAF code. z/OSMF's `rc` is not always the
+ * 0/4/8/12 the rest of this file uses -- copy the measured value.
+ */
+#define CATEGORY_DYNALLOC			8
+#define RC_DYNALLOC_ERROR			900
+#define REASON_DYNALLOC_ERROR			7
+#define ERR_MSG_DYNALLOC_ERROR			"Dynamic allocation Error"
+
 // Error messages for Category 6
 #define ERR_MSG_PDS_NOT_SEQUENTIAL		"Dataset is a partitioned dataset (PDS). Use /ds/{dataset-name}({member-name}) to access members"
 #define ERR_MSG_DATASET_ALLOC_FAILED	"Dataset allocation failed"

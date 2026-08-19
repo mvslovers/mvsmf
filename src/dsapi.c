@@ -3088,10 +3088,16 @@ int datasetCreateHandler(Session *session)
 	/* Allocate the dataset */
 	rc = __dsalcf(ddname, "%s", opts);
 	if (rc != 0) {
-		wtof(MSG_DS_ALLOC_FAILED, dsname, rc);
+		/* No WTO. Both reachable failures are the client's -- a name they may
+		   not use, or parameters that do not fit -- and a client-caused
+		   condition belongs in the response and nowhere else: consapi.c reads
+		   the Master Trace Table, so one retried create becomes a flood served
+		   back out of mvsMF's own console API. The security case is not lost
+		   either way, because RAKF logs the denial itself (RAKF0005/RAKF000A,
+		   with the userid and the data set name). */
 		return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
-			CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_ALLOC_FAILED,
-			ERR_MSG_DATASET_ALLOC_FAILED, NULL, 0);
+			CATEGORY_DYNALLOC, RC_DYNALLOC_ERROR, REASON_DYNALLOC_ERROR,
+			ERR_MSG_DYNALLOC_ERROR, NULL, 0);
 	}
 
 	/* Free the DD allocation */

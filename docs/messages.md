@@ -62,7 +62,7 @@ member not found, record too long) produce **no** console message.
 | Id | Text | Meaning and action |
 |---|---|---|
 | `MVSMF101E` | `OPEN FOR WRITE FAILED dsn ERRNO=n` | `fopen()` for write failed on an existing data set. Not a client error: enqueue held by another job, no space, or a security failure. |
-| `MVSMF102E` | `ALLOCATE FAILED dsn RC=n` | Dynamic allocation of a new data set failed. `RC` is the `__dsalcf()` code. |
+| ~~`MVSMF102E`~~ | *retired (#317)* | Was issued for every failed data set create. Both reachable causes are client errors — a name the caller may not allocate under, or parameters that do not fit — so it is reported in the HTTP response only. A denial still appears on the console as RAKF's own `RAKF0005`/`RAKF000A`. The id is not reused. |
 | `MVSMF103E` | `DELETE FAILED name RC=n ERRNO=n` | Scratch/uncatalog failed after the data set was found. `name` is the data set, or `DSN(MEMBER)` for a member delete. |
 | `MVSMF104E` | `RENAME old TO new FAILED RC=n` | Data set rename failed after the target was confirmed free. |
 | `MVSMF105E` | `RENAME dsn(old) TO (new) FAILED RC=n` | Member rename failed after the target was confirmed free. |

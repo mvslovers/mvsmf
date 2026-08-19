@@ -82,6 +82,15 @@ Entries skipped by `start` are not charged against `X-IBM-Max-Items`, and
 - Only NONVSAM datasets are listed
 - `*` and `**` wildcards are treated identically (both match any number of qualifiers)
 
+## Authorization
+
+**None.** This listing reads the catalog and the VTOC and opens nothing, so no
+RACF check is reached: any authenticated caller can enumerate any qualifier.
+
+That is deliberate and matches the reference — real z/OSMF lists a data set the
+same userid cannot open, and z/OS does not gate `LISTCAT LEVEL()` per entry
+either. See issue #229 and [authorization.md](authorization.md).
+
 ## Examples
 
 ### Using curl

@@ -112,6 +112,16 @@ now told apart by a catalog lookup and a filtered directory read.
 ## Limitations
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.
 
+## Authorization
+
+Requires **READ** on the library in class `DATASET` (issue #228). The check runs
+before any catalog, VTOC or data set access, so a refusal is indistinguishable
+from "does not exist".
+
+A refusal answers **HTTP 500** with `category 4`, `rc 8`, `reason 0` and the
+explanation in `details[]` — the shape a real z/OSMF sends; 403 is not a z/OSMF
+status. See [authorization.md](authorization.md).
+
 ## Examples
 
 ### Using curl

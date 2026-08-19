@@ -2247,6 +2247,107 @@ fi
 curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_slow.txt /tmp/curl_ds_expect.txt
 
+# =========================================================================
+# Authorization (issue #228)
+# =========================================================================
+#
+# Every check below has to come in a PAIR. A refusal on its own proves nothing:
+# a gate that always denies and a gate that works look identical from one
+# request, and a gate that never runs looks identical to a permitted answer.
+# Only the contrast shows that the decision is actually being made.
+#
+# The target is deliberately a name under SYS1.SECURE.* that DOES NOT EXIST.
+# RAKF gives RAKFADM only UPDATE there, so ALTER is refused even for an admin
+# id, which is what makes the refusal reachable with ordinary test credentials.
+# And because the name does not exist, a gate that wrongly permitted would fall
+# through to the catalog lookup and answer 404 -- nothing is ever scratched, so
+# the test cannot damage the security configuration it points at.
+#
+# NOT covered here, and not coverable as an admin: a READ or UPDATE refusal.
+# The generic profile is DATASET * READ with ALTER for ADMIN/STCGROUP, so an
+# admin id is permitted for every attribute except the SYS1.SECURE.* ALTER
+# above. Those two paths need a non-admin userid.
+
+echo ""
+echo "--- Authorization: refusal and its control (issue #228) ---"
+
+DENY_DS="SYS1.SECURE.NOSUCH"
+ALLOW_DS="${MVSMF_USER}.CURL.NOSUCH228"
+
+# 1. delete: ALTER refused
+RESP=$(curl -s -w '\n%{http_code}' -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+CONTENT=$(echo "$RESP" | sed '$d')
+DENY_CODE="$HTTP_CODE"
+assert_http_status "500" "$HTTP_CODE" "auth: delete without ALTER is refused"
+assert_json_field "$CONTENT" '.category' "4" "auth: refusal category"
+assert_json_field "$CONTENT" '.rc' "8" "auth: refusal rc"
+assert_json_field "$CONTENT" '.reason' "0" "auth: refusal reason"
+assert_json_field "$CONTENT" '.message' "LMOPEN error" "auth: refusal message"
+
+# details is an ARRAY, which is the shape z/OSMF sends. It was emitted as a
+# bare string until #228 -- unnoticed, because nothing passed one.
+assert_json_field "$CONTENT" '.details | type' "array" "auth: details is an array"
+assert_json_field_exists "$CONTENT" '.details[0]' "auth: details carries a sentence"
+
+# The refusal must not name an abend it did not take: the reference's own text
+# ends "Open 913 abend", true where OPEN refused, false for a pre-check.
+if echo "$CONTENT" | jq -r '.details[0]' 2>/dev/null | grep -qi "abend"; then
+	fail "auth: refusal does not claim an abend" "details mentions an abend"
+else
+	pass "auth: refusal does not claim an abend"
+fi
+
+# 2. the control: same verb, a name the caller MAY alter. Must get past the
+#    gate and fail on the catalog lookup instead.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}")
+ALLOW_CODE="$HTTP_CODE"
+assert_http_status "404" "$HTTP_CODE" "auth: delete with ALTER reaches the catalog"
+
+# 3. rename INTO a protected namespace: the source is permitted, so only the
+#    target-side check can refuse this. Without it, ALTER over your own
+#    qualifier would be enough to move a data set anywhere.
+RESP=$(curl -s -w '\n%{http_code}' -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
+HTTP_CODE=$(echo "$RESP" | tail -1)
+CONTENT=$(echo "$RESP" | sed '$d')
+assert_http_status "500" "$HTTP_CODE" "auth: rename into a protected name is refused"
+assert_json_field "$CONTENT" '.category' "4" "auth: rename refusal category"
+
+# 4. control for 3: both names permitted, so it must reach the catalog.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}2")
+assert_http_status "404" "$HTTP_CODE" "auth: rename with ALTER on both names reaches the catalog"
+
+# 5. A refusal must not be distinguishable from "does not exist", or the gate
+#    becomes the existence oracle it was added to prevent.
+#
+#    Test 1 already proves it, read the other way round: DENY_DS does not exist,
+#    so if the check ran after the catalog lookup the answer would have been
+#    404. It answered the refusal, therefore the check precedes the lookup and
+#    an existing and an absent denied name are indistinguishable.
+#
+#    Deliberately NOT tested by deleting a protected data set that does exist.
+#    The only such names here belong to the RAKF configuration, and a suite that
+#    aims DELETE at the live security configuration destroys the system the day
+#    a profile change makes the gate permit it. The inference above costs
+#    nothing and risks nothing.
+#    Both names in tests 1 and 2 are absent. Only the authority differs, and the
+#    answers differ -- so the answer is decided by authority, before existence is
+#    ever consulted. A denied caller therefore learns nothing about what exists.
+if [ "$DENY_CODE" = "500" ] && [ "$ALLOW_CODE" = "404" ]; then
+	pass "auth: the refusal is decided before existence is consulted"
+else
+	fail "auth: the refusal is decided before existence is consulted" \
+		"denied=${DENY_CODE} permitted=${ALLOW_CODE}, expected 500 and 404 on two equally absent names"
+fi
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

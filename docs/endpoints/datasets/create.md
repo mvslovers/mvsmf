@@ -37,6 +37,13 @@ On successful completion, this request returns HTTP status code 201 (Created).
 - HTTP 500 (Internal Server Error)
     - Dataset allocation failed (e.g. dataset already exists, no space)
 
+## Authorization
+
+**No explicit check.** Allocation goes through SVC 99 rather than an open, so it
+was not part of the pre-check work in issue #228 and is gated only by whatever
+the allocation itself enforces. It is the one data set-mutating operation without
+an explicit check. See [authorization.md](authorization.md).
+
 ## Examples
 
 ### Using curl

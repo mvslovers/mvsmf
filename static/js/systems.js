@@ -245,8 +245,15 @@ export const Session = {
         // (same-origin). A 401 means the token expired or was reaped — signal
         // the shell to return to the login screen (handled in login.js).
         options.credentials = options.credentials || "same-origin";
+        // X-MVSMF-Client tells the server this is a browser fetch, which is
+        // the one case it withholds WWW-Authenticate: Basic from. With the
+        // challenge present the browser opens its own credential dialog and
+        // withholds the 401 until it is dismissed, so the session-expired
+        // handling below never runs -- and the Basic credentials it then
+        // caches outlive the token logout. See mvsmf#324.
         options.headers = Object.assign({
-          "X-CSRF-ZOSMF-HEADER": "true"
+          "X-CSRF-ZOSMF-HEADER": "true",
+          "X-MVSMF-Client": "desktop"
         }, options.headers || {});
         const resp = await fetch(this.baseUrl + path, options);
         if (resp.status === 401 && typeof window !== "undefined") {

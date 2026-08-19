@@ -409,6 +409,42 @@ Two further consequences that keep getting rediscovered:
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
 here fails silently, on the wire only.
 
+### The 401 challenge — the one deviation, and why it is not negotiable
+
+Every 401 carries `WWW-Authenticate: Basic realm="<SMF ID>"`, **except** when the
+request came from a browser `fetch`/XHR. `send_auth_challenge()` (`common.c`)
+owns the rule; `is_browser_fetch()` next to it owns the exception.
+
+The reference sends the challenge on every endpoint — measured, and *not*
+dropped for a client identifying itself with `X-CSRF-ZOSMF-HEADER`, so there is
+no API-client exemption to copy. RFC 9110 §11.6.1 requires it too.
+
+The exception is not cosmetic and not a guess. Measured with
+`tests/probe-401-dialog.py`: a same-origin `fetch` or XHR that receives a 401
+carrying this header makes the browser open its native credential dialog **and
+withhold the response until a human dismisses it** — 6080 ms and 4805 ms in the
+run that settled it. The Desktop's own `mvsmf:session-expired` handling never
+runs, and once the dialog is satisfied the browser caches those Basic
+credentials and replays them on every same-origin request, outliving the token
+logout that #161 exists to make meaningful. Re-run the probe before doubting
+this; it needs no MVS.
+
+Three things that look like tidying and are not:
+
+- **`X-CSRF-ZOSMF-HEADER` is deliberately not a suppression signal**, even
+  though the Desktop sends it. Zowe and the SDKs send it too, and they must keep
+  getting exactly what the reference sends. httpd suppresses on it
+  (`httppc.c`, httpd#119/#120) — the two layers differ on purpose.
+- **`Sec-Fetch-Mode: navigate` still gets the challenge.** That is somebody
+  typing the URL, where the browser's own prompt is the useful answer.
+- **The realm is the SMF ID, not a constant.** A browser caches Basic
+  credentials under (origin, realm), and httpd answers on the same origin with
+  the realm it derives in `httprlm()` (httpd#191). A different string there is a
+  second protection space and a second dialog; a constant is what httpd#191
+  removed, because it made every system on the network share one. The logic is
+  duplicated in `auth_realm()` because `httprlm()` lives in the server binary
+  and the CGI-side `httpd.a` carries only the `cgistart` stub.
+
 ### Checking behaviour against a real z/OSMF (`zxp`) — READ-ONLY
 
 **This is a real IBM system. We treat it with respect.** Appending

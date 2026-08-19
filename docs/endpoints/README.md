@@ -5,6 +5,52 @@ z/OSMF-compatible REST API for MVS 3.8j. All endpoints require Basic Auth unless
 > **Copy-paste examples** (curl & Zowe CLI) for every endpoint:
 > [examples.md](../examples.md).
 
+## Sessions — a Basic request gets a cookie back
+
+Any request authenticated with `Authorization: Basic` is answered with
+
+```
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+```
+
+so a client that keeps cookies is in a session from its first call and need not
+resend credentials. This mirrors the reference z/OSMF, which does the same on
+any Basic-authenticated request rather than only at `/zosmf/services/authenticate`.
+
+A caller arriving **with** the cookie sends no `Authorization` header and gets
+no new `Set-Cookie` — the session is not refreshed per request. Command-line
+clients that ignore cookies are unaffected: they keep sending Basic and it keeps
+working.
+
+`POST /zosmf/services/authenticate` remains the explicit way in, and the only
+way to get the cookie without also making an API call.
+
+## `X-MVSMF-Client` — for browser clients only
+
+A `401` carries `WWW-Authenticate: Basic realm="<SMF ID>"`, as the reference
+z/OSMF does. **Send `X-MVSMF-Client: <name>` on every request if your client is
+a browser page**, and the challenge is left off your 401s.
+
+This exists because of one browser behaviour, measured rather than assumed
+(`tests/probe-401-dialog.py`, issue #324): a `fetch` or `XMLHttpRequest` that
+receives a 401 carrying the challenge makes the browser open its **native**
+credential dialog and **withhold the response** until a human dismisses it —
+6080 ms in the run that settled it. Your own 401 handling never runs, and the
+Basic credentials the browser then caches replay on every same-origin request
+and outlive a token logout.
+
+- **Command-line and SDK clients want no part of this.** curl, Zowe, the SDKs
+  and anything else that sends credentials preemptively should simply not send
+  the header; they then get exactly what the reference sends.
+- `Sec-Fetch-Mode`, which browsers set themselves, is honoured the same way, so
+  a browser client is covered even without the header. `Sec-Fetch-Mode:
+  navigate` is deliberately excluded — a typed URL should get the browser's
+  prompt.
+- `X-CSRF-ZOSMF-HEADER` is **not** a suppression signal, even though browser
+  clients commonly send it: Zowe sends it too. Send `X-MVSMF-Client` as well.
+- Note that HTTPD's own 401s (for anything outside `/zosmf/`) follow a
+  different rule — they key on `X-CSRF-ZOSMF-HEADER`.
+
 ## System Information
 
 | Method | Path | Description |

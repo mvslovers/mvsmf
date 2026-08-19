@@ -167,6 +167,33 @@ char *getHeaderParam(Session *session, const char *name) asm("CMN0003");
 const char *getRequestScheme(Session *session) asm("CMN0004");
 
 /**
+ * @brief Sends the WWW-Authenticate challenge on a 401
+ *
+ * No-op for any other status, and withheld from a browser fetch/XHR: there the
+ * challenge makes the browser open its native credential dialog and withhold
+ * the response until it is dismissed, which bypasses the Desktop's own
+ * session-expired handling (#324, measured).
+ *
+ * @param session Current session context
+ * @param status HTTP status code about to be sent
+ * @return 0 on success, negative value on error
+ */
+int send_auth_challenge(Session *session, int status) asm("CMN0017");
+
+/**
+ * @brief Hands back the session cookie to a Basic-authenticated caller
+ *
+ * Implicit login (#324 C1): the reference z/OSMF establishes its session on any
+ * Basic-authenticated request, not only at its login endpoint, and does not
+ * re-issue it to a caller already presenting the cookie. No-op unless the
+ * request carried an Authorization header and httpd resolved a token.
+ *
+ * @param session Current session context
+ * @return 0 on success (including the no-op), negative value on error
+ */
+int send_session_cookie(Session *session) asm("CMN0018");
+
+/**
  * @brief Sends the headers every mvsMF response carries
  *
  * Cache-Control, Pragma, X-Content-Type-Options and Content-Language, written

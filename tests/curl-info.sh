@@ -91,6 +91,21 @@ info_anon() {
 	BODY=$(cat "$BODYF")
 }
 
+# Credential-less, capturing the response HEADERS into HDRS.
+info_anon_hdrs() {
+	HDRS=$(curl -s -D- -o /dev/null "$@" "$INFO_URL")
+}
+
+# Assert a header is present / absent (case-insensitive name match).
+assert_header() {
+	if echo "$HDRS" | grep -iq "^$1"; then pass "$2"
+	else fail "$2" "expected header '$1', got: $(echo "$HDRS" | grep -ic .) lines without it"; fi
+}
+assert_no_header() {
+	if echo "$HDRS" | grep -iq "^$1"; then fail "$2" "header '$1' should not be present"
+	else pass "$2"; fi
+}
+
 echo "========================================"
 echo " mvsMF Information service - curl tests"
 echo " Host: ${MVSMF_HOST}:${MVSMF_PORT}"
@@ -227,6 +242,65 @@ echo "--- authentication ---"
 # back by someone who finds a stale doc line.
 info_anon -H "Host: ${TEST_HOST}:${MVSMF_PORT}"
 assert_http_status "401" "$CODE" "a credential-less request is refused"
+
+# RFC 9110 11.6.1 wants a challenge on a 401, and the reference sends one on
+# every endpoint -- including to a client identifying itself with
+# X-CSRF-ZOSMF-HEADER, so there is no API-client exemption to copy.
+info_anon_hdrs
+assert_header "WWW-Authenticate: Basic" "the 401 carries the challenge"
+
+# The one exception. A browser fetch/XHR receiving the challenge gets the
+# browser's native credential dialog, which withholds the response until a
+# human dismisses it -- measured at 6080 ms with tests/probe-401-dialog.py --
+# so the Desktop's session-expired handling never runs. Both markers are
+# tested: the Desktop's own header, and the one browsers set themselves.
+info_anon_hdrs -H "X-MVSMF-Client: desktop"
+assert_no_header "WWW-Authenticate" "the challenge is withheld from the Desktop"
+
+info_anon_hdrs -H "Sec-Fetch-Mode: cors"
+assert_no_header "WWW-Authenticate" "the challenge is withheld from a browser fetch"
+
+# A top-level navigation is not a scripted request: somebody typed the URL, and
+# there the browser's own prompt is the useful answer.
+info_anon_hdrs -H "Sec-Fetch-Mode: navigate"
+assert_header "WWW-Authenticate: Basic" "a navigation still gets the challenge"
+
+# Zowe and the SDKs send X-CSRF-ZOSMF-HEADER and must keep seeing exactly what
+# the reference sends -- it is deliberately NOT a suppression signal.
+info_anon_hdrs -H "X-CSRF-ZOSMF-HEADER: true"
+assert_header "WWW-Authenticate: Basic" "a z/OSMF API client still gets the challenge"
+
+# =========================================================================
+# 7. Implicit login (issue #324 C1)
+# =========================================================================
+echo ""
+echo "--- implicit login ---"
+
+# The reference establishes its session on any Basic-authenticated request,
+# not only at the login endpoint, and does not re-issue it to a caller that
+# already presents the cookie.
+HDRS=$(curl -s -D- -o /dev/null -u "$AUTH" "$INFO_URL")
+assert_header "Set-Cookie: LtpaToken2" "Basic auth hands back the session cookie"
+
+if echo "$HDRS" | grep -iq "^Set-Cookie: LtpaToken2=[^;]*; Path=/; HttpOnly; SameSite=Strict"; then
+	pass "the cookie carries Path, HttpOnly and SameSite"
+else
+	fail "the cookie carries Path, HttpOnly and SameSite" \
+		 "attributes missing -- without HttpOnly the token is readable from JS"
+fi
+
+# A caller arriving with the cookie sends no Authorization, so nothing is
+# re-issued. Absence is the assertion here.
+JAR=$(mktemp)
+curl -s -c "$JAR" -o /dev/null -u "$AUTH" "$INFO_URL"
+HDRS=$(curl -s -D- -o /dev/null -b "$JAR" "$INFO_URL")
+assert_http_status "200" "$(echo "$HDRS" | head -1 | grep -oE '[0-9]{3}')" "the cookie alone authenticates"
+assert_no_header "Set-Cookie" "no cookie is re-issued to a caller that has one"
+rm -f "$JAR"
+
+# No credential at all: there is no token to hand out.
+info_anon_hdrs
+assert_no_header "Set-Cookie" "an unauthenticated request gets no cookie"
 
 # =========================================================================
 # Summary

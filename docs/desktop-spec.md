@@ -206,12 +206,26 @@ Programs.register({
 });
 ```
 
-`apiFetch()` prefixes `baseUrl` and sends `X-CSRF-ZOSMF-HEADER` with
-`credentials: same-origin`; authentication rides on the browser's
-`LtpaToken2` session cookie — no `Authorization` header, no password in JS.
-A `401` dispatches a `mvsmf:session-expired` window event (the shell then
-returns to the login screen). In demo mode it throws — programs provide
-canned data instead (see sysinfo).
+`apiFetch()` prefixes `baseUrl` and sends `X-CSRF-ZOSMF-HEADER` **and
+`X-MVSMF-Client: desktop`** with `credentials: same-origin`; authentication
+rides on the browser's `LtpaToken2` session cookie — no `Authorization` header,
+no password in JS. A `401` dispatches a `mvsmf:session-expired` window event
+(the shell then returns to the login screen). In demo mode it throws — programs
+provide canned data instead (see sysinfo).
+
+**`X-MVSMF-Client` is load-bearing, not decoration.** Without it mvsMF sends
+`WWW-Authenticate: Basic` on the 401 — as the reference z/OSMF does on every
+endpoint — and the browser then opens its own credential dialog and **withholds
+the 401 from JavaScript until a human dismisses it** (measured at 6080 ms,
+`tests/probe-401-dialog.py`, issue #324). The `mvsmf:session-expired` handling
+above simply never runs, and the Basic credentials the browser caches afterwards
+replay on every same-origin request and survive the token logout. Any new code
+path that talks to the API from the browser must send it — use `apiFetch()`
+rather than a bare `fetch()` and it is handled.
+
+`X-CSRF-ZOSMF-HEADER` does **not** serve this purpose against mvsMF: Zowe sends
+it too, so it stays a plain z/OSMF marker there. (HTTPD's own 401s, for anything
+outside `/zosmf/`, do key on it — the two layers differ on purpose.)
 
 ## Systems & login
 
@@ -232,9 +246,16 @@ system (TLS-proxy safe), plain `http:` for remotes.
 Anonymous reachability probe (`GET {base}/zosmf/info`, 4s timeout;
 `connected`/`auth_failed`/`cors_blocked`/`unreachable`). **Not used by the
 login screen** — only by the post-login Systems program and the start-menu
-tray LEDs. The login screen does no pre-login probe: an anonymous `GET` would
-hit the HTTPD's `WWW-Authenticate: Basic` 401 and pop the browser's native
-credential dialog (see mvslovers/httpd#119).
+tray LEDs. The login screen does no pre-login probe, because an anonymous `GET`
+lands on a 401 and a 401 carrying `WWW-Authenticate: Basic` pops the browser's
+native credential dialog (mvslovers/httpd#119).
+
+Since #324 that constraint has a way out: mvsMF withholds the challenge from a
+request carrying `X-MVSMF-Client`, so a probe sending it gets a clean, silent
+401. **The probe below does not send it today** — it uses a bare `fetch`, not
+`apiFetch`. Adding the header is what a pre-login probe would need; do that
+before re-introducing one, and note that HTTPD's own 401s outside `/zosmf/` key
+on `X-CSRF-ZOSMF-HEADER` instead.
 
 ### Token login — authenticate(sys, {user, pass})
 `POST {base}/zosmf/services/authenticate` **once** with `Authorization: Basic`

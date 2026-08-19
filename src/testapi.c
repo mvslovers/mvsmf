@@ -731,6 +731,37 @@ int testHandler(Session *session) {
         acee ? "non-null" : "NULL", direct, ret ? "non-null" : "NULL",
         (int)strlen((char *)buf), hex);
 
+    /* --- fn=token (does httpd mint a session token for every request?) */
+    /* C1 of #324: the reference z/OSMF hands out its LtpaToken2 on ANY
+     * Basic-authenticated request, not only at the login endpoint. Whether
+     * mvsMF can do the same depends on something authapi.c only documents:
+     * http_get_token() is said to return "the resulting session token" from
+     * httpd's credential resolution, which happens before every CGI dispatch.
+     * If that holds outside /zosmf/services/authenticate, C1 is a local
+     * change; if it does not, it needs httpd.
+     *
+     * The token itself is a live session ticket and is NEVER printed -- this
+     * endpoint lands in logs and terminal scrollback. Only its length, plus
+     * how the caller authenticated, so the three cases (Basic / cookie only /
+     * neither) can be told apart. */
+  } else if (strcmp(fn, "token") == 0) {
+    UCHAR token[64] = {0};
+    int toklen = http_get_token(session->httpc, token, sizeof(token));
+    const char *authz =
+        (const char *)http_get_env(session->httpc,
+                                   (const UCHAR *)"HTTP_Authorization");
+    const char *cookie =
+        (const char *)http_get_env(session->httpc,
+                                   (const UCHAR *)"HTTP_Cookie");
+
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"token\", \"toklen\": %d, \"have_token\": %s,"
+        " \"sent_authorization\": %s, \"sent_cookie\": %s,"
+        " \"note\": \"token value withheld on purpose\" }\n",
+        toklen, toklen > 0 ? "true" : "false",
+        authz ? "true" : "false", cookie ? "true" : "false");
+
     /* --- fn=password (exercise http_get_password()) ---------------- */
     /* Verifies httpd's HTTPX http_get_password() export (mvslovers/httpd#111),
      * which decrypts the caller's password from the session credential -- the
@@ -1372,6 +1403,7 @@ int testHandler(Session *session) {
         " \"?fn=spool&jobname=NAME&jobid=JOBnnnnn&dsid=1&maxblk=4&len=1024"
         " (raw spool block dump incl. record headers; mvsmf#314)\","
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
+        " \"?fn=token               (session token length; value withheld)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\","

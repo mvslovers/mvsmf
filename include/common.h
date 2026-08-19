@@ -76,6 +76,47 @@
 #define RC_AUTH    12   /**< Authorization error */
 #define RC_SEVERE  16   /**< Severe error */
 
+/** @brief The z/OSMF error report for an authorization refusal (#228, #315)
+ *
+ * Measured against a real z/OSMF (version 29 / z/OS 05.29.00): a member read of
+ * a data set the caller may not open answers
+ *
+ *   500 {"category":4,"rc":8,"reason":0,"message":"LMOPEN error",
+ *        "details":["ISRZ002 Authorization failed - You may not use this
+ *                    protected data set. Open 913 abend."]}
+ *
+ * So 500 is the conformant status for a denial and always was -- 403 is wrong
+ * twice over, being absent from the z/OSMF list (#250) and not what the
+ * reference sends. The status is the one field mvsMF already had right.
+ *
+ * `category 4` is MEASURED, not documented. It is defined in neither
+ * zosmferr.h nor jobsapi_msg.h, and those two already disagree with each other
+ * (CATEGORY_VSAM 3 vs 7, CATEGORY_UNEXPECTED 7 vs 8), so do not promote it to a
+ * general "authorization category" on the strength of one observation.
+ *
+ * The reason stays the reference's 0 rather than becoming a project-specific
+ * code: fidelity is the point, and the distinction the project would otherwise
+ * carry in `reason` is in `details[]` here, which is where the reference puts
+ * it. The name exists for readability, not to introduce a new code.
+ *
+ * `message` is the reference's string verbatim. `ISRZ002` is deliberately NOT
+ * reproduced -- it is an ISPF message id, and mvsMF runs no ISPF library
+ * management, so quoting it would name a component that is not there.
+ */
+#define CATEGORY_AUTHORIZATION 4
+#define REASON_NOT_AUTHORIZED  0
+#define ERR_MSG_NOT_AUTHORIZED "LMOPEN error"
+
+/** Default `details[]` sentence for a refusal caught by a pre-check.
+ *
+ * The reference's own text ends "Open 913 abend." -- true for it, since OPEN is
+ * what refused. A pre-check that answers before the fopen() has taken no abend,
+ * so it stops one clause earlier. #315 supplies the abend-carrying variant for
+ * the ESTAE path.
+ */
+#define ERR_MSG_DENIED_DETAIL \
+	"Authorization failed - You may not use this protected data set."
+
 /**
  * @brief Gets a query parameter from the request URL
  *
@@ -226,6 +267,26 @@ int send_not_modified(Session *session, const char *etag) asm("CMN0013");
  * @return 0 when everything was sent, -1 otherwise
  */
 int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
+
+/**
+ * @brief Answers a request refused by an authorization check (issue #228)
+ *
+ * Sends the z/OSMF error report a denial produces -- see
+ * CATEGORY_AUTHORIZATION above for the measurement it mirrors.
+ *
+ * It lives here rather than in dsapi.c because the same body has a second
+ * producer: #315 maps the router's S913 ESTAE recovery onto it, so a denial
+ * caught by OPEN and one refused by a pre-check answer identically. Two copies
+ * would drift, and a client would see two bodies for one condition.
+ *
+ * @param session The session
+ * @param detail  One sentence for the `details[]` array, or NULL for the
+ *                default. It must not claim an abend the caller did not take:
+ *                the reference always reaches the S913 and says so, a
+ *                pre-check that refuses first has not.
+ * @return 0 on success, negative on send failure
+ */
+int send_not_authorized(Session *session, const char *detail) asm("CMN0015");
 
 /**
  * @brief Reads the full request body into a malloc'd buffer

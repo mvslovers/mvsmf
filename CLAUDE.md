@@ -295,6 +295,34 @@ All endpoints are under `/zosmf/`:
 
 Endpoint documentation lives in `docs/endpoints/` (with a curl & Zowe cookbook in `docs/examples.md`).
 
+### Authorization — OPEN is the gate, and the listing has none (deliberately)
+
+mvsMF authorizes **nothing explicitly**. The only RACF calls in `src/` are the
+`racf_set_acee()` pair in `mvsmf.c`; every data set operation is a plain
+`fopen()`/`remove()`/`rename()` whose entitlement decision happens inside OPEN,
+under the ACEE in ASXBSENV. That gate is implicit but real — measured: RAKF
+refuses with `RAKF0005` and an **S913 abend**, which the router's ESTAE turns
+into a 500. Making the decision explicit and race-free is #228; the error body
+that denial produces is #315.
+
+**`GET /zosmf/restfiles/ds?dslevel=` is not gated at all, and that is a
+decision, not an oversight (#229, closed).** The listing path (`__listds` +
+`__locate`/`__dscbdv`) reads the catalog and the VTOC and opens nothing, so no
+OPEN check is reached: every authenticated user can enumerate every data set,
+with DSORG/RECFM/LRECL/volume. It stays that way because **real z/OSMF does the
+same** — measured on the reference system, a PDSE that answers a member read
+with `500 / "Authorization failed - You may not use this protected data set"`
+lists with full attributes to that same userid. z/OS does not gate
+`LISTCAT LEVEL()` per entry either. Gating it would make mvsMF stricter than the
+thing it clones, and cost one RACHECK per entry on the request path.
+
+Member listing is **not** in the same position: `__listpd()` and the streaming
+directory read open the PDS with BPAM, so they do go through OPEN.
+
+If that ever gets revisited, the constraint from #229 holds: a refusal must not
+be distinguishable from "does not exist", or the gate becomes the enumeration
+oracle it was meant to close.
+
 ### HTTP Status Codes — the z/OSMF contract is a closed list
 
 z/OSMF's "Error handling" section does not merely say "4nn/5nn means error"; it

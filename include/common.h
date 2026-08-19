@@ -242,4 +242,33 @@ int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
 int read_request_content(Session *session, char **content,
                         size_t *content_size) asm("CMN0020");
 
+/**
+ * @brief Reads exactly @p len bytes, waiting out an empty receive buffer
+ *
+ * httpd sets every accepted socket non-blocking, so a recv() that finds
+ * the buffer empty returns -1/EWOULDBLOCK at once -- "the client has not
+ * sent it yet", not an error. Reads one byte at a time (MVS 3.8j TCP/IP
+ * ring buffer bug); see the note above receive_raw_data() in common.c.
+ *
+ * @param httpc Client connection
+ * @param buf Destination buffer
+ * @param len Number of bytes to read
+ * @return Bytes read -- short only on peer close -- or -1 on error/timeout
+ */
+int receive_raw_data(HTTPC *httpc, char *buf, int len) asm("CMN0021");
+
+/**
+ * @brief Reads up to @p len bytes, waiting out an empty receive buffer
+ *
+ * The bulk counterpart of receive_raw_data(): one recv() of up to @p len
+ * bytes, retried on EWOULDBLOCK against the same budget. Used where the
+ * caller already tolerates a short read and wants the larger granularity.
+ *
+ * @param httpc Client connection
+ * @param buf Destination buffer
+ * @param len Maximum number of bytes to read
+ * @return Bytes read (>0), 0 on orderly close, -1 on error/timeout
+ */
+int receive_raw_some(HTTPC *httpc, char *buf, int len) asm("CMN0022");
+
 #endif // COMMON_H

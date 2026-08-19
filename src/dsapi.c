@@ -1486,14 +1486,14 @@ int datasetPutHandler(Session *session)
             
             // Read chunk size as ASCII hex string
             while (i < sizeof(chunk_size_str)-1) {
-                if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading chunk size");
                 }
                 if (c == 0x0D) { // ASCII CR \r
                     chunk_size_str[i] = '\0';
-                    recv(session->httpc->socket, &c, 1, 0);  // Read ASCII LF \n
+                    receive_raw_data(session->httpc, &c, 1);  // Read ASCII LF \n
                     break;
                 }
                 chunk_size_str[i++] = c;
@@ -1533,7 +1533,7 @@ int datasetPutHandler(Session *session)
 
                 // Read final CRLF
                 char crlf[2] = {0};
-                if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
+                if (receive_raw_data(session->httpc, crlf, 2) != 2) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading final line ending");
@@ -1558,7 +1558,7 @@ int datasetPutHandler(Session *session)
                     int n;
                     if (to_read > space) to_read = space;
 
-                    n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
+                    n = receive_raw_some(session->httpc, record_buffer + record_pos, (int)to_read);
                     if (n <= 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -1584,7 +1584,7 @@ int datasetPutHandler(Session *session)
                    here (as this did) turned every line split across two chunks
                    into two records. */
                 while (bytes_read < chunk_size) {
-                    if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                    if (receive_raw_data(session->httpc, &c, 1) != 1) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
@@ -1608,7 +1608,7 @@ int datasetPutHandler(Session *session)
 
             /* Read chunk trailer (CRLF) */
             char crlf[2];
-            if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
+            if (receive_raw_data(session->httpc, crlf, 2) != 2) {
                 free(record_buffer);
                 session_fclose(session, fp);
                 return handle_error(session, ERR_IO, "Error reading chunk trailer");
@@ -1626,7 +1626,7 @@ int datasetPutHandler(Session *session)
                 int n;
                 if (to_read > space) to_read = space;
 
-                n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
+                n = receive_raw_some(session->httpc, record_buffer + record_pos, (int)to_read);
                 if (n <= 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -1665,7 +1665,7 @@ int datasetPutHandler(Session *session)
                than Content-Length allowed whenever a CR stood alone. */
             char c;
             while (bytes_remaining > 0) {
-                if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
@@ -2385,14 +2385,14 @@ int memberPutHandler(Session *session)
             
             // Read chunk size as ASCII hex string
             while (i < sizeof(chunk_size_str)-1) {
-                if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading chunk size");
                 }
                 if (c == '\r') {
                     chunk_size_str[i] = '\0';
-                    recv(session->httpc->socket, &c, 1, 0);  // Read \n
+                    receive_raw_data(session->httpc, &c, 1);  // Read \n
                     break;
                 }
                 chunk_size_str[i++] = c;
@@ -2429,7 +2429,7 @@ int memberPutHandler(Session *session)
 
                 // Read final CRLF
                 char crlf[2] = {0};
-                if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
+                if (receive_raw_data(session->httpc, crlf, 2) != 2) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading final line ending");
@@ -2454,7 +2454,7 @@ int memberPutHandler(Session *session)
                     int n;
                     if (to_read > space) to_read = space;
 
-                    n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
+                    n = receive_raw_some(session->httpc, record_buffer + record_pos, (int)to_read);
                     if (n <= 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -2478,7 +2478,7 @@ int memberPutHandler(Session *session)
                    state deliberately survives the chunk boundary -- see the
                    sequential handler. */
                 while (bytes_read < chunk_size) {
-                    if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                    if (receive_raw_data(session->httpc, &c, 1) != 1) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error reading chunk data");
@@ -2502,7 +2502,7 @@ int memberPutHandler(Session *session)
             
             // Read chunk trailer (CRLF)
             char crlf[2];
-            if (recv(session->httpc->socket, crlf, 2, 0) != 2) {
+            if (receive_raw_data(session->httpc, crlf, 2) != 2) {
                 free(record_buffer);
                 session_fclose(session, fp);
                 return handle_error(session, ERR_IO, "Error reading chunk trailer");
@@ -2520,7 +2520,7 @@ int memberPutHandler(Session *session)
                 int n;
                 if (to_read > space) to_read = space;
 
-                n = recv(session->httpc->socket, record_buffer + record_pos, to_read, 0);
+                n = receive_raw_some(session->httpc, record_buffer + record_pos, (int)to_read);
                 if (n <= 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -2555,7 +2555,7 @@ int memberPutHandler(Session *session)
                replaces the old read-ahead. */
             char c;
             while (bytes_remaining > 0) {
-                if (recv(session->httpc->socket, &c, 1, 0) != 1) {
+                if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error reading data");
@@ -2869,9 +2869,9 @@ int datasetCreateHandler(Session *session)
 
 				/* Read chunk size line (ASCII hex + CRLF) */
 				while (i < (int)sizeof(chunk_hdr) - 1) {
-					if (recv(session->httpc->socket, &c, 1, 0) != 1) break;
+					if (receive_raw_data(session->httpc, &c, 1) != 1) break;
 					if (c == 0x0D) {	/* ASCII CR */
-						recv(session->httpc->socket, &c, 1, 0); /* LF */
+						receive_raw_data(session->httpc, &c, 1); /* LF */
 						break;
 					}
 					chunk_hdr[i++] = c;
@@ -2885,14 +2885,14 @@ int datasetCreateHandler(Session *session)
 				if (chunk_size == 0) {
 					/* Read trailing CRLF */
 					char crlf[2];
-					recv(session->httpc->socket, crlf, 2, 0);
+					receive_raw_data(session->httpc, crlf, 2);
 					break;
 				}
 
 				/* Read chunk data */
 				n = 0;
 				while (n < chunk_size) {
-					int r = recv(session->httpc->socket, local_body + body_size + n, 1, 0);
+					int r = receive_raw_data(session->httpc, local_body + body_size + n, 1);
 					if (r != 1) break;
 					n++;
 					if (body_size + n >= sizeof(local_body) - 1) break;
@@ -2902,7 +2902,7 @@ int datasetCreateHandler(Session *session)
 				/* Read chunk trailing CRLF */
 				{
 					char crlf[2];
-					recv(session->httpc->socket, crlf, 2, 0);
+					receive_raw_data(session->httpc, crlf, 2);
 				}
 			}
 		} else if (cl) {
@@ -2912,8 +2912,8 @@ int datasetCreateHandler(Session *session)
 				content_length = sizeof(local_body) - 1;
 
 			while (body_size < content_length) {
-				int r = recv(session->httpc->socket,
-					local_body + body_size, 1, 0);
+				int r = receive_raw_data(session->httpc,
+					local_body + body_size, 1);
 				if (r != 1) break;
 				body_size++;
 			}

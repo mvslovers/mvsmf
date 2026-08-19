@@ -346,11 +346,47 @@ send_all(Session *session, const UCHAR *buf, int len)
 // when a multi-byte recv() spans the internal buffer wrap-around point.
 // DO NOT change to multi-byte recv().
 //
+// The EWOULDBLOCK arm below is not a nicety, it is what makes a slow client
+// work at all. httpd puts every accepted socket in non-blocking mode
+// (FIONBIO, httpd.c), so a recv() that finds the receive buffer empty
+// returns -1/EWOULDBLOCK immediately -- and an empty buffer mid-body means
+// "the client has not sent the next byte yet", not "the client is gone".
+// mvsMF consumes a text body at roughly 130 KB/s, so ANY client sending
+// slower than that drains the buffer within the first second; measured on
+// mvsdev, a 240 KB PUT throttled to 100 KB/s ran the buffer dry after
+// 0.6 s. A bare recv() there fails a perfectly healthy upload -- and, with
+// the target already open for output, replaces the resource with whatever
+// arrived first (#247, and the destruction half of #246).
+//
+// A client sending `Expect: 100-continue` is the same failure at byte zero:
+// it holds the body back until an interim response arrives, so the very
+// first read finds nothing. Answering that expectation is httpd's job
+// (httpd#207) -- but even once it does, the interim response and the
+// client's first data segment are a round trip apart, so waiting here is
+// still what carries the read across the gap.
+//
+// 200 retries x 50 ms = 10 s without a single byte before giving up, the
+// same budget send_all() spends on a stalled send. Note the shape: retries
+// resets on every byte received, so the budget is per stall, not per
+// request. A client dribbling one byte every 9 s holds its worker -- and,
+// mid-body, an open DCB on the target -- for as long as it keeps dribbling.
+// That is the unavoidable price of waiting for slow clients; the guard
+// against it is httpd's client timeout, not this loop.
+//
+// MSG_RECV_TIMEOUT stays even though #247 widened its reach from the four
+// read_request_content() callers to every data set PUT. A ten second silence
+// mid-request is an operator-visible symptom -- a held worker is precisely
+// what #217 taught us to look for -- and it cannot flood the console the way
+// a client-caused 404 can, because one stuck request emits at most one WTO
+// per 10 s. MSG_SEND_TIMEOUT is the same policy on the send side; having one
+// direction report a stall and the other stay silent would be worse than
+// either choice made consistently.
+//
 
 #define RAW_RECV_MAX_RETRIES 200
 
 __asm__("\n&FUNC    SETC 'recv_raw_data'");
-static int
+int
 receive_raw_data(HTTPC *httpc, char *buf, int len)
 {
 	int total = 0;
@@ -380,6 +416,48 @@ receive_raw_data(HTTPC *httpc, char *buf, int len)
 	}
 
 	return total;
+}
+
+//
+// The bulk counterpart: one recv() of up to len bytes, retried on
+// EWOULDBLOCK against the same budget.
+//
+// Read granularity is deliberately left alone. The binary record paths in
+// dsapi.c have always read up to one LRECL per call, and turning them into
+// byte-at-a-time reads would be a throughput change dressed up as a bug fix.
+// What they were missing is only the wait -- so that is all this adds. The
+// caller already handles a short read; every one of them loops until the
+// declared length is in.
+//
+
+__asm__("\n&FUNC    SETC 'recv_raw_some'");
+int
+receive_raw_some(HTTPC *httpc, char *buf, int len)
+{
+	int n = 0;
+	int retries = 0;
+	unsigned ecb = 0;
+	int sockfd = httpc->socket;
+
+	while (1) {
+		n = recv(sockfd, buf, len, 0);
+		if (n >= 0) {
+			return n;
+		}
+		if (errno == EINTR) continue;
+		if (errno != EWOULDBLOCK) {
+			return -1;
+		}
+		if (++retries > RAW_RECV_MAX_RETRIES) {
+			wtof(MSG_RECV_TIMEOUT, retries);
+			return -1;
+		}
+		// Zeroed on this frame every time -- an ECB that outlives one
+		// wait returns instantly from every later one, which is the busy
+		// spin this wait exists to avoid. Same reason as send_op_pause().
+		ecb = 0;
+		cthread_timed_wait((void *)&ecb, 5, 0);
+	}
 }
 
 //

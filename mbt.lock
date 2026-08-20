@@ -1,6 +1,6 @@
 {
   "mvslovers/httpd": {
-    "sha256": "4f0aab104ca83be43e9a451ce5830045f21a8d42f0ca3e175566d835a6e4a554",
+    "sha256": "cc8e2f378e03fb74c158f2fbf1c7f0f8c3e57773c93f1f11275a9249dd061645",
     "version": "4.0.0-dev"
   },
   "mvslovers/ufsd": {

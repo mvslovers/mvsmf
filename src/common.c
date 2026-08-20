@@ -1,7 +1,6 @@
 #include <clibb64.h>
 #include <clibstr.h>
 #include <clibio.h>
-#include <clibsmf.h>
 #include <clibthrd.h>
 #include <clibwto.h>
 #include <errno.h>
@@ -144,68 +143,41 @@ int is_browser_fetch(Session *session)
  *
  * No-op for every status but 401.
  */
-/* The Basic realm, from the SMF ID -- the same string httpd derives for its own
- * challenges (httpd#191, src/httprlm.c).
+/* The Basic realm comes from the server (http_realm, httpd#217): the Parmlib's
+ * REALM value, or the SMF ID the server derives when none is configured
+ * (httpd#191, #193).
  *
- * Matching it is not cosmetic. A browser caches Basic credentials under
+ * Matching httpd is not cosmetic. A browser caches Basic credentials under
  * (origin, realm), and httpd and this CGI answer on the SAME origin: two
  * different realms there are two protection spaces, so a user who satisfied
- * one dialog is asked again by the other. A constant would be worse still --
- * that is exactly what httpd#191 removed, because it made every system on the
- * network advertise one shared protection space with no way for a human to
- * tell which machine was asking.
+ * one dialog is asked again by the other. This CGI used to duplicate the
+ * SMF-ID derivation instead (there was nothing to link against -- httprlm()
+ * lives in the server binary), which held exactly until httpd#193 made the
+ * realm configurable: the server then challenged with the configured name
+ * while this CGI still named the SMF ID (#330). The vector export is the one
+ * source both challenges draw from.
  *
- * Duplicated rather than shared: httprlm() lives in the server binary, and the
- * CGI-side httpd.a carries only the cgistart stub, so there is nothing to link
- * against. The rules are httpd's -- copy at most 4 characters, stop at the
- * first blank or NUL (__smfid() hands over a fixed 4-byte blank-padded field
- * that is not terminated, so neither bound may be dropped), and never produce
- * an empty realm, which RFC 7617 does not allow and which would collapse every
- * protection space on the origin into one.
+ * The string is settled at server startup, never NULL or empty, and lives in
+ * the server's static storage for the life of the address space -- so it is
+ * printed directly: no copy, no length cap, no fallback. Called unguarded
+ * like the other appended accessors (http_get_userid and friends): this
+ * module requires an httpd whose vector carries http_realm.
  */
 /* CREDTOK is 32 bytes; 64 leaves head-room without pulling in the
  * credentials layout. http_get_token() returns the actual byte count. */
 #define SESSION_TOKEN_BUFSIZE 64
 
-#define AUTH_REALM_MAX      8
-#define AUTH_REALM_FALLBACK "MVS"
-
-__asm__("\n&FUNC	SETC 'auth_realm'");
-static
-const char *auth_realm(char *out, size_t outlen)
-{
-	const unsigned char *smfid = __smfid();
-	size_t n = 0;
-
-	while (n < 4 && n < outlen - 1 && smfid && smfid[n] && smfid[n] != ' ') {
-		out[n] = (char)smfid[n];
-		n++;
-	}
-
-	if (n == 0) {
-		strncpy(out, AUTH_REALM_FALLBACK, outlen - 1);
-		out[outlen - 1] = '\0';
-		return out;
-	}
-
-	out[n] = '\0';
-
-	return out;
-}
-
 __asm__("\n&FUNC	SETC 'send_auth_challenge'");
 int
 send_auth_challenge(Session *session, int status)
 {
-	char realm[AUTH_REALM_MAX];
-
 	if (status != HTTP_STATUS_UNAUTHORIZED || is_browser_fetch(session)) {
 		return 0;
 	}
 
 	return http_printf(session->httpc,
 			"WWW-Authenticate: Basic realm=\"%s\"\r\n",
-			auth_realm(realm, sizeof(realm)));
+			http_realm(session->httpd));
 }
 
 /* Implicit login: hand back the session cookie when a caller authenticated

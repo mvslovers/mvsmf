@@ -55,6 +55,61 @@ static int dataset_etag(Session *session, const char *dataset,
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
 static int require_access(Session *session, const char *dsname, int attr);
+static int normalize_dsn(const char *value, char *out, size_t outlen);
+
+/* Fold a data set, member or qualifier name from the request into the form MVS
+   actually stores: copy it out of httpd's environment storage, drop trailing
+   blanks, and upper-case it.
+
+   Catalog entries, VTOC entries and PDS directory names are all upper case, so
+   a name that reaches __locate() or fopen() as the client typed it matches
+   nothing -- which is what made every lower-case request a 404 or an empty
+   listing (#334). Real z/OSMF folds both the {dataset-name} path variable and
+   the dslevel query value; measured, so this is what makes mvsMF agree with it.
+
+   Two properties are load-bearing and both fail silently if dropped.
+
+   It COPIES rather than folding in place: the value is httpd's environment
+   storage, not ours, and other readers of the same request see it afterwards.
+
+   And it is the length check as well as the fold, so the two cannot disagree.
+   That is not tidiness -- extract_level_prefix() used to strcpy() an unbounded
+   dslevel into a 45-byte stack buffer (#337), and the only reason that is now
+   unreachable is that an over-long value is refused here, before the split.
+
+   Callers must fold BEFORE require_access(). http_check_auth() normalizes SAF
+   rc 4 ("no profile covers the resource") to 0 = permitted, so authorizing the
+   name as typed and then operating on the folded one lets a lower-case name be
+   permitted by no-match and go on to touch the real data set.
+
+   Returns 1 when the value fit, 0 when it was absent, empty, or too long for
+   out. Shaped deliberately like make_query_key() below, which does the same job
+   for start= and pattern=. */
+__asm__("\n&FUNC    SETC 'normalize_dsn'");
+static int
+normalize_dsn(const char *value, char *out, size_t outlen)
+{
+	size_t	n;
+	size_t	i;
+
+	if (!value || outlen == 0) {
+		return 0;
+	}
+
+	n = strlen(value);
+	while (n > 0 && value[n - 1] == ' ') n--;
+
+	if (n == 0 || n > outlen - 1) {
+		return 0;
+	}
+
+	for (i = 0; i < n; i++) {
+		out[i] = (char) toupper((unsigned char) value[i]);
+	}
+	out[n] = '\0';
+
+	return 1;
+}
 
 /* Authorization gate for a data set operation (issue #228).
  *
@@ -825,11 +880,20 @@ static int write_record_open(Session *session, FILE **fp, const char *target,
 ** extract_level_prefix - split a dslevel pattern into a catalog LEVEL
 ** prefix and an optional wildcard filter for __listds().
 **
-** level_out must be at least 45 bytes. *filter_out is set to the
-** original dslevel when post-filtering is needed, NULL otherwise.
+** level_size bounds every write to level_out. It is a parameter rather than
+** the comment it used to be ("must be at least 45 bytes") because all three
+** copies below are input-derived: with a 45-byte caller buffer and a query
+** value httpd allows to reach 4000, this smashed the caller's stack (#337).
+** normalize_dsn() refuses an over-long dslevel before it ever gets here, so
+** truncation is unreachable today -- the bound exists so that a future caller
+** cannot reintroduce the overflow by getting that wrong.
+**
+** *filter_out is set to the original dslevel when post-filtering is needed,
+** NULL otherwise.
 */
 static void
-extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
+extract_level_prefix(const char *dslevel, char *level_out, size_t level_size,
+		     char **filter_out)
 {
 	const char	*p;
 	const char	*last_dot = NULL;
@@ -854,7 +918,8 @@ extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
 		/* No wildcards: pass through as catalog LEVEL, no filter.
 		** Caller handles z/OSMF prefix semantics (the exact name
 		** plus anything below it) separately. */
-		strcpy(level_out, dslevel);
+		strncpy(level_out, dslevel, level_size - 1);
+		level_out[level_size - 1] = '\0';
 		return;
 	}
 
@@ -883,11 +948,14 @@ extract_level_prefix(const char *dslevel, char *level_out, char **filter_out)
 		}
 
 		if (prefix_end && prefix_end > dslevel) {
-			memcpy(level_out, dslevel, prefix_end - dslevel);
-			level_out[prefix_end - dslevel] = '\0';
+			size_t plen = (size_t)(prefix_end - dslevel);
+			if (plen > level_size - 1) plen = level_size - 1;
+			memcpy(level_out, dslevel, plen);
+			level_out[plen] = '\0';
 		} else {
 			/* wildcard in first qualifier — use full dslevel */
-			strcpy(level_out, dslevel);
+			strncpy(level_out, dslevel, level_size - 1);
+			level_out[level_size - 1] = '\0';
 		}
 
 		/* HLQ.** is equivalent to bare HLQ, no filter needed */
@@ -1082,6 +1150,7 @@ int datasetListHandler(Session *session)
 	char		*start		= NULL;
 	char		*filter		= NULL;
 	char		level_buf[45]	= {0};
+	char		dslevel_buf[MAX_DATASET_NAME + 1] = {0};
 	char		start_key[MAX_DATASET_NAME + 1] = {0};
 	int		have_start	= 0;
 	int		start_after	= 0;
@@ -1095,7 +1164,25 @@ int datasetListHandler(Session *session)
 	volser	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_VOLSER");
 	start 	= (char *) http_get_env(session->httpc, (const UCHAR *) "QUERY_START");
 
-	extract_level_prefix(dslevel, level_buf, &filter);
+	/* Fold before anything reads the catalog (#334). Everything downstream then
+	   works on the folded name -- including `filter`, which extract_level_prefix()
+	   aliases to this pointer, and the exact-name lookup below, which uses it
+	   directly in __locate()/__dscbdv(). dslevel_buf is function-scoped for that
+	   reason: its lifetime has to cover the whole listing loop.
+
+	   An empty dslevel is not an error -- it means "list everything", which is
+	   what extract_level_prefix() already does with it. An over-long one is
+	   refused rather than truncated: silently listing a different level is worse
+	   than saying no, and this refusal is what keeps #337 unreachable. */
+	if (dslevel && *dslevel) {
+		if (!normalize_dsn(dslevel, dslevel_buf, sizeof(dslevel_buf))) {
+			return handle_error(session, ERR_INVALID_PARAM,
+				"Dataset level is too long");
+		}
+		dslevel = dslevel_buf;
+	}
+
+	extract_level_prefix(dslevel, level_buf, sizeof(level_buf), &filter);
 	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
 
 	/* z/OSMF prefix semantics: a bare multi-qualifier dslevel like
@@ -1348,10 +1435,21 @@ int datasetGetHandler(Session *session)
     FILE *fp = NULL;
 
     // Validate parameters
+    char dsn_buf[MAX_DATASET_NAME + 1];
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
     if (!dsname) {
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
     }
+
+    /* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+       ("no profile covers the resource") as permitted, so authorizing the name
+       as typed and then operating on the folded one would let a lower-case name
+       pass by no-match. */
+    if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Dataset name is too long");
+    }
+    dsname = dsn_buf;
 
     /* Authorize before anything looks at the data set (issue #228).
        Ahead of is_pds(), not after it: is_pds() reads the catalog and the VTOC
@@ -1450,11 +1548,22 @@ int datasetPutHandler(Session *session)
     int blksize = 0;
 
     // Validate parameters
+    char dsn_buf[MAX_DATASET_NAME + 1];
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 
     if (!dsname) {
         return handle_error(session, ERR_INVALID_PARAM, "Dataset name is required");
     }
+
+    /* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+       ("no profile covers the resource") as permitted, so authorizing the name
+       as typed and then operating on the folded one would let a lower-case name
+       pass by no-match. */
+    if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Dataset name is too long");
+    }
+    dsname = dsn_buf;
 
     // z/OSMF control request (rename): Content-Type: application/json.
     // Must be handled before the existence/PDS checks because the target
@@ -2088,11 +2197,29 @@ int memberListHandler(Session *session)
 	int		have_pattern	= 0;
 
 
+	char		dsn_buf[MAX_DATASET_NAME + 1];
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname){
 		rc = http_resp_internal_error(session->httpc);
 		goto quit;
 	}
+
+	/* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+	   ("no profile covers the resource") as permitted, so authorizing the name
+	   as typed and then operating on the folded one would let a lower-case name
+	   pass by no-match.
+
+	   goto quit, not return: this handler owns an fp by the time it reaches the
+	   end, and every other early exit here goes through the label. fp is still
+	   NULL at this point, so the two are equivalent today -- which is exactly
+	   why the wrong one would survive review and then break when something is
+	   allocated above it. */
+	if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+		rc = (unsigned) handle_error(session, ERR_INVALID_PARAM,
+				"Dataset name is too long");
+		goto quit;
+	}
+	dsname = dsn_buf;
 
 	/* Authorize before the directory is read (issue #228). This listing is
 	   unlike the dslevel one in #229: it opens the PDS with BPAM, so it has
@@ -2233,6 +2360,8 @@ int memberGetHandler(Session *session)
     FILE *fp = NULL;
 
     // Validate parameters
+    char dsn_buf[MAX_DATASET_NAME + 1];
+    char mbr_buf[MAX_MEMBER_NAME + 1];
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
     member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
 
@@ -2240,10 +2369,21 @@ int memberGetHandler(Session *session)
         return handle_error(session, ERR_INVALID_PARAM, "Dataset and member names are required");
     }
 
-    // Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
-    if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
-        return handle_error(session, ERR_INVALID_PARAM, "Dataset or member name too long");
+    /* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+       ("no profile covers the resource") as permitted, so authorizing the name
+       as typed and then operating on the folded one would let a lower-case name
+       pass by no-match. */
+    if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Dataset name is too long");
     }
+    dsname = dsn_buf;
+
+    if (!normalize_dsn(member, mbr_buf, sizeof(mbr_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Member name is too long");
+    }
+    member = mbr_buf;
 
     // Create dataset path
     snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
@@ -2331,6 +2471,8 @@ int memberPutHandler(Session *session)
     int blksize = 0;
 
     // Validate parameters
+    char dsn_buf[MAX_DATASET_NAME + 1];
+    char mbr_buf[MAX_MEMBER_NAME + 1];
     dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
     member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
 
@@ -2338,6 +2480,22 @@ int memberPutHandler(Session *session)
 
         return handle_error(session, ERR_INVALID_PARAM, "Dataset and member names are required");
     }
+
+    /* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+       ("no profile covers the resource") as permitted, so authorizing the name
+       as typed and then operating on the folded one would let a lower-case name
+       pass by no-match. */
+    if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Dataset name is too long");
+    }
+    dsname = dsn_buf;
+
+    if (!normalize_dsn(member, mbr_buf, sizeof(mbr_buf))) {
+        return handle_error(session, ERR_INVALID_PARAM,
+            "Member name is too long");
+    }
+    member = mbr_buf;
 
     // z/OSMF control request (rename): Content-Type: application/json.
     // Must be handled before opening the (new) member for writing.
@@ -2352,11 +2510,6 @@ int memberPutHandler(Session *session)
        is an update of the PDS; there is no member-level profile to ask about. */
     if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
         return 0;
-    }
-
-    // Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
-    if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
-        return handle_error(session, ERR_INVALID_PARAM, "Dataset or member name too long");
     }
 
     // Get headers
@@ -2813,8 +2966,8 @@ process_rename(Session *session, const char *target_dsn,
 	char	*body		= NULL;
 	size_t	body_len	= 0;
 	char	request[16]	= {0};
-	char	from_dsn[MAX_DATASET_NAME] = {0};
-	char	from_member[12]	= {0};
+	char	from_dsn[MAX_DATASET_NAME + 1] = {0};
+	char	from_member[MAX_MEMBER_NAME + 1] = {0};
 	int	rc;
 
 	// Read and EBCDIC-translate the JSON control body
@@ -2845,6 +2998,16 @@ process_rename(Session *session, const char *target_dsn,
 				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
 		}
 		free(body);
+
+		/* The control body carries names too, and they reach __renmem() and
+		   require_access() exactly like the ones in the URL -- so they get the
+		   same fold (#334). In place is safe here: normalize_dsn() writes out[i]
+		   from value[i] at the same index and never past n. */
+		if (!normalize_dsn(from_member, from_member, sizeof(from_member))) {
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+		}
 
 		/* UPDATE on the library (issue #228): both the old and the new member
 		   are in target_dsn, so one check covers the whole STOW. */
@@ -2884,6 +3047,14 @@ process_rename(Session *session, const char *target_dsn,
 				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
 		}
 		free(body);
+
+		/* Same fold as the member branch above, and for the same reason: this
+		   name is authorized and then renamed (#334). */
+		if (!normalize_dsn(from_dsn, from_dsn, sizeof(from_dsn))) {
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
+				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
+		}
 
 		/* ALTER on BOTH names (issue #228), before the locate so the 404 does
 		   not become an existence oracle for a caller who may not rename.
@@ -2941,12 +3112,23 @@ int datasetCreateHandler(Session *session)
 	char ddname[9] = {0};
 	char opts[512];
 
+	char		dsn_buf[MAX_DATASET_NAME + 1];
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname) {
 		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
 			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 	}
+
+	/* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+	   ("no profile covers the resource") as permitted, so authorizing the name
+	   as typed and then operating on the folded one would let a lower-case name
+	   pass by no-match. */
+	if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+		return handle_error(session, ERR_INVALID_PARAM,
+			"Dataset name is too long");
+	}
+	dsname = dsn_buf;
 
 	/*
 	 * Try POST_STRING first — HTTPD sets this when the request
@@ -3102,12 +3284,23 @@ int datasetDeleteHandler(Session *session)
 	LOCWORK locwork;
 	char dsn44[44];
 
+	char		dsn_buf[MAX_DATASET_NAME + 1];
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	if (!dsname) {
 		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
 			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
 	}
+
+	/* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+	   ("no profile covers the resource") as permitted, so authorizing the name
+	   as typed and then operating on the folded one would let a lower-case name
+	   pass by no-match. */
+	if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
+		return handle_error(session, ERR_INVALID_PARAM,
+			"Dataset name is too long");
+	}
+	dsname = dsn_buf;
 
 	/* ALTER before the catalog is even consulted (issue #228). The order is
 	   deliberate: authorizing after the locate would make the 404 an existence
@@ -3154,6 +3347,8 @@ int memberDeleteHandler(Session *session)
 	char dataset[MAX_QUALIFIED_DSN] = {0};
 	FILE *fp = NULL;
 
+	char		dsn_buf[MAX_DATASET_NAME + 1];
+	char		mbr_buf[MAX_MEMBER_NAME + 1];
 	dsname = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_dataset-name");
 	member = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_member-name");
 
@@ -3162,11 +3357,21 @@ int memberDeleteHandler(Session *session)
 			"Dataset and member names are required");
 	}
 
-	// Validate dsname and member individually (not combined — qualified form fits MAX_QUALIFIED_DSN)
-	if (strlen(dsname) > MAX_DATASET_NAME || strlen(member) > MAX_MEMBER_NAME) {
+	/* Fold before require_access() (#334): http_check_auth() reads SAF rc 4
+	   ("no profile covers the resource") as permitted, so authorizing the name
+	   as typed and then operating on the folded one would let a lower-case name
+	   pass by no-match. */
+	if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
 		return handle_error(session, ERR_INVALID_PARAM,
-			"Dataset or member name too long");
+			"Dataset name is too long");
 	}
+	dsname = dsn_buf;
+
+	if (!normalize_dsn(member, mbr_buf, sizeof(mbr_buf))) {
+		return handle_error(session, ERR_INVALID_PARAM,
+			"Member name is too long");
+	}
+	member = mbr_buf;
 
 	snprintf(dataset, sizeof(dataset), "%s(%s)", dsname, member);
 

@@ -9,7 +9,7 @@ GET
 `/zosmf/restfiles/ds`
 
 ## Query Parameters
-- `dslevel` (required): Dataset name filter pattern. Supports exact names (`USER.TEST.DATA`), hierarchical prefixes (`USER.TEST`), and wildcard patterns (`USER.*`, `USER.**`, `USER.C*`). Internally, the longest concrete prefix is used for the catalog lookup and any wildcard or extra-qualifier filtering is applied afterwards.
+- `dslevel` (required): Dataset name filter pattern. Upper-cased before use, so `mike.test` and `MIKE.TEST` are equivalent; a value longer than 44 characters is refused with `400`. Supports exact names (`USER.TEST.DATA`), hierarchical prefixes (`USER.TEST`), and wildcard patterns (`USER.*`, `USER.**`, `USER.C*`). Internally, the longest concrete prefix is used for the catalog lookup and any wildcard or extra-qualifier filtering is applied afterwards.
 - `volser` (optional): Filter by volume serial
 - `start` (optional): Starting dataset name for pagination. The listing begins
   at this name — **inclusive**, as in z/OSMF — and runs to the end of the list.

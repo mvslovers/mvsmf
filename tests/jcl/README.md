@@ -23,6 +23,12 @@ positional operand of the JOB statement — so it is selected (`$HASP373 STARTED
 - INIT 1`) and then flushed with `IEF633I`. Keeping both matters: the decoding
 reads a different field for each.
 
+**`noprogmn.jcl` is the one row in the matrix that is site-dependent.** Whether
+a programmer name is mandatory is an installation setting; on the reference
+stand it is. Where it is not, the job runs clean and reports `CC 0000`, and the
+suite's assertion fails rather than skipping — which is the right direction, but
+read it as "this stand does not require the name", not as a regression.
+
 A sixth case has no fixture because it is site-specific: a job whose step
 fails **allocation** (`IEF245I INCONSISTENT UNIT NAME AND VOLUME SERIAL`,
 `IEF453I JOB FAILED - JCL ERROR`) leaves `JCTCNVRC` at `77000000` — identical

@@ -474,6 +474,62 @@ int testHandler(Session *session) {
                      " \"rc\": %d, \"volser\": \"%.6s\" }\n",
                      dsn, loc_rc, locwork.volser);
 
+    /* --- fn=dscb ---------------------------------------------------- */
+    /*
+     * Raw format-1 DSCB space fields for a data set.
+     *
+     * The listing endpoint reports the space UNIT (spacu) but never the
+     * secondary QUANTITY, and that gap is not academic: a create modelled with
+     * like= derives the secondary in tracks, and emitting that under a
+     * client-supplied CYL is a fifteen-fold over-allocation that nothing in the
+     * API can see (mvsmf#338). This exposes scal1/scal3 so a test can assert
+     * the number that actually reached the DSCB.
+     *
+     * Read-only: __locate() and __dscbdv() consult the catalog and the VTOC.
+     */
+  } else if (strcmp(fn, "dscb") == 0) {
+    char *dsn =
+        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
+    LOCWORK locwork = {0};
+    DSCB dscb = {0};
+    DSCB1 *d1 = &dscb.dscb1;
+    char vol[7] = {0};
+    char dsn44[44];
+    unsigned sec = 0;
+    int loc_rc, dscb_rc = -1;
+
+    if (!dsn)
+      dsn = "SYS1.MACLIB";
+
+    memset(dsn44, ' ', sizeof(dsn44));
+    {
+      size_t n = strlen(dsn);
+      if (n > sizeof(dsn44))
+        n = sizeof(dsn44);
+      memcpy(dsn44, dsn, n);
+    }
+
+    loc_rc = __locate(dsn44, &locwork);
+    if (loc_rc == 0) {
+      memcpy(vol, locwork.volser, 6);
+      dscb_rc = __dscbdv(dsn44, vol, &dscb);
+    }
+
+    if (dscb_rc == 0) {
+      sec = ((unsigned)d1->scal3[0] << 16) | ((unsigned)d1->scal3[1] << 8) |
+            (unsigned)d1->scal3[2];
+    }
+
+    rc = http_printf(
+        session->httpc,
+        "{ \"fn\": \"dscb\", \"dsn\": \"%s\", \"locate_rc\": %d,"
+        " \"dscb_rc\": %d, \"volser\": \"%.6s\","
+        " \"lrecl\": %d, \"blksize\": %d, \"extents\": %d,"
+        " \"spacu\": \"%s\", \"secondary\": %u }\n",
+        dsn, loc_rc, dscb_rc, vol, dscb_rc == 0 ? d1->lrecl : 0,
+        dscb_rc == 0 ? d1->blksz : 0, dscb_rc == 0 ? d1->noepv : 0,
+        (dscb_rc == 0 && (d1->scal1 & 0xC0) == CYL) ? "CYL" : "TRK", sec);
+
     /* --- fn=syslog (stepped probe) -------------------------------- */
     /* Bisect via &step=N.  Each step that returns normally flushes its
      * output; the highest step still producing output is the last that
@@ -1395,6 +1451,7 @@ int testHandler(Session *session) {
         " \"?fn=version             (deployed version + git build id)\","
         " \"?fn=listds&level=HLQ&filter=HLQ.X*\","
         " \"?fn=locate&dsn=SYS1.MACLIB\","
+        " \"?fn=dscb&dsn=DS        (format-1 DSCB space fields incl. secondary)\","
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
         " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
         " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","

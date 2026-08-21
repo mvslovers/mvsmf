@@ -3420,6 +3420,14 @@ int datasetCreateHandler(Session *session)
 			sizeof(alcunit)) == 0);
 	if (!have_alcunit) {
 		strcpy(alcunit, "TRK");
+	} else {
+		/* Folded here, not left to __dsalcf(): it upper-cases the whole opts
+		   string, but the unit is compared against "TRK" below that, before
+		   the string is built. A client sending "trk" would otherwise miss. */
+		int u;
+		for (u = 0; alcunit[u]; u++) {
+			alcunit[u] = (char) toupper((unsigned char) alcunit[u]);
+		}
 	}
 
 	/* Fill the space the model cannot supply. DALDCBDS carries the DCB
@@ -3438,7 +3446,15 @@ int datasetCreateHandler(Session *session)
 				   otherwise get its track count read as cylinders. */
 				strcpy(alcunit, "TRK");
 			}
-			if (!have_secondary) {
+			/* The same hazard applies to the secondary, and it is easy to
+			   miss because the guard above looks like it covers both: it
+			   does not. With an explicit primary the client's unit governs,
+			   and a derived track count emitted under CYL is a fifteen-fold
+			   over-allocation on every extent -- silent, since nothing in
+			   the listing reports the secondary. So the derived value is
+			   only used when the unit actually in force is TRK; under any
+			   other the secondary stays whatever the client asked for. */
+			if (!have_secondary && strcmp(alcunit, "TRK") == 0) {
 				secondary = (int) msec;
 			}
 		}
@@ -3457,8 +3473,19 @@ int datasetCreateHandler(Session *session)
 		   for the copy case this exists for, and 5 KB out of the primary
 		   allocation, which is a fraction of a single track. A client that
 		   knows better sends dirblk and this does not fire. */
-		if (!have_dirblk && is_pds(like)) {
-			dirblk = LIKE_DIRBLK;
+		/* Keyed off the dsorg actually going out, not the model's: with
+		   {"like":"PS.MODEL","dsorg":"PO"} the target is partitioned even
+		   though the model is not, and a PO with zero directory blocks is
+		   not a data set anyone can use. */
+		if (!have_dirblk) {
+			int target_is_pds = dsorg[0]
+				? (toupper((unsigned char) dsorg[0]) == 'P' &&
+				   toupper((unsigned char) dsorg[1]) == 'O')
+				: is_pds(like);
+
+			if (target_is_pds) {
+				dirblk = LIKE_DIRBLK;
+			}
 		}
 	}
 

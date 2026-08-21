@@ -2849,6 +2849,71 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
 assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is still a 400"
 
+# --- like= and the allocation unit -----------------------------------------
+#
+# model_alloc() answers in TRACKS whatever unit the model was allocated in. The
+# derived primary is guarded by forcing TRK, and it is easy to believe that
+# covers the secondary too. It does not: with an explicit primary the client's
+# unit governs, and a derived track count emitted under CYL over-allocates every
+# extent about fifteenfold.
+#
+# Nothing in the listing reports the secondary quantity, which is why this needs
+# ?fn=dscb -- asserting only on what the listing shows would pass either way,
+# and that is how this got shipped in the first place.
+
+DSCB_SEC() { curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.secondary'; }
+DSCB_UNIT() { curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
+
+assert_json_field "$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+
+LIKE_CYL="${MVSMF_USER}.CURL.LIKECYL"
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}" || true
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
+assert_http_status "201" "$HTTP_CODE" "like: create with an explicit primary in cylinders"
+
+CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
+CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
+MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")
+
+if [ "$CYL_UNIT" = "CYL" ]; then
+	pass "like: an explicit alcunit is honoured (CYL)"
+else
+	fail "like: an explicit alcunit is honoured (CYL)" "got spacu=${CYL_UNIT}"
+fi
+
+# the derived, track-denominated secondary must not have been emitted as cylinders
+if [ "${CYL_SEC:-0}" = "0" ]; then
+	pass "like: no track-denominated secondary is emitted under CYL"
+else
+	fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}"
+
+# --- like= a sequential model, but asking for a PDS -------------------------
+#
+# dirblk keys off the dsorg actually going out, not the model's: a PS model with
+# an explicit dsorg=PO would otherwise be allocated with zero directory blocks.
+LIKE_PS="${MVSMF_USER}.CURL.LIKEPS"
+LIKE_PO="${MVSMF_USER}.CURL.LIKEPO"
+for D in "$LIKE_PS" "$LIKE_PO"; do
+	curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${D}" || true
+done
+
+curl -s -o /dev/null -X POST -u "$AUTH" -H "Content-Type: application/json" 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PS}"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${LIKE_PS}\",\"dsorg\":\"PO\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}")
+assert_http_status "201" "$HTTP_CODE" "like: a PS model with an explicit dsorg=PO"
+
+# the proof is that it works as a PDS -- zero directory blocks only shows here
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" 	-H "Content-Type: application/octet-stream" --data-binary "MEMBER" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}(DIRMBR)")
+assert_http_status "204" "$HTTP_CODE" "like: that PDS got directory blocks and takes a member"
+
+for D in "$LIKE_PS" "$LIKE_PO"; do
+	curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${D}"
+done
+
 curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}"
 curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}"
 

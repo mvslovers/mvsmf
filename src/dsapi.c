@@ -2994,6 +2994,15 @@ process_rename(Session *session, const char *target_dsn,
 	char	request[16]	= {0};
 	char	from_dsn[MAX_DATASET_NAME + 1] = {0};
 	char	from_member[MAX_MEMBER_NAME + 1] = {0};
+	/* Extraction scratch, deliberately wider than either target.
+	   extract_json_string() TRUNCATES a value that does not fit and still
+	   returns 0, so extracting straight into a target sized to the limit turns
+	   an over-long name into a valid one: {"member":"ABCDEFGHIJ"} would arrive
+	   as ABCDEFGH and __renmem() would rename a different, existing member and
+	   answer 204. Extract wide, then let normalize_dsn() refuse the length.
+	   Anything longer than this is truncated to 63, which no target accepts
+	   either -- so no over-long name can ever alias a real one. */
+	char	json_val[64] = {0};
 	int	rc;
 
 	// Read and EBCDIC-translate the JSON control body
@@ -3016,8 +3025,8 @@ process_rename(Session *session, const char *target_dsn,
 	if (target_member) {
 		// Member rename: from-dataset.member is the OLD member name,
 		// the URL member is the NEW name, within the same PDS (target_dsn).
-		if (extract_json_string(body, "member", from_member,
-				sizeof(from_member)) < 0) {
+		if (extract_json_string(body, "member", json_val,
+				sizeof(json_val)) < 0) {
 			free(body);
 			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
@@ -3027,9 +3036,8 @@ process_rename(Session *session, const char *target_dsn,
 
 		/* The control body carries names too, and they reach __renmem() and
 		   require_access() exactly like the ones in the URL -- so they get the
-		   same fold (#334). In place is safe here: normalize_dsn() writes out[i]
-		   from value[i] at the same index and never past n. */
-		if (!normalize_dsn(from_member, from_member, sizeof(from_member))) {
+		   same fold (#334), and the same length refusal. */
+		if (!normalize_dsn(json_val, from_member, sizeof(from_member))) {
 			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
 				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);
@@ -3065,8 +3073,8 @@ process_rename(Session *session, const char *target_dsn,
 		LOCWORK	locwork;
 		char	dsn44[44];
 
-		if (extract_json_string(body, "dsn", from_dsn,
-				sizeof(from_dsn)) < 0) {
+		if (extract_json_string(body, "dsn", json_val,
+				sizeof(json_val)) < 0) {
 			free(body);
 			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
@@ -3076,7 +3084,7 @@ process_rename(Session *session, const char *target_dsn,
 
 		/* Same fold as the member branch above, and for the same reason: this
 		   name is authorized and then renamed (#334). */
-		if (!normalize_dsn(from_dsn, from_dsn, sizeof(from_dsn))) {
+		if (!normalize_dsn(json_val, from_dsn, sizeof(from_dsn))) {
 			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
 				ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);

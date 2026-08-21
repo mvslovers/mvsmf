@@ -2729,6 +2729,41 @@ fi
 curl -s -o /dev/null -X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)"
 
+# An over-long member name in the control body must not rename a DIFFERENT
+# member. extract_json_string() truncates a value that does not fit and still
+# returns 0, so a target buffer sized to the 8-character limit would turn
+# "ABCDEFGHIJ" into "ABCDEFGH" -- an existing member -- and __renmem() would
+# rename that one and answer 204. The extraction buffer is deliberately wider
+# than the limit so the length refusal happens on the real value.
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "DO NOT RENAME ME" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"ABCDEFGHIJ\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)")
+if [ "$HTTP_CODE" = "204" ]; then
+	fail "an over-long source member is not truncated into a real one" \
+		"got HTTP 204 -- the rename hit a different member"
+else
+	pass "an over-long source member is refused (HTTP $HTTP_CODE)"
+fi
+
+CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)")
+if echo "$CONTENT" | grep -q "DO NOT RENAME ME"; then
+	pass "the truncation target was left alone"
+else
+	fail "the truncation target was left alone" \
+		"ABCDEFGH no longer holds its content -- it was renamed by a truncated name"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)" || true
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

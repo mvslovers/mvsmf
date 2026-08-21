@@ -55,9 +55,15 @@ for. mvsMF derives it instead:
 | `primary` | the model's total allocated tracks, in `TRK` |
 | `secondary` | the model's secondary quantity, converted to tracks |
 | `alcunit` | forced to `TRK`, because the two above are track counts |
-| `dirblk` | `20` when the model is partitioned — see below |
+| `dirblk` | `20` when the **target** is partitioned — see below |
 
-Supplying `primary` yourself leaves your `alcunit` alone.
+Supplying `primary` yourself leaves your `alcunit` alone — and in that case the
+secondary is only derived when the unit in force is `TRK`. Under `CYL` or `BLK`
+there is no safe way to express a track count, so an omitted `secondary` stays
+`0` rather than being emitted in the wrong unit.
+
+`dirblk` follows the `dsorg` actually going out, not the model's: `{"like":
+"PS.MODEL", "dsorg": "PO"}` still gets directory blocks.
 
 `dirblk` is the one value with no source at all: a DSCB records no directory
 quantity, so there is nothing to model. 20 blocks is roughly 100 members once

@@ -93,6 +93,21 @@ Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and P
 | GET | [`/zosmf/restfiles/ds/{name}({member})`](datasets/members-get.md) | Read PDS member |
 | PUT | [`/zosmf/restfiles/ds/{name}({member})`](datasets/members-put.md) | Write PDS member |
 
+## Data set names are folded to upper case
+
+Every data set, member and `dslevel` name on the `/zosmf/restfiles/ds` endpoints
+is upper-cased before it is used, so `ibmuser.cntl`, `IBMUSER.CNTL` and
+`IBMUSER.cntl` all address the same data set. Trailing blanks are trimmed.
+
+This matches z/OSMF, which folds both the path variable and the `dslevel` query
+value. It applies to the names in a `rename` control body as well.
+
+A name longer than its limit is **refused with 400**, not truncated — 44
+characters for a data set or `dslevel`, 8 for a member.
+
+**USS paths are not folded.** `/zosmf/restfiles/fs` addresses a case-sensitive
+file system, where `/tmp/Foo` and `/tmp/foo` are different files.
+
 ## USS Files (`/zosmf/restfiles/fs`)
 
 | Method | Path | Description |

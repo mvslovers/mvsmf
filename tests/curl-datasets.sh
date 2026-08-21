@@ -2525,6 +2525,245 @@ else
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}" || true
 fi
 
+# --- Lower-case names are folded to upper case (issue #334) ---
+#
+# Every files endpoint used to take the name exactly as typed, so a lower-case
+# request found nothing: the catalog, the VTOC and a PDS directory are all upper
+# case. Real z/OSMF folds both the {dataset-name} path variable and the dslevel
+# query value -- measured against z/OSMF 29 -- so mvsMF has to as well.
+#
+# This is the class of bug the Zowe suite structurally CANNOT catch: the CLI
+# folds the name client-side before it reaches the wire, so zowe-datasets.sh
+# sends upper case no matter what is typed. Only curl can see it, which is why
+# these cases live here.
+echo ""
+echo "--- Lower-case names are folded (issue #334) ---"
+
+PDS_LOWER=$(echo "$TEST_PDS" | tr '[:upper:]' '[:lower:]')
+
+# a member to look for, written under the upper-case name
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "FOLDED" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD1)"
+
+# 1. dslevel= -- the reported symptom: an empty listing, not an error
+COUNT=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${PDS_LOWER}" |
+	jq -r '.items | length' 2>/dev/null)
+if [ "${COUNT:-0}" -ge 1 ]; then
+	pass "lower-case dslevel finds the data set"
+else
+	fail "lower-case dslevel finds the data set" \
+		"expected at least one item, got '${COUNT:-<none>}'"
+fi
+
+# 2. member list under a lower-case data set name
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}/member")
+assert_http_status "200" "$HTTP_CODE" "lower-case dsname: member list"
+
+# 3. read a member, both names lower case
+CONTENT=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold1)")
+if echo "$CONTENT" | grep -q "FOLDED"; then
+	pass "lower-case dsname and member: read"
+else
+	fail "lower-case dsname and member: read" \
+		"expected the member content, got '${CONTENT}'"
+fi
+
+# 4. a write through the lower-case name must land on the UPPER-case member --
+#    proving the name was folded, not that a second lower-case name was created
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "WRITTEN VIA LOWER CASE" \
+	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold2)")
+assert_http_status "204" "$HTTP_CODE" "lower-case dsname and member: write"
+
+CONTENT=$(curl -s -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD2)")
+if echo "$CONTENT" | grep -q "WRITTEN VIA LOWER CASE"; then
+	pass "the lower-case write landed on the upper-case member"
+else
+	fail "the lower-case write landed on the upper-case member" \
+		"reading ${TEST_PDS}(FOLD2) gave '${CONTENT}'"
+fi
+
+# 5. delete through the lower-case name
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold2)")
+assert_http_status "204" "$HTTP_CODE" "lower-case dsname and member: delete"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD1)"
+
+# --- An over-long dslevel is refused, not copied (issue #337) ---
+#
+# extract_level_prefix() used to strcpy() the raw query value into a 45-byte
+# stack buffer, and httpd lets a query value reach CBUFSIZE = 4000. The lengths
+# below are deliberately just over the limit rather than 4000: against a build
+# without the fix these still exercise the overflow, and the point is to detect
+# it, not to maximise the damage to the stand while doing so.
+#
+# The liveness check at the end is the actual assertion. A stack smash in the
+# CGI is never cleaned up (mvslovers/httpd#154), so "the server still answers"
+# is what separates a fixed build from one that happened not to crash yet.
+echo ""
+echo "--- Over-long dslevel is refused (issue #337) ---"
+
+LEVEL44=$(printf 'A%.0s' $(seq 1 44))
+LEVEL45=$(printf 'A%.0s' $(seq 1 45))
+LEVEL200=$(printf 'A%.0s' $(seq 1 200))
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL44}")
+assert_http_status "200" "$HTTP_CODE" "dslevel at the 44-character limit is accepted"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL45}")
+assert_http_status "400" "$HTTP_CODE" "dslevel one character over the limit is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL200}")
+assert_http_status "400" "$HTTP_CODE" "a 200-character dslevel is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
+assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long dslevels"
+
+# --- An over-long name in the PATH is refused too (issue #337) ---
+#
+# dslevel was not the only door. get_fb_record_count() and is_pds() copied
+# dsname into a 44-byte dsn44 with a bare memcpy(..., strlen(dsname)), and the
+# sequential GET/DELETE/POST handlers had no length check on dsname at all --
+# only the two member handlers did. So an over-long name in the path was the
+# same stack smash. The fold refuses it; dsn44_len() clamps behind that.
+echo ""
+echo "--- Over-long name in the path is refused (issue #337) ---"
+
+NAME45=$(printf 'A%.0s' $(seq 1 45))
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${NAME45}")
+assert_http_status "400" "$HTTP_CODE" "over-long dsname in the path is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${NAME45})")
+assert_http_status "400" "$HTTP_CODE" "over-long member name in the path is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
+assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long path names"
+
+# --- Create and rename accept lower case too (issue #334) ---
+#
+# Both are changed code and neither was covered. The rename cases matter most:
+# process_rename() takes its source name from the JSON control body, not the
+# URL, and that is the one fold done in place (value == out).
+echo ""
+echo "--- Create and rename fold lower case (issue #334) ---"
+
+FOLD_NEW="${MVSMF_USER}.CURL.FOLDNEW"
+FOLD_SRC="${MVSMF_USER}.CURL.FOLDSRC"
+FOLD_DST="${MVSMF_USER}.CURL.FOLDDST"
+FOLD_NEW_LOWER=$(echo "$FOLD_NEW" | tr '[:upper:]' '[:lower:]')
+FOLD_SRC_LOWER=$(echo "$FOLD_SRC" | tr '[:upper:]' '[:lower:]')
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}" || true
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}" || true
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}" || true
+
+ALLOC='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+
+# create through a lower-case name ...
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" -d "$ALLOC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW_LOWER}")
+assert_http_status "201" "$HTTP_CODE" "create through a lower-case name"
+
+# ... and the data set exists under the upper-case name
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}")
+assert_http_status "200" "$HTTP_CODE" "the lower-case create landed on the upper-case name"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}"
+
+# data set rename with a lower-case source in the control body
+curl -s -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" -d "$ALLOC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${FOLD_SRC_LOWER}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
+assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source data set"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
+assert_http_status "200" "$HTTP_CODE" "the renamed data set is there"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}"
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
+
+# member rename with a lower-case source member in the control body
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "RENAME ME" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD3)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"fold3\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
+assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source member"
+
+CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
+if echo "$CONTENT" | grep -q "RENAME ME"; then
+	pass "the renamed member kept its content"
+else
+	fail "the renamed member kept its content" "got '${CONTENT}'"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)"
+
+# An over-long member name in the control body must not rename a DIFFERENT
+# member. extract_json_string() truncates a value that does not fit and still
+# returns 0, so a target buffer sized to the 8-character limit would turn
+# "ABCDEFGHIJ" into "ABCDEFGH" -- an existing member -- and __renmem() would
+# rename that one and answer 204. The extraction buffer is deliberately wider
+# than the limit so the length refusal happens on the real value.
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "DO NOT RENAME ME" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"ABCDEFGHIJ\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)")
+if [ "$HTTP_CODE" = "204" ]; then
+	fail "an over-long source member is not truncated into a real one" \
+		"got HTTP 204 -- the rename hit a different member"
+else
+	pass "an over-long source member is refused (HTTP $HTTP_CODE)"
+fi
+
+CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)")
+if echo "$CONTENT" | grep -q "DO NOT RENAME ME"; then
+	pass "the truncation target was left alone"
+else
+	fail "the truncation target was left alone" \
+		"ABCDEFGH no longer holds its content -- it was renamed by a truncated name"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)" || true
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

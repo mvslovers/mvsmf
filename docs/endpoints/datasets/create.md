@@ -17,6 +17,10 @@ POST
 ## Request Body (JSON)
 
 ### Required Fields
+
+Required **unless `like` is given** — with a model, every one of them becomes an
+optional override:
+
 - `dsorg`: Dataset organization (`PS` for sequential, `PO` for partitioned)
 - `recfm`: Record format (e.g. `FB`, `VB`, `U`)
 - `lrecl`: Logical record length
@@ -24,16 +28,61 @@ POST
 - `primary`: Primary space allocation
 
 ### Optional Fields
+- `like`: Model the new data set on an existing one (see below)
 - `secondary`: Secondary space allocation (default: 0)
 - `dirblk`: Directory blocks for PDS (default: 0)
 - `alcunit`: Allocation unit — `TRK`, `CYL`, or `BLK` (default: `TRK`)
+
+## `like` — model on an existing data set
+
+```json
+{"like": "MY.MODEL.PDS"}
+{"like": "MY.MODEL.PDS", "blksize": 800}
+```
+
+This is what `zowe files cp ds` sends when it creates the copy target.
+
+**DSORG, RECFM, LRECL and BLKSIZE come from the model**, read off its DSCB by
+MVS itself through the SVC 99 `DALDCBDS` text unit — the same mechanism as JCL
+`DCB=(dsname)`. Any of those fields present in the body overrides the model.
+
+**Space does not come from the model in the same way.** `DCB=` never copied
+`SPACE`; the thing that does is DFSMS `LIKE=`, which MVS 3.8j has no equivalent
+for. mvsMF derives it instead:
+
+| | with `like`, field absent |
+|---|---|
+| `primary` | the model's total allocated tracks, in `TRK` |
+| `secondary` | the model's secondary quantity, converted to tracks |
+| `alcunit` | forced to `TRK`, because the two above are track counts |
+| `dirblk` | `20` when the **target** is partitioned — see below |
+
+Supplying `primary` yourself leaves your `alcunit` alone — and in that case the
+secondary is only derived when the unit in force is `TRK`. Under `CYL` or `BLK`
+there is no safe way to express a track count, so an omitted `secondary` stays
+`0` rather than being emitted in the wrong unit.
+
+`dirblk` follows the `dsorg` actually going out, not the model's: `{"like":
+"PS.MODEL", "dsorg": "PO"}` still gets directory blocks.
+
+`dirblk` is the one value with no source at all: a DSCB records no directory
+quantity, so there is nothing to model. 20 blocks is roughly 100 members once
+ISPF statistics are present, which covers the copy case and costs about 5 KB.
+Send `dirblk` explicitly when you know better.
+
+A `like` naming a data set that is not cataloged answers **404**, not the
+generic allocation 500 — otherwise nothing would say it was the *model* that
+was missing.
 
 ## Response
 On successful completion, this request returns HTTP status code 201 (Created).
 
 ## Error Responses
 - HTTP 400 (Bad Request)
-    - Missing or invalid allocation parameters
+    - Missing or invalid allocation parameters, or a `like` name longer than 44
+      characters
+- HTTP 404 (Not Found)
+    - The data set named by `like` is not cataloged
 - HTTP 500 (Internal Server Error)
     - `{"category":8,"rc":900,"reason":7,"message":"Dynamic allocation Error"}`
       — every allocation failure, whatever the cause: the name already exists,

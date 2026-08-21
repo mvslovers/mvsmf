@@ -2764,6 +2764,94 @@ curl -s -o /dev/null -X DELETE -u "$AUTH" \
 curl -s -o /dev/null -X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)" || true
 
+# --- Create modelled on an existing data set: like= (issue #338) ---
+#
+# This is what `zowe files cp ds` sends -- {"like":"SRC","blksize":19040} -- and
+# a body with none of the five otherwise-required fields used to come back
+# "Invalid or missing allocation parameters".
+#
+# The 201 proves nothing on its own: the point is whether the attributes were
+# actually taken from the model, so every case reads them back off the listing.
+echo ""
+echo "--- Create with like= (issue #338) ---"
+
+LIKE_NEW="${MVSMF_USER}.CURL.LIKENEW"
+LIKE_OVR="${MVSMF_USER}.CURL.LIKEOVR"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}" || true
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}" || true
+
+# the model's own attributes, straight from the listing
+MODEL=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
+M_DSORG=$(echo "$MODEL" | jq -r '.items[0].dsorg')
+M_RECFM=$(echo "$MODEL" | jq -r '.items[0].recfm')
+M_LRECL=$(echo "$MODEL" | jq -r '.items[0].lrecl')
+M_BLKSZ=$(echo "$MODEL" | jq -r '.items[0].blksz')
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "{\"like\":\"${TEST_PDS}\"}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}")
+assert_http_status "201" "$HTTP_CODE" "create with like= only"
+
+NEWDS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_NEW}")
+assert_json_field "$NEWDS" '.items[0].dsorg' "$M_DSORG" "like: dsorg copied from the model"
+assert_json_field "$NEWDS" '.items[0].recfm' "$M_RECFM" "like: recfm copied from the model"
+assert_json_field "$NEWDS" '.items[0].lrecl' "$M_LRECL" "like: lrecl copied from the model"
+assert_json_field "$NEWDS" '.items[0].blksz' "$M_BLKSZ" "like: blksize copied from the model"
+
+# the new PDS must actually be usable as one -- a directory with no blocks is
+# the failure mode LIKE_DIRBLK exists to avoid, and it only shows on a write
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "MEMBER IN A MODELLED PDS" \
+	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}(LIKEMBR)")
+assert_http_status "204" "$HTTP_CODE" "like: the modelled PDS takes a member"
+
+# an explicit field overrides the model
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "{\"like\":\"${TEST_PDS}\",\"blksize\":800}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}")
+assert_http_status "201" "$HTTP_CODE" "create with like= plus an override"
+
+OVRDS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_OVR}")
+assert_json_field "$OVRDS" '.items[0].blksz' "800" "like: an explicit blksize wins over the model"
+assert_json_field "$OVRDS" '.items[0].lrecl' "$M_LRECL" "like: the unspecified lrecl still comes from the model"
+
+# a model that does not exist is a 404, not the generic dynalloc 500
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "{\"like\":\"${MVSMF_USER}.NO.SUCH.MODEL\"}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
+assert_http_status "404" "$HTTP_CODE" "like: a missing model is a 404"
+
+# ... and it created nothing
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
+assert_http_status "404" "$HTTP_CODE" "like: the refused create created nothing"
+
+# an over-long model name must be refused, not truncated into a real one
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d "{\"like\":\"$(printf 'A%.0s' $(seq 1 60))\"}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
+if [ "$HTTP_CODE" = "201" ]; then
+	fail "like: an over-long model name is refused" \
+		"got HTTP 201 -- a truncated name was accepted as a model"
+else
+	pass "like: an over-long model name is refused (HTTP $HTTP_CODE)"
+fi
+
+# a body with neither like= nor the five required fields is still a 400
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" -d '{"recfm":"FB"}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
+assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is still a 400"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}"
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}"
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

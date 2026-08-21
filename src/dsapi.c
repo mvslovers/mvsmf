@@ -26,6 +26,11 @@
 #define UNDEFINED 0x0004
 
 // Constants for better readability and maintainability
+/* Directory blocks given to a PDS created with like= when the client does not
+   say. See datasetCreateHandler() for why this is a decision rather than a
+   measurement. */
+#define LIKE_DIRBLK 20
+
 #define MAX_DATASET_NAME 44
 #define MAX_MEMBER_NAME 8
 // Qualified form DSN(MEMBER): 44 + '(' + 8 + ')' + NUL
@@ -131,6 +136,97 @@ dsn44_len(const char *dsname)
 	size_t	len = dsname ? strlen(dsname) : 0;
 
 	return len > MAX_DATASET_NAME ? (size_t) MAX_DATASET_NAME : len;
+}
+
+/* Read a `like` model's space allocation off its DSCB, for a create that names
+   one (#338).
+
+   MVS supplies the DCB attributes itself through the DALDCBDS text unit
+   (`DCBDSN=`, the SVC 99 form of JCL DCB=(dsname)) -- DSORG, RECFM, LRECL and
+   BLKSIZE all come from the model without mvsMF decoding anything. What it does
+   NOT supply is SPACE: copying the allocation as well is DFSMS LIKE=, and 3.8j
+   has no equivalent. Measured -- LIKE= on a DD statement is a JCL ERROR here,
+   and key X'004B' is DALRSRVS ("secondary buffer reserve") in this era's
+   text-unit table rather than DALLIKE, so sending it would quietly set a TCAM
+   buffer size instead of modelling anything.
+
+   So the space has to be derived here, and this is that derivation: the total
+   allocated tracks of the model become the primary, and its secondary quantity
+   comes off scal3. Everything is expressed in TRACKS, including a model
+   allocated in cylinders -- one unit end to end is what keeps a CYL model from
+   silently producing a 15-times-too-small target.
+
+   Only the first three extents are visible in the DSCB1 (the rest live in
+   format-3 DSCBs), so a heavily fragmented model reports short. That
+   under-reports the primary rather than over-reporting it, and the secondary
+   still covers the rest, which is the safe direction for the failure.
+
+   Returns 0 on success. */
+__asm__("\n&FUNC    SETC 'model_alloc'");
+static int
+model_alloc(const char *dsname, unsigned *pri_trks, unsigned *sec_trks)
+{
+	LOCWORK		locwork = {0};
+	DSCB		dscb = {0};
+	DSCB1		*dscb1 = &dscb.dscb1;
+	DSCB		dscb4buf = {0};
+	char		vol[7] = {0};
+	char		dsn44[44];
+	unsigned short	tpc = 0;
+	unsigned	trks = 0;
+	unsigned	sec;
+	int		e;
+
+	*pri_trks = 0;
+	*sec_trks = 0;
+
+	memset(dsn44, ' ', sizeof(dsn44));
+	memcpy(dsn44, dsname, dsn44_len(dsname));
+
+	if (__locate(dsn44, &locwork) != 0) {
+		return -1;
+	}
+	memcpy(vol, locwork.volser, 6);
+	if (__dscbdv(dsn44, vol, &dscb) != 0) {
+		return -1;
+	}
+
+	/* tracks per cylinder, read the same way the listing reads it: __dscbv()
+	   returns data only, so dstrk sits at work[20] rather than at its struct
+	   offset. 30 is the 3350 fallback the listing uses when the volume DSCB
+	   cannot be read. */
+	if (__dscbv(vol, &dscb4buf) == 0) {
+		tpc = ((unsigned char)dscb4buf.work[20] << 8)
+		    |  (unsigned char)dscb4buf.work[21];
+	}
+	if (tpc == 0) tpc = 30;
+
+	for (e = 0; e < 3 && e < dscb1->noepv; e++) {
+		unsigned short lc, lh, hc, hh;
+		lc = ((unsigned)dscb1->extent[e].lower[0] << 8)
+		   |  (unsigned)dscb1->extent[e].lower[1];
+		lh = ((unsigned)dscb1->extent[e].lower[2] << 8)
+		   |  (unsigned)dscb1->extent[e].lower[3];
+		hc = ((unsigned)dscb1->extent[e].upper[0] << 8)
+		   |  (unsigned)dscb1->extent[e].upper[1];
+		hh = ((unsigned)dscb1->extent[e].upper[2] << 8)
+		   |  (unsigned)dscb1->extent[e].upper[3];
+		trks += (unsigned)((hc - lc) * tpc + (hh - lh) + 1);
+	}
+
+	sec = ((unsigned)dscb1->scal3[0] << 16)
+	    | ((unsigned)dscb1->scal3[1] << 8)
+	    |  (unsigned)dscb1->scal3[2];
+
+	/* scal1 says which unit scal3 counts in; normalise to tracks */
+	if ((dscb1->scal1 & 0xC0) == CYL) {
+		sec *= tpc;
+	}
+
+	*pri_trks = trks ? trks : 1;
+	*sec_trks = sec;
+
+	return 0;
 }
 
 /* Authorization gate for a data set operation (issue #228).
@@ -3143,6 +3239,14 @@ int datasetCreateHandler(Session *session)
 	int lrecl = 0;
 	int blksize = 0;
 
+	char like[MAX_DATASET_NAME + 1] = {0};
+	char json_val[64] = {0};	/* see the note at the like= extraction */
+	int have_like = 0;
+	int have_primary = 0;
+	int have_secondary = 0;
+	int have_dirblk = 0;
+	int have_alcunit = 0;
+
 	char ddname[9] = {0};
 	char opts[512];
 
@@ -3260,30 +3364,135 @@ int datasetCreateHandler(Session *session)
 		body_size = strlen(body);
 	}
 
-	/* Parse JSON fields */
-	if (extract_json_string(body, "dsorg", dsorg, sizeof(dsorg)) < 0 ||
-	    extract_json_string(body, "recfm", recfm, sizeof(recfm)) < 0 ||
-	    extract_json_int(body, "lrecl", &lrecl) < 0 ||
-	    extract_json_int(body, "blksize", &blksize) < 0 ||
-	    extract_json_int(body, "primary", &primary) < 0) {
-		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
-			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
-			ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+	/* like= -- allocate modelled on an existing data set (#338). This is what
+	   `zowe files cp ds` sends: {"like":"SRC","blksize":19040}, a body with
+	   none of the five fields below in it, which is why that command used to
+	   come back "Invalid or missing allocation parameters".
+
+	   Extracted through a scratch buffer wider than the target, for the same
+	   reason as the rename names: extract_json_string() truncates a value that
+	   does not fit and still returns 0, so extracting straight into a 45-byte
+	   buffer would turn an over-long name into a valid, different one. */
+	if (extract_json_string(body, "like", json_val, sizeof(json_val)) == 0) {
+		if (!normalize_dsn(json_val, like, sizeof(like))) {
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+				ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+		}
+		/* A model that is not there is a 404. Without this it would reach
+		   __dsalcf(), fail there, and come back as the generic 500 dynalloc
+		   error -- which does not say that it was the *model* that was
+		   missing, and that is the whole diagnosis. */
+		if (!dataset_cataloged(like)) {
+			return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
+				CATEGORY_SERVICE, RC_ERROR, REASON_DATASET_NOT_FOUND,
+				ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
+		}
+		have_like = 1;
+	}
+
+	/* Parse JSON fields. With a model, every one of these is an override and
+	   none is required -- MVS fills the rest in from the model's DSCB. Without
+	   one they are all required, exactly as before. */
+	if (!have_like) {
+		if (extract_json_string(body, "dsorg", dsorg, sizeof(dsorg)) < 0 ||
+		    extract_json_string(body, "recfm", recfm, sizeof(recfm)) < 0 ||
+		    extract_json_int(body, "lrecl", &lrecl) < 0 ||
+		    extract_json_int(body, "blksize", &blksize) < 0 ||
+		    extract_json_int(body, "primary", &primary) < 0) {
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+				ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+		}
+		have_primary = 1;
+	} else {
+		extract_json_string(body, "dsorg", dsorg, sizeof(dsorg));
+		extract_json_string(body, "recfm", recfm, sizeof(recfm));
+		extract_json_int(body, "lrecl", &lrecl);
+		extract_json_int(body, "blksize", &blksize);
+		have_primary = (extract_json_int(body, "primary", &primary) == 0);
 	}
 
 	/* Optional fields */
-	extract_json_int(body, "secondary", &secondary);
-	extract_json_int(body, "dirblk", &dirblk);
-	if (extract_json_string(body, "alcunit", alcunit, sizeof(alcunit)) < 0) {
+	have_secondary = (extract_json_int(body, "secondary", &secondary) == 0);
+	have_dirblk = (extract_json_int(body, "dirblk", &dirblk) == 0);
+	have_alcunit = (extract_json_string(body, "alcunit", alcunit,
+			sizeof(alcunit)) == 0);
+	if (!have_alcunit) {
 		strcpy(alcunit, "TRK");
 	}
 
-	/* Build allocation options string */
-	snprintf(opts, sizeof(opts),
-		"DSN=%s;DISP=(NEW,CATLG,DELETE);DSORG=%s;RECFM=%s;"
-		"LRECL=%d;BLKSIZE=%d;SPACE=%s(%d,%d,%d)",
-		dsname, dsorg, recfm, lrecl, blksize,
-		alcunit, primary, secondary, dirblk);
+	/* Fill the space the model cannot supply. DALDCBDS carries the DCB
+	   attributes and nothing else -- see model_alloc() for why SPACE is not
+	   part of that bargain on this platform. */
+	if (have_like) {
+		unsigned mpri = 0;
+		unsigned msec = 0;
+
+		if (model_alloc(like, &mpri, &msec) == 0) {
+			if (!have_primary && mpri > 0) {
+				primary = (int) mpri;
+				/* model_alloc() answers in tracks whatever unit the model
+				   was allocated in, so the unit has to follow. A client
+				   that asked for CYL and left primary to us would
+				   otherwise get its track count read as cylinders. */
+				strcpy(alcunit, "TRK");
+			}
+			if (!have_secondary) {
+				secondary = (int) msec;
+			}
+		}
+		if (primary <= 0) {
+			primary = 1;
+		}
+
+		/* Directory blocks are the one thing neither MVS nor the DSCB can
+		   answer: the DSCB records no directory quantity, so there is nothing
+		   to model. A PDS target needs some, and getting it wrong is a
+		   directory-full failure part way through a copy.
+
+		   LIKE_DIRBLK is therefore a deliberate default, not a measurement. A
+		   256-byte directory block holds roughly five entries once ISPF
+		   statistics are present, so 20 blocks is about 100 members -- enough
+		   for the copy case this exists for, and 5 KB out of the primary
+		   allocation, which is a fraction of a single track. A client that
+		   knows better sends dirblk and this does not fire. */
+		if (!have_dirblk && is_pds(like)) {
+			dirblk = LIKE_DIRBLK;
+		}
+	}
+
+	/* Build allocation options string. Assembled piecewise because with a
+	   model the DCB keywords are omitted rather than sent empty -- an empty
+	   DSORG= would override the model with nothing. */
+	{
+		int n = 0;
+
+		n += snprintf(opts + n, sizeof(opts) - n,
+			"DSN=%s;DISP=(NEW,CATLG,DELETE)", dsname);
+		if (have_like) {
+			n += snprintf(opts + n, sizeof(opts) - n, ";DCBDSN=%s", like);
+		}
+		if (dsorg[0]) {
+			n += snprintf(opts + n, sizeof(opts) - n, ";DSORG=%s", dsorg);
+		}
+		if (recfm[0]) {
+			n += snprintf(opts + n, sizeof(opts) - n, ";RECFM=%s", recfm);
+		}
+		if (lrecl > 0) {
+			n += snprintf(opts + n, sizeof(opts) - n, ";LRECL=%d", lrecl);
+		}
+		if (blksize > 0) {
+			n += snprintf(opts + n, sizeof(opts) - n, ";BLKSIZE=%d", blksize);
+		}
+		if (n < 0 || n >= (int) sizeof(opts)) {
+			return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+				CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_ALLOC_PARAMS,
+				ERR_MSG_INVALID_ALLOC_PARAMS, NULL, 0);
+		}
+		snprintf(opts + n, sizeof(opts) - n, ";SPACE=%s(%d,%d,%d)",
+			alcunit, primary, secondary, dirblk);
+	}
 
 	/* Allocate the dataset */
 	rc = __dsalcf(ddname, "%s", opts);

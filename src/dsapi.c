@@ -56,6 +56,7 @@ static int check_if_match(Session *session, const char *dataset,
                           long max_records);
 static int require_access(Session *session, const char *dsname, int attr);
 static int normalize_dsn(const char *value, char *out, size_t outlen);
+static size_t dsn44_len(const char *dsname);
 
 /* Fold a data set, member or qualifier name from the request into the form MVS
    actually stores: copy it out of httpd's environment storage, drop trailing
@@ -109,6 +110,27 @@ normalize_dsn(const char *value, char *out, size_t outlen)
 	out[n] = '\0';
 
 	return 1;
+}
+
+/* Length of dsname to copy into a 44-byte, blank-padded dsn44 for __locate()
+   and __dscbdv().
+
+   Every caller now folds through normalize_dsn() first, which refuses anything
+   longer than 44, so this never actually clamps. It exists because the four
+   copies it guards used to be a bare memcpy(dsn44, dsname, strlen(dsname)) into
+   a 44-byte stack buffer, and three of their callers had no length check on
+   dsname at all -- GET /zosmf/restfiles/ds/<200 characters> was the same remote
+   stack smash as #337, through the path variable instead of dslevel. The fold
+   is what closes that; this makes sure a future caller cannot reopen it by
+   forgetting to fold. dataset_cataloged() has always clamped here -- it was the
+   only one that did. */
+__asm__("\n&FUNC    SETC 'dsn44_len'");
+static size_t
+dsn44_len(const char *dsname)
+{
+	size_t	len = dsname ? strlen(dsname) : 0;
+
+	return len > MAX_DATASET_NAME ? (size_t) MAX_DATASET_NAME : len;
 }
 
 /* Authorization gate for a data set operation (issue #228).
@@ -211,7 +233,7 @@ get_fb_record_count(const char *dsname)
 	int rc;
 
 	memset(dsn44, ' ', sizeof(dsn44));
-	memcpy(dsn44, dsname, strlen(dsname));
+	memcpy(dsn44, dsname, dsn44_len(dsname));
 
 	/* Locate dataset to get volser */
 	memset(&locwork, 0, sizeof(locwork));
@@ -499,7 +521,7 @@ is_pds(const char *dsname)
 
 	// Pad dataset name to 44 bytes (required by __locate/__dscbdv)
 	memset(dsn44, ' ', sizeof(dsn44));
-	memcpy(dsn44, dsname, strlen(dsname));
+	memcpy(dsn44, dsname, dsn44_len(dsname));
 
 	// Locate dataset in catalog to get volume serial
 	memset(&locwork, 0, sizeof(locwork));
@@ -1176,8 +1198,12 @@ int datasetListHandler(Session *session)
 	   than saying no, and this refusal is what keeps #337 unreachable. */
 	if (dslevel && *dslevel) {
 		if (!normalize_dsn(dslevel, dslevel_buf, sizeof(dslevel_buf))) {
-			return handle_error(session, ERR_INVALID_PARAM,
-				"Dataset level is too long");
+			/* goto quit like every other exit here: dslist is still NULL at
+			   this point, so a bare return would be correct today and wrong
+			   the moment anything is allocated above it. */
+			rc = (unsigned) handle_error(session, ERR_INVALID_PARAM,
+					"Dataset level is too long");
+			goto quit;
 		}
 		dslevel = dslevel_buf;
 	}
@@ -3071,7 +3097,7 @@ process_rename(Session *session, const char *target_dsn,
 
 		// Verify the source data set exists
 		memset(dsn44, ' ', sizeof(dsn44));
-		memcpy(dsn44, from_dsn, strlen(from_dsn));
+		memcpy(dsn44, from_dsn, dsn44_len(from_dsn));
 		memset(&locwork, 0, sizeof(locwork));
 		if (__locate(dsn44, &locwork) != 0) {
 			return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
@@ -3313,7 +3339,7 @@ int datasetDeleteHandler(Session *session)
 
 	/* Check if dataset exists via catalog locate */
 	memset(dsn44, ' ', sizeof(dsn44));
-	memcpy(dsn44, dsname, strlen(dsname));
+	memcpy(dsn44, dsname, dsn44_len(dsname));
 	memset(&locwork, 0, sizeof(locwork));
 
 	rc = __locate(dsn44, &locwork);

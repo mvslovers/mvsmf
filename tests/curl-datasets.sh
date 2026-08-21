@@ -2632,6 +2632,103 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long dslevels"
 
+# --- An over-long name in the PATH is refused too (issue #337) ---
+#
+# dslevel was not the only door. get_fb_record_count() and is_pds() copied
+# dsname into a 44-byte dsn44 with a bare memcpy(..., strlen(dsname)), and the
+# sequential GET/DELETE/POST handlers had no length check on dsname at all --
+# only the two member handlers did. So an over-long name in the path was the
+# same stack smash. The fold refuses it; dsn44_len() clamps behind that.
+echo ""
+echo "--- Over-long name in the path is refused (issue #337) ---"
+
+NAME45=$(printf 'A%.0s' $(seq 1 45))
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${NAME45}")
+assert_http_status "400" "$HTTP_CODE" "over-long dsname in the path is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${NAME45})")
+assert_http_status "400" "$HTTP_CODE" "over-long member name in the path is refused"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
+assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long path names"
+
+# --- Create and rename accept lower case too (issue #334) ---
+#
+# Both are changed code and neither was covered. The rename cases matter most:
+# process_rename() takes its source name from the JSON control body, not the
+# URL, and that is the one fold done in place (value == out).
+echo ""
+echo "--- Create and rename fold lower case (issue #334) ---"
+
+FOLD_NEW="${MVSMF_USER}.CURL.FOLDNEW"
+FOLD_SRC="${MVSMF_USER}.CURL.FOLDSRC"
+FOLD_DST="${MVSMF_USER}.CURL.FOLDDST"
+FOLD_NEW_LOWER=$(echo "$FOLD_NEW" | tr '[:upper:]' '[:lower:]')
+FOLD_SRC_LOWER=$(echo "$FOLD_SRC" | tr '[:upper:]' '[:lower:]')
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}" || true
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}" || true
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}" || true
+
+ALLOC='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+
+# create through a lower-case name ...
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" -d "$ALLOC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW_LOWER}")
+assert_http_status "201" "$HTTP_CODE" "create through a lower-case name"
+
+# ... and the data set exists under the upper-case name
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}")
+assert_http_status "200" "$HTTP_CODE" "the lower-case create landed on the upper-case name"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}"
+
+# data set rename with a lower-case source in the control body
+curl -s -o /dev/null -X POST -u "$AUTH" \
+	-H "Content-Type: application/json" -d "$ALLOC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${FOLD_SRC_LOWER}\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
+assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source data set"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
+assert_http_status "200" "$HTTP_CODE" "the renamed data set is there"
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}"
+curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
+
+# member rename with a lower-case source member in the control body
+curl -s -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary "RENAME ME" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD3)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"fold3\"}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
+assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source member"
+
+CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
+if echo "$CONTENT" | grep -q "RENAME ME"; then
+	pass "the renamed member kept its content"
+else
+	fail "the renamed member kept its content" "got '${CONTENT}'"
+fi
+
+curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)"
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

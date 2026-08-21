@@ -621,6 +621,62 @@ skip "etag: X-IBM-Return-Etag / If-Match (no Zowe CLI flag — see curl-datasets
 # option at all, so a 304 cannot be provoked through the CLI even indirectly.
 skip "etag: If-None-Match / 304 (no Zowe CLI or SDK option — see curl-datasets.sh)"
 
+# --- Copy a data set: files cp ds (issue #338) ---
+#
+# The reported symptom, and the one case only the CLI can produce: `cp ds`
+# creates the target with {"like":"<source>","blksize":N} and then copies the
+# members. Before like= was supported that create came back 400 "Invalid or
+# missing allocation parameters" and the copy aborted.
+#
+# The success message is not the assertion -- the members and the attributes
+# are, since a target created with the wrong DCB accepts the copy and corrupts
+# it.
+echo ""
+echo "--- Copy data set (issue #338) ---"
+
+COPY_DST="${MVS_USER}.ZOWE.COPYDST"
+
+run_zowe files delete ds "$COPY_DST" -f >/dev/null 2>&1 || true
+
+# The earlier member tests delete what they create, so TEST_PDS is empty by the
+# time this runs. Put a member back: comparing two empty directories would pass
+# whatever the copy did, which is the assertion that is really a skip.
+printf 'COPY SOURCE MEMBER\n' > /tmp/zowe_copy_src.txt
+run_zowe files ul ftds /tmp/zowe_copy_src.txt "${TEST_PDS}(COPYMBR)" >/dev/null 2>&1 || true
+
+RC=0
+OUTPUT=$(run_zowe files cp ds "$TEST_PDS" "$COPY_DST") || RC=$?
+assert_rc 0 "$RC" "copy PDS to a new data set"
+
+RC=0
+SRC=$(run_zowe_json files ls am "$TEST_PDS") || RC=$?
+DST=$(run_zowe_json files ls am "$COPY_DST") || RC=$?
+SRC_M=$(echo "$SRC" | jq -r '.data.apiResponse.items[].member' 2>/dev/null | sort | tr '\n' ' ')
+DST_M=$(echo "$DST" | jq -r '.data.apiResponse.items[].member' 2>/dev/null | sort | tr '\n' ' ')
+if [ -n "$SRC_M" ] && [ "$SRC_M" = "$DST_M" ]; then
+	pass "the copy has the same members as the source"
+else
+	fail "the copy has the same members as the source" \
+		"source: [${SRC_M}] copy: [${DST_M}]"
+fi
+
+RC=0
+SRCA=$(run_zowe_json files ls ds "$TEST_PDS" -a) || RC=$?
+DSTA=$(run_zowe_json files ls ds "$COPY_DST" -a) || RC=$?
+for F in dsorg recfm lrecl; do
+	SV=$(echo "$SRCA" | jq -r ".data.apiResponse.items[0].${F}" 2>/dev/null)
+	DV=$(echo "$DSTA" | jq -r ".data.apiResponse.items[0].${F}" 2>/dev/null)
+	if [ -n "$SV" ] && [ "$SV" = "$DV" ]; then
+		pass "the copy kept the source ${F} (${DV})"
+	else
+		fail "the copy kept the source ${F}" "source: ${SV}, copy: ${DV}"
+	fi
+done
+
+run_zowe files delete ds "$COPY_DST" -f >/dev/null 2>&1 || true
+run_zowe files delete ds "${TEST_PDS}(COPYMBR)" -f >/dev/null 2>&1 || true
+rm -f /tmp/zowe_copy_src.txt
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

@@ -7,14 +7,23 @@ Fixtures used by `tests/curl-jobs.sh` and by hand.
 | `iefbr14.jcl` | clean | `77000000` | `00` | `CC 0000` |
 | `condfail.jcl` | `IEF451I ENDED BY CC 0012` | `7700000C` | `C0` | `CC 0012` |
 | `abendjob.jcl` | `IEF450I ABEND S806` | `77806000` | `20` | `ABEND S806` |
-| `jclerror.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` | `00000004` | `00` | `JCL ERROR` |
+| `jclerror.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` (converter) | `00000004` | `00` | `JCL ERROR` |
+| `noprogmn.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` (job select) | `00000000` | `80` | `JCL ERROR` |
 | `allocpds.jcl` | allocates the test PDS — **no suite uses it any more** | — | — | — |
 
-The four above are the regression set for the `retcode` decoding (#305) —
+The five above are the regression set for the `retcode` decoding (#305, #332) —
 between them they cover every branch of it. Read the raw fields back with
 `/zosmf/test?fn=job&jobname=NAME`.
 
-A fifth case has no fixture because it is site-specific: a job whose step
+`jclerror.jcl` and `noprogmn.jcl` provoke the *same console message* through
+different stages and share not one field value. `jclerror.jcl` has `EXECC` on
+the EXEC statement, which the converter rejects before any initiator sees the
+job. `noprogmn.jcl` converts cleanly and omits the programmer name — the second
+positional operand of the JOB statement — so it is selected (`$HASP373 STARTED
+- INIT 1`) and then flushed with `IEF633I`. Keeping both matters: the decoding
+reads a different field for each.
+
+A sixth case has no fixture because it is site-specific: a job whose step
 fails **allocation** (`IEF245I INCONSISTENT UNIT NAME AND VOLUME SERIAL`,
 `IEF453I JOB FAILED - JCL ERROR`) leaves `JCTCNVRC` at `77000000` — identical
 to a clean run — and is distinguished only by `JCTJTFLG` = `80`. Provoke one

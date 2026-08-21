@@ -140,6 +140,18 @@ when that byte is exactly the `JF` bit — the same equality test the usermod
 itself uses in `SYZYGY1B` before printing its `- MAX COND CODE nnnn` line. A
 job that failed its `COND` carries `JF|CF` and keeps its condition code.
 
+**`IEF452I JOB NOT RUN - JCL ERROR` has two shapes, and no field is the same in
+both.** When the *converter* rejects the JCL — a syntax error such as `EXECC` —
+the job is never selected, so JES2 never reaches the `JF` store and the
+converter's own return code is still sitting in `JCTCNVRC` (`00000004`). When
+the JCL converts and the **JOB statement** is rejected on job select instead —
+`IEF633I PROGRAMMER NAME MISSING ON THE JOB STATEMENT` is the one that turns up
+in practice — the converter left `JCTCNVRC` at zero, and no step ran, so
+`SYZYGY1A` never stamped the `0x77` form either. The whole failure is then
+carried by the `JF` bit alone, which is why mvsMF reads that bit whatever the
+completion word holds (#332). It cannot misfire on a job that recorded nothing:
+without `NOTIFY`, `JCTJTFLG` stays `00` and the answer stays `null`.
+
 Measured on MVS 3.8j, all with `NOTIFY`:
 
 | ended as | `JCTCNVRC` | `JCTJTFLG` | `retcode` |
@@ -147,8 +159,9 @@ Measured on MVS 3.8j, all with `NOTIFY`:
 | clean | `77000000` | `00` | `CC 0000` |
 | `IEF451I ENDED BY CC 0012` | `7700000C` | `C0` | `CC 0012` |
 | `IEF450I ABEND S806` | `77806000` | `20` | `ABEND S806` |
-| `IEF453I JOB FAILED - JCL ERROR` | `77000000` | `80` | `JCL ERROR` |
-| `IEF452I JOB NOT RUN - JCL ERROR` | `00000004` | `00` | `JCL ERROR` |
+| `IEF453I JOB FAILED - JCL ERROR` (allocation) | `77000000` | `80` | `JCL ERROR` |
+| `IEF452I JOB NOT RUN - JCL ERROR` (converter) | `00000004` | `00` | `JCL ERROR` |
+| `IEF452I JOB NOT RUN - JCL ERROR` (job select, `IEF633I`) | `00000000` | `80` | `JCL ERROR` |
 
 `/zosmf/test?fn=job&jobname=NAME` reports these fields directly.
 

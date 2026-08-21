@@ -1156,7 +1156,20 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 		} else if (comp == 4 || comp == 8 || comp == 36) {
 			/* JCL converter error: the job never reached an initiator, so
 			   the converter's own return code is still in the field
-			   (IEF452I JOB NOT RUN - JCL ERROR). */
+			   (IEF452I JOB NOT RUN - JCL ERROR). Measured 00000004/00 --
+			   JES2 never got to set JF, because that happens on job select. */
+			retcode = "JCL ERROR";
+		} else if (job->jtflg == JESJOB_JF) {
+			/* The other JCL-error shape, and the only one with no trace in
+			   the completion word at all (measured 00000000/80): the JCL
+			   converted, so JCTCNVRC stayed 0, an initiator selected the job
+			   and the JOB statement was then rejected -- IEF633I PROGRAMMER
+			   NAME MISSING, IEF452I JOB NOT RUN - JCL ERROR. No step ran, so
+			   SYZJ2001's SCT walk never stamped the 0x77 form either, and
+			   JES2's JF bit from T2269500 is the only field left carrying the
+			   failure. It is enough on its own: a job that recorded nothing
+			   because its card had no NOTIFY keeps JCTJTFLG at 0 and stays
+			   null. Equality again, for the reason spelled out above. */
 			retcode = "JCL ERROR";
 		}
 	}

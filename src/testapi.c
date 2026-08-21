@@ -1032,6 +1032,8 @@ int testHandler(Session *session) {
           snprintf(retcode, sizeof(retcode), "CC %04d", maxcc);
       } else if (comp == 4 || comp == 8 || comp == 36) {
         snprintf(retcode, sizeof(retcode), "%s", "JCL ERROR");
+      } else if (jtflg == JESJOB_JF) {
+        snprintf(retcode, sizeof(retcode), "%s", "JCL ERROR");
       } else {
         snprintf(retcode, sizeof(retcode), "%s", "(null)");
       }

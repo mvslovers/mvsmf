@@ -532,6 +532,56 @@ test_submit_notify_inside_programmer_name() {
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
+test_submit_missing_programmer_name_retcode() {
+	echo ""
+	echo "--- Submit Job: job flushed on job select reports JCL ERROR (issue #332) ---"
+
+	# The second of the two IEF452I shapes, and the one that shares no field
+	# value with the first. A card whose only positional operand is accounting
+	# information has no programmer name, so it converts cleanly (JCTCNVRC stays
+	# 0) and is then flushed by IEF633I after an initiator selected it. No step
+	# runs, so SYZJ2001 never stamps the 0x77 form either -- JES2's JF bit is the
+	# whole signal, and reading it only inside the 0x77 arm reported null here.
+	# tests/jcl/noprogmn.jcl is the same card as a fixture.
+	local jcl
+	jcl=$(printf '%s\n%s\n' \
+		"//NOPROGMN JOB 'ACCOUNTING ONLY',CLASS=A,MSGCLASS=H" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	# The submit itself succeeds -- the reference accepts this card too and lets
+	# JES2 flush it. Only the reporting afterwards is under test.
+	assert_http_status "200" "$HTTP_STATUS" "submit card without a programmer name"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "flushed job reports JCL ERROR (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		# null is the regression; CC 0000 would mean the job actually ran, which
+		# would mean this stand does not require a programmer name and the test
+		# is measuring nothing.
+		assert_json_field "$BODY" '.retcode' "JCL ERROR" \
+			"job flushed on job select reports JCL ERROR"
+	else
+		skip "flushed job reports JCL ERROR (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
 test_submit_jobcard_too_long() {
 	echo ""
 	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
@@ -1530,6 +1580,7 @@ test_submit_notify_sysuid_trailing_param
 test_submit_without_notify_gets_retcode
 test_submit_literal_notify_not_duplicated
 test_submit_notify_inside_programmer_name
+test_submit_missing_programmer_name_retcode
 test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type

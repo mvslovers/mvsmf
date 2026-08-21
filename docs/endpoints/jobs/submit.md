@@ -66,6 +66,16 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
 
   If you *want* to be notified, write `NOTIFY` on the card yourself — mvsMF never touches one that is already there.
 - The whole feature needs JES2 usermod **`SYZJ201`** to be installed; see [Prerequisites](../../../README.md#the-syzj201-usermod).
+- **The JOB statement needs a programmer name.** It is the second positional
+  operand, and a card carrying only accounting information — `//MYJOB JOB
+  'SOME TEXT',CLASS=A` — has none: the quoted string is the accounting field.
+  mvsMF accepts such a job, JES2 gives it a jobid, and MVS then flushes it with
+  `IEF633I PROGRAMMER NAME MISSING ON THE JOB STATEMENT` / `IEF452I JOB NOT RUN
+  - JCL ERROR`. The submit response cannot report this — the job has not run
+  yet — so it arrives as `"retcode": "JCL ERROR"` on the next status poll, and
+  the message itself is in `JESYSMSG`. Write the card as `//MYJOB JOB
+  (ACCT),'SOME NAME',CLASS=A`. Whether the name is mandatory is an installation
+  setting; on the reference stand it is.
 
 ## Examples
 

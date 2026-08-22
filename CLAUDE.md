@@ -559,6 +559,22 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
 See [docs/storage-probe.md](docs/storage-probe.md).
 
+**The endpoint has no per-function gate any more, and must not grow one back
+(#343).** `fn=abend`, `fn=jesabend` and `fn=denyopen` were gated on
+`MVSMF_ABEND_TEST` in the server environment from the days when a CGI abend
+cost the address space its storage permanently (httpd#154). That is measured
+gone — httpd#175 plus mvslovers/libc370#126 — and the gate was guarding the
+weakest function here while `fn=cmd`, which issues operator commands through
+SVC 34 in supervisor state, never had one. `&hold=` went with it: it was the
+only knob that degraded *other* requests, and #287, which it was built for, is
+closed. The boundary that means something is the route: building with
+`-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, which covers
+`fn=cmd` too. Default is ON — `fn=version` is how a deploy is verified.
+
+`tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
+caught, the server keeps serving, and it costs no storage. It deliberately
+faults the worker several times.
+
 ### Known Platform Bugs
 
 The MVS 3.8j TCP/IP stack has a ring buffer bug that corrupts data when a multi-byte `recv()` call spans the internal buffer wrap-around point. Corrupted reads return replayed data from earlier in the stream. Single-byte `recv()` calls are not affected because they never cross the boundary.

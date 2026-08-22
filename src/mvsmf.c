@@ -127,8 +127,22 @@ int main(int argc, char **argv)
 
 	/* add the URL mappings */
 	add_route(&router, GET, "/zosmf/info", infoHandler);
+
+	/* /zosmf/test is the diagnostic endpoint, and the boundary that decides
+	   whether a deployment has one is HERE, not inside its functions (#343).
+	   It carries fn=cmd (operator commands via SVC 34 in supervisor state),
+	   fn=abend and fn=denyopen; a runtime flag on some of those guarded the
+	   weakest of them while the strongest never had one. Building with
+	   -DMVSMF_NO_TEST_ENDPOINT leaves the routes unregistered, so the whole
+	   surface answers 404 and the code behind it is unreachable.
+
+	   The default is ON deliberately: fn=version is the documented way to
+	   confirm which build a deploy actually activated, and fn=storage is the
+	   storage instrument -- a hardened build gives both up knowingly. */
+#ifndef MVSMF_NO_TEST_ENDPOINT
 	add_route(&router, GET, "/zosmf/test", testHandler);
 	add_route(&router, GET, "/zosmf/test/wildcard/{*filepath}", testWildcardHandler);
+#endif
 
 	add_route(&router, POST, "/zosmf/services/authenticate", authLoginHandler);
 	add_route(&router, DELETE, "/zosmf/services/authenticate", authLogoutHandler);

@@ -88,7 +88,7 @@ member not found, record too long) produce **no** console message.
 | `MVSMF903W` | `SESSION FILE TABLE FULL, FILE NOT TRACKED` | More data sets are open in one request than `MAX_SESSION_FILES`. The untracked file is not closed if the handler abends. |
 | `MVSMF904I` | `RECOVERY CLOSING dsn (DD:ddname)` | Recovery is closing a data set the abending handler left open. Informational; it accompanies a `MVSMF901E`. |
 | `MVSMF905W` | `RECOVERY FCLOSE ABENDED FOR SLOT n` | The recovery close abended in turn. The DD stays allocated and its storage stays held for the life of the address space. |
-| `MVSMF906W` | `FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY` | `/zosmf/test?fn=abend` is about to abend the worker **on purpose**. Only reachable with `MVSMF_ABEND_TEST=1` in the server environment. Not a fault. |
+| `MVSMF906W` | `FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY` | `/zosmf/test?fn=abend` is about to abend the worker **on purpose**. Not a fault. A build that does not want the diagnostic endpoint at all leaves it out with `-DMVSMF_NO_TEST_ENDPOINT` (#343). |
 | `MVSMF907I` | `ENV[n] "name"="value"` | CGI environment dump, one line per variable. Only written when `logging_middleware` is registered — it is not by default. A developer aid, not an operator message. |
 | `MVSMF908I` | `RECOVERY CLOSING THE JES SPOOL HANDLE` | Recovery is closing the JES2 spool handle an abending handler left open. Informational; it accompanies a `MVSMF901E`. Its absence after a jobs-API abend is the leak of issue #286. |
 | `MVSMF909W` | `RECOVERY JESCLOSE ABENDED, SPOOL DATA SETS STAY OPEN` | The recovery `jesclose()` abended in turn. The JES2 spool data sets stay allocated and their storage stays held for the life of the address space. |

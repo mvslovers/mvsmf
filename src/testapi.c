@@ -78,20 +78,18 @@ static const char *jespr_reason_name(int reason) {
  * (e.g. the 2026-07-22 console crash) -- distinct from httpd's worker-level
  * recovery() path, which /abend in httpd already covers.
  *
- * HARD-GUARDED so it can never fire in a production deployment: it only
- * triggers when the server operator has explicitly set MVSMF_ABEND_TEST in
- * the server environment (a `//SYSENV DD` line `MVSMF_ABEND_TEST=1` in the
- * HTTPD started task; read here via getenv() from the CGI's runtime env,
- * which shares httpd's GRT). Unset -- the production default -- returns 400
- * and never faults. The value is server-side and operator-controlled; a
- * client cannot enable it by any request input.
+ * It used to be gated on MVSMF_ABEND_TEST in the server environment, back
+ * when a CGI abend cost the address space its storage permanently
+ * (mvslovers/httpd#154): one deliberate abend could wedge every endpoint
+ * with S80A until the STC was restarted.  That is measured gone -- httpd#175
+ * made CGI storage request-lifetime (ten fn=abend cost 4096 bytes between
+ * them, #287) and mvslovers/libc370#126 closed the last path where a handler
+ * abend leaked what it had built.  The gate also guarded the weakest
+ * function here: fn=cmd issues operator commands through SVC 34 in
+ * supervisor state and never had one, and every caller is authenticated
+ * anyway.  The boundary that means something is the route -- see
+ * MVSMF_NO_TEST_ENDPOINT in mvsmf.c (issue #343).
  */
-__asm__("\n&FUNC	SETC 'abend_test_enabled'");
-static int abend_test_enabled(void) {
-  const char *v = getenv("MVSMF_ABEND_TEST");
-  return v && (v[0] == '1' || v[0] == 'Y' || v[0] == 'y');
-}
-
 /* --- fn=denyopen (issue #315) -------------------------------------------
  * Take a real S913 through the real ESTAE, to check that the router answers a
  * denial OPEN caught with the reference's authorization report rather than the
@@ -107,8 +105,6 @@ static int abend_test_enabled(void) {
  * pre-checks do not cover -- a pre-check and OPEN disagreeing, and the handlers
  * outside dsapi.c -- and a net nobody can reach is a net nobody can test.
  *
- * Gated exactly like fn=abend: an abend costs the CGI its storage subpool
- * (mvslovers/httpd#154), so this must never be reachable in production.
  * Handled before any response byte is written, so headers_sent is still 0 and
  * the router can send its recovery response.
  */
@@ -116,15 +112,6 @@ __asm__("\n&FUNC	SETC 'testDenyOpen'");
 static int testDenyOpen(Session *session) {
   char *dsn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
   FILE *fp;
-
-  if (!abend_test_enabled()) {
-    return sendErrorResponse(
-        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
-        REASON_SERVER_ERROR,
-        "fn=denyopen is disabled. Set MVSMF_ABEND_TEST=1 in the server "
-        "environment to enable the denial-recovery test hook.",
-        NULL, 0);
-  }
 
   if (!dsn)
     dsn = "SYS1.SECURE.CNTL(PROFILES)";
@@ -154,15 +141,6 @@ static int testDenyOpen(Session *session) {
 
 __asm__("\n&FUNC	SETC 'testAbend'");
 static int testAbend(Session *session) {
-  if (!abend_test_enabled()) {
-    return sendErrorResponse(
-        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
-        REASON_SERVER_ERROR,
-        "fn=abend is disabled. Set MVSMF_ABEND_TEST=1 in the server "
-        "environment to enable the ESTAE recovery test hook.",
-        NULL, 0);
-  }
-
   wtof(MSG_ABEND_TEST);
 
   /* Deliberate operation exception (S0C1): execute an invalid opcode
@@ -186,15 +164,6 @@ static int testAbend(Session *session) {
 __asm__("\n&FUNC	SETC 'testJesAbend'");
 static int testJesAbend(Session *session) {
   JES *jes = NULL;
-
-  if (!abend_test_enabled()) {
-    return sendErrorResponse(
-        session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE, RC_ERROR,
-        REASON_SERVER_ERROR,
-        "fn=jesabend is disabled. Set MVSMF_ABEND_TEST=1 in the server "
-        "environment to enable the ESTAE recovery test hook.",
-        NULL, 0);
-  }
 
   jes = jesopen();
   if (!jes) {
@@ -848,18 +817,22 @@ int testHandler(Session *session) {
         ret ? "non-null" : "NULL", len,
         (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
 
-    /* --- fn=env (does the CGI see httpd's //SYSENV?) --------------- */
-    /* The abend test hook is gated on getenv("MVSMF_ABEND_TEST"), which only
-     * works because httpd and the CGI share one CLIBGRT -- the CGI reads the
-     * environment httpd's @@START loaded from //SYSENV. When that gate does
-     * not open there are two indistinguishable causes: the DD/member was not
-     * in place at server start, or the CGI is not seeing httpd's environment
-     * at all. Listing what this CGI actually has separates them: names but no
-     * MVSMF_* means the member was empty at start; an empty list means the
-     * environment is not shared.
+    /* --- fn=env (what environment did this CGI load?) -------------- */
+    /* httpd and the CGI do NOT share an environment, despite what this
+     * comment claimed until #343.  Every LINK builds its own CLIBGRT with
+     * its own empty env array (it has to: grtapp2 holds the per-request
+     * HTTPC), and cgistart.c then runs loadenv("dd:SYSENV") into it -- so
+     * what the CGI sees comes from re-reading the DD on this very request,
+     * not from httpd's copy.  What the two share is the address space's DD,
+     * which is why the member must stay allocated for the life of the STC
+     * and why FREE=CLOSE on it leaves every CGI with an empty environment.
      *
-     * Names are always safe to show; values are not (httpd's environment is
-     * the server operator's, not the caller's), so only MVSMF_* values are
+     * That makes this function the direct read-out of that per-request load:
+     * an empty list means the DD or member was not there when this request
+     * ran; names present means loadenv() found and parsed it.
+     *
+     * Names are always safe to show; values are not (the environment is the
+     * server operator's, not the caller's), so only MVSMF_* values are
      * printed -- those are our own test flags and carry no secrets.
      *
      * Read grt->grtenv, which is where the environment actually lives. The
@@ -911,34 +884,18 @@ int testHandler(Session *session) {
     char *spv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_SP");
     char *totalv =
         (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_TOTAL");
-    char *holdv =
-        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_HOLD");
     int spn = spv ? atoi(spv) : 0;
     unsigned sp = (unsigned)spn;
     int want_total = totalv && (totalv[0] == '1' || totalv[0] == 'y' ||
                                 totalv[0] == 'Y');
-    /* &hold=<seconds> (cap 10): after measuring, KEEP the largest block
-     * allocated for that long before freeing it.  Concurrent requests must
-     * then start their 262328-byte C stack in what remains -- which is how
-     * both halves of the #287 fragmentation claim get proven live: a request
-     * that fails U0801 while the holes are the only space left proves the
-     * failure signature AND that a fenced-off hole cannot hold a stack.
-     *
-     * This is deliberate fault injection against a live server, so it is
-     * gated exactly like fn=abend: without MVSMF_ABEND_TEST in the server
-     * environment the parameter is ignored and reported as such. */
-    int hold = holdv ? atoi(holdv) : 0;
-    int hold_denied = 0;
-
-    if (hold < 0)
-      hold = 0;
-    if (hold > 10)
-      hold = 10;
-    if (hold && !abend_test_enabled()) {
-      hold = 0;
-      hold_denied = 1;
-    }
-
+    /* There used to be an &hold=<seconds> here: it kept the largest block
+     * allocated for up to ten seconds so a concurrent request had to build
+     * its C stack in what remained, which is how both halves of the #287
+     * fragmentation claim were proven live.  It is gone with #343.  Unlike
+     * every other function on this endpoint it degraded OTHER requests, and
+     * what it was built to establish is established -- #287 is closed and
+     * its cause fixed (mvslovers/libc370#115 and __stklen).  Reinstate it
+     * from the history if an investigation ever needs it again. */
     if (spn < 0 || spn > 127) {
       rc = http_printf(session->httpc,
                        "{ \"fn\": \"storage\", \"error\": \"sp must be 0..127;"
@@ -963,14 +920,6 @@ int testHandler(Session *session) {
         p = stg_getmain(largest, sp);
         if (p) {
           sprintf(largest_at, "0x%06X", (unsigned)(unsigned long)p);
-          if (hold) {
-            ECB ecb = 0;
-            /* BINTVL is in hundredths of a second.  A failed timer (negative
-             * rc) means no wait happened -- fine here, the block is simply
-             * given back at once and `held` reports what really occurred. */
-            if (ecb_timed_wait(&ecb, (unsigned)hold * 100u, 1) < 0)
-              hold = 0;
-          }
           if (stg_freemain(p, largest, sp) != 0)
             free_errors++;
         }
@@ -1005,13 +954,6 @@ int testHandler(Session *session) {
         }
 
         rc = http_printf(session->httpc, "]");
-        if (rc < 0)
-          goto quit;
-      }
-
-      if (hold || hold_denied) {
-        rc = http_printf(session->httpc, ", \"held\": %d, \"hold_denied\": %s",
-                         hold, hold_denied ? "true" : "false");
         if (rc < 0)
           goto quit;
       }
@@ -1455,8 +1397,7 @@ int testHandler(Session *session) {
         " \"?fn=syslog&step=0..5  (JES2 spool SYSLOG probe)\","
         " \"?fn=mtt&step=1..3     (Master Trace Table dump)\","
         " \"?fn=cmd&cmd=D+T       (issue MVS command via SVC34, find in MTT)\","
-        " \"?fn=storage&sp=0&total=0|1&hold=N (free storage sample; total=1 briefly holds all"
-        " of it; hold=N keeps the largest block N seconds -- needs MVSMF_ABEND_TEST=1)\","
+        " \"?fn=storage&sp=0&total=0|1 (free storage sample; total=1 briefly holds all of it)\","
         " \"?fn=intrdr&n=1..25      (internal-reader open/close cycles, no records; libc370#115 bisect)\","
         " \"?fn=job&jobname=NAME    (raw JCT completion + JCTJTFLG bits per job; mvsmf#305)\","
         " \"?fn=spool&jobname=NAME&jobid=JOBnnnnn&dsid=1&maxblk=4&len=1024"
@@ -1465,8 +1406,8 @@ int testHandler(Session *session) {
         " \"?fn=token               (session token length; value withheld)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
-        " \"?fn=abend               (force S0C1 -> ESTAE recovery test; needs MVSMF_ABEND_TEST=1)\","
-        " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery; needs MVSMF_ABEND_TEST=1)\""
+        " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","
+        " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery)\""
         " ] }\n");
   }
 

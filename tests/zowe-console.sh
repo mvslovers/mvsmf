@@ -155,9 +155,12 @@ fi
 # capture is over before $HASP395 arrives. This asserts the flag reaches the
 # terminal line, which is the whole point of the completion path.
 #
-# The curl suite carries the strict difference (captured vs collected) from a
-# single issue call; here the flag hides the two halves behind one command, so
-# testing the delta would mean stopping FTPD twice.
+# On its own this assertion does not discriminate: it would also pass on a stand
+# where the sync capture caught the whole block. The discriminator is the curl
+# suite's P FTPD block, which measures both halves from a single issue call and
+# fails if collect stays silent on a truncated run. Here the flag hides those
+# halves behind one command, so testing the delta would mean stopping FTPD
+# twice. Read the two blocks together.
 # =========================================================================
 if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
 	echo ""

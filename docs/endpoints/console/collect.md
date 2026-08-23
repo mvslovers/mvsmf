@@ -21,6 +21,26 @@ On successful completion, this request returns HTTP status code 200 (OK):
 
 Repeated polling drains the response: each call returns only what arrived since the previous call; once the command is done, collect returns `""`. An unknown key is **not** an error — it returns 200 with an empty `cmd-response`.
 
+### The completion path — and its one caveat
+
+This is how a truncated `cmd-response` is completed. The synchronous capture at
+issue time ends when the reply goes quiet, so a command that pauses mid-stream
+comes back short, with HTTP 200 and no indicator that anything is missing (see
+[Issue Command](issue-command.md#response)). The lines that arrive after that
+point are here and nowhere else. `P FTPD` is the worked example: one line from
+the issue call, four once collect is polled. Zowe CLI drives exactly this loop
+for `--wait-to-collect <seconds>`.
+
+**It re-correlates rather than resuming, and that part is not deterministic.**
+Every call finds the block again by searching the MTT for the *newest* entry
+matching the stored command text, so the same command text issued again between
+issue and collect — by another client, or by an operator at a console — moves
+the anchor to the newer echo, and the delta is then counted against a block the
+key was not handed out for. #214's serialization does not cover this: that lock
+is held by the issuing path only, and collect runs long afterwards and outside
+it. Closing it needs a stable position in the MTT and there is none across
+snapshots — tracked in #214.
+
 ## Error Responses
 Console error body (`return-code`/`reason-code`/`reason`). A bogus or evicted key yields HTTP 200 with an empty `cmd-response`, not an error.
 

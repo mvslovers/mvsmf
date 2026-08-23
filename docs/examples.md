@@ -409,7 +409,15 @@ curl -s -u $USER:$PASS -X PUT -H 'Content-Type: application/json' \
 ```bash
 zowe zos-console issue command "D T"
 zowe zos-console issue command "D T" --solicited-keyword "DATE"
+zowe zos-console issue command "P FTPD" --wait-to-collect 5   # keep collecting
 ```
+
+> **The plain call can come back short.** `cmd-response` is what arrived before
+> the reply went quiet, so a command that pauses mid-stream is truncated — HTTP
+> 200, no indicator. `P FTPD` comes back as `FTPD098I` alone that way, and with
+> all four lines under `--wait-to-collect <seconds>`, which polls collect for
+> the rest. It costs wall clock (12.3 s against 0.4 s, measured), which is why
+> it is opt-in. With curl, poll `cmd-response-url` yourself.
 
 ### Collect a command response (deltas)
 `GET /zosmf/restconsoles/consoles/{console-name}/solmsgs/{cmd-response-key}`
@@ -421,6 +429,9 @@ curl -s -u $USER:$PASS \
 ```bash
 zowe zos-console collect sync-responses E2E82A699B2B2001
 ```
+
+Each call returns only what arrived since the previous one, so poll until it
+comes back empty. That is the completion path for a truncated `cmd-response`.
 
 ### Detect a keyword in unsolicited messages
 `GET /zosmf/restconsoles/consoles/{console-name}/detections/{detection-key}`

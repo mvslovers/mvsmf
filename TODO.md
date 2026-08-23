@@ -9,8 +9,9 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
 *Last reconciled against the tracker: 2026-08-23, 21 issues open — twenty
-entries below, because one of them pairs two issues. The doc halves of #346 and
-#245 landed the same day; both issues stay open on their remaining half.*
+entries below, because one of them pairs two issues. #346 is complete on PR
+#349 (docs + regression test, measured) and closes with it; #245's doc half
+landed there too and it stays open on its implement-vs-reject decision.*
 
 ---
 
@@ -19,7 +20,7 @@ entries below, because one of them pairs two issues. The doc halves of #346 and
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
 | 1 | #214 | serialization landed; residuals open | a repro for the collect half |
-| 2 | #346 | docs landed; test half open | a stand with `RUN_FTPD_TESTS=1` |
+| 2 | #346 | **done** — docs + test, measured | nothing; closes on PR #349 |
 | 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
 | 5 | #210 | client-visible, fix identified, local | nothing |
@@ -160,11 +161,19 @@ first, so `collect.md` documents the completion path *and* names the
 re-anchoring caveat next to it. That is what makes the wording honest without
 waiting.
 
-**What is left is the regression test**, and it needs no timing constant:
-assert the **difference** on the opt-in `P FTPD`/`S FTPD` block — more lines
-with the flag than without. It asserts only detection status today. It is
-`RUN_FTPD_TESTS=1`, so it stops and starts FTPD on a live stand and cannot be
-written blind.
+**The regression test landed too, in a shape the entry above asked for and one
+it did not.** "More lines with the flag than without" is not assertable on its
+own: it goes green on a stand fast enough to catch the whole block in one
+window, so a passing run would say nothing. What the curl suite asserts instead
+is the union — issue + collect carry the terminal `$HASP395` — and the strict
+difference only on a run that actually truncated, where a silent collect fails.
+Both halves come from **one** `P FTPD` call, so the service stops once.
+
+Measured on mvsdev 2026-08-23 with `RUN_FTPD_TESTS=1`: the capture returned
+**1 line, collect the remaining 3**, so the difference branch fired rather than
+the skip. curl 71/71, Zowe 13/13, FTPD back up afterwards. The Zowe half
+asserts `--wait-to-collect` reaches `$HASP395`, which is the same property
+through the client that meets it.
 
 ### 3 · #267 — `unsigned rc` makes every send-error check dead code
 
@@ -495,13 +504,15 @@ Pointers only — the reasoning lives in the closing comments.
 
 ## Campaigns, not twenty tickets
 
-- **Console correctness** — #214, #346, #251, and #195 behind them. One
-  subsystem and one reading of `consapi.c`, but **four separate bugs**: #214 and
-  #195 were ranked together on the guess that #195 might not survive the first
-  measurement of #214, and that premise is dead — see #195's entry. #214 and
-  #346 are the two halves of "MVS gives no end-of-response signal, so both ends
-  of the block are guessed", and they fail in opposite directions from opposite
-  preconditions. #251 is independent of all three.
+- **Console correctness** — #214, #251 and #195, with #346 now closed out of
+  it. One subsystem and one reading of `consapi.c`, but **four separate bugs**.
+  #214 and #195 were ranked together on the guess that #195 might not survive
+  the first measurement of #214, and that premise is dead — see #195's entry.
+  #214 and #346 were the two halves of "MVS gives no end-of-response signal, so
+  both ends of the block are guessed", failing in opposite directions from
+  opposite preconditions; #346's half proved to be by design and closed as
+  documentation plus a test, which leaves #214 holding that pair alone. #251 is
+  independent of all three.
 - **The endpoint advertises what it does not do** — #245 and #336, with #248 as
   the worked example of how it ends. **#245's doc half is done**, which is the
   campaign's proof that the cheap half is worth taking alone: the mode is still

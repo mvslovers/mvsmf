@@ -1,6 +1,6 @@
 # Write Dataset
 
-Writes content to a sequential dataset. Supports text, binary, and record modes. Handles both chunked transfer encoding and Content-Length based transfers.
+Writes content to a sequential dataset in text or binary mode. Handles both chunked transfer encoding and Content-Length based transfers. `X-IBM-Data-Type: record` is accepted on read but **not implemented on write** — see below.
 
 ## HTTP Method
 PUT
@@ -21,7 +21,14 @@ or with explicit volume:
 - `X-IBM-Data-Type` (optional): Data transfer mode
     - `text` (default): ASCII-to-EBCDIC conversion, records split at newlines
     - `binary`: Raw bytes written without conversion, split at LRECL boundaries
-    - `record`: Each record preceded by 4-byte big-endian length prefix
+    - `record`: **accepted but not implemented on write — do not use.** The read
+      path emits a 4-byte big-endian length before every record; the write path
+      frames nothing. `record` is sent down the *text* loop, which cuts the body
+      at newlines, so the four bytes then taken as a length are one only by
+      accident: the request stores garbage or answers 500. **A body produced by
+      a `GET` with `X-IBM-Data-Type: record` cannot be written back** — use
+      `binary` for a byte-exact round trip. Whether this becomes a
+      length-prefixed reader or an outright 400 is issue #245.
 - `If-Match` (optional): An `ETag` from an earlier read; the write proceeds only
   if the dataset still matches it.
 - `X-IBM-Return-Etag` (optional): `true` returns the `ETag` of the dataset as it

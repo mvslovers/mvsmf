@@ -58,6 +58,8 @@ fail() {
 	FAILED=$((FAILED + 1)); TOTAL=$((TOTAL + 1)); echo "  FAIL: $1"
 	[ -n "${2:-}" ] && echo "        $2"
 }
+# SKIPPED is counted in the summary but had no way to be incremented
+skip() { SKIPPED=$((SKIPPED + 1)); TOTAL=$((TOTAL + 1)); echo "  SKIP: $1"; }
 
 # Run a zowe command with JSON output; sets OUTPUT and RC.
 run_zowe_json() {
@@ -139,6 +141,43 @@ if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
 	assert_json_field "$OUTPUT" '.success' "true" "collect: success"
 else
 	fail "issue returned no lastResponseKey"
+fi
+
+# =========================================================================
+# 5. --wait-to-collect completes a truncated response (issue #346)
+#
+# Opt-in: it STOPS then STARTS FTPD (the P/S pair leaves it running), so it
+# briefly disrupts the FTP service. Set RUN_FTPD_TESTS=1 to enable.
+#
+# Zowe does not collect unless asked -- Command.handler.js calls issue() and
+# only branches to issueAndCollect() when --wait-to-collect is given. P FTPD's
+# reply pauses ~2 s mid-stream, so the plain call returns FTPD098I and the sync
+# capture is over before $HASP395 arrives. This asserts the flag reaches the
+# terminal line, which is the whole point of the completion path.
+#
+# On its own this assertion does not discriminate: it would also pass on a stand
+# where the sync capture caught the whole block. The discriminator is the curl
+# suite's P FTPD block, which measures both halves from a single issue call and
+# fails if collect stays silent on a truncated run. Here the flag hides those
+# halves behind one command, so testing the delta would mean stopping FTPD
+# twice. Read the two blocks together.
+# =========================================================================
+if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
+	echo ""
+	echo "--- wait-to-collect: P/S FTPD (issue #346) ---"
+	run_zowe_json zos-console issue command "P FTPD" --wait-to-collect 5
+	assert_rc 0 "$RC" "issue P FTPD --wait-to-collect"
+	assert_contains "$OUTPUT" '.data.commandResponse' "FTPD098I" \
+		"P FTPD: shutdown line present"
+	assert_contains "$OUTPUT" '.data.commandResponse' "HASP395" \
+		"P FTPD: terminal line present (arrives after the sync capture)"
+
+	# Restart, so the suite leaves the service as it found it.
+	run_zowe_json zos-console issue command "S FTPD" --wait-to-collect 5
+	assert_rc 0 "$RC" "issue S FTPD --wait-to-collect (restores the service)"
+else
+	echo ""
+	skip "P/S FTPD wait-to-collect (set RUN_FTPD_TESTS=1 to enable)"
 fi
 
 # =========================================================================

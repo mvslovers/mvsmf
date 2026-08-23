@@ -44,11 +44,14 @@ PUT
 ## Response
 
 ### Synchronous (`async` omitted or `N`) — HTTP 200
-After issuing, the MTT is polled for ~3 s for the correlated response.
+After issuing, the MTT is polled until the response block stops growing: the
+capture ends ~0.3 s after the line count last changed (three 0.10 s polls with
+no new line), and in any case after ~3 s. A lone `D T` takes about 0.39 s —
+four polls, which is the earliest the loop can return.
 
 ```json
 {
-    "cmd-response": "response lines joined by \\r, or \"\" if none in time",
+    "cmd-response": "lines captured before the reply went quiet, joined by \\r (\"\" if none in time)",
     "cmd-response-key": "opaque key",
     "cmd-response-url": "http://host:port/zosmf/restconsoles/consoles/{name}/solmsgs/{key}",
     "cmd-response-uri": "/zosmf/restconsoles/consoles/{name}/solmsgs/{key}",
@@ -56,7 +59,32 @@ After issuing, the MTT is polled for ~3 s for the correlated response.
 }
 ```
 
-`sol-key-detected` is present only when `sol-key` was supplied. A `cmd-response` of `""` means nothing was captured within the window — use the [Collect Command Response](collect.md) endpoint to retrieve the rest.
+`sol-key-detected` is present only when `sol-key` was supplied.
+
+**`cmd-response` holds what had arrived before the reply went quiet, and nothing
+in the response says whether that was all of it.** A command whose reply pauses
+mid-stream is cut at the pause. `P FTPD` returns `FTPD098I` alone; the
+`FTPD099I`, `IEF404I` and `$HASP395` lines that follow about 2 s later are not
+in it. HTTP 200, and nothing in the response marks it short. An empty
+`cmd-response` is the extreme case of the same thing, not a separate one.
+
+`cmd-response-key` / `-url` / `-uri` are the completion path: poll
+[Collect Command Response](collect.md) for whatever arrived after the capture
+converged. Real z/OSMF carries no "incomplete" flag either — the response key
+is the affordance both offer instead.
+
+Clients have to ask. Zowe CLI collects only when told to: `zowe zos-console
+issue command` prints exactly what the sync capture returned unless
+`--wait-to-collect <seconds>` is given, and with it `P FTPD` returns all four
+lines. Completeness costs wall clock — 12.3 s against 0.4 s for the plain call,
+measured — which is why it is opt-in on both sides.
+
+**The window is deliberate and does not change** (issue #346). About 0.3 s of a
+lone `D T`'s 0.39 s *is* the stability poll, so a 1 s quiet window would roughly
+triple every console call — and it still would not have caught `P FTPD`, whose
+reply pauses 2 s mid-stream. Nor is it free elsewhere: the #214 lock spans MGCR
+through convergence, so every millisecond added here comes off the ~2.2
+commands/s ceiling.
 
 `cmd-response-url` (and `detection-url`, where present) take their host from the request's
 `Host` header and their scheme from `X-Forwarded-Proto` — `https` when a reverse proxy

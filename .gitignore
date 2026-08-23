@@ -96,6 +96,10 @@ dkms.conf
 include/buildid.h
 
 # soak / churn / loadtest artefacts (tests/*-176.sh write these to the cwd)
+# Catch-all first: the named patterns below were too specific and six run logs
+# from the #176/#217 soaks slipped past them into 14302da.  No .log file in this
+# repo is meant to be tracked.
+*.log
 churn-176-*.log
 soak-176-*.log
 loadtest-176-*.log

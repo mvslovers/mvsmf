@@ -17,8 +17,8 @@ entries below, because one of them pairs two issues.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #214 | wrong data reaches a client — reproduced | #346, which sets the lock window |
-| 2 | #346 | silently incomplete, single client, observed | a decision on the contract |
+| 1 | #214 | wrong data reaches a client — reproduced | nothing — #346 settled the window |
+| 2 | #346 | decided: docs, not a timer | #214 part 3, for the collect half |
 | 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
 | 5 | #210 | client-visible, fix identified, local | nothing |
@@ -59,9 +59,10 @@ contaminated response is also the slowest.
 **Decided 2026-08-23: serialize, in three parts** — the lock window (MGCR
 through convergence, writers only, `trylock()` from `cliblock.h` with a 429
 fallback), the echo-stop, and the anchor-by-issue-time. None is sufficient
-alone; the full shape and the residuals are in the issue. Sequenced behind #346,
-which sets how long the lock must be held. What follows is the measurement that
-produced it.
+alone; the full shape and the residuals are in the issue. **Unblocked** — #346 was
+sequenced ahead of it to set the lock window, and that decision is now taken:
+the window does not change. What follows is the measurement that produced the
+serialization decision.
 
 **Two of the issue's three directions are refuted by that data, including its
 preferred one.** MVS interleaves the MTT *line by line*, not block by block: a
@@ -105,20 +106,31 @@ clients and delivers *foreign* lines; this needs one client and drops *own*
 lines. Do not fold them together — #214 is held on a serialization decision that
 has no bearing here.
 
-**The hazard is that lengthening the quiet window looks like the fix and is
-not.** Two limits stack: `POLL_SECONDS` is 3 and `tod_hi()`'s LSB is ~1.05 s, so
-the hard cap is 2.1–3.1 s and `P FTPD`'s last line arrives at 3 s. Anything
-slower is truncated however patient the convergence rule gets. The real choice
-is in the issue, and one of the four options is that this is **by design** —
-collect already returns the later lines, and real z/OSMF treats `cmd-response`
-as "what was available". If that is the answer, the defect is that the sync
-reply gives the client no way to know it is incomplete, and the work is a
-contract plus a marker, not a longer timer.
+**Decided 2026-08-23 on measurement: it is by design, and the work is
+documentation.** `P FTPD --wait-to-collect 5` returns all four lines where the
+plain call returns one, so `collect` does recover what the sync capture leaves
+behind — the completion path works today and the contract matches the reference.
+Zowe simply does not collect unless asked (`Command.handler.js` branches on
+`wait-to-collect`).
 
-Regression test wants a command with a known multi-second gap and an assertion
-on the **last** expected line. `tests/curl-console.sh` uses `D T`, `D A,L` and
-`F HTTPD,D P` — all sub-second — and its opt-in `P FTPD`/`S FTPD` block asserts
-only the detection status, never the completeness of `cmd-response`.
+**The timer does not change**, and the reason is the hazard worth keeping:
+lengthening the quiet window looks like the fix and is the wrong trade twice.
+~0.3 s of a lone `D T`'s 0.39 s *is* the stability poll, so a 1 s window roughly
+triples every console call — and it still would not fix this report, because
+`P FTPD` pauses 2 s mid-reply. It also feeds straight into #214, whose lock
+spans convergence.
+
+So: no timer, no marker field, no protocol change. `issue-command.md` must say
+that `cmd-response` is what arrived before the reply went quiet and that
+`cmd-response-key` is the way to the rest; `docs/examples.md` needs
+`--wait-to-collect`, which is the answer to the reported symptom and is
+currently nowhere. **The collect half depends on #214 part 3** — documenting
+collect as the completion path is only honest once it stops re-anchoring on the
+newest `strstr` match.
+
+The regression test now needs no timing constant: assert the **difference** on
+the opt-in `P FTPD`/`S FTPD` block — more lines with the flag than without. It
+asserts only detection status today.
 
 ### 3 · #267 — `unsigned rc` makes every send-error check dead code
 

@@ -9,7 +9,8 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
 *Last reconciled against the tracker: 2026-08-23, 21 issues open — twenty
-entries below, because one of them pairs two issues.*
+entries below, because one of them pairs two issues. The doc halves of #346 and
+#245 landed the same day; both issues stay open on their remaining half.*
 
 ---
 
@@ -18,13 +19,13 @@ entries below, because one of them pairs two issues.*
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
 | 1 | #214 | serialization landed; residuals open | a repro for the collect half |
-| 2 | #346 | decided: docs, not a timer | #214 part 3, for the collect half |
+| 2 | #346 | docs landed; test half open | a stand with `RUN_FTPD_TESTS=1` |
 | 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
 | 5 | #210 | client-visible, fix identified, local | nothing |
 | 6 | #251 | Optimistic Path stop pattern | nothing |
 | 7 | #209 | client-visible, cheap on 3.8j | nothing |
-| 8 | #245 | the docs are wrong *today* | doc fix now, decision after |
+| 8 | #245 | docs corrected; decision open | reader-vs-400 decision |
 | 9 | #326 | its trigger has fired | nothing |
 | 10 | #76 | the one externally reported defect | nothing |
 | 11 | #244 | the ordering constraint is the content | nothing |
@@ -145,17 +146,25 @@ triples every console call — and it still would not fix this report, because
 `P FTPD` pauses 2 s mid-reply. It also feeds straight into #214, whose lock
 spans convergence.
 
-So: no timer, no marker field, no protocol change. `issue-command.md` must say
-that `cmd-response` is what arrived before the reply went quiet and that
-`cmd-response-key` is the way to the rest; `docs/examples.md` needs
-`--wait-to-collect`, which is the answer to the reported symptom and is
-currently nowhere. **The collect half depends on #214 part 3** — documenting
-collect as the completion path is only honest once it stops re-anchoring on the
-newest `strstr` match.
+So: no timer, no marker field, no protocol change. **The documentation half
+landed** — `issue-command.md` now states the convergence rule rather than its
+bound and says a reply with a mid-stream pause is cut at the pause,
+`collect.md` gained the completion-path section, and `docs/examples.md` gained
+`--wait-to-collect`.
 
-The regression test now needs no timing constant: assert the **difference** on
-the opt-in `P FTPD`/`S FTPD` block — more lines with the flag than without. It
-asserts only detection status today.
+**The "#214 part 3" dependency is discharged as a wording constraint, not as a
+fix.** It is dead as written — part 3 never landed and cannot, because it needs
+an MTT position that does not exist. But "collect is the completion path" and
+"collect is deterministic" are different claims and #346 only ever needed the
+first, so `collect.md` documents the completion path *and* names the
+re-anchoring caveat next to it. That is what makes the wording honest without
+waiting.
+
+**What is left is the regression test**, and it needs no timing constant:
+assert the **difference** on the opt-in `P FTPD`/`S FTPD` block — more lines
+with the flag than without. It asserts only detection status today. It is
+`RUN_FTPD_TESTS=1`, so it stops and starts FTPD on a live stand and cannot be
+written blind.
 
 ### 3 · #267 — `unsigned rc` makes every send-error check dead code
 
@@ -209,10 +218,14 @@ the code.
 The read path length-prefixes each record; the write path sends `record` down the
 *text* loop, so the four bytes read back as a length are a length only by accident.
 
-**Correct `put.md` and `members-put.md` immediately, ahead of any other decision.**
-Both advertise the mode without qualification today; that is what misleads right
-now and it costs nothing to stop. Then choose: a length-prefixed reader (mind a
-prefix split across a chunk boundary, and `record_content_max()`), or a 400.
+**The docs are corrected — that half is done.** It was three places, not the
+two the issue names: the opening sentence of `put.md` and `members-put.md`,
+their `X-IBM-Data-Type` bullets, and the common-header table in
+`docs/endpoints/README.md`. Grep before trusting an issue's list of sites.
+
+What is left is the choice: a length-prefixed reader (mind a prefix split
+across a chunk boundary, and `record_content_max()`), or a 400. Nothing
+misleads a client in the meantime.
 
 ### 9 · #326 — five sources missing from the CLAUDE.md list
 
@@ -490,9 +503,10 @@ Pointers only — the reasoning lives in the closing comments.
   of the block are guessed", and they fail in opposite directions from opposite
   preconditions. #251 is independent of all three.
 - **The endpoint advertises what it does not do** — #245 and #336, with #248 as
-  the worked example of how it ends. The doc half of #245 and the reject half of
-  #336 are both nearly free and both stop the lying today, ahead of whichever
-  implementation decision follows.
+  the worked example of how it ends. **#245's doc half is done**, which is the
+  campaign's proof that the cheap half is worth taking alone: the mode is still
+  unimplemented and nothing lies about it any more. #336's reject half is the
+  same move and is still open.
 - **Checked, then swallowed** — #267, #251, #215. The same `CLAUDE.md` stop pattern
   in three subsystems: the return code is inspected and the failure goes nowhere.
   One convention, not three decisions.

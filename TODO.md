@@ -17,20 +17,20 @@ entries below, because one of them pairs two issues.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #347 | an authenticated user can stop the system | a console-authority measurement |
-| 2 | #214 | wrong data reaches a client — reproduced | #346, which sets the lock window |
-| 3 | #346 | silently incomplete, single client, observed | a decision on the contract |
-| 4 | #267 | latent; one word, activates ten paths | a read of `quit:` |
-| 5 | #336 | accepts the syntax, discards the operand | wire it or reject it |
-| 6 | #210 | client-visible, fix identified, local | nothing |
-| 7 | #251 | Optimistic Path stop pattern | nothing |
-| 8 | #209 | client-visible, cheap on 3.8j | nothing |
-| 9 | #245 | the docs are wrong *today* | doc fix now, decision after |
-| 10 | #326 | its trigger has fired | nothing |
-| 11 | #76 | the one externally reported defect | nothing |
-| 12 | #244 | the ordering constraint is the content | nothing |
-| 13 | #215 | latent, one place, every caller benefits | nothing |
-| 14 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 1 | #214 | wrong data reaches a client — reproduced | #346, which sets the lock window |
+| 2 | #346 | silently incomplete, single client, observed | a decision on the contract |
+| 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
+| 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
+| 5 | #210 | client-visible, fix identified, local | nothing |
+| 6 | #251 | Optimistic Path stop pattern | nothing |
+| 7 | #209 | client-visible, cheap on 3.8j | nothing |
+| 8 | #245 | the docs are wrong *today* | doc fix now, decision after |
+| 9 | #326 | its trigger has fired | nothing |
+| 10 | #76 | the one externally reported defect | nothing |
+| 11 | #244 | the ordering constraint is the content | nothing |
+| 12 | #215 | latent, one place, every caller benefits | nothing |
+| 13 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 14 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
 | 15 | #234 | `type:research` | measuring the reference |
 | 16 | #329 | `type:research` | **one measurement** — see *RAKF* |
 | 17 | #345 | `type:research` | **a policy** — see *RAKF* |
@@ -42,36 +42,7 @@ entries below, because one of them pairs two issues.*
 
 ## Tier 1 — now
 
-### 1 · #347 — restconsoles authorizes nothing at all
-
-*an authenticated user can stop the system*
-
-`grep -c 'http_check_auth\|require_access\|racf' src/consapi.c` → **0**, against
-25 in `dsapi.c`. `issue_command()` leaves the SVC 34 buffer's bytes +2/+3 zero,
-so every command goes out from **console 0 — the master console** — with the text
-passed through unfiltered: `$P JES2`, `V xxx,OFFLINE`, `P`/`S` of any started
-task. `GET /restconsoles/v1/log` separately returns the whole Master Trace Table
-to anyone. Neither latent nor intermittent: it is what the shipped endpoint does
-today.
-
-Ranked 1 because this file orders by impact on running systems. #214 hands a
-client a wrong answer; this hands it the machine.
-
-**The hazard is treating it as #345's twin and stopping.** It is the same vacuum
-— real z/OSMF delegates to `OPERCMDS`/`CONSOLE`, RAKF has neither, so the policy
-has to be invented — but unlike #345 **there is a native MVS mechanism here that
-needs no security product**: command authority is a property of the *issuing
-console*, and mvsMF picks the most privileged one by leaving the buffer zeroed.
-A lower-authority console id makes MVS itself refuse anything above its level,
-from the layer that owns the decision, with no per-command allow-list to
-maintain here.
-
-So the unblocked first step is a **measurement, not a policy**: confirm which
-byte of the command input buffer carries the console id on 3.8j, and what
-authority levels the sysgen'd UCM entries hold on MVS/CE and TK5. Decide the
-refusal shape with #345 and `ftpd#90` only after that comes back.
-
-### 2 · #214 — concurrent issue-command requests pick up each other's lines
+### 1 · #214 — concurrent issue-command requests pick up each other's lines
 
 *the worst live symptom: one client is served another client's data*
 
@@ -118,7 +89,7 @@ says "reserved: re-issue disamb."). And #174's `d <= 1` adoption window does not
 merely append a stray line under concurrency — it **redirects the whole block**
 to another address space, which is strictly worse than the reported symptom.
 
-### 3 · #346 — the sync capture converges on 0.3 s of quiet and truncates
+### 2 · #346 — the sync capture converges on 0.3 s of quiet and truncates
 
 *observed by the maintainer, single client, HTTP 200 with four of five lines
 missing and nothing saying so*
@@ -149,7 +120,7 @@ on the **last** expected line. `tests/curl-console.sh` uses `D T`, `D A,L` and
 `F HTTPD,D P` — all sub-second — and its opt-in `P FTPD`/`S FTPD` block asserts
 only the detection status, never the completeness of `cmd-response`.
 
-### 4 · #267 — `unsigned rc` makes every send-error check dead code
+### 3 · #267 — `unsigned rc` makes every send-error check dead code
 
 `dsapi.c:1251` and `:2294`. A client that disconnects mid-listing has the whole
 remaining directory written after it.
@@ -160,7 +131,7 @@ in that light before flipping it. `member_scan()` (#265) is the only place in th
 member listing that detects a write failure today, and is the worked example.
 Grep the other handlers in the same pass — the declaration is copied around.
 
-### 5 · #336 — `{volume-serial}` is captured and never used
+### 4 · #336 — `{volume-serial}` is captured and never used
 
 Seven routes accept `-(VOLSER)` and discard the operand; a request naming the
 wrong volume is answered as if it had named the right one. Ranked here because
@@ -174,7 +145,7 @@ worth taking even as an interim.
 
 ## Tier 2 — cheap and client-visible
 
-### 6 · #210 — the submit response returns `owner:""`
+### 5 · #210 — the submit response returns `owner:""`
 
 A race, not a divergent path — and therefore **not fixable by asking libc370
 earlier**: `JCTUSEID` is unwritten and the internal text is not on the spool yet.
@@ -182,21 +153,21 @@ mvsMF already knows the answer, because `process_jobcard()` injected `USER=`.
 Fall back to that. Check the purge handler (`jobsapi.c:363,375`) for the same
 emptiness, and make `tests/curl-jobs.sh` assert the value, not the key.
 
-### 7 · #251 — console log answers 200 with an empty body on allocation failure
+### 6 · #251 — console log answers 200 with an empty body on allocation failure
 
 `consapi.c:1100` collapses a NULL `cmtt_new()` into `n = 0`. The MTT copy is the
 largest allocation on that path — the one most likely to fail exactly when a
 silent empty answer misleads most. The sibling `malloc()` three lines below
 already returns 500. Textbook **Optimistic Path**; check `:266` and `:457` too.
 
-### 8 · #209 — `exec-system` and `exec-member` are never emitted
+### 7 · #209 — `exec-system` and `exec-member` are never emitted
 
 3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
 libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
 (`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
 the code.
 
-### 9 · #245 — `X-IBM-Data-Type: record` cannot be written back
+### 8 · #245 — `X-IBM-Data-Type: record` cannot be written back
 
 The read path length-prefixes each record; the write path sends `record` down the
 *text* loop, so the four bytes read back as a length are a length only by accident.
@@ -206,7 +177,7 @@ Both advertise the mode without qualification today; that is what misleads right
 now and it costs nothing to stop. Then choose: a length-prefixed reader (mind a
 prefix split across a chunk boundary, and `record_content_max()`), or a 400.
 
-### 10 · #326 — five sources missing from the CLAUDE.md list
+### 9 · #326 — five sources missing from the CLAUDE.md list
 
 `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
 "next time `CLAUDE.md` is touched", so fold it into the next edit of that file
@@ -217,7 +188,7 @@ which is how the list drifted in the first place.
 
 ## Tier 3 — correctness, needs care
 
-### 11 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
+### 10 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
 
 *the only defect on this list someone outside the project reported*
 
@@ -231,7 +202,7 @@ is observed, reported from outside, and blocking a real workflow; #244 is curren
 harmless and #215 has never been seen at all. What holds it out of Tier 1 is that
 `ufsd-utils upload` does the job today — a workaround, not an absence of impact.
 
-### 12 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
+### 11 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
 
 **The ordering constraint is the whole content of this ticket.** The broken mask
 is the only thing keeping `write_record()`'s manual RDW dormant, and that RDW is
@@ -242,7 +213,7 @@ alone ships **two** RDWs. Remove the manual RDW first, then fix the mask. Drop
 The regression test wants a **VB** data set written binary and read back with
 lengths checked — `curl-binary.sh` uses FB, which is why this survived.
 
-### 13 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 12 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -252,7 +223,7 @@ Honest scope, per the issue: **no observed failure**. #212 fixed this locally in
 The subtlety from #212, easy to lose: `http_printf()` translates on the way out,
 so the printability test applies to the **translated** byte, via `xlate_cp037`.
 
-### 14 · #257 + #335 — early 4xx on a PUT with a body still in flight
+### 13 · #257 + #335 — early 4xx on a PUT with a body still in flight
 
 **One class, two tickets — rank and fix them together.** Every early return in the
 PUT handlers answers before draining the announced body (`dsapi.c:1156, 1180,
@@ -268,6 +239,43 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 ---
 
 ## Tier 4 — decisions before code
+
+### 14 · #347 — restconsoles authorizes nothing at all
+
+*an authenticated user can stop the system*
+
+`grep -c 'http_check_auth\|require_access\|racf' src/consapi.c` → **0**, against
+25 in `dsapi.c`. `issue_command()` leaves the SVC 34 buffer's bytes +2/+3 zero,
+so every command goes out from **console 0 — the master console** — with the text
+passed through unfiltered: `$P JES2`, `V xxx,OFFLINE`, `P`/`S` of any started
+task. `GET /restconsoles/v1/log` separately returns the whole Master Trace Table
+to anyone. Neither latent nor intermittent: it is what the shipped endpoint does
+today.
+
+Ranked 1 because this file orders by impact on running systems. #214 hands a
+client a wrong answer; this hands it the machine.
+
+**It is #345's twin, and the hope that it was not has been measured and is
+gone.** The first version of this entry claimed a native MVS mechanism needing no
+security product — issue from a console with a lower authority level and let MVS
+refuse. Read from primary source on 2026-08-23, that does not exist:
+`SYS1.AMODGEN(IEECDCM)` maps the SVC 34 buffer as length / **MCS flags** / text
+with **no console field**, and `MGCR` passes none. The authority machinery is
+real — `IEECUCM`'s `UCMAUTH` groups commands into SYS / I/O / CONS per console,
+set at sysgen — but it hangs off the UCM entry of the console a command was
+*entered at*. MGCR from a program has none, which is what `CONS(0)` means: no
+console, not master console selected.
+
+So there is nothing to select and nothing to weaken, and the policy has to be
+invented here exactly as in #345. Ranked at the top of Tier 4 rather than in
+Tier 1 for that reason: it outranks everything below it on impact, but nothing
+can be done *now* without a maintainer decision, and an entry in "Tier 1 — now"
+that no one can act on is what this file's preamble warns against.
+
+Directions are in the issue, none verified. The one worth knowing before
+reaching for the obvious: a display-only allow-list **breaks a real workflow** —
+`P FTPD` / `S FTPD` are group-1 (SYS) commands and are in use today (#346's
+transcript). Decide with #345 and `ftpd#90`.
 
 ### 15 · #234 — what should the API do with non-ASCII input?
 
@@ -452,9 +460,10 @@ Pointers only — the reasoning lives in the closing comments.
   in three subsystems: the return code is inspected and the failure goes nowhere.
   One convention, not three decisions.
 - **The authorization endgame** — #347, #329, #345, with `httpd#176` behind
-  them. Three measurements and one policy; no code for any of them before the
-  measurements are recorded. #347 is the one with a native MVS mechanism to
-  delegate to, so it is the least blocked of the three despite ranking highest.
+  them. #347 looked like the least blocked until its measurement came back
+  empty: there is no console authority to delegate to, so all three now wait on
+  policy that has to be invented here. #347 is the one to settle first — it
+  outranks the other two on impact by a wide margin.
 
 ## Cross-repo
 

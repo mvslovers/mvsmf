@@ -9,6 +9,7 @@
 #include <clibary.h>
 #include <clibsmf.h>
 #include <mvssupa.h>
+#include <cliblock.h>   /* trylock / unlock, LOCK_EXC -- #214 */
 
 #include "consapi.h"
 #include "common.h"
@@ -30,6 +31,15 @@
 #define POLL_SECONDS   3          /* sync capture window (~ TOD high-word ticks)*/
 
 #define CONS_POLL_INTERRUPTED (-1)     /* capture_response(): quiesced mid-poll  */
+
+/* Console correlation lock (#214). One mvsMF response block may be open in the
+ * MTT at a time; the bracket runs from just before SVC 34 to the end of
+ * convergence. LOCK_TRIES * 0.10 s is the acquire budget -- one holder costs at
+ * most the poll window (2.1-3.1 s), so 5 s absorbs a holder plus a little
+ * queueing and then answers 429 rather than parking a worker indefinitely. */
+#define CONS_LOCK_TRIES  50
+#define CONS_LOCK_BUSY      (-1)   /* budget exhausted -> 429                   */
+#define CONS_LOCK_QUIESCED  (-2)   /* server going down -> 503, NOT issued      */
 
 /* Column layout of a formatted MTT line (see /zosmf/test?fn=mtt output):
  *   "0000  9.24.38 STC  320  IEE136I ..."
@@ -104,6 +114,87 @@ __asm__("\n&FUNC	SETC 'CPOLLNAP'");
 static void cons_poll_nap(void)
 {
 	__asm__("STIMER WAIT,BINTVL==F'10'   0.10 seconds" : : : "0", "1");
+}
+
+/* Seconds since local midnight, in the SAME frame as mtt_secs_of_day().
+ *
+ * Deliberately not via mktime(): on 3.8j mktime() does not re-apply the TZ
+ * offset (see consoleLogHandler), and the MTT's "hh.mm.ss" is local wall clock.
+ * Reading the broken-down local time directly keeps both sides in one frame --
+ * if they ever drift by a second, correlate_once() rejects our own echo and
+ * every capture comes back empty, which reads like "no response" rather than
+ * like a bug. */
+__asm__("\n&FUNC	SETC 'CSECSNOW'");
+static int cons_secs_now(void)
+{
+	time_t     now = time((time_t *)0);
+	struct tm  lt;
+
+	localtime_r(&now, &lt);
+	return lt.tm_hour * 3600 + lt.tm_min * 60 + lt.tm_sec;
+}
+
+/* The address every worker ENQs on for the console correlation lock: a field of
+ * the per-CGI context, which httpd keeps for the life of the address space.
+ * NULL when httpd predates the cgictx service -- see console_lock_acquire(). */
+__asm__("\n&FUNC	SETC 'CLKANCHR'");
+static void *console_lock_anchor(Session *session)
+{
+	MVSMF_CTX *ctx;
+
+	if (!session || !session->httpd) return (void *)0;
+
+	ctx = mvsmf_ctx_get(session->httpd);
+	if (!ctx) return (void *)0;
+
+	return (void *)&ctx->rsvd[0];
+}
+
+/* Take the console correlation lock. Returns 0 when the caller may issue a
+ * command, -1 when the acquire budget is exhausted (caller answers 429).
+ *
+ * The lock is recorded in the Session because the router's ESTAE RECOVERS the
+ * worker instead of ending its task -- so an ENQ held across an abend is not
+ * released by task termination, and session_cleanup() has to DEQ it.
+ *
+ * With no context (an httpd without cgictx) there is nothing to ENQ on and the
+ * request proceeds UNSERIALIZED. That is the same graceful degradation the
+ * cursor store makes, and it means the serialization is not unconditional --
+ * on such a server #214 is still live. */
+__asm__("\n&FUNC	SETC 'CLKACQ'");
+int console_lock_acquire(Session *session)
+{
+	void *anchor = console_lock_anchor(session);
+	int   i;
+
+	if (!anchor) return 0;
+
+	for (i = 0; i < CONS_LOCK_TRIES; i++) {
+		if (trylock(anchor, LOCK_EXC) == 0) {
+			session->console_lock = anchor;
+			return 0;
+		}
+		/* Do not park a worker through a shutdown: libc370's worker-drain gives
+		 * each task ~5 s before a force-DETACH, which is the whole budget. */
+		if (server_quiescing(session)) return CONS_LOCK_QUIESCED;
+		cons_poll_nap();
+	}
+
+	return CONS_LOCK_BUSY;
+}
+
+/* Release it if held. Safe to call unconditionally, including on paths that
+ * never took it. */
+__asm__("\n&FUNC	SETC 'CLKREL'");
+void console_lock_release(Session *session)
+{
+	void *anchor;
+
+	if (!session || !session->console_lock) return;
+
+	anchor = session->console_lock;
+	session->console_lock = (void *)0;
+	unlock(anchor, LOCK_EXC);
 }
 
 /* Minimal JSON string-field extractor (body is already EBCDIC).
@@ -227,11 +318,19 @@ quit:
  * it).  The cursor is a delivered-LINE COUNT, not a timestamp: the MTT has no
  * stable per-line sequence and its hh.mm.ss is second-granular. */
 typedef struct sol_cursor {
-	unsigned long long  issue_tod;   /* STCK at issue (reserved: re-issue disamb.) */
+	unsigned long long  issue_tod;   /* STCK at issue (opaque response key)        */
 	unsigned            delivered;   /* # response lines already delivered         */
+	int                 issue_secs;  /* local wall-clock seconds-of-day at issue   */
 	unsigned char       cmdlen;
 	char                cmd[126];    /* uppercased command, for MTT re-correlation  */
 } SOL_CURSOR;
+
+/* issue_secs is what pins a cursor to ITS block rather than to the newest entry
+ * carrying the same text (#214). It grew the struct, so cursors written by an
+ * earlier build are shorter than sizeof(SOL_CURSOR) -- MVSMF_CTX outlives a
+ * module replace, so they really are still in the store after an activation.
+ * consoleCollectHandler's existing `curlen < sizeof(cur)` check rejects them,
+ * which degrades exactly like an evicted key: one empty collect, then gone. */
 
 static unsigned long long tod64(void)
 {
@@ -260,8 +359,8 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 static int mtt_secs_of_day(const char *dat, int len);
 
 __asm__("\n&FUNC	SETC 'correlate_once'");
-static int correlate_once(Session *session, const char *cmd_upper, char *out,
-                          size_t outsz, unsigned skip, unsigned *total)
+static int correlate_once(Session *session, const char *cmd_upper, int issue_secs,
+                          char *out, size_t outsz, unsigned skip, unsigned *total)
 {
 	CMTT *cmtt = cmtt_new();
 	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
@@ -278,16 +377,40 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 
 	out[0] = '\0';
 
-	/* find OUR echo: newest entry whose text contains the command */
-	for (i = n; i > 0; i--) {
-		MTENTRY *e = arr[i - 1];
+	/* Find OUR echo: the OLDEST entry containing the command that is not older
+	 * than the issue second.
+	 *
+	 * Taking the newest match instead was two bugs. On the issue path the first
+	 * poll runs before the echo is guaranteed to be in the table, so a previous
+	 * identical command still in the window got anchored on, converged on its
+	 * stale block and returned the PREVIOUS response. On the collect path,
+	 * which re-correlates minutes later, the newest match can be a different
+	 * client's identical command -- returning their block wholesale.
+	 *
+	 * "Not older" is the wrapped difference against a half-day window. That is
+	 * far looser than the issue path needs, and it is the OLDEST-match
+	 * selection, not the window, that does the work: of the several echoes that
+	 * may satisfy it, the first one at or after our issue second is ours. The
+	 * window only has to exclude yesterday, and the MTT's own retention -- tens
+	 * of minutes -- excludes it long before the arithmetic would. */
+	for (i = 0; i < n; i++) {
+		MTENTRY *e = arr[i];
 		char tmp[160];
 		int len = mtt_len(e);
+		int s;
 		if (!e) continue;
 		if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
 		memcpy(tmp, e->mtentdat, len);
 		tmp[len] = '\0';
-		if (strstr(tmp, cmd_upper)) { ei = (int)(i - 1); break; }
+		if (!strstr(tmp, cmd_upper)) continue;
+
+		if (issue_secs >= 0) {
+			s = mtt_secs_of_day(e->mtentdat, mtt_len(e));
+			if (s < 0) continue;                  /* no usable time: not ours  */
+			if (((s - issue_secs) + 86400) % 86400 >= 43200) continue;
+		}
+		ei = (int)i;
+		break;
 	}
 
 	if (ei >= 0) {
@@ -409,8 +532,8 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 /* Issue-time sync capture: poll up to ~3 s and return the whole response block
  * in out; the return value is the number of lines it contains. */
 __asm__("\n&FUNC	SETC 'capture_response'");
-static int capture_response(Session *session, const char *cmd_upper, char *out,
-                            size_t outsz)
+static int capture_response(Session *session, const char *cmd_upper, int issue_secs,
+                            char *out, size_t outsz)
 {
 	unsigned start = tod_hi();
 	int stable = 0;
@@ -419,7 +542,7 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 
 	for (;;) {
 		if (server_quiescing(session)) return CONS_POLL_INTERRUPTED;
-		correlate_once(session, cmd_upper, out, outsz, 0, &total);
+		correlate_once(session, cmd_upper, issue_secs, out, outsz, 0, &total);
 		if (total > 0) {
 			if (total == prev_total) {
 				if (++stable >= 3) break;
@@ -520,6 +643,7 @@ int consoleIssueHandler(Session *session)
 	const char *host = getHeaderParam(session, "Host");
 	const char *scheme = getRequestScheme(session);
 	int cmdlen, cnlen, i, is_async, sol_detected = 0;
+	int issue_secs = -1;
 	unsigned delivered = 0;
 	unsigned long long issue_tod;
 
@@ -620,7 +744,44 @@ int consoleIssueHandler(Session *session)
 		cmd_upper[i] = (char)toupper((unsigned char)cmd[i]);
 	cmd_upper[cmdlen] = '\0';
 
+	/* Serialize from here to the end of convergence (#214).
+	 *
+	 * The MTT is one stream with no per-request identity, and every worker
+	 * writes into it under the address space's single source, so two blocks
+	 * open at once interleave line by line and cannot be told apart afterwards.
+	 * Holding one command at a time is what makes a block a block.
+	 *
+	 * ASYNC TAKES IT TOO, and pays the same wait even though it returns no
+	 * cmd-response. Its echo and reply lines land in the table exactly like a
+	 * sync command's, so leaving it out would let any client re-open the defect
+	 * by setting one JSON field. Documented in
+	 * docs/endpoints/console/issue-command.md. */
+	{
+		int lk = console_lock_acquire(session);
+
+		if (lk == CONS_LOCK_QUIESCED) {
+			/* Distinct from the 8/15 pair below: there the command WAS issued
+			 * and only the poll was abandoned, so a retry re-issues it. Here
+			 * nothing was issued and a retry is safe -- say so, because the
+			 * difference decides whether an operator may retry a S / V / $P. */
+			send_console_error(session, HTTP_STATUS_SERVICE_UNAVAILABLE, 8, 17,
+			    "Server is quiescing; the command was NOT issued. Retry later.");
+			rc = -1;
+			goto quit;
+		}
+		if (lk != 0) {
+			/* Client-caused and self-correcting: no WTO. The console API reads
+			 * the MTT back out, so a message here would feed its own endpoint
+			 * and a client retrying in a loop would flood it. */
+			send_console_error(session, HTTP_STATUS_TOO_MANY_REQUESTS, 8, 16,
+			    "Another console command is in progress. Retry the request.");
+			rc = -1;
+			goto quit;
+		}
+	}
+
 	/* issue under the authenticated user's ACEE (set by the identity middleware) */
+	issue_secs = cons_secs_now();
 	issue_command(cmd_upper, (unsigned)cmdlen);
 
 	/* unsol-key: uppercase it and snapshot the baseline match count *before*
@@ -652,8 +813,15 @@ int consoleIssueHandler(Session *session)
 	}
 	resp[0] = '\0';
 
-	if (!is_async) {
-		int captured = capture_response(session, cmd_upper, resp, RESP_CAP);
+	{
+		int captured = capture_response(session, cmd_upper, issue_secs, resp,
+		                                RESP_CAP);
+
+		/* The block is closed as far as we can tell -- let the next command in
+		 * before the (possibly long) unsolicited-detection wait below, which
+		 * has nothing to do with our block. */
+		console_lock_release(session);
+
 		if (captured == CONS_POLL_INTERRUPTED) {
 			/* The command has already been ISSUED (issue_command/MGCR above);
 			 * only the response capture was abandoned. This is NOT a pre-issue
@@ -666,8 +834,14 @@ int consoleIssueHandler(Session *session)
 			rc = -1;
 			goto quit;
 		}
-		delivered = (unsigned)captured;
-		if (solkey[0] && strstr(resp, solkey)) sol_detected = 1;
+		if (is_async) {
+			/* The wait happened, but async promises no cmd-response and its
+			 * cursor must start at zero so collect returns the whole block. */
+			resp[0] = '\0';
+		} else {
+			delivered = (unsigned)captured;
+			if (solkey[0] && strstr(resp, solkey)) sol_detected = 1;
+		}
 	}
 
 	/* persist the cursor so collect can return only the new lines later */
@@ -676,8 +850,9 @@ int consoleIssueHandler(Session *session)
 		if (store) {
 			SOL_CURSOR cur;
 			memset(&cur, 0, sizeof(cur));
-			cur.issue_tod = issue_tod;
-			cur.delivered = delivered;
+			cur.issue_tod  = issue_tod;
+			cur.delivered  = delivered;
+			cur.issue_secs = issue_secs;
 			cur.cmdlen    = (unsigned char)cmdlen;
 			strncpy(cur.cmd, cmd_upper, sizeof(cur.cmd) - 1);
 			key_to_name(key, name);
@@ -780,6 +955,7 @@ int consoleIssueHandler(Session *session)
 	rc = sendJSONResponse(session, HTTP_STATUS_OK, b);
 
 quit:
+	console_lock_release(session);   /* no-op unless an early exit still holds it */
 	if (b) freeJsonBuilder(b);
 	if (resp) free(resp);
 	if (body) free(body);
@@ -843,7 +1019,8 @@ int consoleCollectHandler(Session *session)
 	resp[0] = '\0';
 
 	/* return only the lines beyond what we already delivered, then advance */
-	correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total);
+	correlate_once(session, cur.cmd, cur.issue_secs, resp, RESP_CAP,
+	               cur.delivered, &total);
 	cur.delivered = total;
 	nt_set(store, name, &cur, sizeof(cur));
 

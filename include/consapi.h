@@ -61,4 +61,32 @@ int consoleDetectHandler(Session *session) asm("CAPI0003");
  */
 int consoleLogHandler(Session *session) asm("CAPI0004");
 
+/**
+ * @brief Take the console correlation lock (#214).
+ *
+ * One mvsMF command block may be open in the Master Trace Table at a time.
+ * Every caller of SVC 34 in this address space must bracket itself with these,
+ * or it writes an echo into somebody else's open block -- which includes
+ * /zosmf/test?fn=cmd, not just the console API.
+ *
+ * Returns 0 when the caller may issue (also when no per-CGI context exists, in
+ * which case the request proceeds UNSERIALIZED), -1 when the acquire budget is
+ * exhausted and the caller should answer 429.
+ *
+ * @param session Current session context
+ * @return 0 to proceed, -1 if busy
+ */
+int console_lock_acquire(Session *session) asm("CLKACQ");
+
+/**
+ * @brief Release the console correlation lock if this session holds it.
+ *
+ * Idempotent. The router's ESTAE releases it too (session_cleanup), because it
+ * recovers the worker rather than ending its task -- so an ENQ held across an
+ * abend outlives the request.
+ *
+ * @param session Current session context
+ */
+void console_lock_release(Session *session) asm("CLKREL");
+
 #endif // CONSAPI_H

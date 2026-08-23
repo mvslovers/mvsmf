@@ -3,6 +3,7 @@
 #include <clibwto.h>
 #include <clibtry.h>
 #include <clibjes2.h>
+#include <cliblock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
 #include "router.h"
 #include "common.h"
@@ -287,6 +288,15 @@ static int safe_fclose_thunk(FILE *fp)
     return 0;
 }
 
+// Thunk for ESTAE-protected DEQ during recovery.
+// Returns 0 on success; a secondary abend is caught by try().
+__asm__("\n&FUNC    SETC 'safe_unlock'");
+static int safe_unlock_thunk(void *anchor)
+{
+    unlock(anchor, LOCK_EXC);
+    return 0;
+}
+
 __asm__("\n&FUNC    SETC 'ses_cleanup'");
 void session_cleanup(Session *session)
 {
@@ -318,6 +328,22 @@ void session_cleanup(Session *session)
         wtof(MSG_RECOVERY_JES);
         if (try(safe_jesclose_thunk, jes) != 0) {
             wtof(MSG_RECOVERY_JES_ABEND);
+        }
+    }
+
+    // The console correlation ENQ (#214). Unlike a data set or a JES handle
+    // this costs no storage, but leaving it held is worse: every later console
+    // command waits its full acquire budget and then answers 429, for the life
+    // of the STC. session_cleanup() runs on the worker that took it, which is
+    // what makes the DEQ legal here -- the ENQ is task-scoped and this task
+    // survived the abend.
+    if (session->console_lock) {
+        void *anchor = session->console_lock;
+
+        session->console_lock = NULL;
+        wtof(MSG_RECOVERY_CONSLK);
+        if (try(safe_unlock_thunk, anchor) != 0) {
+            wtof(MSG_RECOVERY_CONSLK_ABEND);
         }
     }
 

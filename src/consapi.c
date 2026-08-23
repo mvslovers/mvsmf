@@ -333,9 +333,8 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 static int mtt_secs_of_day(const char *dat, int len);
 
 __asm__("\n&FUNC	SETC 'correlate_once'");
-static int correlate_once(Session *session, const char *cmd_upper,
-                          unsigned min_matches, char *out, size_t outsz,
-                          unsigned skip, unsigned *total)
+static int correlate_once(Session *session, const char *cmd_upper, char *out,
+                          size_t outsz, unsigned skip, unsigned *total)
 {
 	CMTT *cmtt = cmtt_new();
 	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
@@ -348,31 +347,34 @@ static int correlate_once(Session *session, const char *cmd_upper,
 	char num[12];
 	int have_num = 0;
 	int echo_secs = -1;	/* hh.mm.ss of the echo, for the adoption below */
-	int matches = 0;	/* entries carrying the command text (anchor gate) */
 	int adopted = 0;	/* the block's source was taken from the target  */
 
 	out[0] = '\0';
 
-	/* Find OUR echo: the newest entry containing the command -- but only once
-	 * MORE of them exist than did just before we issued.
+	/* find OUR echo: newest entry whose text contains the command.
 	 *
-	 * The newest match alone was a race. The first poll runs immediately after
+	 * Known race, NOT fixed here (#214): the first poll runs immediately after
 	 * MGCR, before the echo is guaranteed to be in the table, so a previous
-	 * identical command still in the window got anchored on, converged on its
-	 * stale block, and returned the PREVIOUS response. min_matches is the count
-	 * taken under the lock just before SVC 34, so until the count grows there is
-	 * no anchor and capture_response() simply keeps polling.
+	 * identical command still in the window can be anchored on -- converging on
+	 * its stale block and returning the PREVIOUS response.
 	 *
-	 * A count, not a timestamp. Anchoring by issue time was tried first and is
-	 * wrong on this platform: the MTT carries hh.mm.ss and nothing finer, and
-	 * back-to-back requests land in the SAME second routinely -- so "oldest
-	 * match at or after the issue second" resolves to the previous command's
-	 * echo, which is the defect being fixed. Measured doing exactly that.
+	 * Two closures were tried on target and both measured worse than the race:
 	 *
-	 * What makes the count exact is the lock: while we hold it no other mvsMF
-	 * command can be issued, so no other worker can add a match for this text,
-	 * and the newest one is ours. Callers outside the bracket pass 0 and get the
-	 * old ungated behaviour. */
+	 *   - By issue timestamp ("oldest match at or after our second"). MTT
+	 *     entries carry hh.mm.ss and nothing finer, and back-to-back requests
+	 *     land in the SAME second routinely, so it resolved to the previous
+	 *     command's echo -- the very defect being fixed.
+	 *   - By match count taken under the lock before SVC 34 ("anchor only once
+	 *     more entries carry this text"). That is a count over a WRAPPING
+	 *     window, which is the same design error as #195's detection baseline:
+	 *     when the oldest entries happen to be echoes of this command -- after
+	 *     any burst of it -- each new entry evicts one as ours is added, the
+	 *     count never grows, and every capture returns empty after burning the
+	 *     full poll window. Measured doing exactly that: `D T` empty at 3.1 s
+	 *     while `D M`, whose matches sat at the young end, was fine.
+	 *
+	 * What this needs is a position, and the MTT offers no stable one across
+	 * snapshots. Leave the race until there is a reproduction for it. */
 	for (i = n; i > 0; i--) {
 		MTENTRY *e = arr[i - 1];
 		char tmp[160];
@@ -381,11 +383,8 @@ static int correlate_once(Session *session, const char *cmd_upper,
 		if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
 		memcpy(tmp, e->mtentdat, len);
 		tmp[len] = '\0';
-		if (!strstr(tmp, cmd_upper)) continue;
-		matches++;
-		if (ei < 0) ei = (int)(i - 1);          /* newest, remembered once     */
+		if (strstr(tmp, cmd_upper)) { ei = (int)(i - 1); break; }
 	}
-	if ((unsigned)matches <= min_matches) ei = -1;   /* ours has not landed yet */
 
 	if (ei >= 0) {
 		MTENTRY *ee = arr[ei];
@@ -503,38 +502,11 @@ static int correlate_once(Session *session, const char *cmd_upper,
 	return appended;
 }
 
-/* Entries whose text contains cmd_upper. Same shape as detect_count() but
- * without the uppercasing -- the caller already uppercased, and the MTT's own
- * command echoes are uppercase. */
-__asm__("\n&FUNC	SETC 'CNTMATCH'");
-static int count_matches(Session *session, const char *cmd_upper)
-{
-	CMTT *cmtt = cmtt_new();
-	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
-	unsigned n = arr ? array_count(&arr) : 0;
-	unsigned i;
-	int count = 0;
-
-	for (i = 0; i < n; i++) {
-		MTENTRY *e = arr[i];
-		char tmp[160];
-		int len = mtt_len(e);
-		if (!e) continue;
-		if (len > (int)sizeof(tmp) - 1) len = (int)sizeof(tmp) - 1;
-		memcpy(tmp, e->mtentdat, len);
-		tmp[len] = '\0';
-		if (strstr(tmp, cmd_upper)) count++;
-	}
-
-	if (cmtt) cmtt_free(&cmtt);
-	return count;
-}
-
 /* Issue-time sync capture: poll up to ~3 s and return the whole response block
  * in out; the return value is the number of lines it contains. */
 __asm__("\n&FUNC	SETC 'capture_response'");
-static int capture_response(Session *session, const char *cmd_upper,
-                            unsigned min_matches, char *out, size_t outsz)
+static int capture_response(Session *session, const char *cmd_upper, char *out,
+                            size_t outsz)
 {
 	unsigned start = tod_hi();
 	int stable = 0;
@@ -543,7 +515,7 @@ static int capture_response(Session *session, const char *cmd_upper,
 
 	for (;;) {
 		if (server_quiescing(session)) return CONS_POLL_INTERRUPTED;
-		correlate_once(session, cmd_upper, min_matches, out, outsz, 0, &total);
+		correlate_once(session, cmd_upper, out, outsz, 0, &total);
 		if (total > 0) {
 			if (total == prev_total) {
 				if (++stable >= 3) break;
@@ -644,7 +616,6 @@ int consoleIssueHandler(Session *session)
 	const char *host = getHeaderParam(session, "Host");
 	const char *scheme = getRequestScheme(session);
 	int cmdlen, cnlen, i, is_async, sol_detected = 0;
-	unsigned base_matches = 0;
 	unsigned delivered = 0;
 	unsigned long long issue_tod;
 
@@ -781,11 +752,6 @@ int consoleIssueHandler(Session *session)
 		}
 	}
 
-	/* How many entries already carry this command text. Taken under the lock and
-	 * before SVC 34, it is what lets correlate_once() tell our echo from an
-	 * identical one still in the window (see its comment). */
-	base_matches = (unsigned)count_matches(session, cmd_upper);
-
 	/* issue under the authenticated user's ACEE (set by the identity middleware) */
 	issue_command(cmd_upper, (unsigned)cmdlen);
 
@@ -819,8 +785,7 @@ int consoleIssueHandler(Session *session)
 	resp[0] = '\0';
 
 	{
-		int captured = capture_response(session, cmd_upper, base_matches, resp,
-		                                RESP_CAP);
+		int captured = capture_response(session, cmd_upper, resp, RESP_CAP);
 
 		/* The block is closed as far as we can tell -- let the next command in
 		 * before the (possibly long) unsolicited-detection wait below, which
@@ -1023,10 +988,7 @@ int consoleCollectHandler(Session *session)
 	resp[0] = '\0';
 
 	/* return only the lines beyond what we already delivered, then advance */
-	/* 0: no gate. Collect runs outside the lock and long after the fact, so it
-	 * still anchors on the newest match and can walk into a later block -- see
-	 * the residuals in #214. Serialization does not reach it. */
-	correlate_once(session, cur.cmd, 0, resp, RESP_CAP, cur.delivered, &total);
+	correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total);
 	cur.delivered = total;
 	nt_set(store, name, &cur, sizeof(cur));
 

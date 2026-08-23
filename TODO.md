@@ -17,7 +17,7 @@ entries below, because one of them pairs two issues.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #214 | wrong data reaches a client — reproduced | nothing — #346 settled the window |
+| 1 | #214 | serialization landed; residuals open | a repro for the collect half |
 | 2 | #346 | decided: docs, not a timer | #214 part 3, for the collect half |
 | 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
@@ -56,13 +56,38 @@ twelve foreground `D T`: **5/12 contaminated, up to 30 foreign lines, 2.39 s
 against a 0.39 s baseline**. Both symptoms are one mechanism — the worst
 contaminated response is also the slowest.
 
-**Decided 2026-08-23: serialize, in three parts** — the lock window (MGCR
-through convergence, writers only, `trylock()` from `cliblock.h` with a 429
-fallback), the echo-stop, and the anchor-by-issue-time. None is sufficient
-alone; the full shape and the residuals are in the issue. **Unblocked** — #346 was
-sequenced ahead of it to set the lock window, and that decision is now taken:
-the window does not change. What follows is the measurement that produced the
-serialization decision.
+**Serialization landed 2026-08-23** (branch
+`issue-214-serialize-console-correlation`): one command block open at a time,
+the bracket spanning MGCR through convergence, writers only — async and
+`/zosmf/test?fn=cmd` included — with a conditional `trylock()` from
+`cliblock.h`, a 429 when the budget is spent, and a DEQ in `session_cleanup()`
+because the router's ESTAE recovers the worker rather than ending its task.
+**Measured 0/12 contaminated against 5/12 before**, console suite 65/65.
+
+**Two of the three planned parts did not land, and the reason is worth more than
+the code would have been.** Both attempts at closing the stale-echo race
+measured *worse on target* than the race:
+
+- by issue timestamp — MTT entries carry `hh.mm.ss` and back-to-back requests
+  land in the same second routinely, so "oldest match at or after our second"
+  resolved to the **previous** command's echo;
+- by a match count taken under the lock before SVC 34 — **a count over a
+  wrapping window, which is #195's design error rebuilt**. After a burst of one
+  command its oldest echoes sit at the aging edge, each new entry evicts one as
+  ours is added, the count never grows, and every capture returns empty. `D T`
+  came back empty at 3.1 s while `D M`, same code path with its matches at the
+  young end, was correct three times running.
+
+What both needed is a **position**, and the MTT has none that survives a
+snapshot. That is the open problem, and it is also what blocks the echo-stop:
+recognising a later command echo has no field to do it with, and the obvious
+heuristic (an echo carries no message identifier) was tested against 407 real
+lines and fails — `IEFACTRT` and `SE '...'` carry none either.
+
+So what is left on this ticket is the **collect half**, and it wants a
+reproduction before another attempt: collect runs outside the lock, long after
+the fact, and still anchors on the newest match. Serialization does not reach
+it.
 
 **Two of the issue's three directions are refuted by that data, including its
 preferred one.** MVS interleaves the MTT *line by line*, not block by block: a

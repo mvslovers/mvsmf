@@ -355,11 +355,60 @@ if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
 	RESP=$(issue '{"cmd":"P FTPD","unsol-key":"FTPD"}')
 	BODY=$(echo "$RESP" | sed '$d')
 	DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
+	# The same issue call feeds the completion-path check below. Keep both
+	# values here: a second P FTPD is not available to that test -- FTPD is
+	# down by then -- and stopping the service twice to test it would be worse.
+	SYNC_RESP=$(echo "$BODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null)
+	CKEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
 	if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
 		sleep 3
 		RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
 		assert_json_field "$RESP" '.status' "detected" "P FTPD: ENDED detected (async)"
 		assert_contains   "$RESP" '.msg' "FTPD" "P FTPD: msg mentions FTPD"
+	fi
+
+	# ---- collect completes a truncated sync capture (issue #346) ----
+	#
+	# P FTPD is the reported case: its reply pauses ~2 s mid-stream, the sync
+	# capture converges after 0.3 s of quiet, and the issue call returns
+	# FTPD098I while FTPD099I, IEF404I and $HASP395 arrive later. collect is
+	# the documented way to the rest -- what Zowe's --wait-to-collect drives.
+	#
+	# The property under test is NOT a line count. "More lines with collect
+	# than without" goes green on a stand fast enough to catch the whole block
+	# in one window, which makes a passing run say nothing. So assert the
+	# union first -- issue + collect carry the terminal $HASP395 -- and only
+	# then the difference, and only when this run actually truncated.
+	if [ -n "$CKEY" ] && [ "$CKEY" != "null" ]; then
+		COLLECTED=""
+		for _ in 1 2 3; do
+			MORE=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${CKEY}" |
+				jq -r '.["cmd-response"] // ""' 2>/dev/null)
+			[ -n "$MORE" ] && COLLECTED="${COLLECTED}${MORE}"
+			sleep 1
+		done
+		SYNC_N=$(printf '%s' "$SYNC_RESP" | tr '\r' '\n' | grep -c .)
+		COLL_N=$(printf '%s' "$COLLECTED" | tr '\r' '\n' | grep -c .)
+
+		case "${SYNC_RESP}${COLLECTED}" in
+			*'$HASP395'*)
+				pass "P FTPD: issue+collect carry the whole block (${SYNC_N}+${COLL_N} lines)" ;;
+			*)
+				fail "P FTPD: issue+collect carry the whole block" \
+				     "no \$HASP395 in ${SYNC_N} captured + ${COLL_N} collected lines" ;;
+		esac
+
+		case "$SYNC_RESP" in
+			*'$HASP395'*)
+				skip "P FTPD: collect adds lines (this run captured the whole block)" ;;
+			*)
+				if [ "$COLL_N" -gt 0 ]; then
+					pass "P FTPD: collect supplied what the capture missed (${SYNC_N} -> $((SYNC_N + COLL_N)) lines)"
+				else
+					fail "P FTPD: collect supplied what the capture missed" \
+					     "the capture returned ${SYNC_N} line(s) without \$HASP395 and collect returned none"
+				fi ;;
+		esac
 	fi
 	# S FTPD -> sync detect "FTPD" -> startup message; also restarts FTPD.
 	# This is the "start and wait until ready" pattern in one call.

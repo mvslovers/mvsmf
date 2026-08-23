@@ -18,7 +18,7 @@ PR #349; it stays open on its implement-vs-reject decision.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #214 | serialization landed; residuals open | a repro for the collect half |
+| 1 | #214 | serialization landed; collect half **reproduced** | a design decision, not a measurement |
 | 2 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 3 | #336 | accepts the syntax, discards the operand | wire it or reject it |
 | 4 | #210 | client-visible, fix identified, local | nothing |
@@ -84,10 +84,34 @@ recognising a later command echo has no field to do it with, and the obvious
 heuristic (an echo carries no message identifier) was tested against 407 real
 lines and fails — `IEFACTRT` and `SE '...'` carry none either.
 
-So what is left on this ticket is the **collect half**, and it wants a
-reproduction before another attempt: collect runs outside the lock, long after
-the fact, and still anchors on the newest match. Serialization does not reach
-it.
+So what is left on this ticket is the **collect half**, and it is no longer
+waiting on a reproduction — PR #350 carries one
+(`tests/repro-214-collect.sh`, standalone, exit 1 = reproduced, 2/2 on two
+runs). **It needs no concurrency**, which is the finding: one client issuing
+two commands is enough, because collect re-correlates on every poll instead of
+resuming. Two `D T` five seconds apart, and the first key comes back with the
+second command's reply — provable because `IEE136I` carries the time and the
+hardcopy log holds both blocks.
+
+**It is also wider than this entry said.** The anchor is `strstr()`, not an
+equality test, so any later command whose echo merely *contains* the stored
+text takes it: a cursor for `D A` returned ten lines of a subsequent `D A,L`.
+Narrowing that match is independent of the anchor question and looks like the
+cheapest piece here.
+
+And once mis-anchored the cursor writes the foreign block's count back
+(`cur.delivered = total`, watched 10 → 5), after which that key answers empty
+for good — so a polling client reads "complete" having received the wrong block
+or nothing.
+
+**One reading recorded above needs re-testing rather than inheriting.** Both
+refuted anchor attempts were on the *sync capture*, where the failure is that
+our own echo may not be in the table yet. At collect time it certainly is, and
+collect is not racing its arrival, so that verdict does not obviously transfer.
+`SOL_CURSOR.issue_tod` is stamped at issue (`consapi.c:823`) and never read by
+collect; `correlate_once()` already computes `echo_secs`. Hypothesis only — it
+resolves both experiments on paper, the residual (two matches inside one
+second, an echo aged out) is unmeasured, and that measurement is the next step.
 
 **Two of the issue's three directions are refuted by that data, including its
 preferred one.** MVS interleaves the MTT *line by line*, not block by block: a

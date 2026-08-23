@@ -131,7 +131,7 @@ file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 
 | Header | Used By | Description |
 |--------|---------|-------------|
-| `X-IBM-Data-Type` | Dataset/member GET & PUT | `text` (default), `binary`, `record` |
+| `X-IBM-Data-Type` | Dataset/member GET & PUT | `text` (default), `binary`; `record` on GET only (unimplemented on PUT, #245) |
 | `X-IBM-Intrdr-Mode` | Job submit | Validated but fixed to `TEXT` |
 | `X-IBM-Intrdr-Lrecl` | Job submit | Validated but fixed to `80` |
 | `X-IBM-Intrdr-Recfm` | Job submit | Validated but fixed to `F` |

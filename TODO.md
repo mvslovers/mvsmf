@@ -8,8 +8,8 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 **It carries nothing that is copied.** Where the reasoning already has an owner —
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
-*Last reconciled against the tracker: 2026-08-23, 19 issues open — seventeen
-entries below, because two of them pair two issues each.*
+*Last reconciled against the tracker: 2026-08-23, 19 issues open — eighteen
+entries below, because one of them pairs two issues.*
 
 ---
 
@@ -17,7 +17,7 @@ entries below, because two of them pair two issues each.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #214, #195 | wrong data reaches a client | nothing |
+| 1 | #214 | wrong data reaches a client — reproduced | a decision on serializing |
 | 2 | #267 | latent; one word, activates ten paths | a read of `quit:` |
 | 3 | #336 | accepts the syntax, discards the operand | wire it or reject it |
 | 4 | #210 | client-visible, fix identified, local | nothing |
@@ -32,8 +32,9 @@ entries below, because two of them pair two issues each.*
 | 13 | #234 | `type:research` | measuring the reference |
 | 14 | #329 | `type:research` | **one measurement** — see *RAKF* |
 | 15 | #345 | `type:research` | **a policy** — see *RAKF* |
-| 16 | #291 | reclassified — hygiene, not stability | nothing |
-| 17 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
+| 16 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
+| 17 | #291 | reclassified — hygiene, not stability | nothing |
+| 18 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
 
 ---
 
@@ -47,10 +48,37 @@ Every worker shares one MTT source, so `has_src` cannot separate two concurrent
 requests. Second symptom, same cause: a `MODIFY` reply burns the whole
 `POLL_SECONDS` window because foreign lines keep the block's line count moving.
 
-**First step is asking whether #195 is this**, not opening two hunts. #195 is not
-monotonic in load (0 → detected, 5 → waiting, 20 → detected), which fits
-contamination better than a race. A `/zosmf/test` diagnostic reporting cursor
-position and entries scanned likely settles both in one run.
+**Reproduced and measured on 2026-08-23** — recipe, numbers and the raw MTT
+window are in the issue. Two background clients looping `F HTTPD,D P` against
+twelve foreground `D T`: **5/12 contaminated, up to 30 foreign lines, 2.39 s
+against a 0.39 s baseline**. Both symptoms are one mechanism — the worst
+contaminated response is also the slowest.
+
+**Two of the issue's three directions are refuted by that data, including its
+preferred one.** MVS interleaves the MTT *line by line*, not block by block: a
+foreign echo lands between our echo and our own reply, in the same second. So a
+time bound cannot cut it (the MTT is second-granular), and echo-stopping either
+loses our own reply or — in the obvious `line_idx == 0` repair — still appends
+the foreign reply lines, which share our source. **Serializing is the only one
+of the three left standing**, and the decision to take is whether its cost is
+acceptable: the lock must span MGCR through convergence, so the 2.1–3.1 s poll
+window becomes the throughput ceiling, and it reduces rather than eliminates —
+httpd's own WTOs carry the same source and still land inside an open block.
+
+**Do not gate that decision on reading the MTT entry header.** `mtenttag` /
+`mtentimm` have never been looked at, but `issue_command()` leaves the SVC 34
+buffer's bytes 2–3 zero for every worker, so any caller identity MVS records
+reads identically for two workers in one address space. Worth a probe run for
+the record; it is not a blocker.
+
+**Two further defects on the same path, neither addressed by any of the three
+options** — fold them into whatever fix lands. `correlate_once()` anchors on the
+*newest* `strstr` match over the whole table, and `consoleCollectHandler()`
+re-anchors on every poll, so `cur.delivered` is counted against a block that may
+have moved (`SOL_CURSOR.issue_tod` is stored, unused, and its comment already
+says "reserved: re-issue disamb."). And #174's `d <= 1` adoption window does not
+merely append a stray line under concurrency — it **redirects the whole block**
+to another address space, which is strictly worse than the reported symptom.
 
 ### 2 · #267 — `unsigned rc` makes every send-error check dead code
 
@@ -210,11 +238,41 @@ Whatever refusal is chosen must keep #229's constraint: "not yours" must not be
 distinguishable from "does not exist". Establish `jescanj()`'s own behaviour on a
 foreign purge, on a throwaway job. Decide together with `mvslovers/ftpd#90`.
 
+### 16 · #195 — detections intermittently report `waiting` for a message that was emitted
+
+**Split out of #214 on 2026-08-23: they are not the same bug.** Structural, no
+measurement needed — `detect_count()` never reads `MTT_SRC_OFF`, never anchors an
+echo and never walks a block. It is a `strstr` count over the whole snapshot
+against a stored baseline, so #214's `has_src` contamination has no route into
+it. What the two share is only the substrate: a global, wrapping, second-granular
+MTT with no per-request identity, over which both features fake a cursor.
+
+Here rather than in Tier 1 because nothing reaches a client wrongly — a
+detection is missed, not misattributed — and because no fix can be designed
+before one cheap measurement runs. Above Tier 5 because a silently missed
+operator reply is impact on a running system, which is what this file orders by;
+`#291` is hygiene and `#186` is a feature.
+
+One thing is already settled from code: `unsol_base` is snapshotted **after**
+`issue_command()`, so a `D T` carrying `unsol-key: IEE136I` detects its own
+reply. `tests/curl-console.sh` asserts the opposite in a comment; the assertion
+passes for the wrong reason and wants correcting either way.
+
+The discriminator is two back-to-back `cmtt_new()` snapshots with no traffic
+between: equal `n` with the oldest timestamp advancing under load means entries
+aging out of the window between baseline and poll — a `D T` cluster leaving it
+drops the count by more than the new match adds, and where the trailing edge
+falls is exactly the reported non-monotonicity. `n` jumping between adjacent
+snapshots instead means a torn walk in `cmtt_new()`'s unserialized `memcpy`,
+which is libc370 and a different ticket. A third candidate the test does not
+separate: `array_add()` failing to expand under storage pressure, silently
+truncating the snapshot.
+
 ---
 
 ## Tier 5 — larger work
 
-### 16 · #291 — large bodies fully buffered, twice on submit
+### 17 · #291 — large bodies fully buffered, twice on submit
 
 **Reclassify: memory hygiene, not stability.** Its motivation — stopping long-held
 requests acting as the anvil for httpd#195's fragmentation — is gone: #287 closed,
@@ -228,7 +286,7 @@ holds 2 MB. Cheapest item, and independent of the streaming work.
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
 
-### 17 · #186 — console log: deep history beyond the MTT window
+### 18 · #186 — console log: deep history beyond the MTT window
 
 **No longer blocked — the issue text says it is, and that is out of date.** Its
 hard dependency `libc370#21` is **closed and verified on target** (PR#31,
@@ -308,10 +366,13 @@ Pointers only — the reasoning lives in the closing comments.
   is in the closing comment: match in-stream data to spool files **by ddname, never
   by position**.
 
-## Campaigns, not seventeen tickets
+## Campaigns, not eighteen tickets
 
-- **Console correctness** — #214, #195, #251. One subsystem, one reading of
-  `consapi.c`, and #195 may not survive the first measurement of #214.
+- **Console correctness** — #214, #251, and #195 behind them. One subsystem and
+  one reading of `consapi.c`, but **not one bug**: #214 and #195 were ranked
+  together on the guess that #195 might not survive the first measurement of
+  #214, and that premise is dead — see #195's entry. #251 is independent of
+  both.
 - **The endpoint advertises what it does not do** — #245 and #336, with #248 as
   the worked example of how it ends. The doc half of #245 and the reject half of
   #336 are both nearly free and both stop the lying today, ahead of whichever

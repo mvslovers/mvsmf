@@ -8,7 +8,7 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 **It carries nothing that is copied.** Where the reasoning already has an owner —
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
-*Last reconciled against the tracker: 2026-08-23, 19 issues open — eighteen
+*Last reconciled against the tracker: 2026-08-23, 20 issues open — nineteen
 entries below, because one of them pairs two issues.*
 
 ---
@@ -18,23 +18,24 @@ entries below, because one of them pairs two issues.*
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
 | 1 | #214 | wrong data reaches a client — reproduced | a decision on serializing |
-| 2 | #267 | latent; one word, activates ten paths | a read of `quit:` |
-| 3 | #336 | accepts the syntax, discards the operand | wire it or reject it |
-| 4 | #210 | client-visible, fix identified, local | nothing |
-| 5 | #251 | Optimistic Path stop pattern | nothing |
-| 6 | #209 | client-visible, cheap on 3.8j | nothing |
-| 7 | #245 | the docs are wrong *today* | doc fix now, decision after |
-| 8 | #326 | its trigger has fired | nothing |
-| 9 | #76 | the one externally reported defect | nothing |
-| 10 | #244 | the ordering constraint is the content | nothing |
-| 11 | #215 | latent, one place, every caller benefits | nothing |
-| 12 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 13 | #234 | `type:research` | measuring the reference |
-| 14 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 15 | #345 | `type:research` | **a policy** — see *RAKF* |
-| 16 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
-| 17 | #291 | reclassified — hygiene, not stability | nothing |
-| 18 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
+| 2 | #346 | silently incomplete, single client, observed | a decision on the contract |
+| 3 | #267 | latent; one word, activates ten paths | a read of `quit:` |
+| 4 | #336 | accepts the syntax, discards the operand | wire it or reject it |
+| 5 | #210 | client-visible, fix identified, local | nothing |
+| 6 | #251 | Optimistic Path stop pattern | nothing |
+| 7 | #209 | client-visible, cheap on 3.8j | nothing |
+| 8 | #245 | the docs are wrong *today* | doc fix now, decision after |
+| 9 | #326 | its trigger has fired | nothing |
+| 10 | #76 | the one externally reported defect | nothing |
+| 11 | #244 | the ordering constraint is the content | nothing |
+| 12 | #215 | latent, one place, every caller benefits | nothing |
+| 13 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 14 | #234 | `type:research` | measuring the reference |
+| 15 | #329 | `type:research` | **one measurement** — see *RAKF* |
+| 16 | #345 | `type:research` | **a policy** — see *RAKF* |
+| 17 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
+| 18 | #291 | reclassified — hygiene, not stability | nothing |
+| 19 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
 
 ---
 
@@ -80,7 +81,38 @@ says "reserved: re-issue disamb."). And #174's `d <= 1` adoption window does not
 merely append a stray line under concurrency — it **redirects the whole block**
 to another address space, which is strictly worse than the reported symptom.
 
-### 2 · #267 — `unsigned rc` makes every send-error check dead code
+### 2 · #346 — the sync capture converges on 0.3 s of quiet and truncates
+
+*observed by the maintainer, single client, HTTP 200 with four of five lines
+missing and nothing saying so*
+
+`P FTPD` returns `FTPD098I` alone; `FTPD099I`, `IEF404I` and `$HASP395` are
+dropped. `S FTPD`, issued seconds later, is complete. The whole difference is in
+the MTT timestamps — `S FTPD`'s reply lands inside one second, `P FTPD` pauses
+2 s in the middle, and `capture_response()` breaks after the line count has been
+unchanged for three 0.10 s polls.
+
+**Same function as #214, opposite failure, no shared fix.** #214 needs two
+clients and delivers *foreign* lines; this needs one client and drops *own*
+lines. Do not fold them together — #214 is held on a serialization decision that
+has no bearing here.
+
+**The hazard is that lengthening the quiet window looks like the fix and is
+not.** Two limits stack: `POLL_SECONDS` is 3 and `tod_hi()`'s LSB is ~1.05 s, so
+the hard cap is 2.1–3.1 s and `P FTPD`'s last line arrives at 3 s. Anything
+slower is truncated however patient the convergence rule gets. The real choice
+is in the issue, and one of the four options is that this is **by design** —
+collect already returns the later lines, and real z/OSMF treats `cmd-response`
+as "what was available". If that is the answer, the defect is that the sync
+reply gives the client no way to know it is incomplete, and the work is a
+contract plus a marker, not a longer timer.
+
+Regression test wants a command with a known multi-second gap and an assertion
+on the **last** expected line. `tests/curl-console.sh` uses `D T`, `D A,L` and
+`F HTTPD,D P` — all sub-second — and its opt-in `P FTPD`/`S FTPD` block asserts
+only the detection status, never the completeness of `cmd-response`.
+
+### 3 · #267 — `unsigned rc` makes every send-error check dead code
 
 `dsapi.c:1251` and `:2294`. A client that disconnects mid-listing has the whole
 remaining directory written after it.
@@ -91,7 +123,7 @@ in that light before flipping it. `member_scan()` (#265) is the only place in th
 member listing that detects a write failure today, and is the worked example.
 Grep the other handlers in the same pass — the declaration is copied around.
 
-### 3 · #336 — `{volume-serial}` is captured and never used
+### 4 · #336 — `{volume-serial}` is captured and never used
 
 Seven routes accept `-(VOLSER)` and discard the operand; a request naming the
 wrong volume is answered as if it had named the right one. Ranked here because
@@ -105,7 +137,7 @@ worth taking even as an interim.
 
 ## Tier 2 — cheap and client-visible
 
-### 4 · #210 — the submit response returns `owner:""`
+### 5 · #210 — the submit response returns `owner:""`
 
 A race, not a divergent path — and therefore **not fixable by asking libc370
 earlier**: `JCTUSEID` is unwritten and the internal text is not on the spool yet.
@@ -113,21 +145,21 @@ mvsMF already knows the answer, because `process_jobcard()` injected `USER=`.
 Fall back to that. Check the purge handler (`jobsapi.c:363,375`) for the same
 emptiness, and make `tests/curl-jobs.sh` assert the value, not the key.
 
-### 5 · #251 — console log answers 200 with an empty body on allocation failure
+### 6 · #251 — console log answers 200 with an empty body on allocation failure
 
 `consapi.c:1100` collapses a NULL `cmtt_new()` into `n = 0`. The MTT copy is the
 largest allocation on that path — the one most likely to fail exactly when a
 silent empty answer misleads most. The sibling `malloc()` three lines below
 already returns 500. Textbook **Optimistic Path**; check `:266` and `:457` too.
 
-### 6 · #209 — `exec-system` and `exec-member` are never emitted
+### 7 · #209 — `exec-system` and `exec-member` are never emitted
 
 3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
 libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
 (`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
 the code.
 
-### 7 · #245 — `X-IBM-Data-Type: record` cannot be written back
+### 8 · #245 — `X-IBM-Data-Type: record` cannot be written back
 
 The read path length-prefixes each record; the write path sends `record` down the
 *text* loop, so the four bytes read back as a length are a length only by accident.
@@ -137,7 +169,7 @@ Both advertise the mode without qualification today; that is what misleads right
 now and it costs nothing to stop. Then choose: a length-prefixed reader (mind a
 prefix split across a chunk boundary, and `record_content_max()`), or a 400.
 
-### 8 · #326 — five sources missing from the CLAUDE.md list
+### 9 · #326 — five sources missing from the CLAUDE.md list
 
 `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
 "next time `CLAUDE.md` is touched", so fold it into the next edit of that file
@@ -148,7 +180,7 @@ which is how the list drifted in the first place.
 
 ## Tier 3 — correctness, needs care
 
-### 9 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
+### 10 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
 
 *the only defect on this list someone outside the project reported*
 
@@ -162,7 +194,7 @@ is observed, reported from outside, and blocking a real workflow; #244 is curren
 harmless and #215 has never been seen at all. What holds it out of Tier 1 is that
 `ufsd-utils upload` does the job today — a workaround, not an absence of impact.
 
-### 10 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
+### 11 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
 
 **The ordering constraint is the whole content of this ticket.** The broken mask
 is the only thing keeping `write_record()`'s manual RDW dormant, and that RDW is
@@ -173,7 +205,7 @@ alone ships **two** RDWs. Remove the manual RDW first, then fix the mask. Drop
 The regression test wants a **VB** data set written binary and read back with
 lengths checked — `curl-binary.sh` uses FB, which is why this survived.
 
-### 11 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 12 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -183,7 +215,7 @@ Honest scope, per the issue: **no observed failure**. #212 fixed this locally in
 The subtlety from #212, easy to lose: `http_printf()` translates on the way out,
 so the printability test applies to the **translated** byte, via `xlate_cp037`.
 
-### 12 · #257 + #335 — early 4xx on a PUT with a body still in flight
+### 13 · #257 + #335 — early 4xx on a PUT with a body still in flight
 
 **One class, two tickets — rank and fix them together.** Every early return in the
 PUT handlers answers before draining the announced body (`dsapi.c:1156, 1180,
@@ -200,7 +232,7 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 13 · #234 — what should the API do with non-ASCII input?
+### 14 · #234 — what should the API do with non-ASCII input?
 
 Byte-wise through CP037 with no UTF-8 decoding — and **invisible through the API**,
 because `etoa` inverts `atoe`, so only ISPF and the program reading the member see
@@ -213,7 +245,7 @@ Research because the policy is the hard part. Measure the reference first
 `xmit370`'s split between well-formed UTF-8 and Latin-1 is worth borrowing. Decide
 GET and PUT together; a reject changes the round-trip property.
 
-### 14 · #329 — dataset create is authorized only by the ambient ACEE
+### 15 · #329 — dataset create is authorized only by the ambient ACEE
 
 **The endpoint is not unauthorized and the response shape is settled** (#315,
 #317): RAKF refuses the allocation and the refusal must stay indistinguishable
@@ -224,7 +256,7 @@ open is only **which identity decides** — SVC 99 runs under whatever sits in
 The cheap unblocked step is a measurement, and it decides whether the fix exists
 at all: what does RACHECK answer for a name with no catalog entry and no DSCB?
 
-### 15 · #345 — restjobs has no authorization model
+### 16 · #345 — restjobs has no authorization model
 
 `grep -c 'http_check_auth\|require_access' src/jobsapi.c` → **0**, against 25 in
 `dsapi.c`. `owner=*` switches the default off, and the four by-jobid paths —
@@ -238,7 +270,7 @@ Whatever refusal is chosen must keep #229's constraint: "not yours" must not be
 distinguishable from "does not exist". Establish `jescanj()`'s own behaviour on a
 foreign purge, on a throwaway job. Decide together with `mvslovers/ftpd#90`.
 
-### 16 · #195 — detections intermittently report `waiting` for a message that was emitted
+### 17 · #195 — detections intermittently report `waiting` for a message that was emitted
 
 **Split out of #214 on 2026-08-23: they are not the same bug.** Structural, no
 measurement needed — `detect_count()` never reads `MTT_SRC_OFF`, never anchors an
@@ -272,7 +304,7 @@ truncating the snapshot.
 
 ## Tier 5 — larger work
 
-### 17 · #291 — large bodies fully buffered, twice on submit
+### 18 · #291 — large bodies fully buffered, twice on submit
 
 **Reclassify: memory hygiene, not stability.** Its motivation — stopping long-held
 requests acting as the anvil for httpd#195's fragmentation — is gone: #287 closed,
@@ -286,7 +318,7 @@ holds 2 MB. Cheapest item, and independent of the streaming work.
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
 
-### 18 · #186 — console log: deep history beyond the MTT window
+### 19 · #186 — console log: deep history beyond the MTT window
 
 **No longer blocked — the issue text says it is, and that is out of date.** Its
 hard dependency `libc370#21` is **closed and verified on target** (PR#31,
@@ -366,13 +398,15 @@ Pointers only — the reasoning lives in the closing comments.
   is in the closing comment: match in-stream data to spool files **by ddname, never
   by position**.
 
-## Campaigns, not eighteen tickets
+## Campaigns, not nineteen tickets
 
-- **Console correctness** — #214, #251, and #195 behind them. One subsystem and
-  one reading of `consapi.c`, but **not one bug**: #214 and #195 were ranked
-  together on the guess that #195 might not survive the first measurement of
-  #214, and that premise is dead — see #195's entry. #251 is independent of
-  both.
+- **Console correctness** — #214, #346, #251, and #195 behind them. One
+  subsystem and one reading of `consapi.c`, but **four separate bugs**: #214 and
+  #195 were ranked together on the guess that #195 might not survive the first
+  measurement of #214, and that premise is dead — see #195's entry. #214 and
+  #346 are the two halves of "MVS gives no end-of-response signal, so both ends
+  of the block are guessed", and they fail in opposite directions from opposite
+  preconditions. #251 is independent of all three.
 - **The endpoint advertises what it does not do** — #245 and #336, with #248 as
   the worked example of how it ends. The doc half of #245 and the reject half of
   #336 are both nearly free and both stop the lying today, ahead of whichever

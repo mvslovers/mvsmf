@@ -152,6 +152,13 @@
 /** MVSMF910W a second JES handle was opened while one was still held */
 #define MSG_JES_TRACKED		"MVSMF910W SESSION ALREADY HOLDS A JES HANDLE, THIS ONE NOT TRACKED"
 
+/** MVSMF911I recovery is releasing the console correlation lock (#214) */
+#define MSG_RECOVERY_CONSLK	"MVSMF911I RECOVERY RELEASING THE CONSOLE CORRELATION LOCK"
+
+/** MVSMF912W the recovery DEQ abended; console commands will 429 until restart */
+#define MSG_RECOVERY_CONSLK_ABEND \
+	"MVSMF912W RECOVERY DEQ ABENDED, CONSOLE COMMANDS WILL BE REFUSED"
+
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted
  * into an uppercase literal.

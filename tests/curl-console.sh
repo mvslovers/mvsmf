@@ -189,6 +189,55 @@ assert_json_exists "$BODY" '.["cmd-response-key"]' "async: key present"
 assert_json_absent "$BODY" '.["cmd-response"]'     "async: no cmd-response"
 
 # =========================================================================
+# 3b. Serialization: concurrent commands must not mix (#214)
+# =========================================================================
+echo ""
+echo "--- concurrency: no cross-request contamination ---"
+
+# Two background clients loop a DIFFERENT command while the foreground issues
+# D T. Before #214 this returned 5 of 12 responses carrying the other client's
+# lines; the block is only well defined while one command is in flight.
+#
+# The assertion is on CONTENT, not on a status: every response must contain its
+# own IEE136I and nothing belonging to F HTTPD,D P. A 429 is a legitimate
+# outcome here (the acquire budget is finite) and is not a failure -- it is a
+# refusal to issue, which is the point.
+cons_bg() {
+	for _ in 1 2 3 4 5 6 7 8 9 10; do
+		curl -s -o /dev/null -m 30 -u "$AUTH" -X PUT \
+			-H 'Content-Type: application/json' \
+			-d '{"cmd":"F HTTPD,D P"}' "$CONSOLE" || true
+	done
+}
+cons_bg & CONS_BG1=$!
+cons_bg & CONS_BG2=$!
+sleep 1
+
+CONC_BAD=0; CONC_OK=0; CONC_429=0
+for _ in 1 2 3 4 5 6 7 8; do
+	RESP=$(issue '{"cmd":"D T"}')
+	CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
+	if [ "$CODE" = "429" ]; then
+		CONC_429=$((CONC_429 + 1))
+		continue
+	fi
+	CR=$(echo "$BODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null)
+	case "$CR" in
+		*HTTPD100I*|*HTTPD102I*|*"F HTTPD"*) CONC_BAD=$((CONC_BAD + 1)) ;;
+		*IEE136I*)                           CONC_OK=$((CONC_OK + 1))  ;;
+		*)                                   CONC_BAD=$((CONC_BAD + 1)) ;;
+	esac
+done
+wait $CONS_BG1 $CONS_BG2 2>/dev/null || true
+
+if [ "$CONC_BAD" -eq 0 ]; then
+	pass "concurrency: no foreign lines in any response ($CONC_OK clean, $CONC_429 refused 429)"
+else
+	fail "concurrency: foreign lines leaked into a response" \
+		"$CONC_BAD of 8 contaminated ($CONC_OK clean, $CONC_429 refused 429)"
+fi
+
+# =========================================================================
 # 4. Solicited keyword detection
 # =========================================================================
 echo ""

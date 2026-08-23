@@ -93,6 +93,8 @@ member not found, record too long) produce **no** console message.
 | `MVSMF908I` | `RECOVERY CLOSING THE JES SPOOL HANDLE` | Recovery is closing the JES2 spool handle an abending handler left open. Informational; it accompanies a `MVSMF901E`. Its absence after a jobs-API abend is the leak of issue #286. |
 | `MVSMF909W` | `RECOVERY JESCLOSE ABENDED, SPOOL DATA SETS STAY OPEN` | The recovery `jesclose()` abended in turn. The JES2 spool data sets stay allocated and their storage stays held for the life of the address space. |
 | `MVSMF910W` | `SESSION ALREADY HOLDS A JES HANDLE, THIS ONE NOT TRACKED` | A request opened a second JES handle while the first was still held. No path does this today; the second handle is not closed if the handler abends. Report it — it means a code change broke the one-at-a-time assumption in `Session`. |
+| `MVSMF911I` | `RECOVERY RELEASING THE CONSOLE CORRELATION LOCK` | An abending handler held the console serialization ENQ (#214); recovery is releasing it. Informational, and it accompanies a `MVSMF901E`. Its absence after a console-API abend would mean every later console command waits its full acquire budget and then answers 429. |
+| `MVSMF912W` | `RECOVERY DEQ ABENDED, CONSOLE COMMANDS WILL BE REFUSED` | The recovery DEQ abended in turn, so the console correlation lock stays held for the life of the address space. `PUT /zosmf/restconsoles/consoles/{name}` will answer `429` from now on; other endpoints are unaffected. Restart the server. |
 
 ## Adding a message
 

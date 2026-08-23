@@ -101,6 +101,12 @@ struct session {
        held is therefore a bug, and session_register_jes() says so rather than
        overwriting the slot and leaking what was in it (issue #286). */
     struct jes *open_jes;                 /**< Tracked JES spool handle */
+    /* Console correlation lock (#214). Holds the address consoleIssueHandler
+       ENQ'd, or NULL. Tracked here for the same reason open_jes is: the router
+       ESTAE recovers the worker rather than ending its task, so an ENQ taken
+       before an abend is NOT released by task termination and would wedge the
+       console endpoint for the life of the STC. */
+    void *console_lock;                   /**< Held console ENQ, or NULL */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**

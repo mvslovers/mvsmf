@@ -168,6 +168,33 @@ Before ${BEFORE}, after ${AFTER}."
 fi
 
 # =========================================================================
+# 4. the response is framed (issue #355)
+#
+# httpd injects Transfer-Encoding: chunked only when it recognises the header
+# terminator, and it recognises it by shape: the blank line has to arrive as
+# its own http_printf() call. Glued to the Content-Type header, every
+# /zosmf/test reply went out with no Content-Length and no Transfer-Encoding
+# while announcing keep-alive, so the client had to wait for the socket to
+# close -- 4.6 s measured against 0.11 s for /zosmf/info.
+#
+# Assert the header, not the clock: a timing assertion would go green on any
+# stand whose idle timeout is short.
+# =========================================================================
+echo ""
+echo "--- the response is framed (issue #355) ---"
+HDRS=$(curl -s -D - -o /dev/null -u "$AUTH" "${TEST_URL}?fn=version")
+
+if echo "$HDRS" | grep -qi "^Transfer-Encoding: chunked"; then
+	pass "fn=version response is chunked"
+elif echo "$HDRS" | grep -qi "^Content-Length:"; then
+	pass "fn=version response carries a Content-Length"
+else
+	fail "fn=version response is framed" \
+		"neither Transfer-Encoding nor Content-Length -- the client must \
+wait out the idle timeout to learn the body ended"
+fi
+
+# =========================================================================
 # summary
 # =========================================================================
 echo ""

@@ -379,7 +379,15 @@ int testHandler(Session *session) {
   if ((rc = http_resp(session->httpc, 200)) < 0)
     goto quit;
   if ((rc = http_printf(session->httpc,
-                        "Content-Type: application/json\r\n\r\n")) < 0)
+                        "Content-Type: application/json\r\n")) < 0)
+    goto quit;
+  /* The blank line goes out on its own call, and that is load-bearing (#355):
+     httpd recognises the header terminator by shape -- httpprtv.c tests
+     len == 2 && "\r\n" -- and only then injects Transfer-Encoding: chunked.
+     Glued to the header above it, this response went out with no framing at
+     all while still announcing keep-alive, and every client waited out the
+     idle timeout for an EOF that told it the body had ended. */
+  if ((rc = http_printf(session->httpc, "\r\n")) < 0)
     goto quit;
 
   /* --- fn=listds ------------------------------------------------ */
@@ -1455,7 +1463,10 @@ int testWildcardHandler(Session *session) {
   if ((rc = http_resp(session->httpc, 200)) < 0)
     goto quit2;
   if ((rc = http_printf(session->httpc,
-                        "Content-Type: application/json\r\n\r\n")) < 0)
+                        "Content-Type: application/json\r\n")) < 0)
+    goto quit2;
+  /* separate call -- see the note at the dispatcher above (#355) */
+  if ((rc = http_printf(session->httpc, "\r\n")) < 0)
     goto quit2;
 
   rc = http_printf(session->httpc,

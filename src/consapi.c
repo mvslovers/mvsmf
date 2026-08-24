@@ -364,6 +364,36 @@ static int is_echo_line(const MTENTRY *e, const char *cmd_upper)
 	return memcmp(msg, cmd_upper, (size_t)cmdlen) == 0;
 }
 
+/* Does this message text read as a COMMAND rather than as a message? Used to
+ * find the end of a response block, where the command is somebody else's and
+ * its text is therefore unknown -- is_echo_line() cannot help.
+ *
+ * The test is the first token: an MVS message identifier carries a digit in it
+ * (IEE136I, HTTPD100I, $HASP395, RAKF0004, IGF991I) and an operator command
+ * does not (D T, F HTTPD,D P, P FTPD, V 500,ONLINE).
+ *
+ * It is a heuristic, and the honest statement of its cost is that it is only
+ * ever applied to lines the walk would otherwise take into the block -- our
+ * own source, or a blank one. Measured over a 317-entry live snapshot: every
+ * command-shaped line carrying our source was a command echo, and the only
+ * lines it misreads (IEFACTRT job accounting) carry a JOB source, which ends
+ * the block one test later anyway. An MLWTO continuation is excluded by the
+ * caller before this is reached; its first token is the message number and
+ * would read as a message regardless. */
+__asm__("\n&FUNC	SETC 'is_command_shaped'");
+static int is_command_shaped(const char *msg, int msglen)
+{
+	int i;
+
+	if (msglen <= 0) return 0;
+
+	/* EBCDIC keeps 0-9 contiguous, so the range test is safe here. */
+	for (i = 0; i < msglen && msg[i] != ' '; i++)
+		if (msg[i] >= '0' && msg[i] <= '9') return 0;
+
+	return 1;
+}
+
 __asm__("\n&FUNC	SETC 'correlate_once'");
 static int correlate_once(Session *session, const char *cmd_upper, char *out,
                           size_t outsz, unsigned skip, unsigned *total,
@@ -478,6 +508,36 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 				if (len - k >= (int)strlen(num) &&
 				    memcmp(&dat[k], num, strlen(num)) == 0)
 					cont = 1;
+			}
+
+			/* A COMMAND ECHO STARTS A NEW BLOCK, so ours ends at the first one
+			   carrying our source: everything after it -- its own reply lines
+			   included -- belongs to that command. Without this the block has
+			   no end at all and the walk runs to the end of the table, which
+			   is what a correct anchor exposed: the right block, then a later
+			   "D T" echo and the later reply appended to it (#214).
+
+			   A blank-source command is skipped instead of ending the block.
+			   It is nobody's evidence that a new block from OUR source has
+			   started, and it is not rare: JES2 writes SE '$HASP165 ... ENDED'
+			   on every job end that notifies a user, and a timer writes
+			   S ZTIMER, both with a blank source. Taking them was the
+			   "blank_src lines are accepted unconditionally" hole -- they came
+			   back as OUR response lines.
+
+			   "Command" is a shape, not a field. The MTENTRY header was read
+			   on 2026-08-24 for exactly this question and does not answer it:
+			   over 317 live entries mtentflg/mtenttag are uniformly
+			   0000/0001, for a "D T" echo and for the IEE136I that answers it
+			   alike, and mtentimm is an address that does not track the kind
+			   of entry. See is_command_shaped() for what is used instead and
+			   for what it costs. */
+			if (!cont && (has_src || blank_src) && len > MTT_MSG_OFF &&
+			    is_command_shaped(&dat[MTT_MSG_OFF],
+			                      rstrip_len(&dat[MTT_MSG_OFF],
+			                                 len - MTT_MSG_OFF))) {
+				if (has_src) break;
+				continue;
 			}
 
 			/* A differently attributed originator normally ends our block --

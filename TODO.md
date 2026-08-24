@@ -8,9 +8,11 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 **It carries nothing that is copied.** Where the reasoning already has an owner —
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
-*Last reconciled against the tracker: 2026-08-23, 20 issues open — nineteen
+*Last reconciled against the tracker: 2026-08-24, 19 issues open — eighteen
 entries below, because one of them pairs two issues. #245's doc half landed in
-PR #349; it stays open on its implement-vs-reject decision.*
+PR #349; it stays open on its implement-vs-reject decision. #214 closed on
+2026-08-24, which is why Tier 1 is short: it was the console campaign's
+largest piece.*
 
 ---
 
@@ -18,128 +20,30 @@ PR #349; it stays open on its implement-vs-reject decision.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #214 | serialization landed; collect half **reproduced** | a design decision, not a measurement |
-| 2 | #267 | latent; one word, activates ten paths | a read of `quit:` |
-| 3 | #336 | accepts the syntax, discards the operand | wire it or reject it |
-| 4 | #210 | client-visible, fix identified, local | nothing |
-| 5 | #251 | Optimistic Path stop pattern | nothing |
-| 6 | #209 | client-visible, cheap on 3.8j | nothing |
-| 7 | #245 | docs corrected; decision open | reader-vs-400 decision |
-| 8 | #326 | its trigger has fired | nothing |
-| 9 | #76 | the one externally reported defect | nothing |
-| 10 | #244 | the ordering constraint is the content | nothing |
-| 11 | #215 | latent, one place, every caller benefits | nothing |
-| 12 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 13 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
-| 14 | #234 | `type:research` | measuring the reference |
-| 15 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 16 | #345 | `type:research` | **a policy** — see *RAKF* |
-| 17 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
-| 18 | #291 | reclassified — hygiene, not stability | nothing |
-| 19 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
+| 1 | #267 | latent; one word, activates ten paths | a read of `quit:` |
+| 2 | #336 | accepts the syntax, discards the operand | wire it or reject it |
+| 3 | #210 | client-visible, fix identified, local | nothing |
+| 4 | #251 | Optimistic Path stop pattern | nothing |
+| 5 | #209 | client-visible, cheap on 3.8j | nothing |
+| 6 | #245 | docs corrected; decision open | reader-vs-400 decision |
+| 7 | #326 | its trigger has fired | nothing |
+| 8 | #76 | the one externally reported defect | nothing |
+| 9 | #244 | the ordering constraint is the content | nothing |
+| 10 | #215 | latent, one place, every caller benefits | nothing |
+| 11 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 12 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
+| 13 | #234 | `type:research` | measuring the reference |
+| 14 | #329 | `type:research` | **one measurement** — see *RAKF* |
+| 15 | #345 | `type:research` | **a policy** — see *RAKF* |
+| 16 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
+| 17 | #291 | reclassified — hygiene, not stability | nothing |
+| 18 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
 
 ---
 
 ## Tier 1 — now
 
-### 1 · #214 — concurrent issue-command requests pick up each other's lines
-
-*the worst live symptom: one client is served another client's data*
-
-Every worker shares one MTT source, so `has_src` cannot separate two concurrent
-requests. Second symptom, same cause: a `MODIFY` reply burns the whole
-`POLL_SECONDS` window because foreign lines keep the block's line count moving.
-
-**Reproduced and measured on 2026-08-23** — recipe, numbers and the raw MTT
-window are in the issue. Two background clients looping `F HTTPD,D P` against
-twelve foreground `D T`: **5/12 contaminated, up to 30 foreign lines, 2.39 s
-against a 0.39 s baseline**. Both symptoms are one mechanism — the worst
-contaminated response is also the slowest.
-
-**Serialization landed 2026-08-23** (branch
-`issue-214-serialize-console-correlation`): one command block open at a time,
-the bracket spanning MGCR through convergence, writers only — async and
-`/zosmf/test?fn=cmd` included — with a conditional `trylock()` from
-`cliblock.h`, a 429 when the budget is spent, and a DEQ in `session_cleanup()`
-because the router's ESTAE recovers the worker rather than ending its task.
-**Measured 0/12 contaminated against 5/12 before**, console suite 65/65.
-
-**Two of the three planned parts did not land, and the reason is worth more than
-the code would have been.** Both attempts at closing the stale-echo race
-measured *worse on target* than the race:
-
-- by issue timestamp — MTT entries carry `hh.mm.ss` and back-to-back requests
-  land in the same second routinely, so "oldest match at or after our second"
-  resolved to the **previous** command's echo;
-- by a match count taken under the lock before SVC 34 — **a count over a
-  wrapping window, which is #195's design error rebuilt**. After a burst of one
-  command its oldest echoes sit at the aging edge, each new entry evicts one as
-  ours is added, the count never grows, and every capture returns empty. `D T`
-  came back empty at 3.1 s while `D M`, same code path with its matches at the
-  young end, was correct three times running.
-
-What both needed is a **position**, and the MTT has none that survives a
-snapshot. That is the open problem, and it is also what blocks the echo-stop:
-recognising a later command echo has no field to do it with, and the obvious
-heuristic (an echo carries no message identifier) was tested against 407 real
-lines and fails — `IEFACTRT` and `SE '...'` carry none either.
-
-So what is left on this ticket is the **collect half**, and it is no longer
-waiting on a reproduction — PR #350 carries one
-(`tests/repro-214-collect.sh`, standalone, exit 1 = reproduced, 2/2 on two
-runs). **It needs no concurrency**, which is the finding: one client issuing
-two commands is enough, because collect re-correlates on every poll instead of
-resuming. Two `D T` five seconds apart, and the first key comes back with the
-second command's reply — provable because `IEE136I` carries the time and the
-hardcopy log holds both blocks.
-
-**It is also wider than this entry said.** The anchor is `strstr()`, not an
-equality test, so any later command whose echo merely *contains* the stored
-text takes it: a cursor for `D A` returned ten lines of a subsequent `D A,L`.
-Narrowing that match is independent of the anchor question and looks like the
-cheapest piece here.
-
-And once mis-anchored the cursor writes the foreign block's count back
-(`cur.delivered = total`, watched 10 → 5), after which that key answers empty
-for good — so a polling client reads "complete" having received the wrong block
-or nothing.
-
-**One reading recorded above needs re-testing rather than inheriting.** Both
-refuted anchor attempts were on the *sync capture*, where the failure is that
-our own echo may not be in the table yet. At collect time it certainly is, and
-collect is not racing its arrival, so that verdict does not obviously transfer.
-`SOL_CURSOR.issue_tod` is stamped at issue (`consapi.c:823`) and never read by
-collect; `correlate_once()` already computes `echo_secs`. Hypothesis only — it
-resolves both experiments on paper, the residual (two matches inside one
-second, an echo aged out) is unmeasured, and that measurement is the next step.
-
-**Two of the issue's three directions are refuted by that data, including its
-preferred one.** MVS interleaves the MTT *line by line*, not block by block: a
-foreign echo lands between our echo and our own reply, in the same second. So a
-time bound cannot cut it (the MTT is second-granular), and echo-stopping either
-loses our own reply or — in the obvious `line_idx == 0` repair — still appends
-the foreign reply lines, which share our source. **Serializing is the only one
-of the three left standing**, and the decision to take is whether its cost is
-acceptable: the lock must span MGCR through convergence, so the 2.1–3.1 s poll
-window becomes the throughput ceiling, and it reduces rather than eliminates —
-httpd's own WTOs carry the same source and still land inside an open block.
-
-**Do not gate that decision on reading the MTT entry header.** `mtenttag` /
-`mtentimm` have never been looked at, but `issue_command()` leaves the SVC 34
-buffer's bytes 2–3 zero for every worker, so any caller identity MVS records
-reads identically for two workers in one address space. Worth a probe run for
-the record; it is not a blocker.
-
-**Two further defects on the same path, neither addressed by any of the three
-options** — fold them into whatever fix lands. `correlate_once()` anchors on the
-*newest* `strstr` match over the whole table, and `consoleCollectHandler()`
-re-anchors on every poll, so `cur.delivered` is counted against a block that may
-have moved (`SOL_CURSOR.issue_tod` is stored, unused, and its comment already
-says "reserved: re-issue disamb."). And #174's `d <= 1` adoption window does not
-merely append a stray line under concurrency — it **redirects the whole block**
-to another address space, which is strictly worse than the reported symptom.
-
-### 2 · #267 — `unsigned rc` makes every send-error check dead code
+### 1 · #267 — `unsigned rc` makes every send-error check dead code
 
 `dsapi.c:1251` and `:2294`. A client that disconnects mid-listing has the whole
 remaining directory written after it.
@@ -150,7 +54,7 @@ in that light before flipping it. `member_scan()` (#265) is the only place in th
 member listing that detects a write failure today, and is the worked example.
 Grep the other handlers in the same pass — the declaration is copied around.
 
-### 3 · #336 — `{volume-serial}` is captured and never used
+### 2 · #336 — `{volume-serial}` is captured and never used
 
 Seven routes accept `-(VOLSER)` and discard the operand; a request naming the
 wrong volume is answered as if it had named the right one. Ranked here because
@@ -164,7 +68,7 @@ worth taking even as an interim.
 
 ## Tier 2 — cheap and client-visible
 
-### 4 · #210 — the submit response returns `owner:""`
+### 3 · #210 — the submit response returns `owner:""`
 
 A race, not a divergent path — and therefore **not fixable by asking libc370
 earlier**: `JCTUSEID` is unwritten and the internal text is not on the spool yet.
@@ -172,21 +76,21 @@ mvsMF already knows the answer, because `process_jobcard()` injected `USER=`.
 Fall back to that. Check the purge handler (`jobsapi.c:363,375`) for the same
 emptiness, and make `tests/curl-jobs.sh` assert the value, not the key.
 
-### 5 · #251 — console log answers 200 with an empty body on allocation failure
+### 4 · #251 — console log answers 200 with an empty body on allocation failure
 
 `consapi.c:1100` collapses a NULL `cmtt_new()` into `n = 0`. The MTT copy is the
 largest allocation on that path — the one most likely to fail exactly when a
 silent empty answer misleads most. The sibling `malloc()` three lines below
 already returns 500. Textbook **Optimistic Path**; check `:266` and `:457` too.
 
-### 6 · #209 — `exec-system` and `exec-member` are never emitted
+### 5 · #209 — `exec-system` and `exec-member` are never emitted
 
 3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
 libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
 (`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
 the code.
 
-### 7 · #245 — `X-IBM-Data-Type: record` cannot be written back
+### 6 · #245 — `X-IBM-Data-Type: record` cannot be written back
 
 The read path length-prefixes each record; the write path sends `record` down the
 *text* loop, so the four bytes read back as a length are a length only by accident.
@@ -200,7 +104,7 @@ What is left is the choice: a length-prefixed reader (mind a prefix split
 across a chunk boundary, and `record_content_max()`), or a 400. Nothing
 misleads a client in the meantime.
 
-### 8 · #326 — five sources missing from the CLAUDE.md list
+### 7 · #326 — five sources missing from the CLAUDE.md list
 
 `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
 "next time `CLAUDE.md` is touched", so fold it into the next edit of that file
@@ -211,7 +115,7 @@ which is how the list drifted in the first place.
 
 ## Tier 3 — correctness, needs care
 
-### 9 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
+### 8 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
 
 *the only defect on this list someone outside the project reported*
 
@@ -225,7 +129,7 @@ is observed, reported from outside, and blocking a real workflow; #244 is curren
 harmless and #215 has never been seen at all. What holds it out of Tier 1 is that
 `ufsd-utils upload` does the job today — a workaround, not an absence of impact.
 
-### 10 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
+### 9 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
 
 **The ordering constraint is the whole content of this ticket.** The broken mask
 is the only thing keeping `write_record()`'s manual RDW dormant, and that RDW is
@@ -236,7 +140,7 @@ alone ships **two** RDWs. Remove the manual RDW first, then fix the mask. Drop
 The regression test wants a **VB** data set written binary and read back with
 lengths checked — `curl-binary.sh` uses FB, which is why this survived.
 
-### 11 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 10 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -246,7 +150,7 @@ Honest scope, per the issue: **no observed failure**. #212 fixed this locally in
 The subtlety from #212, easy to lose: `http_printf()` translates on the way out,
 so the printability test applies to the **translated** byte, via `xlate_cp037`.
 
-### 12 · #257 + #335 — early 4xx on a PUT with a body still in flight
+### 11 · #257 + #335 — early 4xx on a PUT with a body still in flight
 
 **One class, two tickets — rank and fix them together.** Every early return in the
 PUT handlers answers before draining the announced body (`dsapi.c:1156, 1180,
@@ -263,7 +167,7 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 13 · #347 — restconsoles authorizes nothing at all
+### 12 · #347 — restconsoles authorizes nothing at all
 
 *an authenticated user can stop the system*
 
@@ -275,8 +179,9 @@ task. `GET /restconsoles/v1/log` separately returns the whole Master Trace Table
 to anyone. Neither latent nor intermittent: it is what the shipped endpoint does
 today.
 
-Ranked 1 because this file orders by impact on running systems. #214 hands a
-client a wrong answer; this hands it the machine.
+Ranked at the top of its tier because this file orders by impact on running
+systems: #214, now closed, handed a client a wrong answer; this hands it the
+machine.
 
 **It is #345's twin, and the hope that it was not has been measured and is
 gone.** The first version of this entry claimed a native MVS mechanism needing no
@@ -300,7 +205,7 @@ reaching for the obvious: a display-only allow-list **breaks a real workflow** �
 `P FTPD` / `S FTPD` are group-1 (SYS) commands and are in use today (#346's
 transcript). Decide with #345 and `ftpd#90`.
 
-### 14 · #234 — what should the API do with non-ASCII input?
+### 13 · #234 — what should the API do with non-ASCII input?
 
 Byte-wise through CP037 with no UTF-8 decoding — and **invisible through the API**,
 because `etoa` inverts `atoe`, so only ISPF and the program reading the member see
@@ -313,7 +218,7 @@ Research because the policy is the hard part. Measure the reference first
 `xmit370`'s split between well-formed UTF-8 and Latin-1 is worth borrowing. Decide
 GET and PUT together; a reject changes the round-trip property.
 
-### 15 · #329 — dataset create is authorized only by the ambient ACEE
+### 14 · #329 — dataset create is authorized only by the ambient ACEE
 
 **The endpoint is not unauthorized and the response shape is settled** (#315,
 #317): RAKF refuses the allocation and the refusal must stay indistinguishable
@@ -324,7 +229,7 @@ open is only **which identity decides** — SVC 99 runs under whatever sits in
 The cheap unblocked step is a measurement, and it decides whether the fix exists
 at all: what does RACHECK answer for a name with no catalog entry and no DSCB?
 
-### 16 · #345 — restjobs has no authorization model
+### 15 · #345 — restjobs has no authorization model
 
 `grep -c 'http_check_auth\|require_access' src/jobsapi.c` → **0**, against 25 in
 `dsapi.c`. `owner=*` switches the default off, and the four by-jobid paths —
@@ -338,7 +243,7 @@ Whatever refusal is chosen must keep #229's constraint: "not yours" must not be
 distinguishable from "does not exist". Establish `jescanj()`'s own behaviour on a
 foreign purge, on a throwaway job. Decide together with `mvslovers/ftpd#90`.
 
-### 17 · #195 — detections intermittently report `waiting` for a message that was emitted
+### 16 · #195 — detections intermittently report `waiting` for a message that was emitted
 
 **Split out of #214 on 2026-08-23: they are not the same bug.** Structural, no
 measurement needed — `detect_count()` never reads `MTT_SRC_OFF`, never anchors an
@@ -372,7 +277,7 @@ truncating the snapshot.
 
 ## Tier 5 — larger work
 
-### 18 · #291 — large bodies fully buffered, twice on submit
+### 17 · #291 — large bodies fully buffered, twice on submit
 
 **Reclassify: memory hygiene, not stability.** Its motivation — stopping long-held
 requests acting as the anvil for httpd#195's fragmentation — is gone: #287 closed,
@@ -386,7 +291,7 @@ holds 2 MB. Cheapest item, and independent of the streaming work.
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
 
-### 19 · #186 — console log: deep history beyond the MTT window
+### 18 · #186 — console log: deep history beyond the MTT window
 
 **No longer blocked — the issue text says it is, and that is out of date.** Its
 hard dependency `libc370#21` is **closed and verified on target** (PR#31,
@@ -451,6 +356,21 @@ policy vacuum.
 
 Pointers only — the reasoning lives in the closing comments.
 
+- **#214** — the console correlation. Closed on 2026-08-24 in three landings:
+  the serialization (PR #348), the reproduction of the collect half (PR #350)
+  and the fix (PR #351). The transferable parts, none of them about locks:
+  a correct anchor made a *missing* block end visible — the first key came back
+  with its own reply followed by the next command's, so the two halves had to
+  land together; the field that would have made the block end exact does not
+  exist, and that is now measured rather than assumed (`mtentflg`/`mtenttag`
+  read uniform `0000`/`0001` over 317 entries, echo and reply alike, via the
+  `fn=mtt&hdr=1` the PR adds); and what replaced it — an MVS message id carries
+  a digit in its first token, a command does not — is a heuristic held safe by
+  *where* it is applied, only to lines the walk would otherwise swallow. The
+  residual limits are in `docs/endpoints/console/collect.md`, promoted from
+  open work to documented behaviour: same-second identical commands, an echo
+  aged out of the window, and the sync-capture race that two measured attempts
+  failed to close.
 - **#346** — the sync console capture converging on 0.3 s of quiet. Closed on
   measurement, not on code: `P FTPD --wait-to-collect 5` returns all four lines
   where the plain call returns one, so the completion path already worked and
@@ -477,15 +397,15 @@ Pointers only — the reasoning lives in the closing comments.
 
 ## Campaigns, not twenty tickets
 
-- **Console correctness** — #214, #251 and #195, with #346 now closed out of
-  it. One subsystem and one reading of `consapi.c`, but **four separate bugs**.
-  #214 and #195 were ranked together on the guess that #195 might not survive
-  the first measurement of #214, and that premise is dead — see #195's entry.
-  #214 and #346 were the two halves of "MVS gives no end-of-response signal, so
-  both ends of the block are guessed", failing in opposite directions from
-  opposite preconditions; #346's half proved to be by design and closed as
-  documentation plus a test, which leaves #214 holding that pair alone. #251 is
-  independent of all three.
+- **Console correctness** — **#251 and #195 are what is left**, with #346 and
+  #214 both closed out of it. One subsystem and one reading of `consapi.c`, but
+  four separate bugs, and the two that closed were the two that shared a
+  premise: "MVS gives no end-of-response signal, so both ends of the block are
+  guessed". #346 was the *end* guessed too early (by design, closed as
+  documentation plus a test); #214 was the *start* guessed wrong and then no end
+  guessed at all. #195 was ranked with #214 on the guess that it might not
+  survive #214's first measurement, and that premise died before #214 did — see
+  #195's entry. #251 was always independent of all three.
 - **The endpoint advertises what it does not do** — #245 and #336, with #248 as
   the worked example of how it ends. **#245's doc half is done**, which is the
   campaign's proof that the cheap half is worth taking alone: the mode is still

@@ -8,7 +8,7 @@ type = "application"
 # deliberately keeps floating on main so a cc370/libc370 regression surfaces
 # in a PR build (mbt#68). cc370 is omitted -- it defaults to main and has no
 # releases to pin to yet.
-libc370 = "1.0.2"
+libc370 = "1.0.3"
 
 [build]
 # infoapi.c reports the project version via a VERSION string macro. v1's mbt
@@ -17,7 +17,7 @@ libc370 = "1.0.2"
 cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 [dependencies]
-"mvslovers/httpd" = ">=4.0.0-dev"
+"mvslovers/httpd" = ">=4.0.0"
 "mvslovers/ufsd" = ">=1.2.0"
 
 # Single load module: a CGI program that runs under httpd.  It includes its

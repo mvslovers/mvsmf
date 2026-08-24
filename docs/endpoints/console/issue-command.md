@@ -168,8 +168,10 @@ Two things it does **not** cover, both by construction:
   OPER, an automation task. Those cannot be locked against, and their lines can
   still end or contaminate a block.
 - **`collect`**, which re-correlates long afterwards and outside the lock. It
-  still anchors on the newest matching entry and can walk past the end of its own
-  block. Tracked in #214.
+  needs no lock: since #214 it asks the table for the echo it was handed out for,
+  by the second recorded at issue, rather than for whatever matches now. What it
+  still shares with the issuing path is the block *walk* — a foreign line
+  carrying our source, or a blank source, is taken into the block here too.
 
 On an httpd without the `cgictx` service there is no context to lock on and
 requests proceed **unserialized** — the same graceful degradation the cursor
@@ -177,7 +179,13 @@ store makes.
 
 ### How the response block is identified
 
-The newest MTT entry containing the command text is the **echo**.
+The **echo** is an MTT entry whose message text *is* the command — an exact
+match after trailing blanks, not a substring. That distinction is load-bearing:
+`strstr` over the formatted line also matches ordinary reply text (a `D A` cursor
+matches `RAKF0004 INVALI`**`D A`**`TTEMPT TO ACCESS SYSTEM`, measured) and any
+later command containing it (`D A,L`), and the search takes the newest match. At
+issue time the newest echo is taken; `collect` takes the one carrying the second
+recorded in its cursor (see [Collect](collect.md)).
 
 **Known race, not closed:** the first poll runs immediately after SVC 34, before
 the echo is guaranteed to be in the table, so a *previous* identical command
@@ -189,11 +197,31 @@ the previous command's echo), and by a match count taken before issuing (a count
 over a *wrapping* window — after any burst of one command its oldest echoes sit
 at the aging edge, each new entry evicts one as ours is added, the count never
 grows, and every capture returns empty). Closing it needs a stable position in
-the MTT, and there is none across snapshots. Tracked in #214. Its source
-field (`"STC  nnn"`) seeds the block, and following entries are kept while they
-carry that source, a blank source (an MLWTO header such as `IEE102I`), or a
-matching MLWTO continuation number. A differently attributed originator ends the
-block.
+the MTT, and there is none across snapshots. Tracked in #214.
+
+The echo's source field (`"STC  nnn"`) seeds the block, and following entries are
+kept while they carry that source, a blank source (an MLWTO header such as
+`IEE102I`), or a matching MLWTO continuation number. **Two things end the block:**
+a differently attributed originator, and **the next command echo carrying our own
+source** — a command echo starts a new block, so everything from it on, its reply
+lines included, belongs to that command. A command with a *blank* source (JES2's
+`SE '$HASP165 … ENDED'` on every job end that notifies a user, a timer's
+`S ZTIMER`) is skipped rather than ending the block: it is no evidence that a new
+block from our source has started, and taking it returned it as one of *our*
+response lines.
+
+"Command" here is a shape, not a field, and the field was looked for first: the
+`MTENTRY` header `IEEZB806` documents as *flags set by caller* / *identifies
+caller* (`mtentflg`, `mtenttag`, `mtentimm`) was read on this system for exactly
+this question and does not separate an echo from a message — over 317 live entries
+every one reads `0000` / `0001`, a `D T` echo and the `IEE136I` answering it
+alike. What is used instead is the first token: an MVS message id carries a digit
+(`IEE136I`, `$HASP395`, `RAKF0004`), an operator command does not (`D T`,
+`P FTPD`, `V 500,ONLINE`). It is applied only to lines the walk would otherwise
+take into the block, which is what bounds the cost of it being a heuristic —
+`IEFACTRT` job accounting reads as command-shaped but carries a JOB source and
+ends the block one test later anyway. `/zosmf/test?fn=mtt&hdr=1` dumps the header
+if the question ever comes back.
 
 **A command routed to another address space is the exception.** The echo carries
 the *issuer's* source — mvsMF's own worker — while the reply to `F <stc>,...` is

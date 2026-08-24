@@ -617,10 +617,25 @@ int testHandler(Session *session) {
     }
 
     if (step >= 3 && arr) {
+      /* &hdr=1 prefixes each line with the MTENTRY header nobody had read:
+       * mtentflg (FLGS SET BY CALLER) / mtenttag (IDENTIFIES CALLER) /
+       * mtentimm (CALLER'S IMMEDIATE DATA), per IEEZB806. The question it
+       * exists for is whether a command echo can be told from a WTO without
+       * guessing at the text (#214). */
+      char *hdrv =
+          (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_HDR");
+      int hdr = hdrv ? atoi(hdrv) : 0;
+
       for (i = 0; i < n; i++) {
         MTENTRY *e = arr[i];
         if (!e)
           continue;
+        if (hdr) {
+          const unsigned char *h = (const unsigned char *)e->mtenthdr;
+          http_printf(session->httpc,
+                      "%02X%02X %02X%02X %02X%02X%02X%02X %04d |", h[0], h[1],
+                      h[2], h[3], h[4], h[5], h[6], h[7], (int)e->mtentlen);
+        }
         http_printf(session->httpc, "%-*.*s\r\n", (int)e->mtentlen,
                     (int)e->mtentlen, e->mtentdat);
       }

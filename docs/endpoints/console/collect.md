@@ -38,6 +38,13 @@ but "the echo carrying the second this key was issued in", so a later command �
 another client's, or an operator's at a console — no longer moves the anchor.
 The lock taken by the issuing path does not reach here and does not need to.
 
+The block also **ends** now, at the next command echo carrying the same source
+(see [Issue Command](issue-command.md#how-the-response-block-is-identified)).
+Both halves are needed and neither is sufficient: with the old anchor, a correct
+end still walked the wrong block; with a correct anchor and no end, collect
+returned its own block and then every later line the address space wrote —
+measured, a `D T` key answering with its own reply *and* the next `D T`'s.
+
 Three limits follow from the MTT itself and are worth knowing before automating
 against this:
 

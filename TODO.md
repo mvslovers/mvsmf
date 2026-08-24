@@ -349,6 +349,18 @@ policy vacuum.
 
 Pointers only — the reasoning lives in the closing comments.
 
+- **#355** — `/zosmf/test` answered with no framing at all: no
+  `Content-Length`, no `Transfer-Encoding`, and `Connection: keep-alive`
+  anyway, so every call cost about 5 s waiting for the socket to close. Opened
+  and closed the same hour in PR #356, found while verifying #267 — the 5 s
+  reading looked at first like a server the abort probe had damaged. Two things
+  worth carrying: the trigger is a **shape**, `httpprtv.c` injects chunked only
+  when the blank line arrives as its own `http_printf()` (`len == 2`), so
+  gluing it to the `Content-Type` header disables framing silently — httprexx
+  and httplua write headers under the same httpd, and the same mistake is
+  available there. And the test asserts the *header*, never the elapsed time: a
+  timing assertion goes green on any stand with a short idle timeout, which is
+  how this survived being measured at all.
 - **#267** — `unsigned rc` in the two data set list handlers, closed together
   with **#353** in PR #354. The transferable part is the sweep that found the
   second one: cc370 is GCC 3.4.6, where the tautological-comparison warning

@@ -263,6 +263,12 @@ One thing is already settled from code: `unsol_base` is snapshotted **after**
 reply. `tests/curl-console.sh` asserts the opposite in a comment; the assertion
 passes for the wrong reason and wants correcting either way.
 
+**A provocation recipe fell out of #214's verification and is in the issue:** the
+two `detections` assertions failed in the one console-suite run that carried the
+most MTT traffic (`P FTPD` + `S FTPD`) and passed in three quiet runs against the
+same module. That favours the aging-out branch below over the torn-`memcpy` one,
+and it says when to run the discriminator — while a started task stops and starts.
+
 The discriminator is two back-to-back `cmtt_new()` snapshots with no traffic
 between: equal `n` with the oldest timestamp advancing under load means entries
 aging out of the window between baseline and poll — a `D T` cluster leaving it
@@ -356,9 +362,12 @@ policy vacuum.
 
 Pointers only — the reasoning lives in the closing comments.
 
-- **#214** — the console correlation. Closed on 2026-08-24 in three landings:
-  the serialization (PR #348), the reproduction of the collect half (PR #350)
-  and the fix (PR #351). The transferable parts, none of them about locks:
+- **#214** — the console correlation. Closed on 2026-08-24 in four landings:
+  the serialization (PR #348), the reproduction of the collect half (PR #350),
+  the fix (PR #351) and one narrowing found by review rather than by
+  measurement (PR #352 — the block end must test the *issuer's* source, or a
+  MODIFY target answering without a message id is truncated mid-reply; UFSD
+  answers `UFSD010I`… so no test on this stand could have caught it). The transferable parts, none of them about locks:
   a correct anchor made a *missing* block end visible — the first key came back
   with its own reply followed by the next command's, so the two halves had to
   land together; the field that would have made the block end exact does not

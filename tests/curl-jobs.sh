@@ -385,6 +385,47 @@ test_submit_notify_sysuid_trailing_param() {
 	fi
 }
 
+test_submit_padded_null_statement() {
+	echo ""
+	echo "--- Submit Job: blank-padded null statement in the deck (issue #353) ---"
+
+	# get_operation() right-trimmed with `for (i--; i >= 0; i--)` on a size_t, so
+	# an empty operation field wrapped i to SIZE_MAX and the trim wrote below its
+	# own five-byte buffer, zeroing every blank it met in the caller's frame. A
+	# "//" card padded to column 80 is exactly that case -- and it is what a fixed
+	# RECFM=F deck looks like, so it ran on ordinary submits, this suite's own #130
+	# test included. The corruption is silent, so this is a regression guard rather
+	# than a reproduction: it asserts the deck still parses and the job card is
+	# still found, which a lost card would answer 400.
+	local jcl
+	jcl=$(printf '%-80s\n%-80s\n%-80s\n' \
+		'//NULLST   JOB CLASS=A,MSGCLASS=H' \
+		'//STEP1    EXEC PGM=IEFBR14' \
+		'//')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		-H "X-IBM-Intrdr-Mode: TEXT" \
+		-H "X-IBM-Intrdr-Lrecl: 80" \
+		-H "X-IBM-Intrdr-Recfm: F" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit deck with padded null statement"
+	assert_json_field "$BODY" '.jobname' "NULLST" "job card found despite padded null statement"
+
+	# Purge this job to avoid clutter
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" != "null" ] && [ "$ji" != "null" ]; then
+		wait_for_output "$jn" "$ji" || true
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+	fi
+}
+
 test_submit_without_notify_gets_retcode() {
 	echo ""
 	echo "--- Submit Job: card without NOTIFY still reports a retcode (issue #307) ---"
@@ -1577,6 +1618,7 @@ fi
 test_submit_inline_jcl
 test_submit_inline_jcl_with_intrdr_headers
 test_submit_notify_sysuid_trailing_param
+test_submit_padded_null_statement
 test_submit_without_notify_gets_retcode
 test_submit_literal_notify_not_duplicated
 test_submit_notify_inside_programmer_name

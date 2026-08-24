@@ -357,10 +357,15 @@ Pointers only — the reasoning lives in the closing comments.
   tree — `get_operation()`'s right trim, which was not dead but *writing*, one
   byte below its own stack array, on any deck ending in a blank-padded `//`.
   Cheap to repeat; budget for filtering the 61 other `-Wextra` warnings.
-  What could not be shown is the fix working on the wire: the largest listing
-  on mvsdev is 45 KB against roughly 58 KB of Hercules buffering, so an aborted
-  client's RST always lands after the last byte has gone to the stack — the
-  ceiling #298 met from the other side.
+  What could not be shown is the fix working on the wire, and the reason is
+  narrower than it first looked: the failure path *is* reached — an aborted
+  client's RST lands within milliseconds, and a `send()` on a reset connection
+  fails however much room the host-side buffer has, which is what separates
+  this from the `rc == 0` stall #298 measured as unreachable here. What is
+  missing is an observable: nothing on the client side tells a handler that
+  stopped at the first failed write from one that wrote the rest into a dead
+  socket, and 3.8j offers no CPU counter to weigh them (`D A,L` carries none).
+  A measurement gap, not an unreachable branch.
 - **#214** — the console correlation. Closed on 2026-08-24 in four landings:
   the serialization (PR #348), the reproduction of the collect half (PR #350),
   the fix (PR #351) and one narrowing found by review rather than by

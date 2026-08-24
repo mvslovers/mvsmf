@@ -298,10 +298,18 @@ quit:
 
 /* Per-key cursor, stored opaquely in the kv-store value (the store never reads
  * it).  The cursor is a delivered-LINE COUNT, not a timestamp: the MTT has no
- * stable per-line sequence and its hh.mm.ss is second-granular. */
+ * stable per-line sequence and its hh.mm.ss is second-granular.
+ *
+ * echo_secs is what keeps a cursor pointed at ONE block (#214): the MTT's own
+ * recorded second for the echo this cursor was created from -- read out of the
+ * table at issue time, not converted from a clock -- so collect can ask for
+ * that entry again instead of taking whatever matches now. -1 means the echo
+ * had not landed before the sync capture gave up; collect then falls back to
+ * the newest echo, which is where a slow reply is still reachable. */
 typedef struct sol_cursor {
 	unsigned long long  issue_tod;   /* STCK at issue (opaque response key)        */
 	unsigned            delivered;   /* # response lines already delivered         */
+	int                 echo_secs;   /* MTT hh.mm.ss of OUR echo; -1 = never seen  */
 	unsigned char       cmdlen;
 	char                cmd[126];    /* uppercased command, for MTT re-correlation  */
 } SOL_CURSOR;
@@ -332,9 +340,34 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 /* ------------------------------------------------------------------ */
 static int mtt_secs_of_day(const char *dat, int len);
 
+/* Is this entry the ECHO of cmd_upper -- is its message text exactly the
+ * command, rather than merely containing it?
+ *
+ * The predicate used to be strstr() over the whole formatted line, which
+ * matches far more than a later echo of the same command. Measured on mvsdev:
+ * a cursor for "D A" matches "RAKF0004 INVALI(D A)TTEMPT TO ACCESS SYSTEM",
+ * an ordinary reply line from another address space -- and the search takes
+ * the NEWEST match, so any such line steals the anchor. */
+__asm__("\n&FUNC	SETC 'is_echo_line'");
+static int is_echo_line(const MTENTRY *e, const char *cmd_upper)
+{
+	int len = mtt_len(e);
+	const char *msg;
+	int msglen, cmdlen;
+
+	if (len <= MTT_MSG_OFF) return 0;
+	msg = &e->mtentdat[MTT_MSG_OFF];
+	msglen = rstrip_len(msg, len - MTT_MSG_OFF);
+	cmdlen = rstrip_len(cmd_upper, (int)strlen(cmd_upper));
+	if (msglen <= 0 || msglen != cmdlen) return 0;
+
+	return memcmp(msg, cmd_upper, (size_t)cmdlen) == 0;
+}
+
 __asm__("\n&FUNC	SETC 'correlate_once'");
 static int correlate_once(Session *session, const char *cmd_upper, char *out,
-                          size_t outsz, unsigned skip, unsigned *total)
+                          size_t outsz, unsigned skip, unsigned *total,
+                          int want_secs, int *echo_secs_out)
 {
 	CMTT *cmtt = cmtt_new();
 	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
@@ -350,13 +383,30 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	int adopted = 0;	/* the block's source was taken from the target  */
 
 	out[0] = '\0';
+	/* set on EVERY path: a later poll that finds no echo must not leave an
+	 * earlier poll's second standing in the caller's variable. */
+	if (echo_secs_out) *echo_secs_out = -1;
 
-	/* find OUR echo: newest entry whose text contains the command.
+	/* find OUR echo. want_secs picks between the two callers:
+	 *
+	 *   < 0   the newest echo of this command -- issue time, where ours is the
+	 *         newest by construction and no cursor exists yet to say otherwise.
+	 *   >= 0  the oldest echo carrying THAT MTT second -- collect time, where
+	 *         the cursor knows which block it was handed out for (#214). A
+	 *         later echo of the same command no longer takes the anchor, and
+	 *         when our own echo has aged out of the window nothing matches:
+	 *         collect answers empty ("done"), which is the honest answer and
+	 *         not a foreign block. Equality, not "at or after", so there is no
+	 *         midnight roll to get wrong -- an entry stamped 23.59.59 still
+	 *         reads 23.59.59 when collect runs at 00.00.05.
 	 *
 	 * Known race, NOT fixed here (#214): the first poll runs immediately after
 	 * MGCR, before the echo is guaranteed to be in the table, so a previous
 	 * identical command still in the window can be anchored on -- converging on
-	 * its stale block and returning the PREVIOUS response.
+	 * its stale block and returning the PREVIOUS response. Narrowing the match
+	 * to an echo does not close this: a previous identical command's echo is an
+	 * echo too. Same-second issue is the floor under want_secs for the same
+	 * reason.
 	 *
 	 * Two closures were tried on target and both measured worse than the race:
 	 *
@@ -375,15 +425,21 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	 *
 	 * What this needs is a position, and the MTT offers no stable one across
 	 * snapshots. Leave the race until there is a reproduction for it. */
-	for (i = n; i > 0; i--) {
-		MTENTRY *e = arr[i - 1];
-		char tmp[160];
-		int len = mtt_len(e);
-		if (!e) continue;
-		if (len > (int)sizeof(tmp) - 1) len = sizeof(tmp) - 1;
-		memcpy(tmp, e->mtentdat, len);
-		tmp[len] = '\0';
-		if (strstr(tmp, cmd_upper)) { ei = (int)(i - 1); break; }
+	if (want_secs < 0) {
+		for (i = n; i > 0; i--) {
+			MTENTRY *e = arr[i - 1];
+			if (!e) continue;
+			if (is_echo_line(e, cmd_upper)) { ei = (int)(i - 1); break; }
+		}
+	} else {
+		for (i = 0; i < n; i++) {
+			MTENTRY *e = arr[i];
+			if (!e) continue;
+			if (!is_echo_line(e, cmd_upper)) continue;
+			if (mtt_secs_of_day(e->mtentdat, mtt_len(e)) != want_secs) continue;
+			ei = (int)i;
+			break;
+		}
 	}
 
 	if (ei >= 0) {
@@ -395,6 +451,7 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 		src[MTT_SRC_LEN] = '\0';
 
 		echo_secs = mtt_secs_of_day(ee->mtentdat, elen);
+		if (echo_secs_out) *echo_secs_out = echo_secs;
 
 		for (i = (unsigned)ei + 1; i < n; i++) {
 			MTENTRY *e = arr[i];
@@ -503,10 +560,13 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 }
 
 /* Issue-time sync capture: poll up to ~3 s and return the whole response block
- * in out; the return value is the number of lines it contains. */
+ * in out; the return value is the number of lines it contains. echo_secs_out
+ * receives the MTT second of the echo the LAST poll correlated -- the same poll
+ * the returned line count comes from, so the cursor stored from the two of them
+ * describes one block. */
 __asm__("\n&FUNC	SETC 'capture_response'");
 static int capture_response(Session *session, const char *cmd_upper, char *out,
-                            size_t outsz)
+                            size_t outsz, int *echo_secs_out)
 {
 	unsigned start = tod_hi();
 	int stable = 0;
@@ -515,7 +575,8 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 
 	for (;;) {
 		if (server_quiescing(session)) return CONS_POLL_INTERRUPTED;
-		correlate_once(session, cmd_upper, out, outsz, 0, &total);
+		correlate_once(session, cmd_upper, out, outsz, 0, &total, -1,
+		               echo_secs_out);
 		if (total > 0) {
 			if (total == prev_total) {
 				if (++stable >= 3) break;
@@ -616,6 +677,7 @@ int consoleIssueHandler(Session *session)
 	const char *host = getHeaderParam(session, "Host");
 	const char *scheme = getRequestScheme(session);
 	int cmdlen, cnlen, i, is_async, sol_detected = 0;
+	int echo_secs = -1;
 	unsigned delivered = 0;
 	unsigned long long issue_tod;
 
@@ -785,7 +847,8 @@ int consoleIssueHandler(Session *session)
 	resp[0] = '\0';
 
 	{
-		int captured = capture_response(session, cmd_upper, resp, RESP_CAP);
+		int captured = capture_response(session, cmd_upper, resp, RESP_CAP,
+		                                &echo_secs);
 
 		/* The block is closed as far as we can tell -- let the next command in
 		 * before the (possibly long) unsolicited-detection wait below, which
@@ -822,6 +885,7 @@ int consoleIssueHandler(Session *session)
 			memset(&cur, 0, sizeof(cur));
 			cur.issue_tod = issue_tod;
 			cur.delivered = delivered;
+			cur.echo_secs = echo_secs;
 			cur.cmdlen    = (unsigned char)cmdlen;
 			strncpy(cur.cmd, cmd_upper, sizeof(cur.cmd) - 1);
 			key_to_name(key, name);
@@ -987,9 +1051,17 @@ int consoleCollectHandler(Session *session)
 	}
 	resp[0] = '\0';
 
-	/* return only the lines beyond what we already delivered, then advance */
-	correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total);
-	cur.delivered = total;
+	/* return only the lines beyond what we already delivered, then advance.
+	 *
+	 * cur.echo_secs pins the block to the one this key was handed out for
+	 * (#214). The cursor advances only FORWARD: a block that is shorter than
+	 * what we already delivered is not ours to count against, and writing its
+	 * length back is what used to leave a key answering empty for good after a
+	 * mis-anchor (watched going 10 -> 5). The entry is rewritten either way, so
+	 * a polling client keeps it alive against the store's LRU and TTL. */
+	correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total,
+	               cur.echo_secs, (int *)0);
+	if (total > cur.delivered) cur.delivered = total;
 	nt_set(store, name, &cur, sizeof(cur));
 
 	rc = send_collect(session, resp);

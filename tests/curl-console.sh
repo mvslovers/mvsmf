@@ -287,6 +287,36 @@ CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$CODE" "collect bogus key"
 assert_json_field "$CBODY" '.["cmd-response"]' "" "collect bogus: empty"
 
+# ---- the anchor stays on the block the key was issued for (issue #214) ----
+#
+# A cursor for "D A", then an ordinary "D A,L" before the collect. The stored
+# text is a SUBSTRING of the later command's echo, which is how the anchor used
+# to move: the search took the newest MTT entry CONTAINING the command text, so
+# the "D A" key came back with the "D A,L" block.
+#
+# The discriminator is the content, not a line count: a plain "D A" answers a
+# four-line activity summary and never lists address spaces, so an IEFPROC line
+# can only have come from the "D A,L" block.  tests/repro-214-collect.sh is the
+# fuller version of this, including the same-command-twice case.
+RESP=$(issue '{"cmd":"D A","async":"Y"}')
+BODY=$(echo "$RESP" | sed '$d')
+KEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
+if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
+	sleep 2
+	issue '{"cmd":"D A,L"}' >/dev/null
+	sleep 1
+	CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	CRESP=$(echo "$CBODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null)
+	case "$CRESP" in
+		*IEFPROC*) fail "collect: the 'D A' key kept its own block" \
+		                "returned the 'D A,L' block (IEFPROC lines present)" ;;
+		*IEE102I*) pass "collect: the 'D A' key kept its own block" ;;
+		*)         skip "collect: the 'D A' key kept its own block (block no longer in the trace table)" ;;
+	esac
+else
+	fail "collect anchor: async 'D A' returned no cmd-response-key"
+fi
+
 # =========================================================================
 # 6. Unsolicited keyword detection
 # =========================================================================

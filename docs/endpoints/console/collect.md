@@ -31,21 +31,33 @@ point are here and nowhere else. `P FTPD` is the worked example: one line from
 the issue call, four once collect is polled. Zowe CLI drives exactly this loop
 for `--wait-to-collect <seconds>`.
 
-**It re-correlates rather than resuming, and that part is not deterministic.**
-Every call finds the block again by searching the MTT for the *newest* entry
-matching the stored command text, so the same command text issued again between
-issue and collect — by another client, or by an operator at a console — moves
-the anchor to the newer echo, and the delta is then counted against a block the
-key was not handed out for. #214's serialization does not cover this: that lock
-is held by the issuing path only, and collect runs long afterwards and outside
-it. Closing it needs a stable position in the MTT and there is none across
-snapshots — tracked in #214.
+**It re-correlates rather than resuming, and the cursor is what keeps that
+pointed at one block.** Every call finds the block again in the Master Trace
+Table. Since #214 the search is not "the newest entry matching the command text"
+but "the echo carrying the second this key was issued in", so a later command —
+another client's, or an operator's at a console — no longer moves the anchor.
+The lock taken by the issuing path does not reach here and does not need to.
+
+Three limits follow from the MTT itself and are worth knowing before automating
+against this:
+
+- **Two identical commands inside the same second are ambiguous.** The table
+  stamps `hh.mm.ss` and nothing finer, so both cursors resolve to the first of
+  the two echoes.
+- **An echo that has aged out of the trace-table window matches nothing**, and
+  collect then answers `""` — the same "done" a drained block gives. The lines
+  are gone from the table; a longer history is the hardcopy log's job.
+- **If the echo had not landed before the synchronous capture gave up** (a very
+  slow system: the capture polls ~3 s), the cursor has no second to match and
+  collect falls back to the newest echo of that command — which is how a
+  late-arriving reply is still reachable, and is the one case where a later
+  identical command can still take the anchor.
 
 ## Error Responses
 Console error body (`return-code`/`reason-code`/`reason`). A bogus or evicted key yields HTTP 200 with an empty `cmd-response`, not an error.
 
 ## Implementation (MVS 3.8j)
-Each collect re-correlates the original command in the **Master Trace Table (MTT)** (echo + jobid + command-text + MLWTO-number, same as [Issue Command](issue-command.md)) and returns only the lines beyond what was already delivered. The `cmd-response-key` indexes a **delivered-line-count cursor** in the per-CGI key/value store (`ntstore`, lazy-init in the httpd `cgictx`): the MTT has no stable per-line sequence and `hh.mm.ss` is only second-granular, so the cursor tracks a *count*, returning lines `[delivered .. total)` and advancing `delivered` to `total`. The cursor is subject to LRU + TTL eviction; after eviction a collect re-correlates from whatever is still in the trace table.
+Each collect re-correlates the original command in the **Master Trace Table (MTT)** (echo + jobid + command-text + MLWTO-number, same as [Issue Command](issue-command.md)) and returns only the lines beyond what was already delivered. The `cmd-response-key` indexes a cursor in the per-CGI key/value store (`ntstore`, lazy-init in the httpd `cgictx`) holding two things: the **delivered line count** and the **MTT second of the command's own echo**. The MTT has no stable per-line sequence, so the delta is a *count* — lines `[delivered .. total)` — and the second is what pins that count to one block. The count only ever moves forward: a block shorter than what was already delivered is not counted back down, which is what used to leave a mis-anchored key answering empty for good. The cursor is subject to LRU + TTL eviction; after eviction a collect re-correlates from whatever is still in the trace table.
 
 ## Examples
 

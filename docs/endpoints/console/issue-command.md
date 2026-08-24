@@ -168,8 +168,10 @@ Two things it does **not** cover, both by construction:
   OPER, an automation task. Those cannot be locked against, and their lines can
   still end or contaminate a block.
 - **`collect`**, which re-correlates long afterwards and outside the lock. It
-  still anchors on the newest matching entry and can walk past the end of its own
-  block. Tracked in #214.
+  needs no lock: since #214 it asks the table for the echo it was handed out for,
+  by the second recorded at issue, rather than for whatever matches now. What it
+  still shares with the issuing path is the block *walk* — a foreign line
+  carrying our source, or a blank source, is taken into the block here too.
 
 On an httpd without the `cgictx` service there is no context to lock on and
 requests proceed **unserialized** — the same graceful degradation the cursor
@@ -177,7 +179,13 @@ store makes.
 
 ### How the response block is identified
 
-The newest MTT entry containing the command text is the **echo**.
+The **echo** is an MTT entry whose message text *is* the command — an exact
+match after trailing blanks, not a substring. That distinction is load-bearing:
+`strstr` over the formatted line also matches ordinary reply text (a `D A` cursor
+matches `RAKF0004 INVALI`**`D A`**`TTEMPT TO ACCESS SYSTEM`, measured) and any
+later command containing it (`D A,L`), and the search takes the newest match. At
+issue time the newest echo is taken; `collect` takes the one carrying the second
+recorded in its cursor (see [Collect](collect.md)).
 
 **Known race, not closed:** the first poll runs immediately after SVC 34, before
 the echo is guaranteed to be in the table, so a *previous* identical command

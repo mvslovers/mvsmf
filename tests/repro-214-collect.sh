@@ -1,13 +1,17 @@
 #!/bin/bash
 # =========================================================================
-# Reproduction for issue #214, collect half.
+# Regression test for issue #214, collect half. Written as a reproduction
+# (2/2 on the build before the fix); it is kept as the test because the two
+# experiments below are the measurement the fix was designed against.
 #
-# consoleCollectHandler() re-correlates on every poll instead of resuming:
-# correlate_once() anchors on the NEWEST MTT entry whose text contains the
-# stored command, so a matching entry written after the key was handed out
-# takes the anchor away from the block the key belongs to. #214's
-# serialization does not reach this -- the lock is held by the issuing path
-# only, and collect runs long afterwards and outside it.
+# consoleCollectHandler() re-correlates on every poll instead of resuming.
+# It used to anchor on the NEWEST MTT entry whose text CONTAINED the stored
+# command, so a matching entry written after the key was handed out took the
+# anchor away from the block the key belongs to. The fix records the MTT
+# second of the command's own echo in the cursor and asks for that entry
+# again, and narrows the match from "contains" to "is" the command.
+# #214's serialization never reached this -- the lock is held by the issuing
+# path only, and collect runs long afterwards and outside it.
 #
 # This script does NOT need two clients. Both experiments are sequential.
 #
@@ -16,14 +20,17 @@
 #      used so the cursor starts at delivered=0 and collect must return the
 #      whole block. The hardcopy log supplies the expected time independently.
 #
-#   2. A cursor for "D A" against a later "D A,L". The anchor is a strstr(),
-#      not an equality test, so any later command whose echo CONTAINS the
-#      stored text takes the anchor -- a wider surface than "the same command
-#      issued twice", and "D A" then "D A,L" is an ordinary operator sequence.
+#   2. A cursor for "D A" against a later "D A,L". The old anchor was a
+#      strstr(), not an equality test, so any later command whose echo merely
+#      CONTAINED the stored text took it -- a wider surface than "the same
+#      command issued twice", and "D A" then "D A,L" is an ordinary operator
+#      sequence. (Wider still: strstr ran over the whole formatted line, so
+#      "RAKF0004 INVALID ATTEMPT TO ACCESS SYSTEM" matches a "D A" cursor.)
 #
 # Only display commands are issued; nothing on the system is changed.
 #
-# Exit status: 0 = the defect did NOT reproduce, 1 = it did (expected today).
+# Exit status: 0 = correct (expected), 1 = the defect is back, 2 = inconclusive
+# (the system did not give the script what it needs -- rerun).
 #
 # Usage:  ./tests/repro-214-collect.sh
 # =========================================================================
@@ -131,9 +138,9 @@ fi
 echo ""
 echo "========================================"
 if [ "$DEFECTS" -gt 0 ]; then
-	echo " #214 collect half REPRODUCED (${DEFECTS}/2)"
+	echo " #214 collect half REPRODUCED (${DEFECTS}/2) -- REGRESSION"
 	echo "========================================"
 	exit 1
 fi
-echo " not reproduced this run"
+echo " both keys returned their own block -- OK"
 echo "========================================"

@@ -1248,7 +1248,12 @@ dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,
 
 int datasetListHandler(Session *session)
 {
-	unsigned	rc		= 0;
+	/* signed, and that is the whole point: `if ((rc = http_printf(...)) < 0)`
+	   is dead code on an unsigned rc, so every write below went unchecked and a
+	   client that disconnected mid-listing had the rest of the catalog formatted
+	   and sent after it (#267).  Only rc changes -- the counters below are
+	   compared and bounded as unsigned on purpose. */
+	int		rc		= 0;
 	unsigned	count		= 0;
 	unsigned	first		= 1;
 	unsigned	i		= 0;
@@ -1297,7 +1302,7 @@ int datasetListHandler(Session *session)
 			/* goto quit like every other exit here: dslist is still NULL at
 			   this point, so a bare return would be correct today and wrong
 			   the moment anything is allocated above it. */
-			rc = (unsigned) handle_error(session, ERR_INVALID_PARAM,
+			rc = handle_error(session, ERR_INVALID_PARAM,
 					"Dataset level is too long");
 			goto quit;
 		}
@@ -2291,7 +2296,11 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 
 int memberListHandler(Session *session)
 {
-	unsigned	rc		= 0;
+	/* signed for the reason spelled out in datasetListHandler() (#267).  Here it
+	   is the header and trailer writes that were unchecked; the directory walk
+	   itself is already guarded, because member_scan() returns int and the
+	   caller below tests it. */
+	int		rc		= 0;
 	unsigned	emitted		= 0;
 	unsigned	maxitems	= 0;
 	int		truncated	= 0;
@@ -2337,7 +2346,7 @@ int memberListHandler(Session *session)
 	   why the wrong one would survive review and then break when something is
 	   allocated above it. */
 	if (!normalize_dsn(dsname, dsn_buf, sizeof(dsn_buf))) {
-		rc = (unsigned) handle_error(session, ERR_INVALID_PARAM,
+		rc = handle_error(session, ERR_INVALID_PARAM,
 				"Dataset name is too long");
 		goto quit;
 	}
@@ -2440,7 +2449,7 @@ int memberListHandler(Session *session)
 	scanned = member_scan(session, fp, skipping ? start_key : NULL,
 			start_after, pattern_key, have_pattern, maxitems);
 	if (scanned < 0) {
-		rc = (unsigned) scanned;
+		rc = scanned;
 		goto quit;
 	}
 

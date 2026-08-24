@@ -407,6 +407,7 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	int appended = 0;
 	size_t used = 0;
 	char src[MTT_SRC_LEN + 1];
+	char isrc[MTT_SRC_LEN + 1];	/* the ISSUER's source; src may be adopted */
 	char num[12];
 	int have_num = 0;
 	int echo_secs = -1;	/* hh.mm.ss of the echo, for the adoption below */
@@ -479,6 +480,9 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 		if (elen >= MTT_SRC_OFF + MTT_SRC_LEN)
 			memcpy(src, &ee->mtentdat[MTT_SRC_OFF], MTT_SRC_LEN);
 		src[MTT_SRC_LEN] = '\0';
+		/* src can be re-pointed at the TARGET by the #174 adoption below; isrc
+		 * stays the issuer's and is what the block-end test wants -- see there. */
+		memcpy(isrc, src, MTT_SRC_LEN + 1);
 
 		echo_secs = mtt_secs_of_day(ee->mtentdat, elen);
 		if (echo_secs_out) *echo_secs_out = echo_secs;
@@ -489,13 +493,16 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 			const char *dat = e ? e->mtentdat : "";
 			const char *msg;
 			int msglen, k;
-			int has_src, blank_src, cont;
+			int has_src, blank_src, cont, is_issuer;
 
 			if (!e) continue;
 
 			/* classify the line relative to our command's block */
 			has_src = (len >= MTT_SRC_OFF + MTT_SRC_LEN &&
 			           memcmp(&dat[MTT_SRC_OFF], src, MTT_SRC_LEN) == 0);
+
+			is_issuer = (len >= MTT_SRC_OFF + MTT_SRC_LEN &&
+			             memcmp(&dat[MTT_SRC_OFF], isrc, MTT_SRC_LEN) == 0);
 
 			blank_src = (len >= MTT_SRC_OFF + MTT_SRC_LEN);
 			for (k = MTT_SRC_OFF; blank_src && k < MTT_SRC_OFF + MTT_SRC_LEN; k++)
@@ -511,11 +518,20 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 			}
 
 			/* A COMMAND ECHO STARTS A NEW BLOCK, so ours ends at the first one
-			   carrying our source: everything after it -- its own reply lines
-			   included -- belongs to that command. Without this the block has
-			   no end at all and the walk runs to the end of the table, which
-			   is what a correct anchor exposed: the right block, then a later
-			   "D T" echo and the later reply appended to it (#214).
+			   carrying the ISSUER's source: everything after it -- its own
+			   reply lines included -- belongs to that command. Without this the
+			   block has no end at all and the walk runs to the end of the
+			   table, which is what a correct anchor exposed: the right block,
+			   then a later "D T" echo and the later reply appended to it
+			   (#214).
+
+			   ISSUER, not the block's current source: a MODIFY adopts the
+			   TARGET's source (#174), and a target's reply line is not a
+			   command however it reads. Testing the adopted source here would
+			   truncate the reply of any started task that answers without a
+			   message id -- unreproducible on this stand, where UFSD answers
+			   UFSD010I..UFSD018I, and silent when it happens. A new command
+			   echo comes from our worker, never from the target.
 
 			   A blank-source command is skipped instead of ending the block.
 			   It is nobody's evidence that a new block from OUR source has
@@ -532,11 +548,11 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 			   alike, and mtentimm is an address that does not track the kind
 			   of entry. See is_command_shaped() for what is used instead and
 			   for what it costs. */
-			if (!cont && (has_src || blank_src) && len > MTT_MSG_OFF &&
+			if (!cont && (is_issuer || blank_src) && len > MTT_MSG_OFF &&
 			    is_command_shaped(&dat[MTT_MSG_OFF],
 			                      rstrip_len(&dat[MTT_MSG_OFF],
 			                                 len - MTT_MSG_OFF))) {
-				if (has_src) break;
+				if (is_issuer) break;
 				continue;
 			}
 

@@ -1841,13 +1841,18 @@ get_operation(const char *line, char *op, size_t op_size)
     }
     op[i] = '\0';
 
-    // Right trim
-    for (i--; i >= 0; i--) {
-        if (isspace((unsigned char)op[i])) {
-            op[i] = '\0';
-        } else {
-            break;
-        }
+    /* Right trim.  `for (i--; i >= 0; i--)` was an underflow, not a loop
+       (#353): i is size_t, so on an empty operation field i-- is SIZE_MAX and
+       op[SIZE_MAX] is op[-1] -- the byte below the array.  A blank there was
+       overwritten with '\0' and the walk carried on down the caller's frame
+       for as long as it kept finding blanks.  `// ` and a name-only card both
+       produce an empty field, and find_job_card_range() calls this for every
+       line of submitted JCL.  Walking the length cannot step past zero.
+
+       The trim itself stays: the copy loop above stops at ' ', so a blank can
+       never land in op, but tab/CR/LF can and isspace() matches those. */
+    while (i > 0 && isspace((unsigned char)op[i - 1])) {
+        op[--i] = '\0';
     }
 }
 

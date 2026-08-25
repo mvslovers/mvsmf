@@ -109,7 +109,8 @@ static const unsigned char ASCII_CRLF[] = {CR, LF};
 //
 
 static int send_job_status_response(Session *session, JESJOB *job, const char *host);
-static int find_and_send_job_status(Session *session, const char *jobname, const char *jobid, const char *host);
+static int find_and_send_job_status(Session *session, const char *jobname, const char *jobid, const char *host,
+                                   const char *submitter);
 
 //
 // public functions
@@ -353,7 +354,8 @@ jobStatusHandler(Session *session)
 	const char *jobname = getPathParam(session, "job-name");
 	const char *jobid = getPathParam(session, "jobid");
 
-	find_and_send_job_status(session, jobname, jobid, host);	
+	/* NULL: this handler cannot vouch for an owner -- see #210 */
+	find_and_send_job_status(session, jobname, jobid, host, NULL);
 
 	return 0;
 }
@@ -553,7 +555,14 @@ int jobSubmitHandler(Session *session)
 
 	{
 		const char *host = getHeaderParam(session, "HOST");
-		rc = find_and_send_job_status(session, jobname, jobid, host);
+		UCHAR submitter[64] = {0};
+
+		/* the job carries this userid's USER= (process_jobcard), so it is a
+		   safe answer for the owner JES2 has not written yet -- issue #210 */
+		http_get_userid(session->httpc, submitter, sizeof(submitter));
+
+		rc = find_and_send_job_status(session, jobname, jobid, host,
+									  (const char *)submitter);
 	}
 
 quit:
@@ -1763,9 +1772,30 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
 	return rc;
 }
 
+/*
+ * Report a single job, optionally completing its owner from the identity that
+ * submitted it (issue #210).
+ *
+ * `submitter` is a value the *caller* has to be able to vouch for, and only
+ * jobSubmitHandler can: it passes the userid whose USER= process_jobcard() put
+ * on the job card, so a job that comes back without an owner is that userid's
+ * by construction. libc370 reads the owner from JCTUSEID, which JES2 fills in
+ * during conversion -- so for the couple of seconds between the internal
+ * reader closing and the converter running, it is blank, and the fallback in
+ * process_intxt() has nothing to read either because the internal text is not
+ * on the spool yet. Asking libc370 earlier cannot fix that; the data does not
+ * exist yet.
+ *
+ * Which is why this is a parameter and must stay one. jobStatusHandler is the
+ * other caller and passes NULL: it knows nothing about who submitted the job
+ * it was asked about, so resolving the userid inside this function instead
+ * would report the caller as the owner of somebody else's just-submitted job.
+ * That is not a fallback, it is invented data.
+ */
 __asm__("\n&FUNC    SETC 'find_and_send_job_status'");
 static int
-find_and_send_job_status(Session *session, const char *jobname, const char *jobid, const char *host)
+find_and_send_job_status(Session *session, const char *jobname, const char *jobid, const char *host,
+                         const char *submitter)
 {
     int rc = 0;
 
@@ -1789,6 +1819,13 @@ find_and_send_job_status(Session *session, const char *jobname, const char *jobi
                       msg, NULL, 0);
         rc = -1;
 		goto quit;
+    }
+
+    /* complete, never overwrite: once JES2 has written a userid it is the
+       truth, including a USER= the submitter put on the card themselves */
+    if (submitter && submitter[0] && job->owner[0] == '\0') {
+        strncpy((char *)job->owner, submitter, sizeof(job->owner) - 1);
+        job->owner[sizeof(job->owner) - 1] = '\0';
     }
 
     rc = send_job_status_response(session, job, host);

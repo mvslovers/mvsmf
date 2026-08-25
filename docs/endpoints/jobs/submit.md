@@ -38,6 +38,18 @@ On successful completion, this request returns HTTP status code 200 (OK) and the
 
 `exec-data=Y` is honoured here too, since the response is built by the same code, but it is of little use: a job that has just been submitted has usually not started yet, so `exec-started` and `exec-ended` are typically `null`. A very short job can already have run by the time the response is built, in which case they carry real instants — do not rely on either outcome.
 
+`owner` is the submitting userid, and on this endpoint it is answered locally
+rather than read from JES2. The owner of a batch job lives in `JCTUSEID`, which
+JES2 fills in during conversion — a second or two after the internal reader
+closes, so at the instant this response is built it is still blank and the
+job's internal text is not on the spool to fall back on either (#210). mvsMF
+supplies the userid whose `USER=` it put on the job card, which is the same
+answer JES2 arrives at moments later. Once JES2 has written a userid, that one
+is reported; nothing overwrites it.
+
+The [status](status.md) endpoint has no such knowledge and does not do this, so
+a status poll issued inside that same window can still show an empty `owner`.
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Invalid internal reader parameters

@@ -82,6 +82,9 @@ ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
 	--user "$MVS_USER" --password "$MVSMF_PASS"
 	--reject-unauthorized false)
 TEST_PDS="${MVS_USER}.MVSMF.TESTJCL"
+# mvsMF reads the userid from the ACEE, where RACF keeps it canonical (upper
+# case). .env may hold it in any case, so fold a copy for value comparisons.
+MVS_USER_UC=$(printf '%s' "${MVS_USER}" | tr '[:lower:]' '[:upper:]')
 
 # --- state ---
 PASSED=0
@@ -318,7 +321,10 @@ test_submit_local_file() {
 		assert_json_field_exists "$output" '.data.jobid' "submit has jobid"
 		assert_json_field "$output" '.data.subsystem' "JES2" "submit subsystem"
 		assert_json_field "$output" '.data.type' "JOB" "submit type"
-		assert_json_field_exists "$output" '.data.owner' "submit has owner"
+		# The value, not just the key (#210). JES2 has not written JCTUSEID
+		# this early, so mvsMF answers from the USER= it injected -- and a
+		# present-but-empty key passes an exists check.
+		assert_json_field "$output" '.data.owner' "$MVS_USER_UC" "submit owner"
 		assert_json_field_exists "$output" '.data.status' "submit has status"
 
 		SUBMIT_JOBNAME=$(echo "$output" | jq -r '.data.jobname')

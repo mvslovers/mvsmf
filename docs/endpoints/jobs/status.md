@@ -43,6 +43,13 @@ With `exec-data=Y`, two further fields follow `retcode`:
 Format, `null` semantics and the missing `exec-submitted` are described under
 [Execution timestamps](list.md#execution-timestamps).
 
+`owner` comes from `JCTUSEID`, which JES2 writes during conversion, so it is
+empty for the second or two between a job being read in and being converted.
+This endpoint reports that emptiness rather than guessing: it is told a jobname
+and a jobid, not who submitted them, and the caller is under no obligation to
+be the owner. [Submit](submit.md) is the one place that can fill the field in
+early, because it put the `USER=` on the card itself (#210).
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing required parameters (jobname/jobid)

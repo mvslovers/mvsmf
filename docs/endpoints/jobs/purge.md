@@ -32,6 +32,14 @@ The job is looked up before it is purged. That lookup is what supplies `owner`
 (it cannot be read afterwards, the job is gone) and what makes an unknown job
 answer 404 the same way `GET /jobs/{name}/{id}` does.
 
+`owner` therefore comes back empty for a job purged in the seconds before JES2
+writes `JCTUSEID` — the same window the submit response used to expose (#210).
+Submit closes it by answering from the userid whose `USER=` it put on the job
+card; **this endpoint deliberately does not.** The purge handler authorizes
+nothing (#345), so the caller is frequently not the owner, and filling the
+field from the caller's identity would report a userid that never submitted the
+job. An empty owner is the honest answer here.
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing required parameters (jobname/jobid)

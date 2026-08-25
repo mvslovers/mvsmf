@@ -480,10 +480,12 @@ Pointers only — the reasoning lives in the closing comments.
 
 mvsMF-only. Do not rank these here — update them where they live.
 
-Still open and ours to wait on — all three verified 2026-08-23: `libc370#79`
-(`exec-submitted`, and the accurate answer for #209), `libc370#30` (the nicer route
-for #186, not a gate for it), `httpd#176` (`blocked:rakf`), and `ftpd#90` (decide
-with #345).
+Still open and ours to wait on — the first four verified 2026-08-23:
+`libc370#79` (`exec-submitted`, and the accurate answer for #209), `libc370#30`
+(the nicer route for #186, not a gate for it), `httpd#176` (`blocked:rakf`),
+`ftpd#90` (decide with #345), and — filed 2026-08-25 — **`libc370#143`**
+(volume-addressed SCRATCH/RENAME, the half of #336 that is not ours; the read
+and write half needs nothing from there).
 
 **Cashed in on 2026-08-23** — libc370 rebuilt and installed into the cc370
 sysroot, mvsMF rebuilt, deployed and activated: `libc370#21` (which unblocked

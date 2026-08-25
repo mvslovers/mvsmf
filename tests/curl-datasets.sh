@@ -600,6 +600,11 @@ echo "--- Volume Prefix Routes Are Withdrawn ---"
 # It also proves there is no fallthrough: {dataset-name} stops at '/', '(' and
 # ')', so "-(VOL)/X.Y" must not be served as a data set literally named
 # "-(VOL)" -- that would arrive as reason 4, or as a 200.
+#
+# The two PUT cases send a body to a route that answers before draining it,
+# which is #257/#335's exact shape. ~25 bytes fits one segment, so they pass.
+# If either ever fails with a transport error rather than a status mismatch,
+# that is #257 and not the withdrawal.
 assert_route_withdrawn() {
 	local what="$1"; shift
 	local body code content

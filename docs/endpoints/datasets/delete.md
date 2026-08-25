@@ -8,13 +8,14 @@ DELETE
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}`
 
-or with explicit volume:
-
-`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}`
+> **There is no `-({volume-serial})` form.** That route was withdrawn in #336:
+> it accepted the volume operand and discarded it, so a request naming the
+> wrong volume was answered as if it had named the right one. Such a URL is
+> answered 404. Restoring it needs a volume-addressed SCRATCH/RENAME in
+> libc370 (mvslovers/libc370#143) for the delete and rename paths.
 
 ## Path Parameters
 - `dataset-name`: Name of the dataset to delete
-- `volume-serial` (optional): Volume serial number
 
 ## Response
 On successful completion, this request returns HTTP status code 204 (No Content).
@@ -48,10 +49,6 @@ status. See [authorization.md](authorization.md).
 # Delete a dataset
 curl -X DELETE \
   http://mvs:1080/zosmf/restfiles/ds/MIKE.DUMMY.DATA
-
-# Delete with explicit volume
-curl -X DELETE \
-  http://mvs:1080/zosmf/restfiles/ds/-(PUB001)/MIKE.DUMMY.DATA
 ```
 
 ### Using Zowe CLI

@@ -26,6 +26,25 @@
 //*     GET /zosmf/restjobs/jobs/HTTPD/<stcid>/files/3/records
 //*       -> XXSTEPLIB DD DISP=SHR,DSN=<the answer>
 //*
+//*   That method needs mvsMF, so it is unavailable in the one
+//*   case where the name matters most: a server that cannot
+//*   load MVSMF at all. httpd's own /.dm answers it instead --
+//*   it reads HTTPD's storage from inside HTTPD, so the TIOT it
+//*   walks is the running task's own.
+//*
+//*     /.dm?m=21C&l=16      PSATOLD -> current TCB
+//*     /.dm?m=<tcb>&l=16    +0C = TCBTIO -> TIOT
+//*     /.dm?m=<tiot>&l=256  first entry is STEPLIB; +0C is the
+//*                          3-byte SWA address of its JFCB
+//*     /.dm?m=<jfcb>&l=80   +10 begins the JFCB, whose first 44
+//*                          bytes are the DSN
+//*
+//*   Measured that way on mvsdev 2026-08-25 against HTTPD 4.0.1
+//*   -- the value below. 4.0.1 installs into a library of its
+//*   own, so an httpd upgrade moves this name and leaves the
+//*   previous library behind: still populated, no longer read,
+//*   and a copy into it activates nothing.
+//*
 //*   The deploy library is the one `make deploy` reports as its
 //*   target, built from MBT_MVS_HLQ in .env.
 //*
@@ -45,7 +64,7 @@
 //ACTIVATE EXEC PGM=IEBCOPY
 //SYSPRINT DD SYSOUT=*
 //IN       DD DSN=IBMUSER.MVSMF.V1R0M0D.LINKLIB,DISP=SHR
-//OUT      DD DSN=HTTPD.LINKLIB,DISP=SHR
+//OUT      DD DSN=HTTPD.V4R0M1.LINKLIB,DISP=SHR
 //SYSIN    DD *
   COPY INDD=((IN,R)),OUTDD=OUT
   SELECT MEMBER=MVSMF

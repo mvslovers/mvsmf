@@ -38,6 +38,9 @@ fi
 
 BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
 AUTH="${MVSMF_USER}:${MVSMF_PASS}"
+# mvsMF reads the userid from the ACEE, where RACF keeps it canonical (upper
+# case). .env may hold it in any case, so fold a copy for value comparisons.
+MVSMF_USER_UC=$(printf '%s' "${MVSMF_USER}" | tr '[:lower:]' '[:upper:]')
 JCL_DIR="${SCRIPT_DIR}/jcl"
 TEST_PDS="${MVSMF_USER}.MVSMF.TESTJCL"
 
@@ -307,7 +310,10 @@ test_submit_inline_jcl() {
 	assert_json_field_exists "$BODY" '.jobid' "submit response has jobid"
 	assert_json_field "$BODY" '.subsystem' "JES2" "submit response subsystem"
 	assert_json_field "$BODY" '.type' "JOB" "submit response type"
-	assert_json_field_exists "$BODY" '.owner' "submit response has owner"
+	# The value, not just the key (#210). JES2 has not written JCTUSEID this
+	# early, so mvsMF answers from the USER= it injected -- an empty owner here
+	# is the regression, and a present-but-empty key passes an exists check.
+	assert_json_field "$BODY" '.owner' "$MVSMF_USER_UC" "submit response owner"
 	assert_json_field_exists "$BODY" '.class' "submit response has class"
 	assert_json_field_exists "$BODY" '.url' "submit response has url"
 	assert_json_field_exists "$BODY" '.["files-url"]' "submit response has files-url"

@@ -17,7 +17,7 @@ libc370 = "1.0.3"
 cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
 
 [dependencies]
-"mvslovers/httpd" = ">=4.0.0"
+"mvslovers/httpd" = ">=4.0.1"
 "mvslovers/ufsd" = ">=1.2.1"
 
 # Single load module: a CGI program that runs under httpd.  It includes its

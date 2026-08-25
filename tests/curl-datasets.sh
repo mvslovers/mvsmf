@@ -577,16 +577,88 @@ else
 	fi
 fi
 
-# --- Read with volume prefix ---
+# --- The withdrawn -(volume-serial) routes ---
 echo ""
-echo "--- Read Sequential Dataset with Volume Prefix ---"
+echo "--- Volume Prefix Routes Are Withdrawn ---"
+
+# All seven -(VOLSER) routes were withdrawn in #336. Until then they were
+# registered against the same handlers as the cataloged forms and no handler
+# ever read the operand, so the six assertions that used to live here passed
+# while the feature did not exist -- they were measuring the cataloged path.
+#
+# Each case asserts 404 *and* reason 7. That pairing is what makes the test
+# mean something: 7 is the router's own "Not Found" (router.c), while a
+# handler that reached a missing data set answers reason 4. Without the reason
+# these assertions would go green for a route that still exists and merely
+# failed to find its target.
+#
+# $VOLUME is the volume the listing reported for $TEST_SEQ, i.e. the *correct*
+# one. That is the point: routing never reaches a volume lookup, so a right
+# volser is refused exactly like a wrong one. The same value is used for the
+# PDS routes; which volume it names cannot matter to a router 404.
+#
+# It also proves there is no fallthrough: {dataset-name} stops at '/', '(' and
+# ')', so "-(VOL)/X.Y" must not be served as a data set literally named
+# "-(VOL)" -- that would arrive as reason 4, or as a 200.
+#
+# The two PUT cases send a body to a route that answers before draining it,
+# which is #257/#335's exact shape. ~25 bytes fits one segment, so they pass.
+# If either ever fails with a transport error rather than a status mismatch,
+# that is #257 and not the withdrawal.
+assert_route_withdrawn() {
+	local what="$1"; shift
+	local body code content
+
+	body=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$@")
+	code=$(echo "$body" | tail -1)
+	content=$(echo "$body" | sed '$d')
+
+	assert_http_status "404" "$code" "$what is withdrawn"
+	assert_json_field "$content" '.reason' "7" "$what: reason 7 (no such route)"
+}
+
 if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${VOLUME})/${TEST_SEQ}")
-	HTTP_CODE=$(echo "$BODY" | tail -1)
-	assert_http_status "200" "$HTTP_CODE" "read dataset with volume prefix -(${VOLUME})"
+	VP="-(${VOLUME})"
+
+	assert_route_withdrawn "GET dataset with volume prefix" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+
+	assert_route_withdrawn "PUT dataset with volume prefix" \
+		-X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+
+	assert_route_withdrawn "DELETE dataset with volume prefix" \
+		-X DELETE "${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+
+	assert_route_withdrawn "member list with volume prefix" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}/member"
+
+	assert_route_withdrawn "GET member with volume prefix" \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(TESTMBR)"
+
+	assert_route_withdrawn "PUT member with volume prefix" \
+		-X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(VOLMBR)"
+
+	assert_route_withdrawn "DELETE member with volume prefix" \
+		-X DELETE "${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(TESTMBR)"
+
+	# The refused writes must not have created anything -- a 404 that still
+	# wrote would be the old bug wearing a new status.
+	BODY=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+	if echo "$BODY" | grep -q "VOLUME PREFIX WRITE TEST"; then
+		fail "a withdrawn PUT writes nothing" "the refused PUT reached ${TEST_SEQ}"
+	else
+		pass "a withdrawn PUT writes nothing"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)")
+	assert_http_status "404" "$HTTP_CODE" "a withdrawn PUT creates no member"
 else
-	fail "read dataset with volume prefix" "the listing reported no volume for ${TEST_SEQ} -- the value comes from the API under test"
+	fail "volume prefix routes are withdrawn" "the listing reported no volume for ${TEST_SEQ} -- the value comes from the API under test"
 fi
 
 # --- Delete sequential dataset ---
@@ -606,27 +678,6 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent dataset"
-
-# --- Create and delete with volume prefix ---
-echo ""
-echo "--- Delete Sequential Dataset with Volume Prefix ---"
-
-# Create a fresh dataset to delete via volume prefix
-BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
-	-H "Content-Type: application/json" \
-	-d "$BODY" \
-	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
-
-if [ "$HTTP_CODE" = "201" ] && [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${VOLUME})/${TEST_SEQ}")
-	assert_http_status "204" "$HTTP_CODE" "delete dataset with volume prefix -(${VOLUME})"
-else
-	fail "delete dataset with volume prefix" "could not create the fixture, or the listing reported no volume for it"
-fi
 
 # --- Write PDS member ---
 echo ""
@@ -1028,25 +1079,6 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "404" "$HTTP_CODE" "list members of a missing dataset"
 assert_json_field "$CONTENT" '.reason' "4" "missing dataset: reason 4 (dataset not found)"
 
-# --- List PDS members with volume prefix ---
-echo ""
-echo "--- List PDS Members with Volume Prefix ---"
-
-# Get volume from a dataset list query
-VOLBODY=$(curl -s -u "$AUTH" \
-	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
-PDS_VOLUME=$(echo "$VOLBODY" | jq -r --arg dsn "$TEST_PDS" \
-	'.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || PDS_VOLUME=""
-
-if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}/member")
-	HTTP_CODE=$(echo "$BODY" | tail -1)
-	assert_http_status "200" "$HTTP_CODE" "list members with volume prefix -(${PDS_VOLUME})"
-else
-	fail "list members with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
-fi
-
 # --- Read PDS member ---
 echo ""
 echo "--- Read PDS Member ---"
@@ -1061,34 +1093,6 @@ if echo "$CONTENT" | grep -q "MEMBER TEST LINE 1"; then
 	pass "member content matches"
 else
 	fail "member content matches" "expected 'MEMBER TEST LINE 1' in output"
-fi
-
-# --- Read PDS member with volume prefix ---
-echo ""
-echo "--- Read PDS Member with Volume Prefix ---"
-
-if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}(TESTMBR)")
-	HTTP_CODE=$(echo "$BODY" | tail -1)
-	assert_http_status "200" "$HTTP_CODE" "read member with volume prefix -(${PDS_VOLUME})"
-else
-	fail "read member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
-fi
-
-# --- Write PDS member with volume prefix ---
-echo ""
-echo "--- Write PDS Member with Volume Prefix ---"
-
-if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X PUT -u "$AUTH" \
-		-H "Content-Type: application/octet-stream" \
-		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}(VOLMBR)")
-	assert_http_status "204" "$HTTP_CODE" "write member with volume prefix -(${PDS_VOLUME})"
-else
-	fail "write member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
 fi
 
 # --- Rename PDS member ---
@@ -1144,19 +1148,6 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -u "$AUTH" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "204" "$HTTP_CODE" "delete PDS member"
-
-# --- Delete PDS member with volume prefix ---
-echo ""
-echo "--- Delete PDS Member with Volume Prefix ---"
-
-if [ -n "$PDS_VOLUME" ] && [ "$PDS_VOLUME" != "null" ]; then
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X DELETE -u "$AUTH" \
-		"${BASE_URL}/zosmf/restfiles/ds/-(${PDS_VOLUME})/${TEST_PDS}(VOLMBR)")
-	assert_http_status "204" "$HTTP_CODE" "delete member with volume prefix -(${PDS_VOLUME})"
-else
-	fail "delete member with volume prefix" "the listing reported no volume for ${TEST_PDS} -- the value comes from the API under test"
-fi
 
 # --- Delete PDS member: not found ---
 echo ""

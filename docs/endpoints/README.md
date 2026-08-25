@@ -83,7 +83,9 @@ and outlive a token logout.
 | GET | [`/zosmf/restfiles/ds/{name}`](datasets/get.md) | Read sequential dataset |
 | PUT | [`/zosmf/restfiles/ds/{name}`](datasets/put.md) | Write sequential dataset |
 
-Volume-specific variants: `/zosmf/restfiles/ds/-({volser})/{name}` for GET and PUT.
+There are no volume-specific variants. The
+`/zosmf/restfiles/ds/-({volser})/{name}` routes were withdrawn in #336 — they
+captured the volume and discarded it — and are answered 404.
 
 ## PDS Members (`/zosmf/restfiles/ds`)
 

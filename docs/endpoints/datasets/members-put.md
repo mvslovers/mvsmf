@@ -8,14 +8,15 @@ PUT
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}({member-name})`
 
-or with explicit volume:
-
-`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})`
+> **There is no `-({volume-serial})` form.** That route was withdrawn in #336:
+> it accepted the volume operand and discarded it, so a request naming the
+> wrong volume was answered as if it had named the right one. Such a URL is
+> answered 404. Restoring it needs a volume-addressed SCRATCH/RENAME in
+> libc370 (mvslovers/libc370#143) for the delete and rename paths.
 
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset
 - `member-name`: Name of the member to write
-- `volume-serial` (optional): Volume serial number
 
 ## Request Headers
 - `Content-Length` or `Transfer-Encoding: chunked`: One of these is required

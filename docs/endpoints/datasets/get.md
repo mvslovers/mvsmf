@@ -8,13 +8,14 @@ GET
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}`
 
-or with explicit volume:
-
-`/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}`
+> **There is no `-({volume-serial})` form.** That route was withdrawn in #336:
+> it accepted the volume operand and discarded it, so a request naming the
+> wrong volume was answered as if it had named the right one. Such a URL is
+> answered 404. Restoring it needs a volume-addressed SCRATCH/RENAME in
+> libc370 (mvslovers/libc370#143) for the delete and rename paths.
 
 ## Path Parameters
 - `dataset-name`: Name of the dataset to read
-- `volume-serial` (optional): Volume serial number
 
 ## Request Headers
 - `X-IBM-Data-Type` (optional): Data transfer mode
@@ -71,9 +72,6 @@ curl http://mvs:1080/zosmf/restfiles/ds/MIKE.TEST.DATA
 curl -H "X-IBM-Data-Type: binary" \
   http://mvs:1080/zosmf/restfiles/ds/MIKE.LOAD.XMI \
   -o download.xmi
-
-# With explicit volume
-curl http://mvs:1080/zosmf/restfiles/ds/-(PUB001)/MIKE.TEST.DATA
 ```
 
 ### Using Zowe CLI

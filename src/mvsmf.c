@@ -156,20 +156,41 @@ int main(int argc, char **argv)
 
 	add_route(&router, GET, "/zosmf/restfiles/ds", datasetListHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}", datasetGetHandler);
-	add_route(&router, GET, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}", datasetGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/{dataset-name}", datasetPutHandler);
-	add_route(&router, PUT, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}", datasetPutHandler);
 	add_route(&router, POST, "/zosmf/restfiles/ds/{dataset-name}", datasetCreateHandler);
 	add_route(&router, DELETE, "/zosmf/restfiles/ds/{dataset-name}", datasetDeleteHandler);
-	add_route(&router, DELETE, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}", datasetDeleteHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}/member", memberListHandler);
-	add_route(&router, GET, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}/member", memberListHandler);
 	add_route(&router, GET, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberGetHandler);
-	add_route(&router, GET, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})", memberGetHandler);
 	add_route(&router, PUT, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberPutHandler);
-	add_route(&router, PUT, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})", memberPutHandler);
 	add_route(&router, DELETE, "/zosmf/restfiles/ds/{dataset-name}({member-name})", memberDeleteHandler);
-	add_route(&router, DELETE, "/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})", memberDeleteHandler);
+
+	/* The seven -({volume-serial}) routes are withdrawn, not implemented
+	   (#336).  They used to be registered here pointing at the same handlers
+	   as the cataloged forms, and no handler ever read HTTP_volume-serial:
+	   the operand was captured and discarded, so a request naming the wrong
+	   volume was answered as if it had named the right one.  Accepting the
+	   syntax and ignoring it is worse than not offering it, because the
+	   answer looks correct.
+
+	   Withdrawing them is safe to do by deletion alone: {dataset-name} stops
+	   at '/', '(' and ')' (is_pattern_match(), router.c), so "-(VOL)/X.Y"
+	   matches none of the cataloged patterns above and falls through to the
+	   router's 404.  It cannot be silently served as a data set literally
+	   named "-(VOL)".
+
+	   Restoring them needs more than uncommenting.  The read and write half
+	   is ours: allocate naming the volume (__dsalcf with VOLSER=) and open
+	   the DD (fopen("DD:ddname")), with __listvl() resolving the volser to a
+	   device if UNIT turns out to be required.  DELETE and rename are not:
+	   remove() and rename() reach a data set through the catalog only, and
+	   there is no volume-addressed SCRATCH/RENAME in libc370 to call instead
+	   -- mvslovers/libc370#143.  Routing those through IDCAMS would
+	   reintroduce the SYSDSN ENQ escalation of #342.
+
+	   The catalog-based diagnosis in dsapi.c (why_open_failed(),
+	   dataset_cataloged()) has to move to OBTAIN-by-volume on these routes
+	   as well, or an uncataloged data set comes back with the wrong reason
+	   for its 404. */
 
 	add_route(&router, GET, "/zosmf/restfiles/fs", ussListHandler);
 	add_route(&router, PUT, "/zosmf/restconsoles/consoles/{console-name}", consoleIssueHandler);

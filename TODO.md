@@ -8,14 +8,16 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 **It carries nothing that is copied.** Where the reasoning already has an owner —
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
-*Last reconciled against the tracker: 2026-09-06, 20 issues open — fifteen
-entries below: one pairs two issues, one is a **block of three** (#244 → #361 →
-#245, entry 5), and **#357 and #360 are not ranked yet** — install docs missing
-the HASPCKPT/HASPACE1 requirement, and `errno` unread after a NULL from
-`__listpd()`/`__listds()`. Both need a place in the order. #361 is new
-(2026-09-06) and moved #245 down: they are one subsystem and must be done in
-sequence. **Tier 1 is empty** since #336's reject half landed in PR #358, and
-#210 closed in PR #359, so the top of the queue is Tier 2's #251.*
+*Last reconciled against the tracker: 2026-09-06 after the **1.0.0 release**,
+20 issues open — fifteen entries below: one pairs two issues, one is a **block
+of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
+yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
+unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
+need a place in the order; #363 is the lower of the two, since no maintained
+stand runs a server that old. #361 is new (2026-09-06) and moved #245 down:
+they are one subsystem and must be done in sequence. **Tier 1 is empty** —
+#336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
+PR #364 — so the top of the queue is Tier 2's #251.*
 
 ---
 
@@ -402,6 +404,20 @@ policy vacuum.
 ## Recently closed
 
 Pointers only — the reasoning lives in the closing comments.
+
+- **#362** — fallout of the libc370 1.0.4 relink, found and fixed in the same
+  release (PR #364). A SYNAD on the stdio DCBs turns a media error into
+  `ferror()` + `EIO` instead of ABEND S001 and leaves `feof()` clear, so six
+  read loops would have ended on a bad track exactly as they end at the end of
+  the data — a 500 replaced by a 200 with a short body. The pattern to carry:
+  **a dependency upgrade can move a failure from loud to silent**, and the
+  places it lands are wherever the code reads "no more data" from a count. The
+  fix splits by what each site can still decide — the ETag pass and the JCL
+  reader answer properly, the streaming paths drop the connection because their
+  status is already on the wire.
+- **#357** — the two JES2 DDs the jobs API needs in the *host* STC procedure,
+  documented in the same PR. Undiscoverable except by reading `jobsapi.c` down
+  into libc370, and the whole jobs service answers 500 without them.
 
 - **#210** — the submit response answered `owner:""`, closed in PR #359 and
   measured on mvsdev before and after. Two things worth carrying. The fallback

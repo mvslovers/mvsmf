@@ -39,11 +39,15 @@
 //*     /.dm?m=<jfcb>&l=80   +10 begins the JFCB, whose first 44
 //*                          bytes are the DSN
 //*
-//*   Measured that way on mvsdev 2026-08-25 against HTTPD 4.0.1
-//*   -- the value below. 4.0.1 installs into a library of its
-//*   own, so an httpd upgrade moves this name and leaves the
-//*   previous library behind: still populated, no longer read,
-//*   and a copy into it activates nothing.
+//*   Measured from the running STC on mvsdev 2026-09-06: the
+//*   value below. It changed since 2026-08-25, when the same
+//*   measurement answered HTTPD.V4R0M1.LINKLIB -- the procedure
+//*   in use now names an unqualified HTTPD.LINKLIB. That is the
+//*   hazard this section exists for: an httpd install can move
+//*   the name and leave the previous library behind, still
+//*   populated, no longer read, and a copy into it activates
+//*   nothing while every step of the deploy reports success.
+//*   Re-read it after any httpd upgrade, before believing a test.
 //*
 //*   The deploy library is the one `make deploy` reports as its
 //*   target, built from MBT_MVS_HLQ in .env.
@@ -64,7 +68,7 @@
 //ACTIVATE EXEC PGM=IEBCOPY
 //SYSPRINT DD SYSOUT=*
 //IN       DD DSN=IBMUSER.MVSMF.V1R0M0D.LINKLIB,DISP=SHR
-//OUT      DD DSN=HTTPD.V4R0M1.LINKLIB,DISP=SHR
+//OUT      DD DSN=HTTPD.LINKLIB,DISP=SHR
 //SYSIN    DD *
   COPY INDD=((IN,R)),OUTDD=OUT
   SELECT MEMBER=MVSMF

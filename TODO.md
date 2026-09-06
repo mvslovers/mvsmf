@@ -8,14 +8,14 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 **It carries nothing that is copied.** Where the reasoning already has an owner —
 the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
 
-*Last reconciled against the tracker: 2026-08-25, 18 issues open — sixteen
-entries below: one of them pairs two issues, and **#357 is not ranked yet**
-(opened this morning, install docs missing the HASPCKPT/HASPACE1 requirement —
-it needs a place in the order). #245's doc half landed in PR #349; it stays open
-on its implement-vs-reject decision. #336's reject half landed in PR #358 and
-moved it out of Tier 1 to the bottom of the list, which leaves **Tier 1 empty**;
-#210 closed in PR #359, deployed and measured, so the top of the queue is now
-Tier 2's #251.*
+*Last reconciled against the tracker: 2026-09-06, 20 issues open — fifteen
+entries below: one pairs two issues, one is a **block of three** (#244 → #361 →
+#245, entry 5), and **#357 and #360 are not ranked yet** — install docs missing
+the HASPCKPT/HASPACE1 requirement, and `errno` unread after a NULL from
+`__listpd()`/`__listds()`. Both need a place in the order. #361 is new
+(2026-09-06) and moved #245 down: they are one subsystem and must be done in
+sequence. **Tier 1 is empty** since #336's reject half landed in PR #358, and
+#210 closed in PR #359, so the top of the queue is Tier 2's #251.*
 
 ---
 
@@ -25,20 +25,19 @@ Tier 2's #251.*
 |---|---|---|---|
 | 1 | #251 | Optimistic Path stop pattern | nothing |
 | 2 | #209 | client-visible, cheap on 3.8j | nothing |
-| 3 | #245 | docs corrected; decision open | reader-vs-400 decision |
-| 4 | #326 | its trigger has fired | nothing |
-| 5 | #76 | the one externally reported defect | nothing |
-| 6 | #244 | the ordering constraint is the content | nothing |
-| 7 | #215 | latent, one place, every caller benefits | nothing |
-| 8 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 9 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
-| 10 | #234 | `type:research` | measuring the reference |
-| 11 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 12 | #345 | `type:research` | **a policy** — see *RAKF* |
-| 13 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
-| 14 | #291 | reclassified — hygiene, not stability | nothing |
-| 15 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
-| 16 | #336 | routes withdrawn; now a feature request | `libc370#143` for half of it |
+| 3 | #326 | its trigger has fired | nothing |
+| 4 | #76 | the one externally reported defect | nothing |
+| 5 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
+| 6 | #215 | latent, one place, every caller benefits | nothing |
+| 7 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 8 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
+| 9 | #234 | `type:research` | measuring the reference |
+| 10 | #329 | `type:research` | **one measurement** — see *RAKF* |
+| 11 | #345 | `type:research` | **a policy** — see *RAKF* |
+| 12 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
+| 13 | #291 | reclassified — hygiene, not stability | nothing |
+| 14 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
+| 15 | #336 | routes withdrawn; now a feature request | `libc370#143` for half of it |
 
 ---
 
@@ -67,21 +66,7 @@ libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
 (`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
 the code.
 
-### 3 · #245 — `X-IBM-Data-Type: record` cannot be written back
-
-The read path length-prefixes each record; the write path sends `record` down the
-*text* loop, so the four bytes read back as a length are a length only by accident.
-
-**The docs are corrected — that half is done.** It was three places, not the
-two the issue names: the opening sentence of `put.md` and `members-put.md`,
-their `X-IBM-Data-Type` bullets, and the common-header table in
-`docs/endpoints/README.md`. Grep before trusting an issue's list of sites.
-
-What is left is the choice: a length-prefixed reader (mind a prefix split
-across a chunk boundary, and `record_content_max()`), or a 400. Nothing
-misleads a client in the meantime.
-
-### 4 · #326 — five sources missing from the CLAUDE.md list
+### 3 · #326 — five sources missing from the CLAUDE.md list
 
 `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
 "next time `CLAUDE.md` is touched", so fold it into the next edit of that file
@@ -92,7 +77,7 @@ which is how the list drifted in the first place.
 
 ## Tier 3 — correctness, needs care
 
-### 5 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
+### 4 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
 
 *the only defect on this list someone outside the project reported*
 
@@ -100,24 +85,72 @@ A ufsd image upload `SD37`s because QSAM extends past the primary allocation on 
 DA data set. Detect `DSGDA` from the DSCB — the list handler already does — and
 switch to the `osd*` BDAM API for PUT and GET.
 
-Ranked above the two unobserved defects below it deliberately. This file orders by
+Ranked above the two unobserved entries below it deliberately. This file orders by
 impact on running systems, not by age or effort, and #76 is the one item here that
-is observed, reported from outside, and blocking a real workflow; #244 is currently
-harmless and #215 has never been seen at all. What holds it out of Tier 1 is that
-`ufsd-utils upload` does the job today — a workaround, not an absence of impact.
+is observed, reported from outside, and blocking a real workflow; the RECFM=V block
+is a measured deviation nobody has reported and #215 has never been seen at all.
+What holds it out of Tier 1 is that `ufsd-utils upload` does the job today — a
+workaround, not an absence of impact.
 
-### 6 · #244 — `#define VARIABLE 0x0002` is the wrong RECFM mask
+### 5 · #244 → #361 → #245 — the RECFM=V block, in that order
 
-**The ordering constraint is the whole content of this ticket.** The broken mask
-is the only thing keeping `write_record()`'s manual RDW dormant, and that RDW is
-itself wrong — libc370's `varflush()` already builds one. Correcting the mask
-alone ships **two** RDWs. Remove the manual RDW first, then fix the mask. Drop
-`FIXED`/`UNDEFINED` in the same edit: wrong the same way, and unused.
+*three tickets, one subsystem; the order is a constraint, not a preference*
 
-The regression test wants a **VB** data set written binary and read back with
-lengths checked — `curl-binary.sh` uses FB, which is why this survived.
+**#244 first — it is what makes the other two safe.** The broken mask
+`#define VARIABLE 0x0002` is the only thing keeping `write_record()`'s manual RDW
+dormant, and that RDW is itself wrong: libc370's `varflush()` already builds one.
+Correcting the mask alone ships **two**. Remove the manual RDW, then fix the mask,
+and drop `FIXED`/`UNDEFINED` in the same edit — wrong the same way, and unused.
 
-### 7 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+Two things the ticket text does not name, both added as a comment on 2026-09-06
+and both part of the same edit. The **binary write path survives the stated fix**:
+it splits the body on `eff_lrecl` = LRECL while libc370 sizes a V write buffer at
+LRECL-4, so a VB/4004 chunk lands as a 4000-byte record *plus* a 4-byte one, with
+NUL padding on the tail; `record_content_max()` already holds the right number and
+the binary path is its one non-caller. And the `is_fixed` half is **lossy, not
+merely inaccurate** — a VB record's trailing blanks are data, and the text round
+trip drops them.
+
+**#361 second — the only one of the three with a measured target.** Record mode on
+a V data set emits LRECL-sized chunks of concatenated record data, prefixed with
+the chunk size: `fread()` on a byte-mode stream runs straight across the record
+boundaries that `__fgetc()` has already dissolved. The contract to hit was measured
+against z/OSMF 29 on 2026-09-06 (`SYS1.ADFQPSRC(DFQDCAGA)`, VB/255): one 4-byte
+big-endian length per **logical** record, the data length without the RDW, nothing
+padded, the prefixes tiling the response exactly — and the same resource in binary
+mode is those bytes with the prefixes removed, byte for byte.
+
+That second half matters as much as the first: **binary mode on a V data set is not
+a bug.** The reference concatenates there too, exactly as we do. It looks like the
+same defect and is not, so do not "fix" it.
+
+The fix is a `",record"` open, which hands back one raw record per `__fread()` —
+and libc370's BSAM read reassembles spanned records itself, so V, VB and **VBS**
+all arrive whole. That is what makes this the one entry here with a use case
+outside conformance: a RECFM=VBS SMF dump to a host, untranslated and with
+boundaries intact, which today needs an AWS tape or a punch deck.
+
+**#245 last — a decision, and the only part of the block that is not code.** A
+length-prefixed reader on the write side, or a 400. Its doc half is already done
+(PR #349, three places, not the two the issue names — grep before trusting an
+issue's list of sites), so nothing misleads a client while the decision waits.
+Taking option 1 before #361 means round-tripping against a producer known to be
+wrong; option 2 is unaffected by the other two and can be taken at any time.
+
+The regression tests are the same shape for all three and are missing today
+(`curl-binary.sh` is FB only): a **VB** data set with records of *differing*
+lengths, written binary, read back in record mode, prefixes walked against a
+binary read of the same resource. Records of one uniform length pass while proving
+nothing — the first two members measured on the reference were compiled REXX at a
+flat 251 bytes, which is indistinguishable from LRECL-4 chunking.
+
+Ranked below #76 for the same reason #244 alone was: nobody has reported any of
+it, and nobody sends `X-IBM-Data-Type: record` at a V data set today either. It
+keeps #244's old slot above #215 because it is where #244 already sat and the
+three are one edit's worth of context — not on impact, where #215's unparseable
+response reaches every `consapi.c` caller and this reaches none.
+
+### 6 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -127,7 +160,7 @@ Honest scope, per the issue: **no observed failure**. #212 fixed this locally in
 The subtlety from #212, easy to lose: `http_printf()` translates on the way out,
 so the printability test applies to the **translated** byte, via `xlate_cp037`.
 
-### 8 · #257 + #335 — early 4xx on a PUT with a body still in flight
+### 7 · #257 + #335 — early 4xx on a PUT with a body still in flight
 
 **One class, two tickets — rank and fix them together.** Every early return in the
 PUT handlers answers before draining the announced body (`dsapi.c:1156, 1180,
@@ -144,7 +177,7 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 9 · #347 — restconsoles authorizes nothing at all
+### 8 · #347 — restconsoles authorizes nothing at all
 
 *an authenticated user can stop the system*
 
@@ -182,7 +215,7 @@ reaching for the obvious: a display-only allow-list **breaks a real workflow** �
 `P FTPD` / `S FTPD` are group-1 (SYS) commands and are in use today (#346's
 transcript). Decide with #345 and `ftpd#90`.
 
-### 10 · #234 — what should the API do with non-ASCII input?
+### 9 · #234 — what should the API do with non-ASCII input?
 
 Byte-wise through CP037 with no UTF-8 decoding — and **invisible through the API**,
 because `etoa` inverts `atoe`, so only ISPF and the program reading the member see
@@ -195,7 +228,7 @@ Research because the policy is the hard part. Measure the reference first
 `xmit370`'s split between well-formed UTF-8 and Latin-1 is worth borrowing. Decide
 GET and PUT together; a reject changes the round-trip property.
 
-### 11 · #329 — dataset create is authorized only by the ambient ACEE
+### 10 · #329 — dataset create is authorized only by the ambient ACEE
 
 **The endpoint is not unauthorized and the response shape is settled** (#315,
 #317): RAKF refuses the allocation and the refusal must stay indistinguishable
@@ -206,7 +239,7 @@ open is only **which identity decides** — SVC 99 runs under whatever sits in
 The cheap unblocked step is a measurement, and it decides whether the fix exists
 at all: what does RACHECK answer for a name with no catalog entry and no DSCB?
 
-### 12 · #345 — restjobs has no authorization model
+### 11 · #345 — restjobs has no authorization model
 
 `grep -c 'http_check_auth\|require_access' src/jobsapi.c` → **0**, against 25 in
 `dsapi.c`. `owner=*` switches the default off, and the four by-jobid paths —
@@ -220,7 +253,7 @@ Whatever refusal is chosen must keep #229's constraint: "not yours" must not be
 distinguishable from "does not exist". Establish `jescanj()`'s own behaviour on a
 foreign purge, on a throwaway job. Decide together with `mvslovers/ftpd#90`.
 
-### 13 · #195 — detections intermittently report `waiting` for a message that was emitted
+### 12 · #195 — detections intermittently report `waiting` for a message that was emitted
 
 **Split out of #214 on 2026-08-23: they are not the same bug.** Structural, no
 measurement needed — `detect_count()` never reads `MTT_SRC_OFF`, never anchors an
@@ -260,7 +293,7 @@ truncating the snapshot.
 
 ## Tier 5 — larger work
 
-### 14 · #291 — large bodies fully buffered, twice on submit
+### 13 · #291 — large bodies fully buffered, twice on submit
 
 **Reclassify: memory hygiene, not stability.** Its motivation — stopping long-held
 requests acting as the anvil for httpd#195's fragmentation — is gone: #287 closed,
@@ -274,7 +307,7 @@ holds 2 MB. Cheapest item, and independent of the streaming work.
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
 
-### 15 · #186 — console log: deep history beyond the MTT window
+### 14 · #186 — console log: deep history beyond the MTT window
 
 **No longer blocked — the issue text says it is, and that is out of date.** Its
 hard dependency `libc370#21` is **closed and verified on target** (PR#31,
@@ -303,7 +336,7 @@ operational requirements (`VARY SYSLOG,HARDCPY`, and spinning to a held class)
 belong in `docs/endpoints/console/hardcopy-log.md`, and mvsMF can issue
 `WRITELOG H` through the console API it already has.
 
-### 16 · #336 — `-({volume-serial})` addressing, now a feature rather than a lie
+### 15 · #336 — `-({volume-serial})` addressing, now a feature rather than a lie
 
 **The routes are gone (PR #358), so this no longer misleads anyone** — that is
 the whole reason it fell from rank 1 to last. Until then seven routes accepted
@@ -464,8 +497,12 @@ Pointers only — the reasoning lives in the closing comments.
   guessed at all. #195 was ranked with #214 on the guess that it might not
   survive #214's first measurement, and that premise died before #214 did — see
   #195's entry. #251 was always independent of all three.
-- **The endpoint advertises what it does not do** — **#245 is what is left**,
-  with #248 and now #336 as the worked examples of how it ends. Both prove the
+- **The endpoint advertises what it does not do** — **#245 and #361 are what is
+  left**, with #248 and now #336 as the worked examples of how it ends. #361 is
+  the campaign's mirror image and worth reading as such: there the *docs* are
+  right (`get.md:38`, `README.md:136` both promise a length per record) and the
+  code is what does not deliver, for RECFM=V. The cheap half here is therefore
+  not a doc edit — it is picking which side becomes true. Both prove the
   campaign's premise that the cheap half is worth taking alone: neither mode is
   implemented and nothing lies about either any more. #336 went further than
   #245's doc-only half — the routes themselves are withdrawn (PR #358), and the

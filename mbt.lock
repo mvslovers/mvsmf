@@ -1,10 +1,10 @@
 {
   "mvslovers/httpd": {
-    "sha256": "357ead9734ea43469a7e03bb85e6687144f6ccad6f75910309a3ce8e6248ddfc",
-    "version": "4.0.1"
+    "sha256": "e8d3835853390c2817c34d9a1cf272116e17b93c6f13bce4797abe6fdae48e5d",
+    "version": "4.0.2"
   },
   "mvslovers/ufsd": {
-    "sha256": "3efc6ed09d63cb06afd8b6adf4e411d85efd48511cca266f0ada7b5560ebd5b0",
-    "version": "1.2.1"
+    "sha256": "5d19014572a7dfca0f9081f92ca74ba678a127285784e6dc2558c272bba198d6",
+    "version": "1.2.2"
   }
 }

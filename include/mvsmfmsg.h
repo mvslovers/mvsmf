@@ -93,6 +93,13 @@
 /** MVSMF105E member rename failed after the target was found free */
 #define MSG_MBR_RENAME_FAILED	"MVSMF105E RENAME %s(%s) TO (%s) FAILED RC=%d"
 
+/** MVSMF106E uncorrectable I/O error while reading; the reply is short (#362).
+ * Since libc370 1.0.4 a media error is ferror()+EIO rather than ABEND S001, so
+ * it no longer announces itself on the console by killing the request. This is
+ * that announcement: an operator can act on a bad track, and nothing else in
+ * the response can say so once the status is already on the wire. */
+#define MSG_DS_READ_ERROR	"MVSMF106E I/O ERROR READING %s ERRNO=%d"
+
 /*
  * MVSMF2xx -- jobs (restjobs)
  */

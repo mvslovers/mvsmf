@@ -563,29 +563,48 @@ send_all(Session *session, const UCHAR *buf, int len)
 	rc = send_bytes(session, &send_ops, (const unsigned char *)buf, len);
 
 	if (rc < 0) {
-		// Drop the connection, both halves of it.
-		//
-		// CSTATE_DONE stops the handler's remaining output --
-		// http_printf() and the entry guard in send_bytes() both refuse a
-		// client at CSTATE_DONE -- instead of every later call paying its
-		// own 10 second budget for a peer that is gone (httpd#203).
-		//
-		// It does NOT close the socket, though: DONE is the normal
-		// completion state, and httpd walks DONE -> REPORT -> RESET, where
-		// httprese() keeps the connection open if keepalive is still set.
-		// That is fine for a response that finished and wrong for this one
-		// -- the body is short of the Content-Length it announced, so the
-		// next response on the socket would be appended to a truncated one
-		// and the client would read the two as a single corrupt reply.
-		// Clearing keepalive sends httprese() down its CSTATE_CLOSE branch.
-		// httpd's chunked path clears the same flag for the same reason.
-		if (session->httpc->state < CSTATE_DONE) {
-			session->httpc->state = CSTATE_DONE;
-		}
-		session->httpc->keepalive = 0;
+		abort_response(session);
 	}
 
 	return rc;
+}
+
+//
+// abort_response -- give up on a response whose status is already on the wire.
+//
+// Drop the connection, both halves of it.
+//
+// CSTATE_DONE stops the handler's remaining output -- http_printf() and the
+// entry guard in send_bytes() both refuse a client at CSTATE_DONE -- instead
+// of every later call paying its own 10 second budget for a peer that is gone
+// (httpd#203).
+//
+// It does NOT close the socket, though: DONE is the normal completion state,
+// and httpd walks DONE -> REPORT -> RESET, where httprese() keeps the
+// connection open if keepalive is still set. That is fine for a response that
+// finished and wrong for this one -- the body is short of the Content-Length
+// it announced, so the next response on the socket would be appended to a
+// truncated one and the client would read the two as a single corrupt reply.
+// Clearing keepalive sends httprese() down its CSTATE_CLOSE branch. httpd's
+// chunked path clears the same flag for the same reason.
+//
+// Two callers, and they are the same situation from opposite ends: send_all()
+// when the bytes cannot be delivered, and a streaming handler when the bytes
+// cannot be read (#362). A short body that ends cleanly is the one outcome
+// neither may produce -- the client cannot tell it from a complete one.
+//
+__asm__("\n&FUNC    SETC 'abort_resp'");
+void
+abort_response(Session *session)
+{
+	if (!session || !session->httpc) {
+		return;
+	}
+
+	if (session->httpc->state < CSTATE_DONE) {
+		session->httpc->state = CSTATE_DONE;
+	}
+	session->httpc->keepalive = 0;
 }
 
 //

@@ -13,7 +13,7 @@ builds on.
 
 ## Features
 
-- **Datasets** — list, read, write, create, delete (sequential + volume-qualified)
+- **Datasets** — list, read, write, create, delete (sequential and partitioned)
 - **PDS members** — list, read, write, delete
 - **Jobs** — submit (inline JCL or dataset), status, spool files, spool records, purge
 - **USS files** — list, read, write, create, delete
@@ -27,14 +27,65 @@ every console message mvsMF can write.
 
 ## Installation
 
-> **Note:** mvsMF is **Work in Progress** and not intended for production use.
+> **Security note — what is authorized, and what is only authenticated.**
+> Every endpoint requires a valid userid. The data set services check that
+> userid against RACF/RAKF before every open; `restjobs` and `restconsoles` do
+> not — for them, authentication is the *only* gate there is. On jobs that means
+> a client can widen `owner=` to `*` and read or purge another user's spool
+> output ([#345](https://github.com/mvslovers/mvsmf/issues/345); MVS 3.8j
+> security products have no JESSPOOL class to delegate that to). On consoles it
+> means more: any user who can log in can issue **any** operator command through
+> `PUT /zosmf/restconsoles/consoles/{name}` — it goes out by SVC 34 from console
+> 0, the master console, with the text unfiltered — and can read the whole
+> Master Trace Table through `GET /zosmf/restconsoles/v1/log`. The diagnostic
+> endpoint `/zosmf/test?fn=cmd` is the same power through a second door and is
+> compiled in by default. There is no per-command policy yet
+> ([#347](https://github.com/mvslovers/mvsmf/issues/347)).
+>
+> On a system where not every userid is trusted at the operator console:
+> register the prefixes you want instead of `/zosmf/*` — httpd matches a route
+> per `MOD=` line, so several lines can name the same module — and build with
+> `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
 
 ### Prerequisites
 
 - An MVS 3.8j system (TK4‑, TK5, MVSCE, or local Hercules)
-- **httpd** ≥ `4.0.0-dev` installed and configured — the console services need
-  the `cgictx` API introduced in the httpd 4.x line
+- **httpd** ≥ `4.0.2` installed and configured. **4.0.1 is a hard floor, not a
+  recommendation:** mvsMF reaches the server through the HTTPX function vector,
+  and the `http_realm` entry it uses to build the `WWW-Authenticate` challenge
+  is the last member of that vector, added in 4.0.1. On an older server the
+  call reads past the end of the table and **every unauthenticated request
+  abends the CGI with S0C4** — the client sees a truncated 401 and the console
+  fills with `External program MVSMF failed with S0C4 ABEND`
+  ([#363](https://github.com/mvslovers/mvsmf/issues/363)). A quick check on a
+  server you did not install yourself: `printf 'GET / HTTP/9.9\r\n\r\n' | nc
+  <host> <port>` answers **505** on a current build and 500 on one that predates
+  it.
+
+  4.0.2 on top of that floor is the release that carries the libc370 1.0.4 stdio
+  fixes into the server. mvsMF is a separate load module with its own statically
+  linked runtime, so relinking one does nothing for the other: both sides want
+  to be current.
+- **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — see below
 - JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`
+
+#### The two JES2 DDs
+
+mvsMF reads the JES2 checkpoint and spool through libc370's `jesopen()`, which
+opens them **by ddname**. As a CGI module dispatched into httpd's task by the
+LINK SVC, mvsMF has no allocations of its own — the two DDs have to be in the
+**host server's** STC procedure:
+
+```jcl
+//HASPCKPT DD  DISP=SHR,DSN=SYS1.HASPCKPT
+//HASPACE1 DD  DISP=SHR,DSN=SYS1.HASPACE
+```
+
+Substitute your own names if `$DSNPRFX` is not `SYS1`. Without them **every**
+job endpoint answers HTTP 500 (`REASON_INCORRECT_JES_VSAM_HANDLE`) and writes
+two console lines per request — and nothing on either side of the boundary
+points at the cause, which is what made mvslovers/httpd#256 expensive to
+diagnose. The data set services are unaffected.
 
 #### The `SYZJ201` usermod
 
@@ -106,8 +157,13 @@ released XMIT manually:
 2. Copy the `MVSMF` load module into the `LINKLIB` your httpd server loads from.
 3. Map the CGI in your httpd parmlib member:
    ```text
-   MOD=MVSMF /zosmf/*
+   MOD=MVSMF /zosmf/*  AUTH=BASIC
    ```
+   The `AUTH=` is not what protects the endpoints — mvsMF resolves the client's
+   identity itself and answers 401 without one — but a line that names no mode
+   registers as `AUTH=NONE (public)` and reads that way in `/.dsrv?target=MOD`,
+   which is a poor thing for an audit to find. See the security note above for
+   narrowing the prefix instead of `/zosmf/*`.
 4. Restart the httpd server.
 
 ## Building mvsMF

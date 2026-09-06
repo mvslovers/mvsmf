@@ -2,6 +2,28 @@
 
 Issues an MVS operator command and returns the captured command response. Part of the z/OSMF Console services (`/zosmf/restconsoles`).
 
+> **Authorization: none. Read this before exposing the endpoint.**
+>
+> The request needs an authenticated userid and nothing else. There is no
+> per-command policy, no console authority level and no RACF check — `consapi.c`
+> makes no authorization call at all. The command goes out by SVC 34 with the
+> MCS console field left zero, which is **console 0**: no console entered it, so
+> no `UCMAUTH` authority group applies and nothing is filtered. `$P JES2`,
+> `V xxx,OFFLINE` and `P`/`S` of any started task are all reachable by any user
+> who can log in.
+>
+> That is [#347](https://github.com/mvslovers/mvsmf/issues/347), open and
+> deliberately unfixed rather than half-fixed: the policy has to be invented
+> here, because MVS 3.8j has no mechanism to delegate it to (measured — the
+> authority machinery hangs off the UCM entry of the console a command was
+> entered at, and MGCR from a program has none). Note that a display-only
+> allow-list is not the obvious answer it looks like: `P FTPD` / `S FTPD` are
+> group-1 SYS commands and are in normal use.
+>
+> Until it is settled: register only the prefixes you want in the httpd parmlib
+> member rather than `/zosmf/*`, and leave `/zosmf/restconsoles/*` out on a
+> system where not every userid is trusted at the operator console.
+
 ## HTTP Method
 PUT
 

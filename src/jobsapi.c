@@ -1602,6 +1602,21 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		num_lines++;
 	}
 
+	/* Since libc370 1.0.4 an uncorrectable I/O error is ferror() + EIO with
+	   feof() deliberately clear, so the loop above ends on a bad track exactly
+	   as it ends at the end of the data (#362). Submitting what was read is
+	   the one thing that must not happen: a JCL data set truncated mid-stream
+	   is a different job, and JES2 would run it. No header has gone out yet,
+	   so this one can still be answered properly. */
+	if (ferror(fp)) {
+		wtof(MSG_DS_READ_ERROR, fp->dataset, errno);
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+		rc = -1;
+		goto quit;
+	}
+
 	session_fclose(session, fp);
 	fp = NULL;
 

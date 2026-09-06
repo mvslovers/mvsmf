@@ -39,11 +39,22 @@
 //*     /.dm?m=<jfcb>&l=80   +10 begins the JFCB, whose first 44
 //*                          bytes are the DSN
 //*
-//*   Measured that way on mvsdev 2026-08-25 against HTTPD 4.0.1
-//*   -- the value below. 4.0.1 installs into a library of its
-//*   own, so an httpd upgrade moves this name and leaves the
-//*   previous library behind: still populated, no longer read,
-//*   and a copy into it activates nothing.
+//*   Measured from the running STC (STC01875) on 2026-09-06:
+//*   the value below, HTTPD's own deploy library. It was
+//*   HTTPD.V4R0M1.LINKLIB on 2026-08-25 -- an httpd upgrade
+//*   moves this name and leaves the previous library behind,
+//*   still populated, no longer read, and a copy into it
+//*   activates nothing while every step reports success.
+//*
+//*   The port matters as much as the name. There is more than
+//*   one httpd on this network, and a second one on the same
+//*   HOST answers a different port from a different STEPLIB and
+//*   a different MVS system entirely. Read MBT_MVS_PORT from
+//*   .env, ask THAT server which STC is active, and take the
+//*   STEPLIB from THAT job -- the whole chain, not just the
+//*   host name. Measured wrong once (2026-09-06, port 8083 vs
+//*   8080): every step was green and the module went to an
+//*   unrelated system.
 //*
 //*   The deploy library is the one `make deploy` reports as its
 //*   target, built from MBT_MVS_HLQ in .env.
@@ -64,7 +75,7 @@
 //ACTIVATE EXEC PGM=IEBCOPY
 //SYSPRINT DD SYSOUT=*
 //IN       DD DSN=IBMUSER.MVSMF.V1R0M0D.LINKLIB,DISP=SHR
-//OUT      DD DSN=HTTPD.V4R0M1.LINKLIB,DISP=SHR
+//OUT      DD DSN=HTTPD.V4R0M2D.LINKLIB,DISP=SHR
 //SYSIN    DD *
   COPY INDD=((IN,R)),OUTDD=OUT
   SELECT MEMBER=MVSMF

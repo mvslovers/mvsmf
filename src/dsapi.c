@@ -473,6 +473,19 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		}
 	}
 
+	/* An uncorrectable I/O error is ferror() + EIO since libc370 1.0.4, and
+	   feof() is deliberately NOT set -- so all three loops above end on a bad
+	   track exactly as they end at the end of the data (#362). Before that
+	   library the same error was ABEND S001 and the ESTAE answered 500; the
+	   one outcome that must not replace it is a short body that ends cleanly,
+	   which the client cannot tell from a complete one. The status is long
+	   gone, so the connection is what is left to say it. */
+	if (ferror(fp)) {
+		wtof(MSG_DS_READ_ERROR, fp->dataset, errno);
+		abort_response(session);
+		rc = -1;
+	}
+
 	free(buffer);
 	return rc;
 }
@@ -539,6 +552,16 @@ dataset_etag(Session *session, const char *dataset, long max_records,
 		if (max_records >= 0 && count >= max_records) break;
 		etag_update(&ctx, buffer, n);
 		count++;
+	}
+
+	/* A read that stopped short leaves a stamp over a prefix of the resource,
+	   which compares unequal to itself on the next attempt -- If-Match would
+	   then refuse a write nobody conflicted with. No stamp is better than an
+	   unstable one, the same call uss_etag() makes on ufs_ferror() (#362). */
+	if (ferror(fp)) {
+		free(buffer);
+		session_fclose(session, fp);
+		return -1;
 	}
 
 	free(buffer);
@@ -2289,6 +2312,18 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 
 			pos += size;
 		}
+	}
+
+	/* The walk ends on `len <= 0`, which since libc370 1.0.4 is an I/O error
+	   as readily as it is the end of the directory -- ferror() is the only
+	   thing that separates them, and feof() is deliberately not set (#362).
+	   Unguarded, a bad track answers a short member list as if it were the
+	   whole one. The status is already on the wire, so the connection carries
+	   the failure; -1 is what the caller already treats as a failed write. */
+	if (ferror(fp)) {
+		wtof(MSG_DS_READ_ERROR, fp->dataset, errno);
+		abort_response(session);
+		return -1;
 	}
 
 	return (int) seen;

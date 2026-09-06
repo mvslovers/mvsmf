@@ -16,6 +16,7 @@ Zowe Explorer and JetBrains plugins throughout the 0.x and `1.0.0-dev` line;
 what 1.0.0 adds is the commitment to it.
 
 Built against **libc370 1.0.4**, **httpd 4.0.2** and **ufsd 1.2.2**.
+**httpd 4.0.1 is a hard minimum** — see *Known limitations*.
 
 ### Added
 
@@ -84,6 +85,11 @@ Built against **libc370 1.0.4**, **httpd 4.0.2** and **ufsd 1.2.2**.
 - **`DSORG=DA` data sets cannot be written** (#76) — QSAM extends past the
   primary allocation and `SD37`s.
 - **USS files are capped at 64 KB** by UFSD's direct-block layout.
+- **An httpd older than 4.0.1 abends the CGI on every unauthenticated request**
+  (#363). `http_realm` is the last member of the HTTPX vector and mvsMF calls it
+  unguarded to build the `WWW-Authenticate` challenge, so on an older server the
+  load reads past the end of the table. There is no version field in the vector
+  to test against; the fix that scales is one on the httpd side.
 
 ## [1.0.0-dev] - 2026-08-25
 

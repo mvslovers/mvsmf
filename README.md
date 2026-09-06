@@ -50,11 +50,22 @@ every console message mvsMF can write.
 ### Prerequisites
 
 - An MVS 3.8j system (TK4‑, TK5, MVSCE, or local Hercules)
-- **httpd** ≥ `4.0.2` installed and configured — the console services need the
-  `cgictx` API introduced in the httpd 4.x line, and 4.0.2 is the release that
-  carries the libc370 1.0.4 stdio fixes into the server. mvsMF is a separate
-  load module with its own statically linked runtime, so relinking one does
-  nothing for the other: both sides want to be current.
+- **httpd** ≥ `4.0.2` installed and configured. **4.0.1 is a hard floor, not a
+  recommendation:** mvsMF reaches the server through the HTTPX function vector,
+  and the `http_realm` entry it uses to build the `WWW-Authenticate` challenge
+  is the last member of that vector, added in 4.0.1. On an older server the
+  call reads past the end of the table and **every unauthenticated request
+  abends the CGI with S0C4** — the client sees a truncated 401 and the console
+  fills with `External program MVSMF failed with S0C4 ABEND`
+  ([#363](https://github.com/mvslovers/mvsmf/issues/363)). A quick check on a
+  server you did not install yourself: `printf 'GET / HTTP/9.9\r\n\r\n' | nc
+  <host> <port>` answers **505** on a current build and 500 on one that predates
+  it.
+
+  4.0.2 on top of that floor is the release that carries the libc370 1.0.4 stdio
+  fixes into the server. mvsMF is a separate load module with its own statically
+  linked runtime, so relinking one does nothing for the other: both sides want
+  to be current.
 - **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — see below
 - JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`
 

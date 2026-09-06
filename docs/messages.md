@@ -55,7 +55,7 @@ Ranges:
 
 ## MVSMF1xx — data sets
 
-All five are server-side failures that carry a return code or `errno` the HTTP
+All six are server-side failures that carry a return code or `errno` the HTTP
 error body does not surface. Client mistakes (missing name, data set not found,
 member not found, record too long) produce **no** console message.
 
@@ -66,6 +66,7 @@ member not found, record too long) produce **no** console message.
 | `MVSMF103E` | `DELETE FAILED name RC=n ERRNO=n` | Scratch/uncatalog failed after the data set was found. `name` is the data set, or `DSN(MEMBER)` for a member delete. |
 | `MVSMF104E` | `RENAME old TO new FAILED RC=n` | Data set rename failed after the target was confirmed free. |
 | `MVSMF105E` | `RENAME dsn(old) TO (new) FAILED RC=n` | Member rename failed after the target was confirmed free. |
+| `MVSMF106E` | `I/O ERROR READING dsn ERRNO=n` | An uncorrectable I/O error on a read — bad track, wrong-length record, device error. Since libc370 1.0.4 that no longer abends the request, so this message is the only place it announces itself. The client gets a broken transfer, never a short reply that looks complete. Check the volume. |
 
 ## MVSMF2xx — jobs
 

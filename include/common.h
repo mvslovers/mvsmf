@@ -310,6 +310,20 @@ int send_not_modified(Session *session, const char *etag) asm("CMN0013");
 int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
 
 /**
+ * @brief Abandons a response whose status line has already gone out
+ *
+ * Marks the client CSTATE_DONE and clears keepalive, so the connection closes
+ * without a terminating chunk instead of ending a short body cleanly. Use it
+ * wherever a streaming handler learns, too late to change the status, that it
+ * cannot produce the rest of the body -- a failed send (send_all() calls this
+ * itself) or a failed read (#362). The one outcome it exists to prevent is a
+ * truncated reply the client cannot distinguish from a complete one.
+ *
+ * @param session Current session context
+ */
+void abort_response(Session *session) asm("CMN0019");
+
+/**
  * @brief Answers a request refused by an authorization check (issue #228)
  *
  * Sends the z/OSMF error report a denial produces -- see

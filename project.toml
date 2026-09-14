@@ -117,5 +117,14 @@ name = "TSTSPLN"
 sources = ["test/host/tstspln.c"]
 norent = true
 
+# TSTJCARD: #365 — mvsMF injects USER=/PASSWORD= on every submit, and did so
+# unconditionally, so a caller who wrote USER= themselves got two operands and
+# IEF652I. The TU #includes src/jobcard.c so it drives the real decision
+# process_jobcard() makes — do not list jobcard.c here.
+[[test]]
+name = "TSTJCARD"
+sources = ["test/host/tstjcard.c"]
+norent = true
+
 [release]
 version_files = ["VERSION"]

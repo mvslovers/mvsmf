@@ -19,6 +19,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "jclines.h"
+#include "jobcard.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "mvsmfmsg.h"
@@ -2155,6 +2156,25 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     if (class_param && strlen(class_param) > 6) {
         *jobclass = class_param[6];
     }
+
+    /* Clear any credentials the caller put on the card before adding ours.
+       The injection below used to run regardless, so a card that already
+       carried USER= got a second one and JES2 answered IEF652I MUTUALLY
+       EXCLUSIVE KEYWORDS -- measured on mvsdev 2026-09-14, JOB00351 (#365).
+
+       Overwriting rather than honouring is deliberate. Real z/OSMF passes a
+       card through untouched, but it can: there the submitter's identity is
+       propagated and SAF checks USER= against it. Here there is no
+       propagation, so a card-supplied USER= with no validated password does
+       not run the job as that user -- it loses the identity and the job runs
+       as the PROD default. Consistently running as whoever authenticated the
+       request is the better of the two available answers, and it is the
+       identity the submit response reports as the owner (#210).
+
+       A continuation left carrying nothing is blanked, which both submit
+       loops skip; the line in front of it keeps the comma that made it a
+       continuation, so the card still continues onto the card added below. */
+    jobcard_strip_credentials(lines, start_idx, end_idx);
 
     // Process job card lines in-place: replace NOTIFY=&SYSUID
     for (ii = start_idx; ii <= end_idx; ii++) {

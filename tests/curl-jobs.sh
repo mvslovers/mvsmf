@@ -535,6 +535,55 @@ test_submit_literal_notify_not_duplicated() {
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
+test_submit_user_on_card_is_overwritten() {
+	echo ""
+	echo "--- Submit Job: a USER= on the card is overwritten, not duplicated (issue #365) ---"
+
+	# mvsMF injects USER=/PASSWORD= on every submit, and used to do it whatever
+	# the card already said. A caller who wrote their own USER= therefore got
+	# two operands and the job never ran:
+	#   IEF452I JOBFAIL  JOB NOT RUN - JCL ERROR
+	#   IEF652I MUTUALLY EXCLUSIVE KEYWORDS
+	# A JCL ERROR here is that regression; CC 0000 is the fix.
+	local jcl
+	jcl=$(printf '%s\n%s\n%s\n' \
+		"//USRCARD  JOB (ACCT),'USER ON CARD',CLASS=A,MSGCLASS=H," \
+		"//         USER=${MVSMF_USER}" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit card carrying USER="
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "USER= on card overwritten (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0000" \
+			"card with USER= converts and runs"
+		# The identity must be the authenticated one, which is what the
+		# injection puts on the card -- not whatever the caller wrote.
+		assert_json_field "$BODY" '.owner' "${MVSMF_USER}" \
+			"job runs under the authenticated userid"
+	else
+		skip "USER= on card overwritten (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
 test_submit_notify_inside_programmer_name() {
 	echo ""
 	echo "--- Submit Job: NOTIFY inside the quoted programmer name (issue #307) ---"
@@ -1627,6 +1676,7 @@ test_submit_notify_sysuid_trailing_param
 test_submit_padded_null_statement
 test_submit_without_notify_gets_retcode
 test_submit_literal_notify_not_duplicated
+test_submit_user_on_card_is_overwritten
 test_submit_notify_inside_programmer_name
 test_submit_missing_programmer_name_retcode
 test_submit_jobcard_too_long

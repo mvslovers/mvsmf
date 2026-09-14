@@ -39,12 +39,16 @@
 //*     /.dm?m=<jfcb>&l=80   +10 begins the JFCB, whose first 44
 //*                          bytes are the DSN
 //*
-//*   Measured from the running STC (STC01875) on 2026-09-06:
-//*   the value below, HTTPD's own deploy library. It was
-//*   HTTPD.V4R0M1.LINKLIB on 2026-08-25 -- an httpd upgrade
-//*   moves this name and leaves the previous library behind,
-//*   still populated, no longer read, and a copy into it
-//*   activates nothing while every step reports success.
+//*   Measured from the running STC (STC00153) on 2026-09-14:
+//*   the value below. It was HTTPD.V4R0M2D.LINKLIB earlier the
+//*   same day and HTTPD.V4R0M1.LINKLIB on 2026-08-25 -- an
+//*   httpd upgrade moves this name, and the move that dropped
+//*   the version qualifier entirely left the old data set
+//*   behind: still populated, no longer read, and a copy into
+//*   it activates nothing while every step reports success.
+//*   When the name is wrong in the other direction -- the data
+//*   set is gone -- the job says so plainly, IEF212I ... DATA
+//*   SET NOT FOUND, and that is the friendlier failure.
 //*
 //*   The port matters as much as the name. There is more than
 //*   one httpd on this network, and a second one on the same
@@ -85,7 +89,7 @@
 //ACTIVATE EXEC PGM=IEBCOPY
 //SYSPRINT DD SYSOUT=*
 //IN       DD DSN=IBMUSER.MVSMF.V1R0M1D.LINKLIB,DISP=SHR
-//OUT      DD DSN=HTTPD.V4R0M2D.LINKLIB,DISP=SHR
+//OUT      DD DSN=HTTPD.LINKLIB,DISP=SHR
 //SYSIN    DD *
   COPY INDD=((IN,R)),OUTDD=OUT
   SELECT MEMBER=MVSMF

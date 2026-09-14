@@ -14,8 +14,11 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. #361 is new (2026-09-06) and moved #245 down:
-they are one subsystem and must be done in sequence. **Tier 1 is empty** —
+stand runs a server that old. **#366 is unranked too** (filed 2026-09-13, after
+this reconcile): the libc370 1.0.6 relink. Its `[toolchain]` pin has landed on
+its own; what is left is the write-side pass, and the ticket as filed wants
+reading against the comment on it first. #361 is new (2026-09-06) and moved
+#245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
 #336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
 PR #364 — so the top of the queue is Tier 2's #251.*
 

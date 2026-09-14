@@ -9,9 +9,44 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
-## [Unreleased]
+## [1.1.0] - 2026-09-14
+
+The release that makes mvsMF **SMP4 installable**, which is why the minor
+moves: every project in the ecosystem took one when it did. FMID `TZMF110`.
+
+Built against **libc370 1.0.6**, **httpd 4.0.2** and **ufsd 1.2.2**.
+**httpd 4.1.0 or later is what the install guide assumes** — it is the first
+release carrying unversioned product data sets.
+
+### Added
+
+- **An SMP Release 4 install package** (`TZMF110`). `make package` builds it:
+  an allocation job, an install job carrying the SYSMOD inline, and a samplib
+  with the two members a site has to act on — the STEPLIB concatenation and
+  the three route definitions. [docs/installation.md](docs/installation.md) is
+  the guide, [docs/uninstall.md](docs/uninstall.md) the way back out.
+
+  **The module installs into its own `MVSMF.LINKLIB`, not into httpd's**, and
+  that library needs an `IEAAPF00` entry before it is concatenated into
+  HTTPD's STEPLIB: every library in an authorized STEPLIB concatenation must
+  be APF-authorized, or the whole task silently loses authorization. MVS 3.8j
+  reads `IEAAPF00` at IPL, so that step needs one.
+
+  **There is no SMP prerequisite on httpd**, deliberately. mvsMF is a CGI and
+  does not run without it, but SMP's `REQ()` takes exact SYSMOD ids and has no
+  range syntax, so the only expressible requirement is "exactly this level" —
+  which fails both for an older httpd and for a system where a newer one was
+  installed fresh. The floor is stated in the install guide, where it can be
+  written as a floor.
 
 ### Changed
+
+- **`make deploy` now targets `MVSMF.DEV.LINKLIB`** instead of a versioned
+  library under the caller's HLQ. Three libraries, three owners: SMP owns
+  `MVSMF.LINKLIB`, development owns `MVSMF.DEV.LINKLIB`, and httpd owns
+  `HTTPD.LINKLIB`. Writing a development build into either of the other two
+  makes something lie — SMP's inventory about what is installed, or the
+  server's STEPLIB about which level runs.
 
 - **Relinked against libc370 1.0.6.** Two stdio changes arrive with it, both on
   the write side of the data set API. An out-of-space write is a return code
@@ -36,6 +71,22 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
   answered `204`, where the same request on the previous build answered 500.
   The flush is checked now, and a full data set also reaches the operator as
   `MVSMF107E`.
+
+- **A `USER=` on a submitted job card no longer produces invalid JCL** (#365).
+  mvsMF injects `USER=`/`PASSWORD=` on every submit because MVS 3.8j does no
+  userid propagation, and did so whatever the card already said — so a caller
+  who wrote their own got two operands and `IEF652I MUTUALLY EXCLUSIVE
+  KEYWORDS`. The card is cleared of both before mvsMF adds its own, so the
+  authenticated identity always wins.
+
+  **This deviates from the reference on purpose.** Measured against a real
+  z/OSMF: a card carrying `USER=` comes back out of JESJCL byte for byte and
+  the job runs under that userid. It can, because there the submitter's
+  identity is propagated and SAF checks the card against it. Without
+  propagation, honouring a card-supplied `USER=` does not run the job as that
+  user — it loses the identity and the job runs as the PROD default. You
+  cannot submit under a second identity by putting its credentials on the
+  card; authenticate as that user instead.
 
 ### Known limitations
 

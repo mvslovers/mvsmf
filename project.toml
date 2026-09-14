@@ -1,6 +1,6 @@
 [project]
 name = "mvsmf"
-version = "1.1.0"
+version = "1.1.0-dev"
 type = "application"
 
 [toolchain]
@@ -125,6 +125,28 @@ norent = true
 name = "TSTJCARD"
 sources = ["test/host/tstjcard.c"]
 norent = true
+
+# ── Deploy (development) ─────────────────────────────────
+# `make deploy` RECEIVEs the load module here, NOT into the library SMP owns
+# and NOT into httpd's. Three libraries, three owners:
+#
+#   MVSMF.LINKLIB      SMP installs it; nothing else may write there, or the
+#                      inventory describes a level that is not on disk
+#   MVSMF.DEV.LINKLIB  this one -- what `make deploy` fills
+#   HTTPD.LINKLIB      httpd's own; a copy of MVSMF placed there by hand
+#                      shadows both of the above
+#
+# The name carries no HLQ on purpose. For the development level to be reachable
+# it has to be named in the HTTPD procedure's STEPLIB, and a procedure can only
+# name a fixed data set -- a per-developer HLQ would need a per-developer STC.
+# Anyone sharing an httpd shares the running level anyway.
+#
+# Put it FIRST in the concatenation, ahead of MVSMF.LINKLIB, so a deploy wins
+# over the installed level; take it out to go back. And it needs its own
+# IEAAPF00 entry: every library in an authorized STEPLIB concatenation must be
+# APF-authorized or the whole task silently loses authorization.
+[deploy]
+target = "MVSMF.DEV.LINKLIB"
 
 # ── SMP4 distribution ────────────────────────────────────
 # `make package` renders the install package from this; `make dist` alone

@@ -549,6 +549,24 @@ Still open and ours to wait on — the first four verified 2026-08-23:
 (volume-addressed SCRATCH/RENAME, the half of #336 that is not ours; the read
 and write half needs nothing from there).
 
+Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
+
+- **`libc370#182`** — a close-time out-of-space is invisible. `@@ACLOSE` ends
+  `FUNEXIT RC=0` unconditionally and `fclose()` discards even that, so a PUT
+  whose last block is *partial* loses those records and answers 204, with
+  nothing in this repo able to see it. Measured: five record counts per full
+  data set. `fclose()` returning `EOF` as C99 7.19.5.1 requires would close it,
+  and `tests/curl-nospace.sh` reports the band as a KNOWN GAP that should reach
+  0 when it lands.
+- **`mbt#103`** — neither `libc.a` nor `$(DEP_LIBS)` is a prerequisite of the
+  link rule, so installing a new libc370 or staging a new dependency **never
+  relinks**. `make` reports "Modules built: 1" and links nothing. This cost a
+  measurement here: #366's first run on mvsdev showed pre-1.0.6 behaviour on
+  what was believed to be a 1.0.6 build. Until it lands, `make clean` before
+  any relink. Sibling of `mbt#65` (cflags) and `mbt#66` (the stale build stamp,
+  which also showed up here — the activated module carried the previous
+  commit's hash while containing the fix).
+
 **Cashed in on 2026-08-23** — libc370 rebuilt and installed into the cc370
 sysroot, mvsMF rebuilt, deployed and activated: `libc370#21` (which unblocked
 #186), `#126` (which closed #282), `#127`, `#128`, `#131` and `#104`. Measured

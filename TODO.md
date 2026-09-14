@@ -14,12 +14,7 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. **#366 is unranked and now blocked** (filed
-2026-09-13, after this reconcile): the libc370 1.0.6 relink. PR #367 landed the
-pin, the write-side fix and `tests/curl-nospace.sh`; what is left is the
-close-time band, which **cannot be fixed here** and waits on `libc370#182`.
-Verified on target — see the PR, and read the comments on the ticket rather
-than the ticket as filed. #361 is new (2026-09-06) and moved
+stand runs a server that old. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
 #336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
 PR #364 — so the top of the queue is Tier 2's #251.*
@@ -408,7 +403,18 @@ policy vacuum.
 
 ## Recently closed
 
-**PR #367, merged 2026-09-14** — the libc370 1.0.6 relink (#366, still open).
+**PR #369, merged 2026-09-14** — #365: a `USER=` the caller put on the job
+card got a second one from mvsMF's injection, and JES2 answered `IEF652I
+MUTUALLY EXCLUSIVE KEYWORDS`. The card is cleared of `USER=`/`PASSWORD=` before
+ours go on, so the authenticated identity always wins. **A deliberate deviation
+from the reference** — measured, z/OSMF passes the card through untouched, but
+it can: there the submitter's identity is propagated and SAF checks the card
+against it. Without propagation, honouring a card-supplied `USER=` loses the
+identity rather than assuming it. The removal lives in `src/jobcard.c` with a
+host test, because cutting an operand out of a job card damages the quoted
+programmer name or the comma structure silently.
+
+**PR #367, merged 2026-09-14** — the libc370 1.0.6 relink (#366, closed).
 The `[toolchain]` pin, plus the half of the out-of-space defect this repo can
 reach: the physical I/O is per *block*, so the record that completes one has
 its write inside `fflush()`, whose result all three call sites discarded. A PUT
@@ -417,7 +423,9 @@ measured before and after on mvsdev, exactly one row of the band moves.
 `MVSMF107E` is the operator side. The close-time band (a partial last block,
 five counts in that measurement) is still silently lost and is `libc370#182`.
 `tests/curl-nospace.sh` bisects for the capacity rather than hardcoding it, and
-reports that band as a KNOWN GAP that should reach 0 when #182 lands.
+reports that band as a KNOWN GAP that should reach 0 when #182 lands. #366 is
+closed: what it asked for — relink and check — is done, and the residue is not
+ours to fix.
 
 
 Pointers only — the reasoning lives in the closing comments.

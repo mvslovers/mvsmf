@@ -22,7 +22,30 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
   (`libc370#149`) — measured there as 46 of 50 writes reporting full length
   with not one record reaching the disk. The `ferror()`/`feof()` macros, which
   returned the raw flag value rather than 1/0, are corrected in the same
-  header. What the write loops should report for `ENOSPC` is open as #366.
+  header.
+
+### Fixed
+
+- **A data set PUT no longer reports success after losing records to a full
+  data set** (#366). The relink above is what exposed it: an out-of-space write
+  used to ABEND `SD37` into the router's ESTAE and answer 500, and now it
+  returns. mvsMF flushes after every record but the physical I/O is per
+  *block*, so whenever a record completes a block that block's write happens
+  inside `fflush()` — whose return value was discarded. Measured on mvsdev
+  2026-09-14 against a 194-record data set: a PUT of 200 records lost ten and
+  answered `204`, where the same request on the previous build answered 500.
+  The flush is checked now, and a full data set also reaches the operator as
+  `MVSMF107E`.
+
+### Known limitations
+
+- **A PUT whose last block is partial still loses those records silently**
+  (#366). The tail block is written by libc370's `@@ACLOSE`, which ends
+  `FUNEXIT RC=0` unconditionally, and `fclose()` discards even that — so
+  nothing in this repo can see the failure. In the measurement above that band
+  is 195..199 records against a 194-record target: `204`, five to nine records
+  gone. Closing it needs libc370 to report a failed close; `fclose()` returning
+  `EOF` as C requires would be enough.
 
 ## [1.0.0] - 2026-09-06
 

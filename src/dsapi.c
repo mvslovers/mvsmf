@@ -893,9 +893,43 @@ static int open_write_target(Session *session, FILE **fp, const char *target,
  * RECFM=U data set to zero length, because a text-mode write is selected by
  * the X-IBM-Data-Type header and does not care what RECFM the data set has.
  */
+/* Hand the buffered record to the access method, and take the answer.
+ *
+ * This is the only place a write failure can still be seen.  mvsMF flushes
+ * after every record, but the physical I/O is per BLOCK: fflush() gives one
+ * record to @@AWRITE and the block reaches DASD when it fills.  So whenever a
+ * record completes a block, that block's write happens inside this call and
+ * its failure is reported only here.  Discarding the rc answered 204 with
+ * records missing -- measured on mvsdev 2026-09-14 (#366): a PUT of 200
+ * records into a data set that held 194 lost ten and reported success.
+ *
+ * libc370 passes __fflush()'s rc straight through: 0, 8 (EIO) or 12, the x37
+ * exit, which is out of space (libc370#176).  -2 carries that distinction up
+ * to write_record_open(), which has the data set name the operator needs.
+ *
+ * A failure at CLOSE time is NOT covered and cannot be, from here or anywhere
+ * else in this repo: a partial last block is written by @@ACLOSE, which ends
+ * FUNEXIT RC=0 unconditionally, and fclose() discards even that.  In the same
+ * measurement that band is 195..199 records -- still silently lost.  Closing
+ * it needs libc370 to report a failed close; until then do not add a check
+ * here that pretends to cover it.
+ */
+__asm__("\n&FUNC    SETC 'flush_record'");
+static int flush_record(FILE *fp)
+{
+    int err = fflush(fp);
+
+    if (!err) {
+        return 0;
+    }
+
+    return (err == 12) ? -2 : -1;
+}
+
 static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t content_max)
 {
     int recfm = fp->recfm;  // Get record format from file handle
+    int rc;                 // flush_record() result; -2 is out of space
 
     int is_variable = (recfm & VARIABLE) == VARIABLE;
     
@@ -917,7 +951,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Write the raw data
             if (fwrite(record_buffer, 1, record_length, fp) != record_length) return -1;
-            fflush(fp);
+            if ((rc = flush_record(fp)) < 0) return rc;
             *total_written += record_length;
             break;
             
@@ -959,7 +993,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
             
             // Write the record data
             if (fwrite(record_buffer, 1, rec_len, fp) != rec_len) return -1;
-            fflush(fp);
+            if ((rc = flush_record(fp)) < 0) return rc;
             *total_written += rec_len;
             break;
             
@@ -982,7 +1016,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
 
             // Write the converted record
             if (fwrite(record_buffer, 1, record_length, fp) != record_length) return -1;
-            fflush(fp);
+            if ((rc = flush_record(fp)) < 0) return rc;
 
             *total_written += record_length;
             break;
@@ -1009,12 +1043,27 @@ static int write_record_open(Session *session, FILE **fp, const char *target,
                              int *line_count, int data_type,
                              size_t content_max)
 {
+    int rc;
+
     if (open_write_target(session, fp, target, mode) < 0) {
         return -1;
     }
 
-    return write_record(session, *fp, record_buffer, record_length,
-                        total_written, line_count, data_type, content_max);
+    rc = write_record(session, *fp, record_buffer, record_length,
+                      total_written, line_count, data_type, content_max);
+
+    /* -2 is out of space, and this is the one frame that has both the failure
+       and the name to put in the message.  The client's 500 cannot say more
+       than "the write failed" without leaving the z/OSMF status list (507 is
+       not on it, #102), so the console carries the actionable half: the data
+       set filled, records were lost, and its previous content is already gone
+       because the write does not stage (#243). */
+    if (rc == -2) {
+        wtof(MSG_DS_WRITE_NOSPACE, target);
+        return -1;
+    }
+
+    return rc;
 }
 
 /*

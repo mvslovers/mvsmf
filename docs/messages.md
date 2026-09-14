@@ -55,7 +55,7 @@ Ranges:
 
 ## MVSMF1xx — data sets
 
-All six are server-side failures that carry a return code or `errno` the HTTP
+All seven are server-side failures that carry a return code or `errno` the HTTP
 error body does not surface. Client mistakes (missing name, data set not found,
 member not found, record too long) produce **no** console message.
 
@@ -67,6 +67,7 @@ member not found, record too long) produce **no** console message.
 | `MVSMF104E` | `RENAME old TO new FAILED RC=n` | Data set rename failed after the target was confirmed free. |
 | `MVSMF105E` | `RENAME dsn(old) TO (new) FAILED RC=n` | Member rename failed after the target was confirmed free. |
 | `MVSMF106E` | `I/O ERROR READING dsn ERRNO=n` | An uncorrectable I/O error on a read — bad track, wrong-length record, device error. Since libc370 1.0.4 that no longer abends the request, so this message is the only place it announces itself. The client gets a broken transfer, never a short reply that looks complete. Check the volume. |
+| `MVSMF107E` | `OUT OF SPACE WRITING dsn - RECORDS LOST` | The data set filled while a PUT was writing it. Since libc370 1.0.6 an out-of-space write is a return code rather than ABEND SD37, so the request no longer dies into the router's ESTAE and this is the only console record of it. The client is answered 500. **The data set is left short and its previous content is already gone** — the write does not stage (#243), so there is nothing to roll back to. Add space, then have the client repeat the upload. A PUT whose *last block is partial* is not covered by this message and is lost silently; that half needs libc370 to report a failed close (#366). |
 
 ## MVSMF2xx — jobs
 

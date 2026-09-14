@@ -31,20 +31,24 @@ distribution zone. Skip one and the id survives there.
 //UCLIN   EXEC SMPAPP
 //SMPCNTL  DD  *
  UCLIN CDS .
-  DEL SYSMOD(TZMF110) MOD(MVSMF) .
+  DEL SYSMOD(TZMF111) MOD(MVSMF) .
   DEL MOD(MVSMF) .
   DEL LMOD(MVSMF) .
+  DEL SYSMOD(TZMF111) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
  UCLIN ACDS .
-  DEL SYSMOD(TZMF110) MOD(MVSMF) .
+  DEL SYSMOD(TZMF111) MOD(MVSMF) .
   DEL MOD(MVSMF) .
+  DEL SYSMOD(TZMF111) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
 /*
 //LIST    EXEC SMPAPP
 //SMPCNTL  DD  *
  RESETRC .
+ LIST CDS  SYSMOD(TZMF111) .
+ LIST ACDS SYSMOD(TZMF111) .
  LIST CDS  SYSMOD(TZMF110) .
  LIST ACDS SYSMOD(TZMF110) .
 /*
@@ -55,9 +59,14 @@ Every `DEL` reports `HMA2550 UPDATE COMPLETE`. The `LIST` at the end is the
 check: **RC 04 with the id reported as not found means it is free.** A hit
 prints `TYPE`, `STATUS` and the FMID it belongs to — the id is still taken.
 
-Add a `DEL SYSMOD(...)` pair for every level that was ever installed on the
-system, not only the current one. Today that is `TZMF110` alone, since 1.0.0
-and 1.0.1 shipped without a `[distribution]` and were never SMP-installed.
+**Name every level that was ever installed on the system, not only the current
+one.** The block above lists `TZMF111` and `TZMF110`; add a pair for each
+further level if the system has seen more. A level that an upgrade already
+deleted is left as a tombstone — `TYPE = FUNCTION / DELBY = …` — which `LIST`
+reports at **RC 00**, so it still reads as occupied and still has to go.
+
+1.0.0 and 1.0.1 shipped without a `[distribution]` and were never
+SMP-installed, so there is nothing below `TZMF110`.
 
 `LMOD` exists only in the CDS; there is nothing to delete for it in the ACDS.
 

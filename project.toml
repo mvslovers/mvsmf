@@ -162,20 +162,29 @@ readme = "docs/installation.md"
 # zones have to be asked, a hit in either means the id is taken).
 #
 # 1.0.0 and 1.0.1 shipped with no [distribution] at all, so TZMF100/TZMF101
-# were never assigned and the id space starts here. The minor bump to 1.1.0 is
-# the ecosystem's, not ours alone: every project took one when it became SMP
-# installable.
+# were never assigned and the id space starts at TZMF110. The minor bump to
+# 1.1.0 was the ecosystem's, not ours alone: every project took one when it
+# became SMP installable.
 #
 # No version component may ever exceed 9 -- a 7-character id has no room for a
 # second digit, so at patch 9 the next release is a new minor. 1.1.10 cannot be
 # expressed and must not be released.
 #
-# `delete` is absent because this is the FIRST level: there is no predecessor
-# to replace. From 1.1.1 on it is mandatory -- SMP keys element ownership on
-# MOD(name) in the CDS, so without it a successor reports NOT SEL for MVSMF,
-# copies nothing, and still ends RC 00 with an empty target library. That needs
-# mbt >= #98, which is why the submodule moved with this change.
-fmid = "TZMF110"
+# `make release` does not move this id: it bumps the version and stops, so a
+# tree comes out of a release still carrying the id that was just spent.
+# Moving it belongs in the commit that FOLLOWS the bump -- this one -- and
+# before anything is built from the tree, because a second install under a
+# spent id does not fail. SMP keys element ownership on MOD(name), so the
+# successor reports NOT SEL for MVSMF, copies nothing, and still ends RC 00
+# with an empty target library and STATUS = REC APP ACC in both zones.
+#
+# `delete` is what avoids exactly that: it puts DELETE(TZMF110) on the ++VER,
+# SMP deletes the predecessor's LMOD (HMA2240) and copies the new one in
+# (HMA2380), and MOD(MVSMF) comes back carrying the new FMID. 1.1.0 carried no
+# `delete` because it was the first level and had no predecessor to replace.
+# The key needs mbt >= #98, which is why the submodule moved for 1.1.0.
+fmid = "TZMF111"
+delete = ["TZMF110"]            # the level this one replaces; SMP deletes it
 system = "Z038"
 
 # EMPTY ON PURPOSE, and httpd is not an oversight. mvsMF is a CGI: it does not

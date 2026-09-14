@@ -1,0 +1,38 @@
+//* -----------------------------------------------------------------
+//* MVSMF -- STEPLIB concatenation for the HTTPD started task
+//*
+//* mvsMF is a CGI: httpd LINKs the MVSMF load module per request from
+//* its own STEPLIB. SMP installs it into MVSMF.LINKLIB, so that
+//* library has to be reachable from the HTTPD procedure.
+//*
+//* Edit the STEPLIB DD of your HTTPD procedure to read:
+//* -----------------------------------------------------------------
+//STEPLIB  DD  DISP=SHR,DSN=MVSMF.LINKLIB
+//         DD  DISP=SHR,DSN=HTTPD.LINKLIB
+//*
+//* MVSMF.LINKLIB IS DELIBERATELY FIRST.
+//*
+//* If a copy of MVSMF was ever placed into HTTPD.LINKLIB by hand -- the
+//* development deploy does exactly that -- then whichever library comes
+//* first wins, and an SMP install into the other one activates nothing
+//* while every step reports success. Putting the SMP-owned library in
+//* front makes the installed level the one that runs. Better still,
+//* delete the hand-placed copy; two copies of a load module are a
+//* question nobody wants to answer during an incident.
+//*
+//* APF: EVERY LIBRARY IN AN AUTHORIZED STEPLIB CONCATENATION MUST BE
+//* APF-AUTHORIZED. HTTPD.LINKLIB is, because httpd and mvsMF do
+//* authorized work -- SVC 34 for operator commands, ACEE handling for
+//* identity. Concatenating a library that is NOT authorized silently
+//* de-authorizes the whole task, and the failure that follows does not
+//* name the cause.
+//*
+//* So add MVSMF.LINKLIB to SYS1.PARMLIB(IEAAPF00) with the volume it
+//* actually lives on:
+//*
+//*   MVSMF.LINKLIB WORK00,
+//*
+//* The volume is part of the entry, not decoration: an APF entry naming
+//* a different volume than the allocation does not authorize anything.
+//* MVS 3.8j reads IEAAPF00 at IPL and has no dynamic APF update, so this
+//* change needs an IPL before the library is usable.

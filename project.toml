@@ -1,6 +1,6 @@
 [project]
 name = "mvsmf"
-version = "1.0.1-dev"
+version = "1.1.0"
 type = "application"
 
 [toolchain]
@@ -125,6 +125,59 @@ norent = true
 name = "TSTJCARD"
 sources = ["test/host/tstjcard.c"]
 norent = true
+
+# ── SMP4 distribution ────────────────────────────────────
+# `make package` renders the install package from this; `make dist` alone
+# re-renders it. ufsd is the reference implementation -- this block follows it
+# and deviates only where mvsMF's shape forces it.
+[distribution]
+readme = "docs/installation.md"
+
+[distribution.smp]
+# The id is the release: T + three product letters + the three version digits.
+# One per release, spent exactly once. TZMF110 is 1.1.0 and was verified free
+# on mvsdev 2026-09-14 (JOB00360: RC 04, NOT FOUND, in CDS *and* ACDS -- both
+# zones have to be asked, a hit in either means the id is taken).
+#
+# 1.0.0 and 1.0.1 shipped with no [distribution] at all, so TZMF100/TZMF101
+# were never assigned and the id space starts here. The minor bump to 1.1.0 is
+# the ecosystem's, not ours alone: every project took one when it became SMP
+# installable.
+#
+# No version component may ever exceed 9 -- a 7-character id has no room for a
+# second digit, so at patch 9 the next release is a new minor. 1.1.10 cannot be
+# expressed and must not be released.
+#
+# `delete` is absent because this is the FIRST level: there is no predecessor
+# to replace. From 1.1.1 on it is mandatory -- SMP keys element ownership on
+# MOD(name) in the CDS, so without it a successor reports NOT SEL for MVSMF,
+# copies nothing, and still ends RC 00 with an empty target library. That needs
+# mbt >= #98, which is why the submodule moved with this change.
+fmid = "TZMF110"
+system = "Z038"
+
+# EMPTY ON PURPOSE, and httpd is not an oversight. mvsMF is a CGI: it does not
+# run without httpd. But SMP's REQ() takes exact SYSMOD ids and has no range
+# syntax, so the only thing expressible is "exactly this level was installed".
+# Under one-id-per-release that breaks on every httpd upgrade in BOTH
+# directions: a system running an older httpd cannot install mvsMF, and a
+# system where a NEWER httpd was installed fresh never saw the id we would
+# name, so it cannot either. A version floor belongs in docs/installation.md,
+# where it can be written as a floor. Same reasoning as ufsd, stronger case.
+prereq = []
+accept_fmid = true              # accept the FMID once so a PTF can be RESTOREd
+
+# Dataset names. ufsd and ftpd use <PROD>LOAD and A<PROD>LOD, which is nine
+# characters for a five-letter product -- one over the qualifier limit. So the
+# LOAD/LOD suffixes shorten here rather than the product name, which is the
+# part a site recognises.
+lklib   = "MVSMF.MVSMFLOD"      # staging: what the load XMIT is received into
+target  = "MVSMF.LINKLIB"       # where the load module ends up
+distlib = "MVSMF.AMVSMFLD"
+
+[[distribution.library]]
+dir = "samplib"
+target = "MVSMF.SAMPLIB"
 
 [release]
 version_files = ["VERSION"]

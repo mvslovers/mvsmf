@@ -1,0 +1,35 @@
+* ------------------------------------------------------------------
+* MVSMF -- route definitions for the httpd parmlib member (DD:HTTPPRM)
+*
+* Add these three lines to the member your HTTPD started task names on
+* its //HTTPPRM DD. They are the same three that ship in httpd's own
+* samplib(HTTPPRM0); keep the two in step.
+*
+* ORDER MATTERS -- FIRST MATCH WINS. The two specific routes must come
+* before the /zosmf/* catch-all, or the catch-all swallows them.
+*
+* AUTH=NONE on the first two is not a hole. Both endpoints resolve the
+* caller themselves and answer 401 without a credential:
+*
+*   /zosmf/info                  authenticated like every other route
+*                                since #324 -- the "anonymous liveness
+*                                probe" it was once documented as never
+*                                existed, and the reference gates its
+*                                own /zosmf/info too
+*   /zosmf/services/authenticate the token login. A failed login has no
+*                                ACEE and still has to reach the handler
+*                                to get the z/OSMF-shaped 401 body, so
+*                                httpd must not gate it
+*
+* A route line with no AUTH= at all reads as AUTH=NONE (public) in
+* /.dsrv?target=MOD. That is a poor thing for an audit to find, which is
+* why all three say what they mean.
+* ------------------------------------------------------------------
+MOD=MVSMF /zosmf/info                    AUTH=NONE
+MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/*                       AUTH=TOKEN
+*
+* To narrow access further, protect the catch-all with a resource check
+* instead of widening the prefix:
+*
+* MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS

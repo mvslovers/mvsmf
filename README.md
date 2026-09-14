@@ -146,25 +146,40 @@ See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install
 
-The simplest path is `make deploy` (see *Building* below): it uploads and
-RECEIVEs the load library into your httpd LINKLIB automatically. To install a
-released XMIT manually:
+mvsMF ships as an **SMP Release 4** install package (FMID `TZMF110`).
+**[docs/installation.md](docs/installation.md)** is the guide — it covers the
+two install jobs, the APF entry the library needs, the STEPLIB concatenation,
+and the route definitions. [docs/uninstall.md](docs/uninstall.md) is the way
+back out.
 
-1. Transfer the **XMIT** file to your MVS system and restore it:
-   ```text
-   RECEIVE INDATASET('your.xmit.dataset')
-   ```
-2. Copy the `MVSMF` load module into the `LINKLIB` your httpd server loads from.
-3. Map the CGI in your httpd parmlib member:
-   ```text
-   MOD=MVSMF /zosmf/*  AUTH=BASIC
-   ```
-   The `AUTH=` is not what protects the endpoints — mvsMF resolves the client's
-   identity itself and answers 401 without one — but a line that names no mode
-   registers as `AUTH=NONE (public)` and reads that way in `/.dsrv?target=MOD`,
-   which is a poor thing for an audit to find. See the security note above for
-   narrowing the prefix instead of `/zosmf/*`.
-4. Restart the httpd server.
+The short version of the configuration, which is the part people get wrong:
+
+```text
+MOD=MVSMF /zosmf/info                    AUTH=NONE
+MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/*                       AUTH=TOKEN
+```
+
+**Order matters — first match wins**, so the two specific routes must precede
+the catch-all. `AUTH=NONE` on them is not a hole: both endpoints resolve the
+caller themselves and answer 401 without a credential. `/zosmf/info` is
+authenticated like every other route (#324), and the token login has to reach
+its handler even when the login fails, to produce the z/OSMF-shaped 401 body.
+
+A route line naming no mode at all registers as `AUTH=NONE (public)` and reads
+that way in `/.dsrv?target=MOD` — a poor thing for an audit to find, which is
+why all three say what they mean. To narrow access, protect the catch-all with
+a resource check rather than widening the prefix:
+
+```text
+MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
+```
+
+These three lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
+`MVSMF.SAMPLIB(MVSMFPRM)`; keep them in step.
+
+For development, `make deploy` (see *Building* below) uploads and RECEIVEs the
+load library directly — no SMP, and no install package.
 
 ## Building mvsMF
 

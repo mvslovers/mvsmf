@@ -14,8 +14,11 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. #361 is new (2026-09-06) and moved #245 down:
-they are one subsystem and must be done in sequence. **Tier 1 is empty** —
+stand runs a server that old. **#366 is unranked too** (filed 2026-09-13, after
+this reconcile): the libc370 1.0.6 relink. Its `[toolchain]` pin has landed on
+its own; what is left is the write-side pass, and the ticket as filed wants
+reading against the comment on it first. #361 is new (2026-09-06) and moved
+#245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
 #336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
 PR #364 — so the top of the queue is Tier 2's #251.*
 
@@ -545,6 +548,24 @@ Still open and ours to wait on — the first four verified 2026-08-23:
 `ftpd#90` (decide with #345), and — filed 2026-08-25 — **`libc370#143`**
 (volume-addressed SCRATCH/RENAME, the half of #336 that is not ours; the read
 and write half needs nothing from there).
+
+Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
+
+- **`libc370#182`** — a close-time out-of-space is invisible. `@@ACLOSE` ends
+  `FUNEXIT RC=0` unconditionally and `fclose()` discards even that, so a PUT
+  whose last block is *partial* loses those records and answers 204, with
+  nothing in this repo able to see it. Measured: five record counts per full
+  data set. `fclose()` returning `EOF` as C99 7.19.5.1 requires would close it,
+  and `tests/curl-nospace.sh` reports the band as a KNOWN GAP that should reach
+  0 when it lands.
+- **`mbt#103`** — neither `libc.a` nor `$(DEP_LIBS)` is a prerequisite of the
+  link rule, so installing a new libc370 or staging a new dependency **never
+  relinks**. `make` reports "Modules built: 1" and links nothing. This cost a
+  measurement here: #366's first run on mvsdev showed pre-1.0.6 behaviour on
+  what was believed to be a 1.0.6 build. Until it lands, `make clean` before
+  any relink. Sibling of `mbt#65` (cflags) and `mbt#66` (the stale build stamp,
+  which also showed up here — the activated module carried the previous
+  commit's hash while containing the fix).
 
 **Cashed in on 2026-08-23** — libc370 rebuilt and installed into the cc370
 sysroot, mvsMF rebuilt, deployed and activated: `libc370#21` (which unblocked

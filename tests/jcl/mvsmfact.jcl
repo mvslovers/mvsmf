@@ -59,6 +59,16 @@
 //*   The deploy library is the one `make deploy` reports as its
 //*   target, built from MBT_MVS_HLQ in .env.
 //*
+//*   IT MOVES WITH THE PROJECT VERSION. The V1R0M1D above is
+//*   [project].version in project.toml, so every version bump
+//*   leaves this card pointing at the PREVIOUS release's
+//*   library -- which still exists, still holds a module, and
+//*   copies it with IEB154I SUCCESSFULLY COPIED. Nothing in
+//*   the job log says the wrong build was activated; only
+//*   ?fn=version does. It read V1R0M0D from the 1.0.0 release
+//*   until 2026-09-14. Take the name from what `make deploy`
+//*   printed, not from this file.
+//*
 //* AFTERWARDS
 //*   GET /zosmf/test?fn=version returns the git hash the live
 //*   module was built from -- it must equal the HEAD you built.
@@ -74,7 +84,7 @@
 //*
 //ACTIVATE EXEC PGM=IEBCOPY
 //SYSPRINT DD SYSOUT=*
-//IN       DD DSN=IBMUSER.MVSMF.V1R0M0D.LINKLIB,DISP=SHR
+//IN       DD DSN=IBMUSER.MVSMF.V1R0M1D.LINKLIB,DISP=SHR
 //OUT      DD DSN=HTTPD.V4R0M2D.LINKLIB,DISP=SHR
 //SYSIN    DD *
   COPY INDD=((IN,R)),OUTDD=OUT

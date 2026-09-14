@@ -100,6 +100,14 @@
  * the response can say so once the status is already on the wire. */
 #define MSG_DS_READ_ERROR	"MVSMF106E I/O ERROR READING %s ERRNO=%d"
 
+/** MVSMF107E the data set filled while a PUT was writing it, and records were
+ * lost (#366). Since libc370 1.0.6 an out-of-space write is a return code
+ * rather than ABEND SD37, so the request no longer dies into the router's
+ * ESTAE and this is the only console record of it. The client is answered 500,
+ * but the data set is left short and its previous content is already gone --
+ * an operator can add space; nothing else can recover the records. */
+#define MSG_DS_WRITE_NOSPACE	"MVSMF107E OUT OF SPACE WRITING %s - RECORDS LOST"
+
 /*
  * MVSMF2xx -- jobs (restjobs)
  */

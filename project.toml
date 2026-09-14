@@ -8,7 +8,7 @@ type = "application"
 # deliberately keeps floating on main so a cc370/libc370 regression surfaces
 # in a PR build (mbt#68). cc370 is omitted -- it defaults to main and has no
 # releases to pin to yet.
-libc370 = "1.0.4"
+libc370 = "1.0.6"
 
 [build]
 # infoapi.c reports the project version via a VERSION string macro. v1's mbt

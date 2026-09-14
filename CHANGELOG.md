@@ -9,6 +9,44 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
+## [Unreleased]
+
+### Changed
+
+- **Relinked against libc370 1.0.6.** Two stdio changes arrive with it, both on
+  the write side of the data set API. An out-of-space write is a return code
+  rather than ABEND SD37 (`libc370#176`): `ferror()` is set and `errno` is
+  `ENOSPC`, where the abend used to reach the router's ESTAE and answer 500.
+  And a stream that has failed now refuses every further write instead of
+  accepting it into the FILE buffer and discarding it at flush time
+  (`libc370#149`) — measured there as 46 of 50 writes reporting full length
+  with not one record reaching the disk. The `ferror()`/`feof()` macros, which
+  returned the raw flag value rather than 1/0, are corrected in the same
+  header.
+
+### Fixed
+
+- **A data set PUT no longer reports success after losing records to a full
+  data set** (#366). The relink above is what exposed it: an out-of-space write
+  used to ABEND `SD37` into the router's ESTAE and answer 500, and now it
+  returns. mvsMF flushes after every record but the physical I/O is per
+  *block*, so whenever a record completes a block that block's write happens
+  inside `fflush()` — whose return value was discarded. Measured on mvsdev
+  2026-09-14 against a 194-record data set: a PUT of 200 records lost ten and
+  answered `204`, where the same request on the previous build answered 500.
+  The flush is checked now, and a full data set also reaches the operator as
+  `MVSMF107E`.
+
+### Known limitations
+
+- **A PUT whose last block is partial still loses those records silently**
+  (#366). The tail block is written by libc370's `@@ACLOSE`, which ends
+  `FUNEXIT RC=0` unconditionally, and `fclose()` discards even that — so
+  nothing in this repo can see the failure. In the measurement above that band
+  is 195..199 records against a 194-record target: `204`, five to nine records
+  gone. Closing it needs libc370 to report a failed close; `fclose()` returning
+  `EOF` as C requires would be enough.
+
 ## [1.0.0] - 2026-09-06
 
 First stable release. The API surface below has been in use against Zowe CLI,

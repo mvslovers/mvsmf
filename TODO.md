@@ -14,10 +14,12 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. **#366 is unranked too** (filed 2026-09-13, after
-this reconcile): the libc370 1.0.6 relink. Its `[toolchain]` pin has landed on
-its own; what is left is the write-side pass, and the ticket as filed wants
-reading against the comment on it first. #361 is new (2026-09-06) and moved
+stand runs a server that old. **#366 is unranked and now blocked** (filed
+2026-09-13, after this reconcile): the libc370 1.0.6 relink. PR #367 landed the
+pin, the write-side fix and `tests/curl-nospace.sh`; what is left is the
+close-time band, which **cannot be fixed here** and waits on `libc370#182`.
+Verified on target — see the PR, and read the comments on the ticket rather
+than the ticket as filed. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
 #336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
 PR #364 — so the top of the queue is Tier 2's #251.*
@@ -405,6 +407,18 @@ policy vacuum.
 ---
 
 ## Recently closed
+
+**PR #367, merged 2026-09-14** — the libc370 1.0.6 relink (#366, still open).
+The `[toolchain]` pin, plus the half of the out-of-space defect this repo can
+reach: the physical I/O is per *block*, so the record that completes one has
+its write inside `fflush()`, whose result all three call sites discarded. A PUT
+of 200 records into a 194-record data set answered 204 having lost ten;
+measured before and after on mvsdev, exactly one row of the band moves.
+`MVSMF107E` is the operator side. The close-time band (a partial last block,
+five counts in that measurement) is still silently lost and is `libc370#182`.
+`tests/curl-nospace.sh` bisects for the capacity rather than hardcoding it, and
+reports that band as a KNOWN GAP that should reach 0 when #182 lands.
+
 
 Pointers only — the reasoning lives in the closing comments.
 

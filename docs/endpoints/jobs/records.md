@@ -50,12 +50,22 @@ The distinction rests on the walk statistics libc370's `jesprint()` reports
 | `JESPR_EMPTY` | the PDDB carries no MTTR — nothing was ever written | 200, empty body |
 | `JESPR_FOREIGN`, `record-count > 0` | the **first** block is foreign: nothing was read, and the checkpoint promises records the spool no longer holds | **404**, `reason: 10` |
 | `JESPR_FOREIGN`, `record-count = 0` | nothing was ever written; the allocated-but-unwritten track carries a foreign key too | 200, empty body |
-| `JESPR_DSID`, `JESPR_IOERR`, `JESPR_LOOP`, `JESPR_CAP`, `JESPR_NOBUF`, `JESPR_NOMEM` | spool read failed or was truncated | 500 |
+| `JESPR_DSID`, `record-count = 0` | the **first** block belongs to another data set of the same job: an empty data set whose unwritten first record JES2 gave to the next one (#376) | 200, empty body |
+| `JESPR_DSID` with `record-count > 0`, `JESPR_IOERR`, `JESPR_LOOP`, `JESPR_CAP`, `JESPR_NOBUF`, `JESPR_NOMEM` | spool read failed or was truncated | 500 |
 
 `JESPR_OPENEND` is why a foreign block alone does not mean "gone": the last written block of an
 open data set chains to a track that is allocated but not yet written, so it carries somebody
 else's key. Every running job reads that way — measured on the target, HTTPD's `JESMSGLG`
 stopped on a foreign block after 350 correctly read lines.
+
+`JESPR_DSID` with no records is the same argument inside one job. A SYSOUT data set gets its
+first record address when it is opened; if it is closed without a record and dynamically
+unallocated, JES2 hands that unwritten record to the next data set the job allocates, and both
+PDDBs carry the same MTTR. BREXX allocates STDOUT/STDERR per exec this way, so every exec that
+writes nothing to STDERR leaves one such data set behind — measured on BRXTEST `JOB00933`,
+dsids 110 and 111 both at MTTR `000E4201`. Static DDs do not show it: their unused record stays
+unwritten until the step ends and reads back as `JESPR_FOREIGN`. `tests/jcl/emptydd.jcl`
+reproduces it with `ALLOC`/`FREE` in TSO batch.
 
 Once the first record has been written to the socket the response is committed to 200. A walk
 that goes wrong after that is reported to the operator as `MVSMF202W`, not turned into an error

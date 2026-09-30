@@ -56,3 +56,9 @@ any stand. The file is kept only for allocating the PDS by hand; prefer the
 suites' `--setup`.
 
 `largejcl.jcl` is a 130 KB body for the submit path, not part of the matrix.
+
+`emptydd.jcl` is not part of the matrix either. In TSO batch it dynamically
+allocates a SYSOUT data set, lets IEBGENER open and close it without a record,
+frees it, and then allocates one that IEBGENER writes to. JES2 hands the first
+data set's unwritten record to the second, so both PDDBs carry the same MTTR —
+the shape behind #376. The first `UNKnnnn` data set must read as an empty 200.

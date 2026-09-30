@@ -1572,8 +1572,9 @@ test_spool_records_empty_dd_reused_mttr() {
 	# Static DDs do not show it: their unwritten record stays unused until the
 	# step ends, so it reads back as zeros (JESPR_FOREIGN, already an empty
 	# 200). It takes a dynamic FREE between the two allocations, which is what
-	# emptydd.jcl does in TSO batch -- the same shape as BREXX's per-exec
-	# STDOUT/STDERR allocation that surfaced it.
+	# emptydd.jcl does in TSO batch -- the same shape as the BREXX/370
+	# 3.0.0-dev build, which allocates and frees its own SYSOUT data sets
+	# instead of writing to the JCL's STDOUT/STDERR, and surfaced it.
 
 	local jcl
 	jcl=$(cat "${JCL_DIR}/emptydd.jcl")

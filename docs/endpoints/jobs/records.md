@@ -61,9 +61,12 @@ stopped on a foreign block after 350 correctly read lines.
 `JESPR_DSID` with no records is the same argument inside one job. A SYSOUT data set gets its
 first record address when it is opened; if it is closed without a record and dynamically
 unallocated, JES2 hands that unwritten record to the next data set the job allocates, and both
-PDDBs carry the same MTTR. BREXX allocates STDOUT/STDERR per exec this way, so every exec that
-writes nothing to STDERR leaves one such data set behind — measured on BRXTEST `JOB00933`,
-dsids 110 and 111 both at MTTR `000E4201`. Static DDs do not show it: their unused record stays
+PDDBs carry the same MTTR. The BREXX/370 3.0.0-dev build writes its output this way — it
+allocates its own SYSOUT data sets (`SYS00001`, `SYS00002`) instead of opening the `STDOUT` and
+`STDERR` DDs in the JCL, and frees them before the step ends — so every step that writes nothing
+to its error stream leaves one such data set behind: measured on BRXTEST `JOB00933`, dsids 110
+and 111 both at MTTR `000E4201`. BREXX V2R5M3 writes into the JCL's DDs and does not produce it
+(`BRXCMP JOB00986`, the two builds side by side). Static DDs do not show it: their unused record stays
 unwritten until the step ends and reads back as `JESPR_FOREIGN`. `tests/jcl/emptydd.jcl`
 reproduces it with `ALLOC`/`FREE` in TSO batch.
 

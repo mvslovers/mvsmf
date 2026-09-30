@@ -639,8 +639,9 @@ typedef struct spool_ctx {
  * gives its unwritten first record back, and JES2 hands it to the next data
  * set the job allocates: both PDDBs then carry the same MTTR, and the empty
  * one's first block is its neighbour's - same job, different dsid. Measured
- * on mvsdev with BREXX's per-exec STDERR (BRXTEST JOB00933, dsids 110/111 both
- * at 000E4201) and tests/jcl/emptydd.jcl. With no records promised there is
+ * on mvsdev with the BREXX/370 3.0.0-dev build, which allocates and frees its
+ * own SYSOUT per step (BRXTEST JOB00933, dsids 110/111 both at 000E4201), and
+ * with tests/jcl/emptydd.jcl. With no records promised there is
  * nothing to lose, so it is an empty data set, not a broken chain.
  */
 __asm__("\n&FUNC	SETC 'do_print_sysout_why'");

@@ -403,6 +403,16 @@ policy vacuum.
 
 ## Recently closed
 
+**PR #377, merged 2026-09-30** — #376: an empty SYSOUT data set whose
+unwritten first record JES2 had handed to the job's next data set (both PDDBs
+at the same MTTR) answered `500 "first spool block belongs to another data
+set"`. `JESPR_DSID` now takes the record-count test `JESPR_FOREIGN` already
+had: no records promised, empty 200. It takes a dynamic `FREE` between the two
+allocations — static DDs never show it — so the reproducer
+`tests/jcl/emptydd.jcl` uses `ALLOC`/`FREE` in TSO batch. Surfaced by the
+BREXX/370 3.0.0-dev build writing to libc370's dynamically allocated SYSOUT
+instead of the JCL's `STDOUT`/`STDERR`; that half is mvslovers/brexx370#251.
+
 **PR #369, merged 2026-09-14** — #365: a `USER=` the caller put on the job
 card got a second one from mvsMF's injection, and JES2 answered `IEF652I
 MUTUALLY EXCLUSIVE KEYWORDS`. The card is cleared of `USER=`/`PASSWORD=` before

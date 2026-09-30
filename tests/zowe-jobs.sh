@@ -645,6 +645,49 @@ test_spool_records() {
 	fi
 }
 
+test_spool_records_empty_dd_reused_mttr() {
+	echo ""
+	echo "--- Spool File Records: empty data set whose first record was reused (issue #376) ---"
+
+	# emptydd.jcl leaves an empty, dynamically freed SYSOUT data set whose
+	# unwritten first record JES2 handed to the next one: both PDDBs carry the
+	# same MTTR. Reading the empty one used to answer 500 "first spool block
+	# belongs to another data set"; it must read as empty. See curl-jobs.sh for
+	# the mechanism and tests/jcl/README.md for the fixture.
+	local output rc=0
+	output=$(run_zowe_json jobs submit local-file "${JCL_DIR}/emptydd.jcl" --wait-for-output) || rc=$?
+
+	local ji
+	ji=$(echo "$output" | jq -r '.data.jobid' 2>/dev/null) || ji="null"
+	if [ -z "$ji" ] || [ "$ji" = "null" ]; then
+		fail "submit empty-DD JCL" "no jobid (zowe rc=${rc})"
+		return
+	fi
+
+	local files ddid n
+	files=$(run_zowe_json jobs list spool-files-by-jobid "$ji" 2>/dev/null) || true
+	ddid=$(echo "$files" | jq '[.data[] | select(.ddname | startswith("UNK"))][0].id' 2>/dev/null)
+	n=$(echo "$files" | jq '[.data[] | select(.ddname | startswith("UNK"))][0]["record-count"]' 2>/dev/null)
+
+	if [ -z "$ddid" ] || [ "$ddid" = "null" ] || [ "$n" != "0" ]; then
+		fail "empty dynamic data set present" "id ${ddid}, record-count ${n}"
+		run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+		return
+	fi
+
+	rc=0
+	output=$(run_zowe jobs view spool-file-by-id "$ji" "$ddid" 2>&1) || rc=$?
+
+	assert_rc 0 "$rc" "read empty data set whose first record was reused"
+	if [ $rc -eq 0 ] && [ -z "$(printf '%s' "$output" | tr -d '[:space:]')" ]; then
+		pass "empty data set reads as empty"
+	else
+		fail "empty data set reads as empty" "got: $(printf '%s' "$output" | head -c 160)"
+	fi
+
+	run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+}
+
 test_purge_job() {
 	echo ""
 	echo "--- Purge Job ---"
@@ -711,6 +754,7 @@ test_job_status
 # Spool tests
 test_spool_files
 test_spool_records
+test_spool_records_empty_dd_reused_mttr
 
 # Purge test (last)
 test_purge_job

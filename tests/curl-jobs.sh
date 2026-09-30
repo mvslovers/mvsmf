@@ -1556,6 +1556,104 @@ test_spool_records_stale_checkpoint() {
 	fi
 }
 
+test_spool_records_empty_dd_reused_mttr() {
+	echo ""
+	echo "--- Spool File Records: empty data set whose first record was reused (issue #376) ---"
+
+	# A SYSOUT data set is given its first record address when it is opened.
+	# When it is closed without a single record written and then unallocated,
+	# JES2 hands that unwritten record to the next data set the job allocates:
+	# both PDDBs carry the same MTTR, and the empty one's "first block" is the
+	# next data set's first block -- same jobkey, different dsid. jesprint()
+	# reports that as JESPR_DSID, and until #376 mvsMF answered it 500 with
+	# "first spool block belongs to another data set", for a data set that
+	# simply holds nothing.
+	#
+	# Static DDs do not show it: their unwritten record stays unused until the
+	# step ends, so it reads back as zeros (JESPR_FOREIGN, already an empty
+	# 200). It takes a dynamic FREE between the two allocations, which is what
+	# emptydd.jcl does in TSO batch -- the same shape as the BREXX/370
+	# 3.0.0-dev build, which allocates and frees its own SYSOUT data sets
+	# instead of writing to the JCL's STDOUT/STDERR, and surfaced it.
+
+	local jcl
+	jcl=$(cat "${JCL_DIR}/emptydd.jcl")
+
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit empty-DD JCL"
+
+	local jobname jobid
+	jobname=$(echo "$BODY" | jq -r '.jobname' 2>/dev/null)
+	jobid=$(echo "$BODY" | jq -r '.jobid' 2>/dev/null)
+
+	if [ -z "$jobid" ] || [ "$jobid" = "null" ]; then
+		fail "empty-DD JCL submitted" "no jobid in response"
+		skip "empty data set assertions (nothing submitted)"
+		return
+	fi
+
+	if ! wait_for_output "$jobname" "$jobid"; then
+		fail "empty-DD job reached OUTPUT" "${jobname}(${jobid})"
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}" >/dev/null 2>&1 || true
+		return
+	fi
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+	split_response "$resp"
+
+	# The two dynamically allocated data sets are the ones JES2 names UNKnnnn:
+	# the first is the empty one, the second is written. If the shape is not
+	# that, the job did not do what this test assumes and a green result
+	# below would mean nothing.
+	local empty_id empty_n next_id next_n
+	empty_id=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("UNK"))][0].id' 2>/dev/null)
+	empty_n=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("UNK"))][0]["record-count"]' 2>/dev/null)
+	next_id=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("UNK"))][1].id' 2>/dev/null)
+	next_n=$(echo "$BODY" | jq '[.[] | select(.ddname | startswith("UNK"))][1]["record-count"]' 2>/dev/null)
+
+	if [ "$empty_n" = "0" ] && [ -n "$next_n" ] && [ "$next_n" != "null" ] && [ "$next_n" -gt 0 ]; then
+		pass "empty dynamic data set followed by a written one (ids ${empty_id}, ${next_id})"
+	else
+		fail "empty dynamic data set followed by a written one" \
+			"ids ${empty_id}/${next_id}, record-count ${empty_n}/${next_n}"
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}" >/dev/null 2>&1 || true
+		return
+	fi
+
+	resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files/${empty_id}/records")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "read empty data set whose first record was reused"
+	if [ -z "$BODY" ]; then
+		pass "empty data set reads as an empty body"
+	else
+		fail "empty data set reads as an empty body" "got: $(printf '%s' "$BODY" | head -c 160)"
+	fi
+
+	# The neighbour owns the shared record and must still read in full.
+	resp=$(do_curl GET \
+		"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files/${next_id}/records")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "read the data set that took over the record"
+	local lines
+	lines=$(printf '%s' "$BODY" | grep -c '' 2>/dev/null)
+	if [ "$lines" = "$next_n" ]; then
+		pass "that data set's line count equals record-count ($next_n)"
+	else
+		fail "that data set's line count equals record-count" "expected $next_n, got $lines"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}" >/dev/null 2>&1 || true
+}
+
 test_spool_records_invalid_ddid() {
 	echo ""
 	echo "--- Spool File Records: invalid DDID ---"
@@ -1712,6 +1810,7 @@ test_spool_records
 test_spool_records_exact_count
 test_spool_records_instream_jclin
 test_spool_records_stale_checkpoint
+test_spool_records_empty_dd_reused_mttr
 test_spool_records_invalid_ddid
 
 # Purge tests (last, since it removes the test job)

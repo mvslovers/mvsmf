@@ -633,6 +633,16 @@ typedef struct spool_ctx {
  * front of it libc370 cannot call that OPENEND. Only a non-zero record count
  * makes it a loss: the checkpoint promises records the spool no longer holds,
  * because JES2 printed and purged the data set and reallocated its tracks.
+ *
+ * DSID takes the same record-count test, for the same reason (#376). A data
+ * set that is opened, closed without a record and dynamically unallocated
+ * gives its unwritten first record back, and JES2 hands it to the next data
+ * set the job allocates: both PDDBs then carry the same MTTR, and the empty
+ * one's first block is its neighbour's - same job, different dsid. Measured
+ * on mvsdev with the BREXX/370 3.0.0-dev build, which allocates and frees its
+ * own SYSOUT per step (BRXTEST JOB00933, dsids 110/111 both at 000E4201), and
+ * with tests/jcl/emptydd.jcl. With no records promised there is
+ * nothing to lose, so it is an empty data set, not a broken chain.
  */
 __asm__("\n&FUNC	SETC 'do_print_sysout_why'");
 static const char *
@@ -649,7 +659,8 @@ do_print_sysout_why(int prc, const JESPRST *st, unsigned records)
 	switch (st->reason) {
 	case JESPR_IOERR:	return "spool read failed";
 	case JESPR_FOREIGN:	return records ? "no longer on the spool" : NULL;
-	case JESPR_DSID:	return "first spool block belongs to another data set";
+	case JESPR_DSID:	return records
+				? "first spool block belongs to another data set" : NULL;
 	case JESPR_LOOP:	return "spool block chain loops, output truncated";
 	case JESPR_CAP:		return "spool block limit reached, output truncated";
 	case JESPR_NOBUF:	return "incomplete spanned record, output truncated";

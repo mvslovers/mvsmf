@@ -8,7 +8,7 @@
 #include <string.h>
 #include <mbtcheck.h>
 
-#include "mvssupa.h"   /* __getm */
+#include <mvs/storage.h> /* __getm */
 #include "ntstore.h"
 
 /* build a distinct 16-byte key "KEYnnnn" (zero-padded) */

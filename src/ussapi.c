@@ -3,9 +3,9 @@
 #include <string.h>
 #include <limits.h>
 #include <time.h>
-#include <clibwto.h>
+#include <mvs/wto.h>
 #include <libufs.h>
-#include <time64.h>
+#include <ext/time64.h>
 
 #include "ussapi.h"
 #include "common.h"

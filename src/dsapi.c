@@ -3,14 +3,15 @@
 #include <string.h>
 #include <ctype.h>
 #include <limits.h>
-#include <clibary.h>
-#include <clibwto.h>
-#include <cliblist.h>
-#include <clibdscb.h>
-#include <clibio.h>
-#include <osdcb.h>
+#include <ext/array.h>
+#include <mvs/wto.h>
+#include <mvs/dslist.h>
+#include <mvs/dscb.h>
+#include <mvs/dynalloc.h>
+#include <mvs/pds.h>
+#include <ibm/mvs/dcbd.h>
 #include <errno.h>
-#include <racf.h>
+#include <mvs/racf.h>
 
 #include "dsapi.h"
 #include "dsapi_err.h"

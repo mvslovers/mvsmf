@@ -1,8 +1,8 @@
 #include <string.h>
 
 #include "ntstore.h"
-#include "mvssupa.h"    /* __getclk */
-#include "cliblock.h"   /* lock / unlock, LOCK_EXC */
+#include <mvs/clock.h>  /* __getclk */
+#include <mvs/lock.h>   /* lock / unlock, LOCK_EXC */
 
 /*
  * Persistent name-keyed store. See ntstore.h.

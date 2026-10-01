@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <clibb64.h>
+#include <base64.h>
 
 #include "authapi.h"
 #include "common.h"

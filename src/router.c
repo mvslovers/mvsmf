@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <string.h>
-#include <clibwto.h>
-#include <clibtry.h>
-#include <clibjes2.h>
-#include <cliblock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
+#include <mvs/wto.h>
+#include <mvs/recovery.h>
+#include <mvs/jes2.h>
+#include <mvs/lock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
 #include "router.h"
 #include "common.h"

@@ -1,11 +1,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <clibgrt.h>
-#include <clibppa.h>
-#include <clibcrt.h>
-#include <clibwto.h>
-#include <racf.h>
+#include <mvs/crt.h>
+#include <mvs/wto.h>
+#include <mvs/racf.h>
 
 #include "common.h"
 #include "logmw.h"

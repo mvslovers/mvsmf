@@ -1,8 +1,7 @@
-#include <clibb64.h>
-#include <clibstr.h>
-#include <clibio.h>
-#include <clibthrd.h>
-#include <clibwto.h>
+#include <base64.h>
+#include <mvs/thread.h>
+#include <mvs/wto.h>
+#include <sys/socket.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>

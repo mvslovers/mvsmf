@@ -1,20 +1,18 @@
-#include <clibary.h>
-#include <clibb64.h>
-#include <clibio.h>
-#include <clibstr.h>
+#include <ext/array.h>
 #include <ctype.h>
+#include <errno.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include <clibjes2.h>
-#include <hasppddb.h>
-#include <clibthrd.h>
-#include <clibtry.h>
-#include <clibvsam.h>
-#include <clibwto.h>
-#include <time64.h>
+#include <mvs/jes2.h>
+#include <ibm/jes2/pddb.h>
+#include <mvs/thread.h>
+#include <mvs/recovery.h>
+#include <mvs/vsam.h>
+#include <mvs/wto.h>
+#include <ext/time64.h>
 
 #include "common.h"
 #include "httpcgi.h"

@@ -1,8 +1,7 @@
 #include "mvsmfctx.h"
 #include "ntstore.h"
-#include "mvssupa.h"    /* __getm */
-#include "clibos.h"     /* __getmsp */
-#include "cliblock.h"   /* lock / unlock, LOCK_EXC */
+#include <mvs/storage.h> /* __getmsp */
+#include <mvs/lock.h>   /* lock / unlock, LOCK_EXC */
 #include "httpcgi.h"    /* HTTPD, HTTPX, http_get_httpx, http_cgictx_get */
 
 /*

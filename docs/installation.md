@@ -3,7 +3,7 @@
 mvsMF is delivered as an **SMP Release 4** install package — the SMP that ships
 with MVS 3.8j, not SMP/E. `make package` builds it; a release attaches it.
 
-FMID **`TZMF111`** (mvsMF 1.1.1). Each release spends one id and **deletes its
+FMID **`TZMF120`** (mvsMF 1.2.0). Each release spends one id and **deletes its
 predecessor**, so an upgrade needs nothing beyond the package.
 
 ## What you need first
@@ -147,7 +147,7 @@ hand.
 
 ## Upgrading
 
-From 1.1.1 onwards each release's SYSMOD **deletes its predecessor**, so an
+From 1.2.0 onwards each release's SYSMOD **deletes its predecessor**, so an
 upgrade is RECEIVE/APPLY/ACCEPT of the new package and nothing else. Do **not**
 run the uninstall job's `DELETE` step in between: it names the data sets the new
 install is about to use.

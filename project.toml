@@ -1,6 +1,6 @@
 [project]
 name = "mvsmf"
-version = "1.1.1-dev"
+version = "1.2.0-dev"
 type = "application"
 
 [toolchain]
@@ -169,8 +169,12 @@ readme = "docs/installation.md"
 # became SMP installable.
 #
 # No version component may ever exceed 9 -- a 7-character id has no room for a
-# second digit, so at patch 9 the next release is a new minor. 1.1.10 cannot be
+# second digit, so at patch 9 the next release is a new minor. 1.2.10 cannot be
 # expressed and must not be released.
+#
+# TZMF111 (1.1.1) was never cut: the libc370 2.0 port made the next release
+# 1.2.0, as it did for ufsd, ftpd and httpd. TZMF111 is unspent and unassigned
+# -- do not "fix" the gap. 1.2.0 still deletes TZMF110, the level released.
 #
 # `make release` does not move this id: it bumps the version and stops, so a
 # tree comes out of a release still carrying the id that was just spent.
@@ -185,7 +189,7 @@ readme = "docs/installation.md"
 # (HMA2380), and MOD(MVSMF) comes back carrying the new FMID. 1.1.0 carried no
 # `delete` because it was the first level and had no predecessor to replace.
 # The key needs mbt >= #98, which is why the submodule moved for 1.1.0.
-fmid = "TZMF111"
+fmid = "TZMF120"
 delete = ["TZMF110"]            # the level this one replaces; SMP deletes it
 system = "Z038"
 

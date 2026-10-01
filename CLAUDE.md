@@ -882,15 +882,19 @@ its predecessor:
 
 ```toml
 [distribution.smp]
-fmid   = "TZMF101"
+fmid   = "TZMF120"
+delete = ["TZMF110"]
 ```
 
 **No version component may ever exceed 9** — a 7-character id has no room for
 a second digit. At patch 9 cut the next minor, at minor 9 the next major;
-mvsmf 1.0.10 cannot be expressed and must not be released.
+mvsmf 1.2.10 cannot be expressed and must not be released.
 
-Proposed: **`TZMF101`** for 1.0.1. Nothing has ever been installed, so the first
-level carries no `delete`; every level after it deletes the one before.
+`TZMF110` is 1.1.0, released 2026-09-14 -- the first level, so it carried no
+`delete`. The next is **`TZMF120`** for 1.2.0, deleting `TZMF110`: the libc370
+2.0 port moved the minor, so 1.1.1 was never cut and `TZMF111` is unspent and
+unassigned. 1.0.0 and 1.0.1 shipped with no `[distribution]`, so nothing below
+`TZMF110` was ever assigned.
 
 Never re-spend an id, and never install a test package under the real one: a
 test needs a throwaway id **and** throwaway module names, because SMP keys

@@ -1,17 +1,17 @@
-#include <clibary.h>
-#include <clibdscb.h>
-#include <clibecb.h>
-#include <clibenv.h>
-#include <clibgrt.h>
-#include <clibjes2.h>
-#include <cliblist.h>
-#include <clibmtt.h>
-#include <clibppa.h>
-#include <clibwto.h>
-#include <racf.h>
+#include <ext/array.h>
+#include <mvs/dscb.h>
+#include <mvs/ecb.h>
+#include <mvs/env.h>
+#include <mvs/crt.h>
+#include <mvs/jes2.h>
+#include <mvs/dslist.h>
+#include <mvs/mtt.h>
+#include <mvs/wto.h>
+#include <mvs/racf.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <buildstamp.h>
 
 #include "common.h"
 #include "httpcgi.h"
@@ -142,6 +142,7 @@ static int testDenyOpen(Session *session) {
 
 __asm__("\n&FUNC	SETC 'testAbend'");
 static int testAbend(Session *session) {
+  (void)session;
   wtof(MSG_ABEND_TEST);
 
   /* Deliberate operation exception (S0C1): execute an invalid opcode
@@ -439,9 +440,10 @@ int testHandler(Session *session) {
   } else if (strcmp(fn, "locate") == 0) {
     char *dsn =
         (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
-    LOCWORK locwork = {0};
+    LOCWORK locwork;
     int loc_rc;
 
+    memset(&locwork, 0, sizeof(locwork));
     if (!dsn)
       dsn = "SYS1.MACLIB";
 
@@ -468,14 +470,16 @@ int testHandler(Session *session) {
   } else if (strcmp(fn, "dscb") == 0) {
     char *dsn =
         (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_DSN");
-    LOCWORK locwork = {0};
-    DSCB dscb = {0};
+    LOCWORK locwork;
+    DSCB dscb;
     DSCB1 *d1 = &dscb.dscb1;
     char vol[7] = {0};
     char dsn44[44];
     unsigned sec = 0;
     int loc_rc, dscb_rc = -1;
 
+    memset(&locwork, 0, sizeof(locwork));
+    memset(&dscb, 0, sizeof(dscb));
     if (!dsn)
       dsn = "SYS1.MACLIB";
 
@@ -753,7 +757,7 @@ int testHandler(Session *session) {
     rc = http_printf(
         session->httpc,
         "{ \"fn\": \"version\", \"version\": \"%s\", \"build\": \"%s\" }\n",
-        VERSION, BUILD_ID);
+        MBT_VERSION, BUILD_ID);
 
     /* --- fn=userid (diagnose http_get_userid() vs. direct ACEE decode) */
     /* Cross-checks httpd's HTTPX http_get_userid() export against a manual

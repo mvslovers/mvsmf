@@ -3,13 +3,13 @@
 #include <string.h>
 #include <ctype.h>
 #include <time.h>
-#include <clibwto.h>
-#include <clibgrt.h>
-#include <clibmtt.h>
-#include <clibary.h>
-#include <clibsmf.h>
-#include <mvssupa.h>
-#include <cliblock.h>   /* trylock / unlock, LOCK_EXC -- #214 */
+#include <mvs/wto.h>
+#include <mvs/crt.h>
+#include <mvs/mtt.h>
+#include <ext/array.h>
+#include <mvs/smf.h>
+#include <mvs/clock.h>
+#include <mvs/lock.h>   /* trylock / unlock, LOCK_EXC -- #214 */
 
 #include "consapi.h"
 #include "common.h"

@@ -10,7 +10,7 @@
  */
 
 #include <stddef.h>
-#include "acee.h"
+#include <ibm/mvs/ihaacee.h>
 #include "httpcgi.h"
 
 /** @brief Memory alignment for half word */

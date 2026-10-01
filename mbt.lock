@@ -1,10 +1,14 @@
 {
+  "mvslovers/crypto370": {
+    "sha256": "f5686240265baf69773e887bb7abd2c3f8da84d77bd377df38f95f4aa879fb6f",
+    "version": "1.0.1"
+  },
   "mvslovers/httpd": {
-    "sha256": "e8d3835853390c2817c34d9a1cf272116e17b93c6f13bce4797abe6fdae48e5d",
-    "version": "4.0.2"
+    "sha256": "fa2873e7bbc4a2e009895aab76b5101d6ae02b57be002be72457168f4ab63d82",
+    "version": "4.2.0-dev"
   },
   "mvslovers/ufsd": {
-    "sha256": "5d19014572a7dfca0f9081f92ca74ba678a127285784e6dc2558c272bba198d6",
-    "version": "1.2.2"
+    "sha256": "09860edcafb7215838b9086420c051686b6c0f4519609f4a9b8b2119074a1a6b",
+    "version": "1.4.0-dev"
   }
 }

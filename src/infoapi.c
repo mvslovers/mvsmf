@@ -1,4 +1,5 @@
 #include <string.h>
+#include <buildstamp.h>
 
 #include "hostparse.h"
 #include "infoapi.h"
@@ -88,15 +89,15 @@ infoHandler(Session *session)
 	   they select their most conservative code path, which is what we want.
 
 	   The literal is the MAJOR of this project's version and has to be bumped
-	   with it; it cannot be derived from VERSION without parsing the string at
-	   runtime, which is not worth a GETMAIN on every request.
+	   with it; it cannot be derived from MBT_VERSION without parsing the string
+	   at runtime, which is not worth a GETMAIN on every request.
 
 	   plugins is empty rather than absent: we have none, and the reference
 	   always emits the key, so an empty array is the honest match. */
 	if (addJsonString(builder, "zosmf_hostname", hostname) < 0 ||
 		addJsonString(builder, "zosmf_port", port_str) < 0 ||
 		addJsonString(builder, "zosmf_version", "1") < 0 ||
-		addJsonString(builder, "zosmf_full_version", VERSION) < 0 ||
+		addJsonString(builder, "zosmf_full_version", MBT_VERSION) < 0 ||
 		addJsonRaw(builder, "plugins", "[]") < 0 ||
 		addJsonString(builder, "zosmf_saf_realm", "SAFRealm") < 0 ||
 		addJsonString(builder, "api_version", "1") < 0 ||

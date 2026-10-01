@@ -1,11 +1,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include <clibgrt.h>
-#include <clibppa.h>
-#include <clibcrt.h>
-#include <clibwto.h>
-#include <racf.h>
+#include <mvs/crt.h>
+#include <mvs/wto.h>
+#include <mvs/racf.h>
 
 #include "common.h"
 #include "logmw.h"
@@ -82,7 +80,6 @@ int main(int argc, char **argv)
 {
 	int irc = 0;
 
-	CLIBPPA *ppa = __ppaget();
 	CLIBGRT *grt = __grtget();
 	CLIBCRT *crt = __crtget();
 
@@ -92,8 +89,11 @@ int main(int argc, char **argv)
 	HTTPD *httpd = grt->grtapp1;
 	HTTPC *httpc = grt->grtapp2;
 
-	Router router = {.routes = 0, .middlewares = 0};
+	Router router;
 	Session session = {.router = &router, .httpd = httpd, .httpc = httpc};
+
+	(void)argc;
+	memset(&router, 0, sizeof(router));
 
 	if (!httpd) {
 		wtof(MSG_NOT_UNDER_HTTPD, argv[0]);
@@ -205,8 +205,6 @@ int main(int argc, char **argv)
 
 	/* dispatch the request */
 	irc = handle_request(&router, &session);
-
-quit:
 
 	/* The ACEE belongs to httpd's credential store now (reused across
 	 * requests by token) — restore the prior task ACEE, don't log it out. */

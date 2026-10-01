@@ -4,7 +4,7 @@ This removes mvsMF from an MVS 3.8j system: the SMP inventory entries, then the
 data sets, then the two configuration changes the install made.
 
 **This is for *removing* the product. It is not the way to upgrade.** From
-1.1.1 onwards each release's SYSMOD deletes its predecessor, so an upgrade is
+1.2.0 onwards each release's SYSMOD deletes its predecessor, so an upgrade is
 just RECEIVE/APPLY/ACCEPT of the new package — and running the `DELETE` step
 below in between scratches the data sets the new install is about to use.
 
@@ -31,24 +31,24 @@ distribution zone. Skip one and the id survives there.
 //UCLIN   EXEC SMPAPP
 //SMPCNTL  DD  *
  UCLIN CDS .
-  DEL SYSMOD(TZMF111) MOD(MVSMF) .
+  DEL SYSMOD(TZMF120) MOD(MVSMF) .
   DEL MOD(MVSMF) .
   DEL LMOD(MVSMF) .
-  DEL SYSMOD(TZMF111) .
+  DEL SYSMOD(TZMF120) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
  UCLIN ACDS .
-  DEL SYSMOD(TZMF111) MOD(MVSMF) .
+  DEL SYSMOD(TZMF120) MOD(MVSMF) .
   DEL MOD(MVSMF) .
-  DEL SYSMOD(TZMF111) .
+  DEL SYSMOD(TZMF120) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
 /*
 //LIST    EXEC SMPAPP
 //SMPCNTL  DD  *
  RESETRC .
- LIST CDS  SYSMOD(TZMF111) .
- LIST ACDS SYSMOD(TZMF111) .
+ LIST CDS  SYSMOD(TZMF120) .
+ LIST ACDS SYSMOD(TZMF120) .
  LIST CDS  SYSMOD(TZMF110) .
  LIST ACDS SYSMOD(TZMF110) .
 /*
@@ -60,7 +60,7 @@ check: **RC 04 with the id reported as not found means it is free.** A hit
 prints `TYPE`, `STATUS` and the FMID it belongs to — the id is still taken.
 
 **Name every level that was ever installed on the system, not only the current
-one.** The block above lists `TZMF111` and `TZMF110`; add a pair for each
+one.** The block above lists `TZMF120` and `TZMF110`; add a pair for each
 further level if the system has seen more. A level that an upgrade already
 deleted is left as a tombstone — `TYPE = FUNCTION / DELBY = …` — which `LIST`
 reports at **RC 00**, so it still reads as occupied and still has to go.

@@ -122,7 +122,6 @@ jobListHandler(Session *session)
 	
 	JES *jes = NULL;
 	JESJOB **joblist = NULL;
-	HASPCP *cp = NULL;
 	JESFILT jesfilt = FILTER_NONE;
 	const char *filter = NULL;
 
@@ -1260,7 +1259,7 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 	}
 
 	int ii = 0;
-	for (ii = 0; ii < array_count(&joblist); ii++) {
+	for (ii = 0; ii < (int)array_count(&joblist); ii++) {
 		JESJOB *job = joblist[ii];
 
 		if (!job) {
@@ -1337,7 +1336,7 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
 	}
 
 	int ii = 0;
-    for (ii = 0; ii < array_count(&job->jesdd); ii++) {
+    for (ii = 0; ii < (int)array_count(&job->jesdd); ii++) {
         JESDD *dd = job->jesdd[ii];
         if (http_cmp((const UCHAR *)dd->ddname, (const UCHAR *)"JESINTXT") == 0) {
             continue;
@@ -1385,7 +1384,7 @@ unsigned get_max_jobs(Session *session)
     if (max_jobs_str) {
         char *endptr = NULL;
         long val = strtol(max_jobs_str, &endptr, DECIMAL_BASE);
-        if (*endptr == '\0' && val > 0 && val <= UINT_MAX) {
+        if (*endptr == '\0' && val > 0 && (unsigned long)val <= UINT_MAX) {
             max_jobs = (unsigned)val;
         }
     }
@@ -1583,7 +1582,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	}
 
 	/* read dataset into lines array */
-	while (fgets(buffer, (int)buffer_size, fp) > 0) {
+	while (fgets(buffer, (int)buffer_size, fp) != NULL) {
 		size_t line_len;
 
 		if (num_lines >= capacity) {
@@ -1925,20 +1924,6 @@ is_jcl_line(const char *line)
     return (strncmp(line, "//", 2) == 0);
 }
 
-__asm__("\n&FUNC    SETC 'has_name_field'");
-static int 
-has_name_field(const char *line) 
-{
-    // Name field is columns 3-10 (0-based: 2-9)
-    int ii = 0;
-    for (ii = 2; ii < 10 && line[ii] != '\0'; ii++) {
-        if (!isspace((unsigned char)line[ii])) {
-            return 1;
-        }
-    }
-    return 0;
-}
-
 __asm__("\n&FUNC    SETC 'find_job_card_range'");
 static void 
 find_job_card_range(char **lines, int count, int *start_idx, int *end_idx) 
@@ -2155,7 +2140,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     }
 
     int ii = 0;
-    for (ii = 2; ii < 10 && ii < first_line_len && first_line[ii] != ' ' && first_line[ii] != '\0'; ii++) {
+    for (ii = 2; ii < 10 && ii < (int)first_line_len && first_line[ii] != ' ' && first_line[ii] != '\0'; ii++) {
         jobname[ii - 2] = first_line[ii];
     }
     jobname[ii - 2] = '\0';
@@ -2239,7 +2224,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
 
                             if (*real_end) {
                                 rc = snprintf(after, sizeof(after), ",%s", real_end);
-                                if (rc < 0 || rc >= sizeof(after)) {
+                                if (rc < 0 || rc >= (int)sizeof(after)) {
                                     return JOBCARD_ERR_TOO_LONG;
                                 }
                             }

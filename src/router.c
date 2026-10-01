@@ -99,8 +99,6 @@ int handle_request(Router *router, Session *session)
         return -1;
     } 
 
-    // needed for http_get_env
-    HTTPD *httpd = session->httpd;
     HTTPC *httpc = session->httpc;
 
     char *method = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_METHOD");
@@ -113,7 +111,7 @@ int handle_request(Router *router, Session *session)
     percent_decode(session, path);
 
     HttpMethod reqMethod = parseMethod(method);
-    if (reqMethod == -1) {
+    if ((int)reqMethod == -1) {
         http_resp(httpc, 405);
         return -1;
     }
@@ -403,6 +401,7 @@ __asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 
 int route_matching_middleware(Session *sessionr) 
 {
+    (void)sessionr;
     // Hier kommt die eigentliche RouteMatching-Logik
 
     return 0;
@@ -412,6 +411,7 @@ __asm__("\n&FUNC	SETC 'path_vars_extracting_middleware'");
 static 
 int path_vars_extracting_middleware(Session *session) 
 {
+    (void)session;
     // Hier kommt die eigentliche PathVars-Logik
 
     return 0;
@@ -434,7 +434,7 @@ static
 Route *find_route(Router *router, HttpMethod method, const char *path)
 {
     int i = 0;
-    for (i = 0; i < router->route_count; i++) {
+    for (i = 0; i < (int)router->route_count; i++) {
         if (router->routes[i].method == method) {
             if (is_pattern_match(router->routes[i].pattern, path)) {
                 return &router->routes[i];
@@ -488,7 +488,6 @@ int extract_path_vars(Session *session, const char *pattern, const char *path)
         return -1;
     }
 
-    HTTPD *httpd = session->httpd;
     HTTPC *httpc = session->httpc;
 
     while (*pattern) {

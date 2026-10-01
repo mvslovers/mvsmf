@@ -82,7 +82,7 @@ int recline_put(RECLINE *rl, char c, char **rec, size_t *rec_len)
 /**
  * Take the trailing record of a body that did not end in a terminator.
  *
- * Returns 1 with *rec/*rec_len set when content is pending, 0 when there is
+ * Returns 1 with *rec and *rec_len set when content is pending, 0 when there is
  * none -- a body ending in a newline must not produce a phantom blank record.
  */
 int recline_flush(RECLINE *rl, char **rec, size_t *rec_len)	asm("MFRECFLS");

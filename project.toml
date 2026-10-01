@@ -11,10 +11,11 @@ type = "application"
 libc370 = "2.0.0"
 
 [build]
-# infoapi.c reports the project version via a VERSION string macro. v1's mbt
-# injected -DVERSION automatically; v2 does not, so declare it explicitly.
-# $(PROJECT_VERSION) is the make variable mbtconfig emits from [project].version.
-cflags = ["-I", "include", '-DVERSION=\"$(PROJECT_VERSION)\"']
+# Warnings are errors, on the cross build and on the host build alike (the
+# host build reuses these flags). The project version comes from mbt's
+# generated <buildstamp.h> (MBT_VERSION), not from a -DVERSION flag: make never
+# expanded $(PROJECT_VERSION) on the host, which -Werror refuses.
+cflags = ["-Wall", "-Wextra", "-Werror", "-I", "include"]
 
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"

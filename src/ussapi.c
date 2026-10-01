@@ -764,7 +764,6 @@ uss_handle_chtag(Session *session, const char *filepath, const char *body)
 		// Return untagged default — UFSD has no file tagging.
 		// Format matches z/OSMF: {"stdout":["- untagged    T=off <path>"]}
 		char tagline[300];
-		int len;
 
 		snprintf(tagline, sizeof(tagline),
 			"- untagged    T=off %s", filepath);

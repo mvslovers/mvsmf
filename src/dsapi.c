@@ -167,16 +167,20 @@ __asm__("\n&FUNC    SETC 'model_alloc'");
 static int
 model_alloc(const char *dsname, unsigned *pri_trks, unsigned *sec_trks)
 {
-	LOCWORK		locwork = {0};
-	DSCB		dscb = {0};
+	LOCWORK		locwork;
+	DSCB		dscb;
 	DSCB1		*dscb1 = &dscb.dscb1;
-	DSCB		dscb4buf = {0};
+	DSCB		dscb4buf;
 	char		vol[7] = {0};
 	char		dsn44[44];
 	unsigned short	tpc = 0;
 	unsigned	trks = 0;
 	unsigned	sec;
 	int		e;
+
+	memset(&locwork, 0, sizeof(locwork));
+	memset(&dscb, 0, sizeof(dscb));
+	memset(&dscb4buf, 0, sizeof(dscb4buf));
 
 	*pri_trks = 0;
 	*sec_trks = 0;
@@ -429,7 +433,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 		   stray control byte into the output. */
 		int is_undefined = ((fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
 		int is_fixed = !is_undefined && !(fp->recfm & VARIABLE);
-		while (fgets(buffer, lrecl + 2, fp) > 0) {
+		while (fgets(buffer, lrecl + 2, fp) != NULL) {
 			size_t len = strlen(buffer);
 			if (is_fixed && len > 0) {
 				size_t end = len;
@@ -1392,11 +1396,13 @@ int datasetListHandler(Session *session)
 	** via __locate()+__dscbdv() and append it if it exists. */
 	if (!filter && dslevel && strchr(dslevel, '.') &&
 		!strchr(dslevel, '*') && !strchr(dslevel, '?')) {
-		LOCWORK locwork = {0};
+		LOCWORK locwork;
+		memset(&locwork, 0, sizeof(locwork));
 		if (__locate(dslevel, &locwork) == 0) {
-			DSCB dscb = {0};
+			DSCB dscb;
 			DSCB1 *dscb1 = &dscb.dscb1;
 			char vol[7] = {0};
+			memset(&dscb, 0, sizeof(dscb));
 			memcpy(vol, locwork.volser, 6);
 			if (__dscbdv(dslevel, vol, &dscb) == 0) {
 				DSLIST *ds = calloc(1, sizeof(DSLIST));
@@ -1440,8 +1446,9 @@ int datasetListHandler(Session *session)
 					{
 						int e, dscbrc;
 						unsigned short trks = 0;
-						DSCB dscb4buf = {0};
+						DSCB dscb4buf;
 						unsigned short tpc = 0;
+						memset(&dscb4buf, 0, sizeof(dscb4buf));
 						dscbrc = __dscbv(vol, &dscb4buf);
 						/* workaround: struct dscb4 includes key[44]
 						** but __dscbv() returns data-only (96 bytes).
@@ -1869,7 +1876,7 @@ int datasetPutHandler(Session *session)
             char c;
             
             // Read chunk size as ASCII hex string
-            while (i < sizeof(chunk_size_str)-1) {
+            while (i < (int)sizeof(chunk_size_str)-1) {
                 if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -2846,7 +2853,7 @@ int memberPutHandler(Session *session)
             char c;
             
             // Read chunk size as ASCII hex string
-            while (i < sizeof(chunk_size_str)-1) {
+            while (i < (int)sizeof(chunk_size_str)-1) {
                 if (receive_raw_data(session->httpc, &c, 1) != 1) {
                     free(record_buffer);
                     session_fclose(session, fp);
@@ -3321,7 +3328,6 @@ int datasetCreateHandler(Session *session)
 	char *dsname = NULL;
 	char *body = NULL;
 	char local_body[4096];
-	int free_body = 0;
 	size_t body_size = 0;
 
 	char dsorg[8] = {0};

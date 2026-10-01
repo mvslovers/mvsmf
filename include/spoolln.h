@@ -60,9 +60,9 @@
  *
  * The cap is tested first: once it is reached the walk ends whatever the
  * record looks like. A JESJCLIN record that does not begin with '/' is then
- * skipped -- every JCL statement does, continuations (`//`), comments (`//*`)
- * and JES2 control statements (`/*`) included, and in-stream data lives in its
- * own SYSIN data set, never here. The test is deliberately positive ("this is
+ * skipped -- every JCL statement does, continuations (`//`), comments (`//`
+ * then `*`) and JES2 control statements (`/` then `*`) included, and
+ * in-stream data lives in its own SYSIN data set, never here. The test is deliberately positive ("this is
  * what JCLIN holds") rather than a match on the pointer record's first byte:
  * it also covers the pre-formatted "JOB DELETED BY JES2 ..." line #158 was
  * written for, which starts with a letter.

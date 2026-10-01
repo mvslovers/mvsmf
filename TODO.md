@@ -14,7 +14,11 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. #361 is new (2026-09-06) and moved
+stand runs a server that old. **#360's `__listpd()` half is unblocked since
+the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
+`diagnose_open_failure()` now answers a shortage or an unreadable directory with
+404 — see the 2026-10-01 comment on #360 (proposal: `__walkpd()`). The
+`__listds()` half still waits on `libc370#157`. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
 #336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
 PR #364 — so the top of the queue is Tier 2's #251.*
@@ -437,6 +441,15 @@ reports that band as a KNOWN GAP that should reach 0 when #182 lands. #366 is
 closed: what it asked for — relink and check — is done, and the residue is not
 ours to fix.
 
+**PR #379, merged 2026-10-01** — the libc370 2.0 port (#378, closed). Includes
+rewritten per libc370's migration guide, base64 from crypto370, httpd
+`>=4.2.0-dev` and ufsd `>=1.4.0-dev` (prereleases: an mvsMF release waits for
+their stable cut), version **1.2.0-dev / `TZMF120`**. The build now runs
+`-Wall -Wextra -Werror` — it had no warning flags at all, which is how a missing
+`recv()` declaration reached the linker. Generated code compared against the
+1.x build TU by TU; `test-mvs` and every integration suite green on mvsdev under
+httpd 4.2.0-dev on libc370 2.0.0.
+
 
 Pointers only — the reasoning lives in the closing comments.
 
@@ -575,7 +588,9 @@ Pointers only — the reasoning lives in the closing comments.
 mvsMF-only. Do not rank these here — update them where they live.
 
 Still open and ours to wait on — the first four verified 2026-08-23:
-`libc370#79` (`exec-submitted`, and the accurate answer for #209), `libc370#30`
+`libc370#79` (`exec-submitted`, and the accurate answer for #209 — its
+`JESJOB.submit_time64`/`sysid` **ship in libc370 2.0.0**, the issue is still
+open), `libc370#30`
 (the nicer route for #186, not a gate for it), `httpd#176` (`blocked:rakf`),
 `ftpd#90` (decide with #345), and — filed 2026-08-25 — **`libc370#143`**
 (volume-addressed SCRATCH/RENAME, the half of #336 that is not ours; the read
@@ -583,7 +598,12 @@ and write half needs nothing from there).
 
 Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
 
-- **`libc370#182`** — a close-time out-of-space is invisible. `@@ACLOSE` ends
+- **`libc370#182`** — **closed, shipped in libc370 1.0.7 and so in our 2.0
+  build: `fclose()` now returns `EOF` with `ENOSPC`. The residue is ours now** —
+  `curl-nospace.sh` still reported the KNOWN GAP at 5 record counts on mvsdev
+  2026-10-01, because mvsMF discards `fclose()`'s result (`session_fclose()`
+  and friends in `dsapi.c`). Needs a ticket. Original description: a close-time
+  out-of-space was invisible. `@@ACLOSE` ends
   `FUNEXIT RC=0` unconditionally and `fclose()` discards even that, so a PUT
   whose last block is *partial* loses those records and answers 204, with
   nothing in this repo able to see it. Measured: five record counts per full
@@ -606,7 +626,7 @@ after: `make test-mvs` 508 PASS / 0 FAIL.
 
 The mechanism is the part to remember, because it recurs every time libc370
 moves: **none of those arrive via `make deps`.** libc370 is the cc370 sysroot,
-not a declared dependency — `mbt.lock` pins only httpd and ufsd. A libc370 fix
+not a declared dependency — `mbt.lock` pins only httpd, ufsd and crypto370. A libc370 fix
 reaches mvsMF only after `make install` in libc370, a rebuild here, `make deploy`,
 and `tests/jcl/mvsmfact.jcl`. Skip any one of the four and you measure the old
 module.

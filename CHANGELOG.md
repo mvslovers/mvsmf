@@ -66,7 +66,7 @@ release carrying unversioned product data sets.
   used to ABEND `SD37` into the router's ESTAE and answer 500, and now it
   returns. mvsMF flushes after every record but the physical I/O is per
   *block*, so whenever a record completes a block that block's write happens
-  inside `fflush()` — whose return value was discarded. Measured on mvsdev
+  inside `fflush()` — whose return value was discarded. Measured on MVS
   2026-09-14 against a 194-record data set: a PUT of 200 records lost ten and
   answered `204`, where the same request on the previous build answered 500.
   The flush is checked now, and a full data set also reaches the operator as

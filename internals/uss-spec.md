@@ -119,7 +119,7 @@ mvsmf/
 │   └── ussapi.h          ← NEU: Handler-Deklarationen + UFS-Session-Management
 ├── src/
 │   └── ussapi.c          ← NEU: USS REST API Handler-Implementierung
-├── doc/endpoints/
+├── docs/endpoints/
 │   └── uss/              ← NEU: Endpoint-Dokumentation
 │       ├── list.md
 │       ├── read.md
@@ -550,7 +550,7 @@ Diese Endpoints betreffen `/zosmf/restfiles/mfs/` und erfordern fundamentale UFS
 | 1.10 | project.toml Update (libufs via MBT) | Build | — | Klein |
 | 1.11 | curl-Tests für alle Phase-1-Endpoints | tests/ | 1.9 | Mittel |
 | 1.12 | Zowe CLI Integration Tests | tests/ | 1.9 | Mittel |
-| 1.13 | Endpoint-Dokumentation (doc/endpoints/uss/) | doc/ | 1.4–1.8 | Klein |
+| 1.13 | Endpoint-Dokumentation (docs/endpoints/uss/) | docs/ | 1.4–1.8 | Klein |
 
 **Estimated LOC:** ~1000–1500 (ussapi.c) + ~100 (router.c) + ~400 (tests)
 

@@ -17,7 +17,7 @@
 # decides the repo the fix ticket goes to.
 #
 # Every sample is itself one request against the address space under test,
-# and with total=1 it briefly holds ALL free storage (see docs/storage-probe.md).
+# and with total=1 it briefly holds ALL free storage (see internals/storage-probe.md).
 # The loop below is strictly sequential for that reason: nothing else of ours
 # is ever in flight while a sample runs.
 #

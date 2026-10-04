@@ -4,7 +4,7 @@ Resolve GitHub issue #$ARGUMENTS end-to-end. Follow these steps strictly:
    Run: `gh issue view $ARGUMENTS --repo mvslovers/mvsmf`
 
 2. **Check for spec:**
-   If the issue has label `uss-phase1`, read `doc/uss-spec.md` before proceeding. It contains the authoritative architecture decisions, error code mappings, encoding rules, and I/O patterns.
+   If the issue has label `uss-phase1`, read `internals/uss-spec.md` before proceeding. It contains the authoritative architecture decisions, error code mappings, encoding rules, and I/O patterns.
 
 3. **Create a feature branch:**
    Run: `git checkout main && git pull && git checkout -b issue-$ARGUMENTS-<short-description>`
@@ -33,7 +33,7 @@ Resolve GitHub issue #$ARGUMENTS end-to-end. Follow these steps strictly:
    If the change affects an endpoint, add or update tests in `tests/`. Follow the patterns in existing test scripts (colored output, pass/fail counters).
 
 9. **Update docs:**
-   If touching an endpoint handler, update the corresponding file in `doc/endpoints/`.
+   If touching an endpoint handler, update the corresponding file in `docs/endpoints/`.
 
 10. **Commit:**
     Write a descriptive commit message. Reference the issue: `Fixes #$ARGUMENTS`

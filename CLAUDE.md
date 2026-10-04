@@ -100,7 +100,7 @@ httpd release → `make deps` in mvsMF (updates `mbt.lock`) → rebuild and
 Autonomous workflow for resolving a GitHub issue end-to-end:
 
 1. **Read the issue** — `gh issue view <number> --repo mvslovers/mvsmf`
-2. **Check for spec** — If the issue has label `uss-phase1`, read `docs/uss-spec.md` first
+2. **Check for spec** — If the issue has label `uss-phase1`, read `internals/uss-spec.md` first
 3. **Create a feature branch** — `git checkout -b issue-<number>-<short-description>`
 4. **Analyze** — Identify affected files, understand the existing patterns in nearby code
 5. **Implement** — Write code following the conventions in this CLAUDE.md
@@ -126,7 +126,7 @@ Synchronize endpoint documentation with current implementation:
 
 ### USS/UFS Feature Pack
 
-The authoritative specification for all USS-related work is `docs/uss-spec.md`. **Read it before working on any issue labeled `uss-phase1`.** It contains:
+The authoritative specification for all USS-related work is `internals/uss-spec.md`. **Read it before working on any issue labeled `uss-phase1`.** It contains:
 
 - Gap analysis: z/OSMF USS API vs. libufs capabilities
 - Architecture decisions (router wildcard, session lifecycle, MBT integration)
@@ -579,7 +579,7 @@ The threshold it exists to watch is **262144**, the unconditional GETMAIN
 libc370's C startup makes on every LINK: once the largest block is below that,
 the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
-See [docs/storage-probe.md](docs/storage-probe.md).
+See [internals/storage-probe.md](internals/storage-probe.md).
 
 **The endpoint has no per-function gate any more, and must not grow one back
 (#343).** `fn=abend`, `fn=jesabend` and `fn=denyopen` were gated on
@@ -651,7 +651,7 @@ which is the only reason this never fired before 2026-08-18.
 
 ## USS/UFS Endpoints
 
-> **Spec:** `docs/uss-spec.md` — the authoritative architecture and design document.
+> **Spec:** `internals/uss-spec.md` — the authoritative architecture and design document.
 > **Status:** Phase 1 complete (Issues #77–#89). chtag utility implemented (#106).
 
 ### Architecture

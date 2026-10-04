@@ -29,28 +29,32 @@ cflags = ["-Wall", "-Wextra", "-Werror", "-I", "include"]
 # httpx callback table (httpcgi.h).
 [[module]]
 name = "MVSMF"
+rent = true
+reus = true
 startup = "crt1"
 sources = ["src/*.c"]
 
 # Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
-# norent: mbtcheck.h keeps file-static counters; a standalone test needs them
-# in writable storage, so drop the module's RENT attribute.
+# rent = false: mbtcheck.h keeps file-static counters; a standalone test needs
+# them in writable storage, so the module is neither RENT nor REUS.
 # host = false: both TUs include mvssupa.h and ntstore.c calls __getm/__getclk
 # plus cliblock.h -- libc370 services with no host equivalent, so the native
 # compile can only ever fail.  test-mvs still runs it.
 [[test]]
 name = "TSTNTST"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 host = false
 sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
-norent = true
 
 # TSTMTLN: #176 host repro — signed-short mtentlen must not drive a negative
 # copy length in the console MTT consumers. Portable C (runs under test-host).
 # NOTE: mirrors the consapi.c clamp; it does not link the real functions.
 [[test]]
 name = "TSTMTLN"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstmtln.c"]
-norent = true
 
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
@@ -58,8 +62,9 @@ norent = true
 # loops in dsapi.c use — do not list reclines.c here.
 [[test]]
 name = "TSTRECL"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstrecl.c"]
-norent = true
 
 # TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
 # the lines[] array and the line buffer consistent. Portable C (test-host); the
@@ -67,8 +72,9 @@ norent = true
 # real grow_lines_arrays() rather than a copy — do not list jclines.c here.
 [[test]]
 name = "TSTJCLN"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstjcln.c"]
-norent = true
 
 # TSTABND: #256 — the abend code has to reach the client, and the x37 family
 # has to be named. Portable C (test-host); the TU #includes src/abendmsg.c so
@@ -76,8 +82,9 @@ norent = true
 # list abendmsg.c here.
 [[test]]
 name = "TSTABND"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstabnd.c"]
-norent = true
 
 # TSTHOST: #260 — a Host header with no name in front of the colon parsed as
 # success with an empty string, so /zosmf/info's fallback never ran. Portable C
@@ -85,8 +92,9 @@ norent = true
 # infoapi.c calls — do not list hostparse.c here.
 [[test]]
 name = "TSTHOST"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tsthost.c"]
-norent = true
 
 # TSTETAG: #152 — the ETag stamp must change on every content change (including
 # a same-length edit and a re-split record boundary) and stay stable otherwise,
@@ -96,8 +104,9 @@ norent = true
 # uses — do not list etag.c here.
 [[test]]
 name = "TSTETAG"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstetag.c"]
-norent = true
 
 # TSTSEND: #298 — the send loop must never advance by the return value without
 # checking it. A 0 from http_send() means "socket send buffer full, retry", and
@@ -106,8 +115,9 @@ norent = true
 # through — do not list sendall.c here.
 [[test]]
 name = "TSTSEND"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstsend.c"]
-norent = true
 
 # TSTSPLN: #314 — JES2 writes a pointer record into JESJCLIN behind every
 # in-stream DD * card, and the PDDB record count does not include them. The
@@ -116,8 +126,9 @@ norent = true
 # it drives the real decision the spool walk makes — do not list spoolln.c here.
 [[test]]
 name = "TSTSPLN"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstspln.c"]
-norent = true
 
 # TSTJCARD: #365 — mvsMF injects USER=/PASSWORD= on every submit, and did so
 # unconditionally, so a caller who wrote USER= themselves got two operands and
@@ -125,8 +136,9 @@ norent = true
 # process_jobcard() makes — do not list jobcard.c here.
 [[test]]
 name = "TSTJCARD"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
 sources = ["test/host/tstjcard.c"]
-norent = true
 
 # ── Deploy (development) ─────────────────────────────────
 # `make deploy` RECEIVEs the load module here, NOT into the library SMP owns

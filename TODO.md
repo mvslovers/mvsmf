@@ -6,7 +6,7 @@ cannot hold: the **order**, the reason for it, which items are a decision rather
 than code, and the per-issue hazard that makes an obvious-looking fix not one.
 
 **It carries nothing that is copied.** Where the reasoning already has an owner —
-the issue thread, the PR, `docs/uss-spec.md` — this file points at it and stops.
+the issue thread, the PR, `internals/uss-spec.md` — this file points at it and stops.
 
 *Last reconciled against the tracker: 2026-09-06 after the **1.0.0 release**,
 20 issues open — fifteen entries below: one pairs two issues, one is a **block

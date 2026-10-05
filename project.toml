@@ -8,7 +8,11 @@ type = "application"
 # deliberately keeps floating on main so a cc370/libc370 regression surfaces
 # in a PR build (mbt#68). cc370 is omitted -- it defaults to main and has no
 # releases to pin to yet.
-libc370 = "2.0.0"
+# 2.3.1: the C runtime startup is a member of libc.a from 2.3.0 on,
+# so no module names a startup object (mvslovers/mbt#158). An older libc.a
+# would quietly link crt0 where these modules used to have crt1. 2.3.1
+# rather than 2.3.0 for the subtask cleanup fix (mvslovers/libc370#431).
+libc370 = "2.3.1"
 
 [build]
 # Warnings are errors, on the cross build and on the host build alike (the
@@ -31,7 +35,8 @@ cflags = ["-Wall", "-Wextra", "-Werror", "-I", "include"]
 name = "MVSMF"
 rent = true
 reus = true
-startup = "crt1"
+# @@START comes from httpd's CGI launcher in httpd.a (mvslovers/mbt#62)
+dep_startup = true
 sources = ["src/*.c"]
 
 # Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).

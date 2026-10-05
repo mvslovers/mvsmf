@@ -450,6 +450,12 @@ their stable cut), version **1.2.0-dev / `TZMF120`**. The build now runs
 1.x build TU by TU; `test-mvs` and every integration suite green on mvsdev under
 httpd 4.2.0-dev on libc370 2.0.0.
 
+**2026-10-05, direct to `main`** — toolchain bump to mbt v2.2.0 (PR #386,
+`dep_startup = true` on MVSMF for httpd's CGI `@@START`), cc370 1.4.0 and a
+`[toolchain]` pin of libc370 2.4.0, which needs cc370 >= 1.4.0 and no longer
+ships `crt0.o`/`crt1.o`. Build warning-free, `test-host` 276/0, `test-mvs`
+584/0 on mvsdev (JOB01416). The integration suites were not re-run.
+
 
 Pointers only — the reasoning lives in the closing comments.
 

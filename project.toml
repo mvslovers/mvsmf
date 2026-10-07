@@ -6,15 +6,18 @@ type = "application"
 [toolchain]
 # Pins the refs release.yml builds the published artifacts against; build.yml
 # deliberately keeps floating on main so a cc370/libc370 regression surfaces
-# in a PR build (mbt#68). cc370 is omitted -- it defaults to main and has no
-# releases to pin to yet.
+# in a PR build (mbt#68).
 # 2.3.1: the C runtime startup is a member of libc.a from 2.3.0 on,
 # so no module names a startup object (mvslovers/mbt#158). An older libc.a
 # would quietly link crt0 where these modules used to have crt1. 2.3.1
 # rather than 2.3.0 for the subtask cleanup fix (mvslovers/libc370#431).
 # 2.4.0 needs cc370 >= 1.4.0 and no longer ships crt0.o/crt1.o, which
 # mbt v2.2.0 does not look for.
-libc370 = "2.4.0"
+# 2.6.1: the stdio lock fix for code in a threaded address space
+# (mvslovers/libc370#470) -- a CGI module runs on one of httpd's workers.
+# cc370: libc370 2.4.0 and later need cc370 >= 1.4.0; 1.4.0 is current.
+cc370 = "1.4.0"
+libc370 = "2.6.1"
 
 [build]
 # Warnings are errors, on the cross build and on the host build alike (the

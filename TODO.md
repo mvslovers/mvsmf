@@ -231,8 +231,9 @@ is dropped — **with HTTP 204**. Four ecosystem `samplib` members carry UTF-8 t
 
 Research because the policy is the hard part. Measure the reference first
 (`--zosmf-p zxp`, read-only). The EBCDIC side of the choice exists since #391
-(`X-IBM-Data-Type: text;fileEncoding=`, IBM-037 / IBM-1047 on data sets); what
-is still uninterpreted is the ASCII side, `Content-Type: …;charset=`.
+and #393 (`X-IBM-Data-Type: text;fileEncoding=`, IBM-037 / IBM-1047 on data
+sets and USS files; jobs still have none); what is still uninterpreted is the
+ASCII side, `Content-Type: …;charset=`.
 `xmit370`'s split between well-formed UTF-8 and Latin-1 is worth borrowing. Decide
 GET and PUT together; a reject changes the round-trip property.
 

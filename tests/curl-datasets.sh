@@ -182,6 +182,7 @@ cleanup_datasets() {
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TESTENC" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -1607,6 +1608,177 @@ fi
 rm -f /tmp/curl_ds_blank.bin /tmp/curl_ds_wide.txt /tmp/curl_ds_wide.bin \
 	/tmp/curl_ds_crlf.bin /tmp/curl_ds_noeol.bin /tmp/curl_ds_chunk.txt \
 	/tmp/curl_ds_chunk.bin
+
+# =========================================================================
+# fileEncoding (issue #391)
+#
+# X-IBM-Data-Type: text;fileEncoding=IBM-1047 used to be dropped, so content
+# with the brackets at X'AD'/X'BD' (IBM-1047) always went through CP037 and
+# came out as 'Ý' / '¨' (#390). The stored bytes are checked through a BINARY
+# read, which returns them untranslated: a text round trip alone proves
+# nothing, because etoa inverts atoe in either code page.
+#
+#   'A[2]' in CP037    = C1 BA F2 BB      (the default)
+#   'A[2]' in IBM-1047 = C1 AD F2 BD
+# =========================================================================
+
+TEST_ENC="${MVSMF_USER}.CURL.TESTENC"
+
+# Hex of a downloaded file, one string, no blanks.
+hex_of() {
+	od -An -tx1 "$1" | tr -d ' \n'
+}
+
+# Two lines, so a read-back also proves the record ends survived the table.
+ENC_TEXT=$'INT A[2];\nINT B[3];'
+
+enc_put() {	# enc_put <data-type> <url> -> HTTP code; body is ENC_TEXT
+	curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json \
+		-X PUT -u "$AUTH" \
+		-H "Content-Type: text/plain" \
+		-H "X-IBM-Data-Type: $1" \
+		--data-binary "${ENC_TEXT}"$'\n' \
+		"$2"
+}
+
+enc_stored() {	# enc_stored <url> -> hex of the stored record(s)
+	curl -s -o /tmp/curl_ds_enc.bin -u "$AUTH" \
+		-H "X-IBM-Data-Type: binary" "$1"
+	hex_of /tmp/curl_ds_enc.bin
+}
+
+echo ""
+echo "--- fileEncoding: members (issue #391) ---"
+
+ENC_MBR="${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ENCTEST)"
+
+HTTP_CODE=$(enc_put "text" "$ENC_MBR")
+assert_http_status "204" "$HTTP_CODE" "write member with the default encoding"
+case "$(enc_stored "$ENC_MBR")" in
+	*c1baf2bb*) pass "default stores the brackets as CP037 (BA/BB)" ;;
+	*)          fail "default stores the brackets as CP037 (BA/BB)" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+HTTP_CODE=$(enc_put "text;fileEncoding=IBM-1047" "$ENC_MBR")
+assert_http_status "204" "$HTTP_CODE" "write member with fileEncoding=IBM-1047"
+case "$(enc_stored "$ENC_MBR")" in
+	*c1adf2bd*) pass "IBM-1047 stores the brackets as AD/BD" ;;
+	*)          fail "IBM-1047 stores the brackets as AD/BD" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_MBR")
+if [ "$CONTENT" = "$ENC_TEXT" ]; then
+	pass "IBM-1047 content reads back with fileEncoding=IBM-1047"
+else
+	fail "IBM-1047 content reads back with fileEncoding=IBM-1047" "got '$CONTENT'"
+fi
+
+# The other spellings the reference accepts, and its case-insensitivity.
+for V in "text;fileEncoding=1047" "TEXT;fileencoding=ibm-1047" "text;crlf=true;fileEncoding=IBM-1047"; do
+	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_MBR")
+	if [ "$CONTENT" = "$ENC_TEXT" ]; then
+		pass "'$V' selects IBM-1047"
+	else
+		fail "'$V' selects IBM-1047" "got '$CONTENT'"
+	fi
+done
+
+# Read as CP037, the same bytes are what #390 reported: X'DD' and X'A8'.
+curl -s -o /tmp/curl_ds_enc.txt -u "$AUTH" "$ENC_MBR"
+case "$(hex_of /tmp/curl_ds_enc.txt)" in
+	*41dd32a8*) pass "IBM-1047 content read as CP037 is still Ý/¨ (the default is unchanged)" ;;
+	*)          fail "IBM-1047 content read as CP037 is still Ý/¨" "got $(hex_of /tmp/curl_ds_enc.txt)" ;;
+esac
+
+# Explicit IBM-037 is the default spelled out.
+HTTP_CODE=$(enc_put "text;fileEncoding=IBM-037" "$ENC_MBR")
+assert_http_status "204" "$HTTP_CODE" "write member with fileEncoding=IBM-037"
+case "$(enc_stored "$ENC_MBR")" in
+	*c1baf2bb*) pass "IBM-037 stores the brackets as BA/BB" ;;
+	*)          fail "IBM-037 stores the brackets as BA/BB" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+# An unsupported encoding is the reference's 500 -- and on a write it must be
+# refused before the member is opened, so the content above survives.
+HTTP_CODE=$(enc_put "text;fileEncoding=BOGUS" "$ENC_MBR")
+assert_http_status "500" "$HTTP_CODE" "write member with an unsupported encoding"
+BODY=$(cat /tmp/curl_ds_enc.json)
+assert_json_field "$BODY" ".category" "16" "unsupported encoding: category"
+assert_json_field "$BODY" ".rc" "121" "unsupported encoding: rc"
+assert_json_field "$BODY" ".message" "iconv_open() failed." "unsupported encoding: message"
+case "$(enc_stored "$ENC_MBR")" in
+	*c1baf2bb*) pass "a refused write leaves the member untouched" ;;
+	*)          fail "a refused write leaves the member untouched" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -u "$AUTH" \
+	-H "X-IBM-Data-Type: text;fileEncoding=IBM-37" "$ENC_MBR")
+assert_http_status "500" "$HTTP_CODE" "read member with IBM-37 (refused by the reference too)"
+
+# Measured on the reference: a blank after ';' hides the parameter, and binary
+# ignores fileEncoding entirely -- neither is an error.
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Data-Type: text; fileEncoding=BOGUS" "$ENC_MBR")
+assert_http_status "200" "$HTTP_CODE" "a blank after ';' is not a fileEncoding"
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Data-Type: binary;fileEncoding=BOGUS" "$ENC_MBR")
+assert_http_status "200" "$HTTP_CODE" "binary ignores fileEncoding"
+
+# BINARY and binary;param used to fall back to text -- a translated download.
+for V in "BINARY" "binary;foo=bar"; do
+	curl -s -o /tmp/curl_ds_enc.bin -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_MBR"
+	SIZE=$(wc -c < /tmp/curl_ds_enc.bin | tr -d ' ')
+	case "$(hex_of /tmp/curl_ds_enc.bin)" in
+		c9d5e340c1baf2bb*) [ "$SIZE" = "160" ] \
+			&& pass "'$V' is a binary read (160 raw bytes, two records)" \
+			|| fail "'$V' is a binary read" "expected 160 bytes, got $SIZE" ;;
+		*) fail "'$V' is a binary read" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+	esac
+done
+
+curl -s -X DELETE -u "$AUTH" "$ENC_MBR" >/dev/null 2>&1 || true
+
+echo ""
+echo "--- fileEncoding: sequential data set (issue #391) ---"
+
+ENC_SEQ="${BASE_URL}/zosmf/restfiles/ds/${TEST_ENC}"
+curl -s -X DELETE -u "$AUTH" "$ENC_SEQ" >/dev/null 2>&1 || true
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -u "$AUTH" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$ENC_SEQ")
+assert_http_status "201" "$HTTP_CODE" "create sequential data set"
+
+HTTP_CODE=$(enc_put "text;fileEncoding=IBM-1047" "$ENC_SEQ")
+assert_http_status "204" "$HTTP_CODE" "write sequential data set with fileEncoding=IBM-1047"
+case "$(enc_stored "$ENC_SEQ")" in
+	c9d5e340c1adf2bd*) pass "IBM-1047 stores the brackets as AD/BD" ;;
+	*)                 fail "IBM-1047 stores the brackets as AD/BD" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_SEQ")
+if [ "$CONTENT" = "$ENC_TEXT" ]; then
+	pass "IBM-1047 content reads back with fileEncoding=IBM-1047"
+else
+	fail "IBM-1047 content reads back with fileEncoding=IBM-1047" "got '$CONTENT'"
+fi
+
+HTTP_CODE=$(enc_put "text;fileEncoding=BOGUS" "$ENC_SEQ")
+assert_http_status "500" "$HTTP_CODE" "write sequential data set with an unsupported encoding"
+case "$(enc_stored "$ENC_SEQ")" in
+	c9d5e340c1adf2bd*) pass "a refused write leaves the data set untouched" ;;
+	*)                 fail "a refused write leaves the data set untouched" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
+esac
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -u "$AUTH" \
+	-H "X-IBM-Data-Type: text;fileEncoding=BOGUS" "$ENC_SEQ")
+assert_http_status "500" "$HTTP_CODE" "read sequential data set with an unsupported encoding"
+assert_json_field "$(cat /tmp/curl_ds_enc.json)" ".category" "16" "unsupported encoding: category"
+
+curl -s -X DELETE -u "$AUTH" "$ENC_SEQ" >/dev/null 2>&1 || true
+rm -f /tmp/curl_ds_enc.json /tmp/curl_ds_enc.bin /tmp/curl_ds_enc.txt
 
 # --- ETag / optimistic locking (issue #152) ---
 echo ""

@@ -472,6 +472,27 @@ send_not_authorized(Session *session, const char *detail)
 			ERR_MSG_NOT_AUTHORIZED, details, 1);
 }
 
+/* An X-IBM-Data-Type fileEncoding this server has no table for (issue #391).
+   The shape is the reference's -- see CATEGORY_ENCODING in common.h. */
+__asm__("\n&FUNC    SETC 'send_bad_encoding'");
+int
+send_bad_encoding(Session *session, const char *value)
+{
+	char detail[160];
+	const char *details[1];
+
+	/* The value is client-supplied and unbounded; %.64s keeps the sentence
+	   inside the buffer whatever arrives. */
+	snprintf(detail, sizeof(detail),
+		"Unsupported encoding in X-IBM-Data-Type '%.64s': "
+		"IBM-037 and IBM-1047 are supported.", value ? value : "");
+	details[0] = detail;
+
+	return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_ENCODING, RC_ENCODING, REASON_ENCODING,
+			ERR_MSG_ENCODING, details, 1);
+}
+
 //
 // Send a whole buffer to the client (issue #298).
 //

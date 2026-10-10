@@ -506,6 +506,50 @@ else
 	skip "delete PDS member (no member written)"
 fi
 
+# --- fileEncoding (issue #391) ---
+# Zowe's --encoding becomes X-IBM-Data-Type: text;fileEncoding=<value>, which
+# mvsMF used to drop -- IBM-1047 brackets (X'AD'/X'BD') always went through
+# CP037 (#390). The stored bytes are checked with a binary download: a text
+# round trip alone would pass in either code page.
+echo ""
+echo "--- fileEncoding: --encoding IBM-1047 (issue #391) ---"
+
+ENCFILE=$(mktemp)
+ENCBIN=$(mktemp)
+printf 'INT A[2];\nINT B[3];\n' > "$ENCFILE"
+
+RC=0
+OUTPUT=$(run_zowe files upload ftds "$ENCFILE" "${TEST_PDS}(ENCTEST)" --encoding IBM-1047) || RC=$?
+assert_rc 0 "$RC" "upload member with --encoding IBM-1047"
+
+RC=0
+OUTPUT=$(run_zowe files download ds "${TEST_PDS}(ENCTEST)" --binary --file "$ENCBIN") || RC=$?
+assert_rc 0 "$RC" "download the member in binary"
+case "$(od -An -tx1 "$ENCBIN" | tr -d ' \n')" in
+	*c1adf2bd*) pass "brackets stored as IBM-1047 (AD/BD)" ;;
+	*)          fail "brackets stored as IBM-1047 (AD/BD)" "got $(od -An -tx1 "$ENCBIN" | tr -d ' \n' | cut -c1-24)" ;;
+esac
+
+RC=0
+OUTPUT=$(run_zowe files view ds "${TEST_PDS}(ENCTEST)" --encoding IBM-1047) || RC=$?
+assert_rc 0 "$RC" "view member with --encoding IBM-1047"
+if echo "$OUTPUT" | grep -qxF "INT A[2];" && echo "$OUTPUT" | grep -qxF "INT B[3];"; then
+	pass "IBM-1047 brackets read back as [ ], two lines"
+else
+	fail "IBM-1047 brackets read back as [ ]" "got '$OUTPUT'"
+fi
+
+RC=0
+OUTPUT=$(run_zowe files view ds "${TEST_PDS}(ENCTEST)" --encoding BOGUS) || RC=$?
+if [ "$RC" -ne 0 ] && echo "$OUTPUT" | grep -qF "iconv_open() failed."; then
+	pass "an unsupported --encoding is refused like the reference (rc=$RC)"
+else
+	fail "an unsupported --encoding is refused like the reference" "rc=$RC: $OUTPUT"
+fi
+
+run_zowe files delete ds "${TEST_PDS}(ENCTEST)" -f >/dev/null 2>&1 || true
+rm -f "$ENCFILE" "$ENCBIN"
+
 # --- Long DSN(member) name validation (Issue #133) ---
 # DSN <=44 and member <=8 are individually valid even when combined they exceed 44.
 # A 36-char DSN + 8-char member (combined 46 chars) was a false 400 before the fix.

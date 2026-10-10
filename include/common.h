@@ -343,6 +343,44 @@ void abort_response(Session *session) asm("CMN0019");
  */
 int send_not_authorized(Session *session, const char *detail) asm("CMN0015");
 
+/** @brief The z/OSMF error report for an unsupported fileEncoding (#391)
+ *
+ * Measured against a real z/OSMF (version 29 / z/OS 05.29.00): a text read
+ * with `X-IBM-Data-Type: text;fileEncoding=BOGUS` -- or `IBM-37`, or `CP037`
+ * -- answers
+ *
+ *   500 {"category":16,"rc":121,"reason":-1037303780,
+ *        "message":"iconv_open() failed.",
+ *        "details":["EDC5121I Invalid argument. (errno2=0xC22C001C)"]}
+ *
+ * Status, category, rc, reason and message are the reference's verbatim, for
+ * the reason CATEGORY_AUTHORIZATION gives: fidelity is the point. The reason
+ * is z/OS's errno2 0xC22C001C read as a signed int. `EDC5121I` is not
+ * reproduced -- it is a Language Environment message id, and quoting it would
+ * name a component that is not there, as ISRZ002 would have in #315. The
+ * details[] sentence is mvsMF's own and names what *is* supported.
+ *
+ * Like category 4, category 16 is one observation; it is not a general
+ * "conversion" category.
+ */
+#define CATEGORY_ENCODING      16
+#define RC_ENCODING            121
+#define REASON_ENCODING        (-1037303780)
+#define ERR_MSG_ENCODING       "iconv_open() failed."
+
+/**
+ * @brief Answers a text request whose fileEncoding cannot be translated
+ *
+ * The caller has already parsed the header (parse_data_type() returned -1);
+ * this only reports it. On a write it must run before the target is opened,
+ * so a refused request never truncates anything.
+ *
+ * @param session Current session context
+ * @param value   the X-IBM-Data-Type value as received, quoted in details[]
+ * @return 0 on success, negative on send failure
+ */
+int send_bad_encoding(Session *session, const char *value) asm("CMN0023");
+
 /**
  * @brief Reads the full request body into a malloc'd buffer
  *

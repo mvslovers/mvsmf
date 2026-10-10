@@ -27,7 +27,7 @@
  * The assertions are deliberately written against the INVARIANT rather than
  * the call order, so they are a red->green gate: they fail on the old
  * buffer-first code and pass on the fixed pointer-array-first code.
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <stdlib.h>   /* LOAD-BEARING: must precede the realloc macro below, so

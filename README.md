@@ -178,75 +178,78 @@ MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 These three lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
 `MVSMF.SAMPLIB(MVSMFPRM)`; keep them in step.
 
-For development, `make deploy` (see *Building* below) uploads and RECEIVEs the
-load library directly — no SMP, and no install package.
+For development, `mbt deploy` (see *Building* below) uploads and RECEIVEs the
+load module directly into `MVSMF.DEV.LINKLIB` — no SMP, and no install package.
 
 ## Building mvsMF
 
-mvsMF uses **[mbt](https://github.com/mvslovers/mbt) v2** (MVS Build Tools). The
+mvsMF uses **[mbt](https://github.com/mvslovers/mbt) 3** (MVS Build Tools). The
 whole build runs **on your host** with the **cc370** toolchain (`cc370`, `as370`,
-`ar370`, `ld370`) — MVS is only touched by `make deploy`.
+`ar370`, `ld370`) — MVS is only touched by `mbt deploy` and `mbt test --mvs`.
 
 ### Prerequisites
 
+- **mbt 3** on the `PATH` (see mbt's installation guide)
 - The **[cc370](https://github.com/mvslovers/cc370)** host toolchain (a GCC 3.4.6 fork)
-- **Python 3.12+**
-- An MVS 3.8j system reachable over IP (for `make deploy` / `make doctor`)
+- An MVS 3.8j system reachable over IP (for `mbt deploy` / `mbt doctor`)
 
 ### Quick Start
 
 ```bash
-git clone --recursive https://github.com/mvslovers/mvsmf.git
+git clone https://github.com/mvslovers/mvsmf.git
 cd mvsmf
-cp .env.example .env     # edit with your MVS connection details
-make deps                # resolve + stage dependencies (httpd, ufsd)
-make                     # cross-compile + link the MVSMF load module (on the host)
-make deploy              # XMIT + upload + RECEIVE into the httpd LINKLIB (touches MVS)
+mbt deps                 # resolve + stage dependencies (httpd, ufsd, crypto370)
+mbt build                # cross-compile + link the MVSMF load module (on the host)
+mbt test                 # run the host unit tests
+mbt deploy               # XMIT + upload + RECEIVE into MVSMF.DEV.LINKLIB (touches MVS)
 ```
 
-### Make Targets
+### Commands
 
-| Target | Description |
+| Command | Description |
 |--------|-------------|
-| `make` | Build the `MVSMF` load module (host only) |
-| `make deps` | Resolve + stage declared dependencies into `.mbt/deps` |
-| `make deploy` | Pack → XMIT → upload → RECEIVE into the LINKLIB (touches MVS) |
-| `make test` / `make test-mvs` | Build (and run on MVS) the test suites |
-| `make doctor` | Check the toolchain + MVS connectivity |
-| `make compiledb` | Generate `compile_commands.json` for clangd |
-| `make package` | Build the release artifacts in `dist/` |
-| `make clean` / `make distclean` | Remove build outputs / everything incl. staged deps |
-| `make help` | List all targets |
+| `mbt build` | Build the `MVSMF` load module (host only) |
+| `mbt deps` | Resolve + stage declared dependencies and plugins into `.mbt/` |
+| `mbt test` / `mbt test --mvs` | Run the unit tests on the host / on MVS |
+| `mbt deploy` | Pack → XMIT → upload → RECEIVE, then replace the member in `MVSMF.DEV.LINKLIB` (touches MVS) |
+| `mbt run restart -- HTTPD` | Compress `MVSMF.DEV.LINKLIB` and restart HTTPD, which activates a deploy (plugin `mvslovers/mbt-stc`) |
+| `mbt doctor` | Check the toolchain + MVS connectivity |
+| `mbt compiledb` | Generate `compile_commands.json` for clangd |
+| `mbt package` | Build the release artifacts in `dist/` |
+| `mbt clean` / `mbt distclean` | Remove build outputs / everything incl. staged deps |
+
+`mbt` alone lists every command.
 
 ### Dependencies
 
-Declared in `project.toml` and pinned in `mbt.lock` (committed):
+Declared in `mbt.toml` and pinned in `mbt.lock` (committed):
 
 | Dependency | Purpose |
 |------------|---------|
 | `mvslovers/httpd` | Web server + client library (the CGI host and `http_*` API) |
 | `mvslovers/ufsd` | Unix‑like filesystem server (the USS endpoints) |
+| `mvslovers/crypto370` | base64 |
 | `libc370` | C runtime (the cc370 sysroot, `-lc`) |
 
-`make deps` resolves `httpd`/`ufsd` from their GitHub Releases and writes
-`mbt.lock`. To develop against an unreleased dependency, use a gitignored
-`.mbt/deps.local.toml` override.
+`mbt deps` resolves them from their GitHub Releases and writes `mbt.lock`; it
+never moves a pin on its own (`mbt deps --update` does). To develop against an
+unreleased dependency, use a gitignored `.mbt/deps.local.toml` override.
 
 ### Configuration
 
-`project.toml` defines the project; local MVS connection settings go in `.env`
-(never committed — copy `.env.example`).
+`mbt.toml` defines the project. The MVS system mbt deploys to is a *target* in
+`~/.mbt/targets.toml`, set up once per machine (`mbt target import .env --name
+<name>` converts an existing `.env`).
+
+The REST test suites in `tests/` read their connection from `.env` at the repo
+root (never committed — copy `.env.example`):
 
 | Variable | Description |
 |----------|-------------|
 | `MBT_MVS_HOST` | IP or hostname of the MVS system |
 | `MBT_MVS_PORT` | mvsMF API port |
 | `MBT_MVS_USER` / `MBT_MVS_PASS` | MVS userid / password |
-| `MBT_MVS_HLQ` | HLQ for build/deploy datasets |
-| `MBT_MVS_DEPS_HLQ` | HLQ for staged dependency datasets |
-| `MBT_JES_JOBCLASS` / `MBT_JES_MSGCLASS` | JES job / message class for deploy jobs |
-
-See `.env.example` for the full list.
+| `MVSMF_USER2` / `MVSMF_PASS2` | Optional ordinary userid for the authorization tests |
 
 ## Usage
 

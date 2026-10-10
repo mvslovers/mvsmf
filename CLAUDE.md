@@ -10,6 +10,10 @@ mvsMF is a z/OSMF REST API implementation for MVS 3.8j, built as a CGI module fo
 ## C Standard Override
 
 **This project uses `-std=gnu99`**, overriding the root CLAUDE.md's strict C89 rule.
+It is mbt 3's default, so `mbt.toml` does not spell it out. Under mbt 2 the
+build set no `-std` and cc370 compiled gnu89; the move to mbt 3 (#396) changed
+code generation in four objects (register choice and smaller stack frames from
+C99 block scoping), not their external symbols.
 
 Implications:
 - `//` line comments are allowed
@@ -18,7 +22,7 @@ Implications:
 - VLAs are still forbidden (stack constraints)
 - All variable declarations should still prefer top-of-block for readability
 
-Cross-compiled for MVS/370 with the **cc370** toolchain (a GCC 3.4.6 fork: `cc370`/`as370`/`ar370`/`ld370`). The whole build runs **on the host**; MVS is only touched by `make deploy`. All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
+Cross-compiled for MVS/370 with the **cc370** toolchain (a GCC 3.4.6 fork: `cc370`/`as370`/`ar370`/`ld370`). The whole build runs **on the host**; MVS is only touched by `mbt deploy` and `mbt test --mvs`. All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
 
 ## Codepage Override (CRITICAL)
 
@@ -82,8 +86,8 @@ httpd's.**
 
 A codepage change is an **httpd-side change**, not a local edit — there is no
 local table to edit. The order is: change the table in httpd → cut/refresh the
-httpd release → `make deps` in mvsMF (updates `mbt.lock`) → rebuild and
-`make deploy`. Editing anything in mvsMF alone cannot change a codepage.
+httpd release → `mbt deps --update` in mvsMF (updates `mbt.lock`) → rebuild and
+`mbt deploy`. Editing anything in mvsMF alone cannot change a codepage.
 
 ## Development Workflow
 
@@ -104,7 +108,7 @@ Autonomous workflow for resolving a GitHub issue end-to-end:
 3. **Create a feature branch** — `git checkout -b issue-<number>-<short-description>`
 4. **Analyze** — Identify affected files, understand the existing patterns in nearby code
 5. **Implement** — Write code following the conventions in this CLAUDE.md
-6. **Verify syntax** — Run `make compiledb` and check clangd diagnostics (no errors)
+6. **Verify syntax** — Run `mbt compiledb` and check clangd diagnostics (no errors)
 7. **Update tests** — Add/update tests in `tests/` matching the change
 8. **Update docs** — If touching an endpoint handler, update `docs/endpoints/`
 9. **Commit** — Descriptive message, no AI references. Reference the issue: `Fixes #<number>`
@@ -134,84 +138,89 @@ The authoritative specification for all USS-related work is `internals/uss-spec.
 - Encoding rules and I/O patterns
 - Implementation plan with task dependencies
 
-## Build System (mbt v2)
+## Build System (mbt 3)
 
-mvsMF uses [mbt](https://github.com/mvslovers/mbt) **v2** as its build tool (Git submodule in `mbt/`). Clone with `--recursive` or run `git submodule update --init`.
+mvsMF uses [mbt](https://github.com/mvslovers/mbt) **3** as its build tool:
+`mbt` on the `PATH`, the project in `mbt.toml`, no submodule and no Makefile
+(#396). `[toolchain] mbt = "3.0"` pins the release line.
 
 ### Build Commands
 
-The whole build runs **on the host** with the cc370 toolchain (`cc370` → `.o`, `as370`, `ar370`, `ld370`). MVS is only touched by `make deploy`.
+The whole build runs **on the host** with the cc370 toolchain (`cc370` → `.o`, `as370`, `ar370`, `ld370`). MVS is only touched by `mbt deploy` and `mbt test --mvs`.
 
 ```bash
-make doctor        # verify the toolchain + MVS connectivity
-make deps          # resolve + stage declared dependencies into .mbt/deps
-make               # cross-compile + link the MVSMF load module (host only)
-make deploy        # pack -> XMIT -> upload -> RECEIVE into the LINKLIB (touches MVS)
-make test          # build the test load modules
-make test-mvs      # deploy + run the test suite on MVS
-make compiledb     # generate compile_commands.json for clangd
-make clean         # remove build/ and dist/
-make distclean     # clean + remove all of .mbt/ (incl. staged deps)
-make help          # list all targets
+mbt doctor         # verify the toolchain + MVS connectivity
+mbt deps           # resolve + stage dependencies and plugins into .mbt/
+mbt build          # cross-compile + link the MVSMF load module (host only)
+mbt test           # run the host unit tests (test/host)
+mbt test --mvs     # deploy + run the test suite on MVS
+mbt deploy         # pack -> XMIT -> RECEIVE -> IEBCOPY into MVSMF.DEV.LINKLIB
+mbt run restart -- HTTPD   # compress MVSMF.DEV.LINKLIB + restart HTTPD (mbt-stc)
+mbt compiledb      # generate compile_commands.json for clangd
+mbt clean          # remove build/ and dist/
+mbt distclean      # clean + remove all of .mbt/ (incl. staged deps)
 ```
 
 The build chain is: C source → `.o` via cc370 on the host → `as370` for the
 hand-written assembler → `ld370` link, with the C runtime and dependencies
-resolved by **autocall** from `.a` archives. `make deploy` packs the load
-library to XMIT, uploads it, and RECEIVEs it into the **deploy** LINKLIB.
+resolved by **autocall** from `.a` archives.
 
-### Deploy and Activation (`make deploy` alone changes nothing)
+The build id `?fn=version` reports is `MBT_COMMIT` from mbt's generated
+`<buildstamp.h>`: the short HEAD, with `-dirty` when a tracked file differed
+from it at build time.
 
-`make deploy` RECEIVEs the load module into the deploy LINKLIB
-(`<MBT_MVS_HLQ>.MVSMF.V1R0M0D.LINKLIB`) **and stops there**. The running httpd
-serves from its own STEPLIB, so until you copy the member across, the old build
-is still live. Deploying and then testing against the server is a standing trap:
-you will be measuring the previous module.
+The Makefile's own targets went with it: `run-mvs` / `stop-mvs` and
+`deploy-desktop` are to come back as mbt commands (`mbt/init.lua`); until then
+`tools/deploy-desktop.sh` is called directly.
 
-httpd loads the CGI **fresh per request**, so the copy activates immediately —
-no httpd restart, no `P HTTPD`.
+### Deploy and Activation
+
+`mbt deploy` RECEIVEs the load module into a staging library and replaces the
+`MVSMF` member of **`MVSMF.DEV.LINKLIB`** (mbt's default `<NAME>.DEV.LINKLIB`)
+with IEBCOPY, `DISP=SHR`. It never deletes the library, so it works while HTTPD
+holds it in its STEPLIB. `--dry-run` packs and reports without logging on.
+
+Activate with **`mbt run restart -- HTTPD`** (plugin `mvslovers/mbt-stc`): it
+compresses the library -- every replaced member leaves its old space dead,
+and mbt refuses a deploy that would not fit -- and restarts HTTPD. Then check:
 
 ```
-make deploy                       # -> deploy LINKLIB
-<submit tests/jcl/mvsmfact.jcl>   # deploy LINKLIB -> httpd STEPLIB (hot)
-GET /zosmf/test?fn=version        # must equal the HEAD you built
+GET /zosmf/test?fn=version        # "build" must equal the HEAD you built
 ```
 
-`tests/jcl/mvsmfact.jcl` is the activation job. It uses `DISP=SHR` on the output
-deliberately — httpd holds the STEPLIB SHR, so `DISP=OLD` would leave the job
-waiting in the enqueue for a server stop that is not needed.
+On mvsdev a deploy or an MVS test run needs a slot from the MBT session.
 
 **Confirm the STEPLIB from the running STC, never from the data set list** —
 several `HTTPD.LINKLIB*` data sets exist on a given stand and only one is in
 use. Find the ACTIVE `STC` via `GET /zosmf/restjobs/jobs?owner=*&prefix=HTTPD*`,
 then read its JESJCL (file id 3) for `XXSTEPLIB DD DISP=SHR,DSN=…`.
 
-The one case that *does* need `P HTTPD` / `S HTTPD` is a compress: every replace
-copy orphans the old member's space, and at the extent limit the copy fails
-`IEF450I … ABEND SE37`. That failure is clean — it abends before writing, so the
-live member and the running server are unharmed — but nothing activates until
-the library is compressed (`COPY INDD=LIB,OUTDD=LIB`, `DISP=OLD`). IEBCOPY's
-`IEB144I` line reports the tracks left; watch it fall.
-
-### Dependencies (from project.toml)
+### Dependencies (from mbt.toml)
 
 ```toml
 [dependencies]
-"mvslovers/httpd" = "=4.0.0-dev"
-"mvslovers/ufsd" = "=1.0.0-dev"
+"mvslovers/crypto370" = ">=1.0.0"
+"mvslovers/httpd" = ">=4.2.0-dev"
+"mvslovers/ufsd" = ">=1.4.0-dev"
+
+[plugins]
+"mvslovers/mbt-stc" = "^0.1"
 ```
 
-`make deps` resolves these from GitHub Releases, stages each under
+`mbt deps` resolves these from GitHub Releases, stages each under
 `.mbt/deps/<repo>/` (`include/` + `lib/`), and writes **`mbt.lock`** (commit it).
-The build wires them in automatically (`-I .mbt/deps/*/include` on compile,
-`.mbt/deps/*/lib/*.a` autocalled on link). **libc370** is the cc370 sysroot
-(`-lc`), not a declared dependency. The console services need the `cgictx` API
-from httpd `4.0.0-dev`. To build against an unreleased dependency, use a
-gitignored `.mbt/deps.local.toml` `[override]`.
+It never moves a pin on its own; `mbt deps --update` re-resolves.
+The build wires them in automatically. **libc370** is the cc370 sysroot
+(`-lc`), not a declared dependency. To build against an unreleased dependency,
+use a gitignored `.mbt/deps.local.toml` `[override]`.
 
 ### Configuration
 
-Local settings go in `.env` (gitignored). See `.env.example` for the template. Key variables: `MBT_MVS_HOST`, `MBT_MVS_PORT`, `MBT_MVS_USER`, `MBT_MVS_PASS`, `MBT_MVS_HLQ`, `MBT_MVS_DEPS_HLQ`.
+mbt reaches MVS through a target in `~/.mbt/targets.toml` (per machine;
+`mbt target import .env --name <name>` converts a `.env`). The REST test
+suites in `tests/` still read `.env` (gitignored, template `.env.example`):
+`MBT_MVS_HOST`, `MBT_MVS_PORT`, `MBT_MVS_USER`, `MBT_MVS_PASS`, and optionally
+`MVSMF_USER2` / `MVSMF_PASS2`.
 
 clangd provides IDE diagnostics (configured in `.clangd`).
 
@@ -417,7 +426,7 @@ Two further consequences that keep getting rediscovered:
   has since been re-cut and the STC redeployed, and 412 was measured going out
   correctly (#152). The mechanism is the part to remember: `http_resp()`
   resolves through the httpx vector into the **running** httpd, so the live
-  server's build decides, not the staged `.a` — `make deps` alone can never
+  server's build decides, not the staged `.a` — `mbt deps` alone can never
   change which statuses are emittable, because `libhttpd.a` carries no status
   table at all. An absent code is answered 500, and no longer silently: an
   unknown one WTOs `HTTPD054E`, which is how a 505 going out as 500 was finally
@@ -662,7 +671,7 @@ which is the only reason this never fired before 2026-08-18.
 - Route pattern `{*filepath}` captures entire remaining path including `/` characters
 - PUT to /fs/ dispatches by Content-Type: application/json → USS utilities handler, else → file write
 - chtag utility: `list` returns "untagged" stub, `set`/`remove` are accepted no-ops
-- libufs/ufsd dependency is managed via mbt (project.toml)
+- libufs/ufsd dependency is managed via mbt (mbt.toml)
 
 ### Handler Naming Convention and ASM Labels
 

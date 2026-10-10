@@ -55,10 +55,8 @@ src/*.s
 # The ones already in tests/jcl/ predate the rule above and were force-added;
 # make the exception explicit so the next one does not hit the same wall.
 !tests/jcl/*.jcl
-.build-warnings
 .mbt/
 build/
-contrib/
 dist/
 compile_commands.json
 *.xmit
@@ -91,9 +89,6 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
-
-# generated build-identity header
-include/buildid.h
 
 # soak / churn / loadtest artefacts (tests/*-176.sh write these to the cwd)
 # Catch-all first: the named patterns below were too specific and six run logs

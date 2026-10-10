@@ -16,7 +16,7 @@
  * This test drives the REAL parser: src/datatype.c is #included below.
  * ====================================================================
  *
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <string.h>

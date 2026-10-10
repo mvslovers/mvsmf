@@ -20,7 +20,7 @@
  * session headers), which is why the parsing lives in its own TU.
  * ====================================================================
  *
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <string.h>

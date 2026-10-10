@@ -24,7 +24,7 @@
  * four MVS/httpd services injected through SEND_OPS.
  * ====================================================================
  *
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <string.h>

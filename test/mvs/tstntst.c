@@ -2,7 +2,7 @@
  * tstntst.c - unit tests for the persistent name/value store (src/ntstore.c).
  *
  * MVS-only: the store uses __getm / lock / STCK (MVS services), so this runs
- * via `make test-mvs`.  Covers set/get roundtrip, upsert, miss, delete, and
+ * via `mbt test --mvs`.  Covers set/get roundtrip, upsert, miss, delete, and
  * LRU eviction with last-access touch (issue #143 acceptance 1-5).
  */
 #include <string.h>

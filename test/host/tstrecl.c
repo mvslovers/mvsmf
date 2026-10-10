@@ -29,7 +29,7 @@
  * swallow the following character. Content bytes are compared against the same
  * literals that produced them, so their encoding does not matter.
  *
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <stdlib.h>

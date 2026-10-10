@@ -29,7 +29,7 @@
  *
  * Red->green gate: cases 1 and 2 fail on the pre-#314 code (which reached the
  * cap early and emitted the pointer records), and pass on the fixed one.
- * Runs on host via `make test-host`.
+ * Runs on host via `mbt test`.
  */
 #include <stdio.h>
 #include <string.h>

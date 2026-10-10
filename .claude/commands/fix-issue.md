@@ -26,7 +26,7 @@ Resolve GitHub issue #$ARGUMENTS end-to-end. Follow these steps strictly:
    - Never reference AI or Claude in code, comments, or commit messages
 
 7. **Verify syntax:**
-   Run: `make compiledb`
+   Run: `mbt compiledb`
    Then check clangd diagnostics — there must be no errors in changed files.
 
 8. **Update tests:**

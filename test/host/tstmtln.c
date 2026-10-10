@@ -33,13 +33,13 @@
  *   - If you change the clamp in consapi.c, you MUST change the mirror
  *     below by hand or this test silently diverges from reality.
  * The DURABLE version is an MVS integration test that links the real
- * statics via a stubbed cmtt_get_array() and runs under test-mvs;
+ * statics via a stubbed cmtt_get_array() and runs under `mbt test --mvs`;
  * that is the follow-up, not this file.
  * ====================================================================
  *
  * The defect is the SIGN of the 16-bit value, which is layout- and
  * endianness-independent, so a symbolic field set reproduces it on any host.
- * #176.  Runs on host via `make test-host`.
+ * #176.  Runs on host via `mbt test`.
  */
 #include <string.h>
 #include <mbtcheck.h>

@@ -1350,7 +1350,7 @@ int testHandler(Session *session) {
      * The vector resolves into the RUNNING httpd (httpx is
      * http_get_httpx(session->httpd)), so a live build older than the entry
      * makes the macro dereference past what the server actually filled. That
-     * is an abend, not a link error, and `make deps` cannot see it -- the same
+     * is an abend, not a link error, and `mbt deps` cannot see it -- the same
      * shape as the httpstat() lesson.
      *
      * And the attribute a given operation needs is a claim about what RAKF

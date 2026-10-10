@@ -2,7 +2,7 @@
   "CompileFlags": {
     "Add": [
       "-xc",
-      "-std=gnu89",
+      "-std=gnu99",
       "-ferror-limit=0",
       "-DLUA_32BITS",
       "-DLUA_USE_C89",

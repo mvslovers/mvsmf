@@ -14,7 +14,9 @@ of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. **#360's `__listpd()` half is unblocked since
+stand runs a server that old. **#398 is new (2026-10-10) and not ranked
+either**: `P HTTPD` through the console API answers 503 with an empty body, so
+a client cannot tell whether the command ran. **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
 404 — see the 2026-10-01 comment on #360 (proposal: `__walkpd()`). The
@@ -459,6 +461,16 @@ httpd 4.2.0-dev on libc370 2.0.0.
 ships `crt0.o`/`crt1.o`. Build warning-free, `test-host` 276/0, `test-mvs`
 584/0 on mvsdev (JOB01416). The integration suites were not re-run.
 
+**PR #397, merged 2026-10-10** — the move to mbt 3 (#396): `mbt.toml`, no
+submodule, no Makefile, no `VERSION`. Built gnu89 it is byte-identical to the
+mbt 2 build; mbt 3's default gnu99 changes code generation in four objects,
+not their externals. Host tests 384/0, every curl and Zowe suite green on
+mvsdev (build `d7f0004`, results on the PR). Activation is now `mbt deploy` +
+`mbt run restart -- HTTPD` (plugin mvslovers/mbt-stc). Left over: the
+Makefile's `run-mvs` / `stop-mvs` / `deploy-desktop` are to come back as mbt
+commands (`tools/deploy-desktop.sh` meanwhile), and #398 came out of the
+restart.
+
 
 Pointers only — the reasoning lives in the closing comments.
 
@@ -619,7 +631,8 @@ Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
   data set. `fclose()` returning `EOF` as C99 7.19.5.1 requires would close it,
   and `tests/curl-nospace.sh` reports the band as a KNOWN GAP that should reach
   0 when it lands.
-- **`mbt#103`** — neither `libc.a` nor `$(DEP_LIBS)` is a prerequisite of the
+- **`mbt#103`** — mbt 2 only; mvsMF is on mbt 3 since PR #397, where this
+  is not measured. Neither `libc.a` nor `$(DEP_LIBS)` is a prerequisite of the
   link rule, so installing a new libc370 or staging a new dependency **never
   relinks**. `make` reports "Modules built: 1" and links nothing. This cost a
   measurement here: #366's first run on mvsdev showed pre-1.0.6 behaviour on
@@ -636,6 +649,6 @@ after: `make test-mvs` 508 PASS / 0 FAIL.
 The mechanism is the part to remember, because it recurs every time libc370
 moves: **none of those arrive via `make deps`.** libc370 is the cc370 sysroot,
 not a declared dependency — `mbt.lock` pins only httpd, ufsd and crypto370. A libc370 fix
-reaches mvsMF only after `make install` in libc370, a rebuild here, `make deploy`,
-and `tests/jcl/mvsmfact.jcl`. Skip any one of the four and you measure the old
+reaches mvsMF only after `make install` in libc370, a rebuild here, `mbt deploy`,
+and `mbt run restart -- HTTPD`. Skip any one of the four and you measure the old
 module.

@@ -18,7 +18,7 @@ GET /zosmf/restfiles/fs/{filepath}
 
 | Header               | Required | Default | Description |
 |----------------------|----------|---------|-------------|
-| `X-IBM-Data-Type`    | No       | `text`  | `text` or `binary` |
+| `X-IBM-Data-Type`    | No       | `text`  | `text`, `text;fileEncoding=IBM-037`, or `binary` (any case, parameters allowed); `record` is refused 400 — see [Encoding](#encoding) |
 | `X-IBM-Return-Etag`  | No       | —       | `true` returns an `ETag` for the file, for use as `If-Match` on a later write |
 | `If-None-Match`      | No       | —       | Makes the read conditional — a file that still holds the stamped state is answered 304 (Not Modified) with the `ETag` and no body |
 
@@ -27,7 +27,8 @@ GET /zosmf/restfiles/fs/{filepath}
 ### Text Mode (default)
 
 - Content-Type: `text/plain`
-- File content is converted from EBCDIC to ASCII (IBM-1047) before it is sent
+- File content is converted from EBCDIC to ASCII before it is sent: IBM-1047
+  by default, CP037 with `fileEncoding=IBM-037` (see [Encoding](#encoding))
 - Streamed in 4 KB chunks
 
 ### Binary Mode
@@ -108,14 +109,34 @@ Since the stamp is over the stored bytes, it does not depend on
 `X-IBM-Data-Type`: a stamp taken from a text read still answers 304 on a binary
 read of the same unchanged file.
 
+## Encoding
+
+USS files default to **IBM-1047**, the z/OS UNIX convention -- the reverse of
+data sets, which default to CP037. `X-IBM-Data-Type: text;fileEncoding=IBM-037`
+(or `037`) reads a file stored in CP037; `IBM-1047` / `1047` names the default.
+The header is parsed exactly as on data sets -- case, parameters, blanks and
+unsupported values -- see [../datasets/encoding.md](../datasets/encoding.md).
+Measured on the reference's `/restfiles/fs` in issue #393.
+
+`X-IBM-Data-Type: record` is not offered by the file service. The reference
+answers it, in any case and with any parameters,
+
+```json
+{"rc":4,"category":1,"reason":12,"message":"X-IBM-Data-Type","details":["record"]}
+```
+
+with **400**, and so does mvsMF. It used to fall back to text.
+
 ## Error Responses
 
 | Status | Condition |
 |--------|-----------|
 | 400    | Missing filepath or path is a directory |
+| 400    | `X-IBM-Data-Type: record` (`category` 1, `reason` 12) |
 | 404    | File not found |
 | 400    | Path name too long |
 | 500    | I/O error |
+| 500    | `fileEncoding` names a code page other than IBM-037 or IBM-1047 (`category` 16, `rc` 121) |
 | 503    | UFSD subsystem not available |
 
 ## Max File Size

@@ -9,12 +9,20 @@
 
 #include "ussapi.h"
 #include "common.h"
+#include "datatype.h"
 #include "etag.h"
 #include "httpcgi.h"
 
-// Data type constants
-#define USS_DATA_TYPE_TEXT   1
-#define USS_DATA_TYPE_BINARY 2
+/* The reference refuses X-IBM-Data-Type: record on /restfiles/fs (measured,
+   issue #393, any case, with or without parameters):
+
+     400 {"category":1,"rc":4,"reason":12,"message":"X-IBM-Data-Type",
+          "details":["record"]}
+
+   mvsMF used to fall back to text for it. Reproduced verbatim. */
+#define CATEGORY_DATA_TYPE    1
+#define REASON_DATA_TYPE      12
+#define ERR_MSG_DATA_TYPE     "X-IBM-Data-Type"
 
 // Wording deliberately identical to the data set path (ERR_MSG_ETAG_MISMATCH
 // in dsapi_err.h): one condition, one message, whichever resource it is about.
@@ -175,19 +183,45 @@ uss_get_ufs(Session *session)
 }
 
 //
-// Data type detection helper
+// Data type and code page of a file transfer (issue #393)
+//
+// The header is parsed by parse_data_type() (src/datatype.c), the same rules
+// as on data sets -- measured on /restfiles/fs as well. What differs is the
+// default: USS files are IBM-1047, and fileEncoding=IBM-037 selects CP037.
+//
+// Returns 0 when the handler should go on. Otherwise the request has been
+// answered -- an unsupported encoding, or `record`, which the service does
+// not offer -- and the handler returns: 1 means the error went out, a
+// negative value that sending it failed. Callers must not have touched the
+// file yet: on a PUT this runs before the truncating "w" open.
 //
 
-__asm__("\n&FUNC    SETC 'get_data_type'");
+__asm__("\n&FUNC    SETC 'uss_data_type'");
 static int
-get_data_type(Session *session)
+uss_data_type(Session *session, int *data_type, const HTTPCP **cp)
 {
-	char *dt = (char *) http_get_env(session->httpc,
+	const char *dt = (const char *) http_get_env(session->httpc,
 		(const UCHAR *) "HTTP_X-IBM-Data-Type");
+	const char *details[1];
+	int encoding;
+	int rc;
 
-	if (!dt) return USS_DATA_TYPE_TEXT;
-	if (strcmp(dt, "binary") == 0) return USS_DATA_TYPE_BINARY;
-	return USS_DATA_TYPE_TEXT;
+	if (parse_data_type(dt, data_type, &encoding) < 0) {
+		rc = send_bad_encoding(session, dt);
+		return rc < 0 ? rc : 1;
+	}
+
+	if (*data_type == DATA_TYPE_RECORD) {
+		details[0] = "record";
+		rc = sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_DATA_TYPE, RC_WARNING, REASON_DATA_TYPE,
+			ERR_MSG_DATA_TYPE, details, 1);
+		return rc < 0 ? rc : 1;
+	}
+
+	*cp = (encoding == FILE_ENC_IBM037) ? httpx->xlate_cp037
+	                                    : httpx->xlate_1047;
+	return 0;
 }
 
 //
@@ -619,6 +653,7 @@ int ussGetHandler(Session *session)
 {
 	int rc = 0;
 	int data_type;
+	const HTTPCP *cp = NULL;
 	char *raw_path = NULL;
 	char abspath[UFS_PATH_MAX];
 	const char *content_type;
@@ -643,8 +678,10 @@ int ussGetHandler(Session *session)
 			"Path name too long", NULL, 0);
 	}
 
-	// Determine data type from X-IBM-Data-Type header
-	data_type = get_data_type(session);
+	// Data type and code page from X-IBM-Data-Type (issue #393)
+	if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
+		return rc < 0 ? rc : 0;
+	}
 
 	// Open UFS session
 	ufs = uss_get_ufs(session);
@@ -709,7 +746,7 @@ int ussGetHandler(Session *session)
 	}
 
 	// Send response headers
-	content_type = (data_type == USS_DATA_TYPE_BINARY)
+	content_type = (data_type == DATA_TYPE_BINARY)
 		? "application/octet-stream"
 		: "text/plain";
 
@@ -724,8 +761,8 @@ int ussGetHandler(Session *session)
 
 	// Stream file content in chunks
 	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-		if (data_type == USS_DATA_TYPE_TEXT) {
-			http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
+		if (data_type == DATA_TYPE_TEXT) {
+			http_xlate((unsigned char *)buf, n, cp->etoa);
 		}
 		rc = send_all(session, (const UCHAR *)buf, (int)n);
 		if (rc < 0) {
@@ -862,6 +899,7 @@ int ussPutHandler(Session *session)
 {
 	int rc = 0;
 	int data_type;
+	const HTTPCP *cp = NULL;
 	char *raw_path = NULL;
 	char abspath[UFS_PATH_MAX];
 	char *body = NULL;
@@ -891,8 +929,12 @@ int ussPutHandler(Session *session)
 		return uss_handle_utilities(session, abspath);
 	}
 
-	// Determine data type from X-IBM-Data-Type header
-	data_type = get_data_type(session);
+	// Data type and code page from X-IBM-Data-Type (issue #393). Before the
+	// body is read and long before the truncating "w" open, so a refused
+	// request leaves the file as it was.
+	if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
+		return rc < 0 ? rc : 0;
+	}
 
 	// Read request body (supports Content-Length and chunked encoding)
 	if (read_request_content(session, &body, &body_len) < 0) {
@@ -904,9 +946,9 @@ int ussPutHandler(Session *session)
 	// saving an emptied file, or uploading a touch'd file). The dataset PUT
 	// handler allows this too, so do not reject body_len == 0 here.
 
-	// Text mode: ASCII→EBCDIC (IBM-1047) before writing
-	if (data_type == USS_DATA_TYPE_TEXT) {
-		http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
+	// Text mode: ASCII→EBCDIC (IBM-1047 unless fileEncoding says CP037)
+	if (data_type == DATA_TYPE_TEXT) {
+		http_xlate((unsigned char *)body, (int)body_len, cp->atoe);
 	}
 
 	// Open UFS session

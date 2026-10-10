@@ -6,4 +6,6 @@ on:
 
 jobs:
   release:
-    uses: mvslovers/mbt/.github/workflows/release.yml@main
+    uses: mvslovers/mbt/.github/workflows/release3.yml@main
+    permissions:
+      contents: write

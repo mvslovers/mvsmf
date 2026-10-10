@@ -10,5 +10,9 @@
   "mvslovers/ufsd": {
     "sha256": "c2eb5f98317769e07c39363f29e4884fec1fd22f803582cfb36de5f7e67ea548",
     "version": "1.4.0-dev"
+  },
+  "plugin:mvslovers/mbt-stc": {
+    "sha256": "e0c9abe247cf97324d6060e4d23d4a4be52527eba020c8a0864527f7545413a2",
+    "version": "0.1.0"
   }
 }

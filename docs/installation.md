@@ -1,7 +1,7 @@
 # Installing mvsMF
 
 mvsMF is delivered as an **SMP Release 4** install package — the SMP that ships
-with MVS 3.8j, not SMP/E. `make package` builds it; a release attaches it.
+with MVS 3.8j, not SMP/E. `mbt package` builds it; a release attaches it.
 
 FMID **`TZMF120`** (mvsMF 1.2.0). Each release spends one id and **deletes its
 predecessor**, so an upgrade needs nothing beyond the package.

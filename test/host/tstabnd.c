@@ -33,7 +33,7 @@
  *
  * Expected texts are compared against string literals the same compiler
  * produced, so the runtime encoding does not matter -- the test is portable
- * and runs under `make test-host`.
+ * and runs under `mbt test`.
  */
 #include <stdio.h>
 #include <string.h>

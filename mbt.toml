@@ -1,10 +1,16 @@
+schema = 3
+
 [project]
 name = "mvsmf"
 version = "1.2.0-dev"
-type = "application"
+kind = "application"
 
 [toolchain]
-# Pins the refs release.yml builds the published artifacts against; build.yml
+# mbt: the mbt 3 release line this project is built with; a newer installed
+# mbt switches to a matching 3.0.x by itself.
+#
+# cc370 and libc370 pin what release.yml (mbt's release3.yml) builds the
+# published artifacts against; build.yml
 # deliberately keeps floating on main so a cc370/libc370 regression surfaces
 # in a PR build (mbt#68).
 # 2.3.1: the C runtime startup is a member of libc.a from 2.3.0 on,
@@ -18,156 +24,27 @@ type = "application"
 # cc370: libc370 2.4.0 and later need cc370 >= 1.4.0; 1.4.0 is current.
 cc370 = "1.4.0"
 libc370 = "2.6.1"
-
-[build]
-# Warnings are errors, on the cross build and on the host build alike (the
-# host build reuses these flags). The project version comes from mbt's
-# generated <buildstamp.h> (MBT_VERSION), not from a -DVERSION flag: make never
-# expanded $(PROJECT_VERSION) on the host, which -Werror refuses.
-cflags = ["-Wall", "-Wextra", "-Werror", "-I", "include"]
+mbt = "3.0"
 
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"
 "mvslovers/httpd" = ">=4.2.0-dev"
 "mvslovers/ufsd" = ">=1.4.0-dev"
 
-# Single load module: a CGI program that runs under httpd.  It includes its
-# own request router + API handlers; the CGI launcher (cgistart, providing
-# @@START) is not carried here at all -- it is autocalled from httpd's client
-# library (libhttpd.a), and the http_* API is reached at runtime through the
-# httpx callback table (httpcgi.h).
-[[module]]
-name = "MVSMF"
-rent = true
-reus = true
-# @@START comes from httpd's CGI launcher in httpd.a (mvslovers/mbt#62)
-dep_startup = true
-sources = ["src/*.c"]
-
-# Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
-# rent = false: mbtcheck.h keeps file-static counters; a standalone test needs
-# them in writable storage, so the module is neither RENT nor REUS.
-# host = false: both TUs include mvssupa.h and ntstore.c calls __getm/__getclk
-# plus cliblock.h -- libc370 services with no host equivalent, so the native
-# compile can only ever fail.  test-mvs still runs it.
-[[test]]
-name = "TSTNTST"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-host = false
-sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
-
-# TSTMTLN: #176 host repro — signed-short mtentlen must not drive a negative
-# copy length in the console MTT consumers. Portable C (runs under test-host).
-# NOTE: mirrors the consapi.c clamp; it does not link the real functions.
-[[test]]
-name = "TSTMTLN"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstmtln.c"]
-
-# TSTRECL: #233 — framing a text upload into data set records. Blank lines must
-# survive, and a line of exactly LRECL columns must be accepted. The TU
-# #includes src/reclines.c so it drives the real state machine the four write
-# loops in dsapi.c use — do not list reclines.c here.
-[[test]]
-name = "TSTRECL"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstrecl.c"]
-
-# TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
-# the lines[] array and the line buffer consistent. Portable C (test-host); the
-# TU #includes src/jclines.c with a fault-injecting realloc, so it exercises the
-# real grow_lines_arrays() rather than a copy — do not list jclines.c here.
-[[test]]
-name = "TSTJCLN"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstjcln.c"]
-
-# TSTABND: #256 — the abend code has to reach the client, and the x37 family
-# has to be named. Portable C (test-host); the TU #includes src/abendmsg.c so
-# it drives the real formatter router.c calls from its ESTAE recovery — do not
-# list abendmsg.c here.
-[[test]]
-name = "TSTABND"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstabnd.c"]
-
-# TSTHOST: #260 — a Host header with no name in front of the colon parsed as
-# success with an empty string, so /zosmf/info's fallback never ran. Portable C
-# (test-host); the TU #includes src/hostparse.c so it drives the real parser
-# infoapi.c calls — do not list hostparse.c here.
-[[test]]
-name = "TSTHOST"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tsthost.c"]
-
-# TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
-# translation (IBM-1047 content was always read as CP037), and BINARY or
-# binary;param must not fall back to text. Portable C (test-host); the TU
-# #includes src/datatype.c so it drives the real parser dsapi.c calls — do not
-# list datatype.c here.
-[[test]]
-name = "TSTDTYP"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstdtyp.c"]
-
-# TSTETAG: #152 — the ETag stamp must change on every content change (including
-# a same-length edit and a re-split record boundary) and stay stable otherwise,
-# and If-Match must accept bare, quoted, weak and list forms. #263 adds the read
-# half: the same predicate answers If-None-Match, wildcard included. Portable C
-# (test-host); the TU #includes src/etag.c so it drives the real stamp dsapi.c
-# uses — do not list etag.c here.
-[[test]]
-name = "TSTETAG"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstetag.c"]
-
-# TSTSEND: #298 — the send loop must never advance by the return value without
-# checking it. A 0 from http_send() means "socket send buffer full, retry", and
-# `pos += rc` on it spins a worker at 100% CPU forever. Portable C (test-host);
-# the TU #includes src/sendall.c so it drives the real loop every response goes
-# through — do not list sendall.c here.
-[[test]]
-name = "TSTSEND"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstsend.c"]
-
-# TSTSPLN: #314 — JES2 writes a pointer record into JESJCLIN behind every
-# in-stream DD * card, and the PDDB record count does not include them. The
-# #158 cap counted them anyway, so the listing lost one real card off the tail
-# per in-stream DD. Portable C (test-host); the TU #includes src/spoolln.c so
-# it drives the real decision the spool walk makes — do not list spoolln.c here.
-[[test]]
-name = "TSTSPLN"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstspln.c"]
-
-# TSTJCARD: #365 — mvsMF injects USER=/PASSWORD= on every submit, and did so
-# unconditionally, so a caller who wrote USER= themselves got two operands and
-# IEF652I. The TU #includes src/jobcard.c so it drives the real decision
-# process_jobcard() makes — do not list jobcard.c here.
-[[test]]
-name = "TSTJCARD"
-rent = false          # mbtcheck.h keeps file-static counters
-reus = false
-sources = ["test/host/tstjcard.c"]
+# `mbt run restart -- HTTPD` compresses MVSMF.DEV.LINKLIB and restarts HTTPD.
+# That is what activates a deploy: HTTPD loads MVSMF when it starts, and every
+# replaced member leaves its old space dead in the library until a compress.
+[plugins]
+"mvslovers/mbt-stc" = "^0.1"
 
 # ── Deploy (development) ─────────────────────────────────
-# `make deploy` RECEIVEs the load module here, NOT into the library SMP owns
-# and NOT into httpd's. Three libraries, three owners:
+# `mbt deploy` goes to MVSMF.DEV.LINKLIB, mbt's default <NAME>.DEV.LINKLIB,
+# NOT into the library SMP owns and NOT into httpd's. Three libraries, three
+# owners:
 #
 #   MVSMF.LINKLIB      SMP installs it; nothing else may write there, or the
 #                      inventory describes a level that is not on disk
-#   MVSMF.DEV.LINKLIB  this one -- what `make deploy` fills
+#   MVSMF.DEV.LINKLIB  this one -- what `mbt deploy` fills
 #   HTTPD.LINKLIB      httpd's own; a copy of MVSMF placed there by hand
 #                      shadows both of the above
 #
@@ -180,17 +57,117 @@ sources = ["test/host/tstjcard.c"]
 # over the installed level; take it out to go back. And it needs its own
 # IEAAPF00 entry: every library in an authorized STEPLIB concatenation must be
 # APF-authorized or the whole task silently loses authorization.
-[deploy]
-target = "MVSMF.DEV.LINKLIB"
+
+# Single load module: a CGI program that runs under httpd.  It includes its
+# own request router + API handlers; the CGI launcher (cgistart, providing
+# @@START) is not carried here at all -- it is autocalled from httpd's client
+# library (libhttpd.a), and the http_* API is reached at runtime through the
+# httpx callback table (httpcgi.h).
+[module.MVSMF]
+rent = true
+reus = true
+# @@START comes from httpd's CGI launcher in httpd.a (mvslovers/mbt#62)
+dep_startup = true
+sources = ["src/*.c"]
+
+# Defaults for every test; test/**/*.c and *.asm are tests unless excluded.
+[tests]
+rent = false
+reus = false
+
+# Unit test for the persistent name/value store (MVS-only: __getm/lock/STCK).
+# rent = false: mbtcheck.h keeps file-static counters; a standalone test needs
+# them in writable storage, so the module is neither RENT nor REUS.
+# host = false: both TUs include mvssupa.h and ntstore.c calls __getm/__getclk
+# plus cliblock.h -- libc370 services with no host equivalent, so the native
+# compile can only ever fail.  `mbt test --mvs` still runs it.
+[test.TSTNTST]
+rent = false          # mbtcheck.h keeps file-static counters
+host = false
+sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
+
+# TSTMTLN: #176 host repro — signed-short mtentlen must not drive a negative
+# copy length in the console MTT consumers. Portable C (runs under `mbt test`).
+# NOTE: mirrors the consapi.c clamp; it does not link the real functions.
+[test.TSTMTLN]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTRECL: #233 — framing a text upload into data set records. Blank lines must
+# survive, and a line of exactly LRECL columns must be accepted. The TU
+# #includes src/reclines.c so it drives the real state machine the four write
+# loops in dsapi.c use — do not list reclines.c here.
+[test.TSTRECL]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
+# the lines[] array and the line buffer consistent. Portable C (`mbt test`); the
+# TU #includes src/jclines.c with a fault-injecting realloc, so it exercises the
+# real grow_lines_arrays() rather than a copy — do not list jclines.c here.
+[test.TSTJCLN]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTABND: #256 — the abend code has to reach the client, and the x37 family
+# has to be named. Portable C (`mbt test`); the TU #includes src/abendmsg.c so
+# it drives the real formatter router.c calls from its ESTAE recovery — do not
+# list abendmsg.c here.
+[test.TSTABND]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTHOST: #260 — a Host header with no name in front of the colon parsed as
+# success with an empty string, so /zosmf/info's fallback never ran. Portable C
+# (`mbt test`); the TU #includes src/hostparse.c so it drives the real parser
+# infoapi.c calls — do not list hostparse.c here.
+[test.TSTHOST]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
+# translation (IBM-1047 content was always read as CP037), and BINARY or
+# binary;param must not fall back to text. Portable C (`mbt test`); the TU
+# #includes src/datatype.c so it drives the real parser dsapi.c calls — do not
+# list datatype.c here.
+[test.TSTDTYP]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTETAG: #152 — the ETag stamp must change on every content change (including
+# a same-length edit and a re-split record boundary) and stay stable otherwise,
+# and If-Match must accept bare, quoted, weak and list forms. #263 adds the read
+# half: the same predicate answers If-None-Match, wildcard included. Portable C
+# (`mbt test`); the TU #includes src/etag.c so it drives the real stamp dsapi.c
+# uses — do not list etag.c here.
+[test.TSTETAG]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTSEND: #298 — the send loop must never advance by the return value without
+# checking it. A 0 from http_send() means "socket send buffer full, retry", and
+# `pos += rc` on it spins a worker at 100% CPU forever. Portable C (`mbt test`);
+# the TU #includes src/sendall.c so it drives the real loop every response goes
+# through — do not list sendall.c here.
+[test.TSTSEND]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTSPLN: #314 — JES2 writes a pointer record into JESJCLIN behind every
+# in-stream DD * card, and the PDDB record count does not include them. The
+# #158 cap counted them anyway, so the listing lost one real card off the tail
+# per in-stream DD. Portable C (`mbt test`); the TU #includes src/spoolln.c so
+# it drives the real decision the spool walk makes — do not list spoolln.c here.
+[test.TSTSPLN]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTJCARD: #365 — mvsMF injects USER=/PASSWORD= on every submit, and did so
+# unconditionally, so a caller who wrote USER= themselves got two operands and
+# IEF652I. The TU #includes src/jobcard.c so it drives the real decision
+# process_jobcard() makes — do not list jobcard.c here.
+[test.TSTJCARD]
+rent = false          # mbtcheck.h keeps file-static counters
 
 # ── SMP4 distribution ────────────────────────────────────
-# `make package` renders the install package from this; `make dist` alone
+# `mbt package` renders the install package from this; `mbt dist` alone
 # re-renders it. ufsd is the reference implementation -- this block follows it
 # and deviates only where mvsMF's shape forces it.
 [distribution]
 readme = "docs/installation.md"
 
-[distribution.smp]
+[smp]
 # The id is the release: T + three product letters + the three version digits.
 # One per release, spent exactly once. TZMF110 is 1.1.0 and was verified free
 # on mvsdev 2026-09-14 (JOB00360: RC 04, NOT FOUND, in CDS *and* ACDS -- both
@@ -209,22 +186,20 @@ readme = "docs/installation.md"
 # 1.2.0, as it did for ufsd, ftpd and httpd. TZMF111 is unspent and unassigned
 # -- do not "fix" the gap. 1.2.0 still deletes TZMF110, the level released.
 #
-# `make release` does not move this id: it bumps the version and stops, so a
-# tree comes out of a release still carrying the id that was just spent.
-# Moving it belongs in the commit that FOLLOWS the bump -- this one -- and
-# before anything is built from the tree, because a second install under a
-# spent id does not fail. SMP keys element ownership on MOD(name), so the
-# successor reports NOT SEL for MVSMF, copies nothing, and still ends RC 00
+# `prefix` derives both halves from [project] version: 1.2.0 is TZMF120,
+# deleting TZMF110, and the next minor moves both by itself. A second install
+# under a spent id does not fail: SMP keys element ownership on MOD(name), so
+# the successor reports NOT SEL for MVSMF, copies nothing, and still ends RC 00
 # with an empty target library and STATUS = REC APP ACC in both zones.
 #
-# `delete` is what avoids exactly that: it puts DELETE(TZMF110) on the ++VER,
+# The delete is what avoids exactly that: it puts DELETE(TZMF110) on the ++VER,
 # SMP deletes the predecessor's LMOD (HMA2240) and copies the new one in
-# (HMA2380), and MOD(MVSMF) comes back carrying the new FMID. 1.1.0 carried no
-# `delete` because it was the first level and had no predecessor to replace.
-# The key needs mbt >= #98, which is why the submodule moved for 1.1.0.
-fmid = "TZMF120"
-delete = ["TZMF110"]            # the level this one replaces; SMP deletes it
-system = "Z038"
+# (HMA2380), and MOD(MVSMF) comes back carrying the new FMID.
+#
+# A patch release (1.2.1) needs an explicit `fmid` and `delete` until mbt
+# builds PTFs -- mbt refuses to spend the minor's id a second time -- and the
+# next minor after it an explicit `delete` naming the patch's id.
+prefix = "TZMF"  # FMID and delete follow from the version
 
 # EMPTY ON PURPOSE, and httpd is not an oversight. mvsMF is a CGI: it does not
 # run without httpd. But SMP's REQ() takes exact SYSMOD ids and has no range
@@ -245,9 +220,5 @@ lklib   = "MVSMF.MVSMFLOD"      # staging: what the load XMIT is received into
 target  = "MVSMF.LINKLIB"       # where the load module ends up
 distlib = "MVSMF.AMVSMFLD"
 
-[[distribution.library]]
-dir = "samplib"
+[distribution.library.samplib]
 target = "MVSMF.SAMPLIB"
-
-[release]
-version_files = ["VERSION"]

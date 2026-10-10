@@ -7,4 +7,6 @@ on:
 
 jobs:
   build:
-    uses: mvslovers/mbt/.github/workflows/build.yml@main
+    uses: mvslovers/mbt/.github/workflows/build3.yml@main
+    with:
+      host_tests: true          # also run mbt test

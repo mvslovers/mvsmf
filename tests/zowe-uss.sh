@@ -309,6 +309,52 @@ else
 	fail "binary round-trip: download file exists" "file not created"
 fi
 
+echo ""
+echo "--- fileEncoding: --encoding IBM-037 (issue #393) ---"
+
+# Zowe's --encoding becomes X-IBM-Data-Type: text;fileEncoding=<value>, which
+# the USS path used to drop -- every file went through IBM-1047. The stored
+# bytes are checked with a binary download (to a path that does not exist yet:
+# Zowe skips an existing --file and still exits 0).
+ENC_SRC="${TMPDIR_LOCAL}/enc.txt"
+ENC_DL="${TMPDIR_LOCAL}/enc_dl.bin"
+printf 'INT A[2];\nINT B[3];\n' > "$ENC_SRC"
+rm -f "$ENC_DL"
+
+RC=0
+OUTPUT=$(run_zowe files upload ftu "$ENC_SRC" "${TEST_DIR}/enc.txt" --encoding IBM-037) || RC=$?
+assert_rc 0 "$RC" "upload with --encoding IBM-037"
+
+RC=0
+OUTPUT=$(run_zowe files download uss-file "${TEST_DIR}/enc.txt" -f "$ENC_DL" -b) || RC=$?
+assert_rc 0 "$RC" "download it in binary"
+GOT=$(od -An -tx1 "$ENC_DL" 2>/dev/null | tr -d ' \n')
+if [ "$GOT" = "c9d5e340c1baf2bb5e15c9d5e340c2baf3bb5e15" ]; then
+	pass "brackets stored as CP037 (BA/BB)"
+else
+	fail "brackets stored as CP037 (BA/BB)" "got $GOT"
+fi
+
+RC=0
+OUTPUT=$(run_zowe files view uss-file "${TEST_DIR}/enc.txt" --encoding IBM-037) || RC=$?
+assert_rc 0 "$RC" "view with --encoding IBM-037"
+if echo "$OUTPUT" | grep -qxF "INT A[2];" && echo "$OUTPUT" | grep -qxF "INT B[3];"; then
+	pass "CP037 brackets read back as [ ], two lines"
+else
+	fail "CP037 brackets read back as [ ], two lines" "got '$OUTPUT'"
+fi
+
+RC=0
+OUTPUT=$(run_zowe files view uss-file "${TEST_DIR}/enc.txt" --encoding BOGUS) || RC=$?
+if [ "$RC" -ne 0 ] && echo "$OUTPUT" | grep -qF "iconv_open() failed."; then
+	pass "an unsupported --encoding is refused like the reference (rc=$RC)"
+else
+	fail "an unsupported --encoding is refused like the reference" "rc=$RC: $OUTPUT"
+fi
+
+run_zowe files delete uss-file "${TEST_DIR}/enc.txt" -f >/dev/null 2>&1 || true
+rm -f "$ENC_SRC" "$ENC_DL"
+
 # =========================================================================
 # 5. Error cases
 # =========================================================================

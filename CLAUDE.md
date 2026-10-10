@@ -34,7 +34,7 @@ deliberately.
 
 | API surface | Codepage | Table |
 |---|---|---|
-| USS / UFS files (`ussapi.c`) | **IBM-1047** | `httpx->xlate_1047` |
+| USS / UFS files (`ussapi.c`) | **IBM-1047**, or CP037 by request | `uss_data_type()` -- `xlate_1047` unless `X-IBM-Data-Type: text;fileEncoding=IBM-037` (#393) |
 | Datasets (`dsapi.c`) | **CP037**, or IBM-1047 by request | `ds_codepage()` -- `xlate_cp037` unless `X-IBM-Data-Type: text;fileEncoding=IBM-1047` (#391) |
 | Jobs (`jobsapi.c`) | **CP037** | `httpx->xlate_cp037` |
 | HTTPD server default | **CP037** | `http_xlate_init()` fallback |
@@ -679,10 +679,14 @@ which is the only reason this never fired before 2026-08-18.
 
 - UFSD stores RAW BYTES — no encoding transformation
 - Convention: files stored in EBCDIC (so MVS programs can read them)
-- ussPutHandler (text mode): ASCII→EBCDIC via `http_xlate(..., httpx->xlate_1047->atoe)` BEFORE ufs_fwrite()
-- ussGetHandler (text mode): EBCDIC→ASCII via `http_xlate(..., httpx->xlate_1047->etoa)` AFTER ufs_fread()
+- ussPutHandler (text mode): ASCII→EBCDIC via `http_xlate(..., cp->atoe)` BEFORE ufs_fwrite()
+- ussGetHandler (text mode): EBCDIC→ASCII via `http_xlate(..., cp->etoa)` AFTER ufs_fread()
+- `cp` comes from `uss_data_type()`: `xlate_1047` by default, `xlate_cp037` for
+  `X-IBM-Data-Type: text;fileEncoding=IBM-037` (#393)
 - Binary mode: NO conversion, pass bytes through
-- X-IBM-Data-Type header determines mode: "text" (default) or "binary"
+- X-IBM-Data-Type is parsed by `parse_data_type()` (`src/datatype.c`, shared
+  with the data set API): "text" (default) or "binary", any case, parameters
+  allowed; "record" is answered 400 like the reference
 
 ### UFS Session Pattern (use in EVERY handler)
 
@@ -746,18 +750,24 @@ mount, so nothing produces this rc today.
 
 `send_all()` does not translate — convert the payload before handing it over,
 and never reach past it to `http_send()` (see **Sending**).
-`USS_DATA_TYPE_TEXT` / `_BINARY` are file-local `#define`s in `src/ussapi.c`;
-`get_data_type()` derives the mode from the `X-IBM-Data-Type` header.
+`uss_data_type()` derives the mode and the table from the `X-IBM-Data-Type`
+header, and answers the request itself (unsupported encoding, `record`) when
+it returns non-zero.
 
 ```c
-char   buf[4096];
-UINT32 n;
-int    data_type = get_data_type(session);
+char          buf[4096];
+UINT32        n;
+int           data_type;
+const HTTPCP *cp = NULL;
+
+if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
+    return rc < 0 ? rc : 0;     /* already answered */
+}
 
 while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-    if (data_type == USS_DATA_TYPE_TEXT) {
-        /* EBCDIC -> ASCII, IBM-1047 (USS), not CP037 */
-        http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
+    if (data_type == DATA_TYPE_TEXT) {
+        /* EBCDIC -> ASCII: IBM-1047 unless fileEncoding said CP037 */
+        http_xlate((unsigned char *)buf, n, cp->etoa);
     }
     if (send_all(session, (const UCHAR *)buf, (int)n) < 0) {
         break;  /* real handlers goto their cleanup label */
@@ -768,18 +778,24 @@ while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
 ### I/O Pattern for File Write
 
 ```c
-char   *body = NULL;
-size_t  body_len = 0;
-int     data_type = get_data_type(session);
+char         *body = NULL;
+size_t        body_len = 0;
+int           data_type;
+const HTTPCP *cp = NULL;
+
+/* Before the body is read and before the truncating "w" open */
+if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
+    return rc < 0 ? rc : 0;
+}
 
 // Supports Content-Length and Transfer-Encoding: chunked
 if (read_request_content(session, &body, &body_len) < 0) {
     return sendErrorResponse(session, 400, ...);
 }
 
-if (data_type == USS_DATA_TYPE_TEXT) {
-    /* ASCII -> EBCDIC, IBM-1047 (USS), not CP037 */
-    http_xlate((unsigned char *)body, (int)body_len, httpx->xlate_1047->atoe);
+if (data_type == DATA_TYPE_TEXT) {
+    /* ASCII -> EBCDIC: IBM-1047 unless fileEncoding said CP037 */
+    http_xlate((unsigned char *)body, (int)body_len, cp->atoe);
 }
 
 UFSFILE *fp = ufs_fopen(ufs, filepath, "w");

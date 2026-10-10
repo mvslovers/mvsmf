@@ -19,7 +19,7 @@ PUT /zosmf/restfiles/fs/{filepath}
 | Header            | Required | Default | Description |
 |-------------------|----------|---------|-------------|
 | `Content-Length`     | Yes      | —       | Size of the request body in bytes |
-| `X-IBM-Data-Type`    | No       | `text`  | `text` or `binary` |
+| `X-IBM-Data-Type`    | No       | `text`  | `text`, `text;fileEncoding=IBM-037`, or `binary` (any case, parameters allowed); `record` is refused 400 — see [Encoding](#encoding) |
 | `Content-Type`       | No       | —       | If `application/json`, dispatches to the USS utilities handler |
 | `If-Match`           | No       | —       | An `ETag` from an earlier read. The write proceeds only if the file still matches it; otherwise **412** and nothing is written |
 | `X-IBM-Return-Etag`  | No       | —       | `true` returns the `ETag` of the file as it stands after the write |
@@ -31,7 +31,9 @@ Raw file content to write.
 ## Encoding
 
 - **Text mode (default):** Request body is converted from ASCII to EBCDIC
-  (IBM-1047) before writing to UFS
+  before writing to UFS: IBM-1047 by default, CP037 with
+  `X-IBM-Data-Type: text;fileEncoding=IBM-037`. Same rules as on a read, see
+  [get.md](get.md#encoding)
 - **Binary mode:** Raw bytes written with no conversion
 
 ## Response
@@ -110,10 +112,12 @@ off the UFS session rather than off the (absent) file handle.
 |--------|-----------|
 | 400    | Missing filepath, invalid utility request, or the path is a directory |
 | 400    | Read-only file system |
+| 400    | `X-IBM-Data-Type: record` (`category` 1, `reason` 12); nothing is written |
 | 404    | Parent directory not found |
 | 412    | `If-Match` was supplied and the file no longer matches it — including a file that no longer exists |
 | 400    | Path name too long |
 | 500    | No space left on device or I/O error (64 KB limit) |
+| 500    | `fileEncoding` names a code page other than IBM-037 or IBM-1047 (`category` 16, `rc` 121); nothing is written |
 | 400    | Unsupported USS utility (Content-Type: application/json with unknown request) |
 | 503    | UFSD subsystem not available |
 

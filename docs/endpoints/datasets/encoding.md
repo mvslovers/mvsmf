@@ -13,8 +13,9 @@ output -- is CP037. Translating it through 1047 would swap `^` and `¬` (X'5F'
 and X'B0'), and `¬` is everywhere in JCL and assembler.
 
 USS files are the other way round: they default to **IBM-1047**, the z/OS UNIX
-convention and what z/OSMF and Zowe assume for USS files. See
-[../uss/get.md](../uss/get.md).
+convention and what z/OSMF and Zowe assume for USS files, and
+`fileEncoding=IBM-037` selects CP037 there. See
+[../uss/get.md](../uss/get.md#encoding).
 
 ## Choosing the code page: `fileEncoding`
 
@@ -72,4 +73,4 @@ leaves the data set or member as it was.
 
 - The ASCII side of the translation (`Content-Type: …;charset=`, Zowe's
   `localEncoding`) is not interpreted -- see issue #234.
-- Jobs (JCL submit, spool) and USS files do not take `fileEncoding` yet.
+- Jobs (JCL submit, spool) do not take `fileEncoding` yet.

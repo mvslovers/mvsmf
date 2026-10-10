@@ -501,6 +501,128 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 
 assert_http_status "204" "$HTTP_CODE" "write file binary mode"
 
+# -----------------------------------------------------------------
+# fileEncoding and data type (issue #393)
+#
+# USS files default to IBM-1047; X-IBM-Data-Type: text;fileEncoding=IBM-037
+# selects CP037, BINARY / binary;param is binary, and record is refused 400 --
+# all measured on the reference's /restfiles/fs. UFSD stores raw bytes, so a
+# binary read shows exactly what a text write stored:
+#
+#   "INT A[2];\n" in IBM-1047 = c9d5e340 c1adf2bd 5e15
+#   "INT A[2];\n" in CP037    = c9d5e340 c1baf2bb 5e15
+# -----------------------------------------------------------------
+
+ENC_FILE="${WORK_DIR}/enc.txt"
+ENC_URL="${BASE_URL}/zosmf/restfiles/fs${ENC_FILE}"
+ENC_TEXT=$'INT A[2];\nINT B[3];'
+ENC_1047="c9d5e340c1adf2bd5e15c9d5e340c2adf3bd5e15"
+ENC_037="c9d5e340c1baf2bb5e15c9d5e340c2baf3bb5e15"
+
+uss_hex() {	# uss_hex <data-type> -> hex of the body a GET returns
+	curl -s -o /tmp/curl_uss_enc.bin -u "$AUTH" -H "X-IBM-Data-Type: $1" "$ENC_URL"
+	od -An -tx1 /tmp/curl_uss_enc.bin | tr -d ' \n'
+}
+
+uss_enc_put() {	# uss_enc_put <data-type> -> HTTP code
+	curl -s -w '%{http_code}' -o /tmp/curl_uss_enc.json \
+		-X PUT -u "$AUTH" -H "Expect:" \
+		-H "X-IBM-Data-Type: $1" \
+		--data-binary "${ENC_TEXT}"$'\n' "$ENC_URL"
+}
+
+assert_stored() {	# assert_stored <want-hex> <label>
+	local got
+	got=$(uss_hex binary)
+	if [ "$got" = "$1" ]; then
+		pass "$2"
+	else
+		fail "$2" "stored $got, expected $1"
+	fi
+}
+
+echo ""
+echo "--- fileEncoding: default is IBM-1047 (issue #393) ---"
+
+HTTP_CODE=$(uss_enc_put "text")
+assert_http_status "204" "$HTTP_CODE" "write with the default encoding"
+assert_stored "$ENC_1047" "default stores the brackets as IBM-1047 (AD/BD)"
+
+HTTP_CODE=$(uss_enc_put "text;fileEncoding=IBM-1047")
+assert_http_status "204" "$HTTP_CODE" "write with fileEncoding=IBM-1047"
+assert_stored "$ENC_1047" "IBM-1047 spelled out is the default"
+
+echo ""
+echo "--- fileEncoding: IBM-037 (issue #393) ---"
+
+HTTP_CODE=$(uss_enc_put "text;fileEncoding=IBM-037")
+assert_http_status "204" "$HTTP_CODE" "write with fileEncoding=IBM-037"
+assert_stored "$ENC_037" "IBM-037 stores the brackets as CP037 (BA/BB)"
+
+for V in "text;fileEncoding=IBM-037" "text;fileEncoding=037" "TEXT;fileencoding=ibm-037"; do
+	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_URL")
+	if [ "$CONTENT" = "$ENC_TEXT" ]; then
+		pass "'$V' reads CP037 content back"
+	else
+		fail "'$V' reads CP037 content back" "got '$CONTENT'"
+	fi
+done
+
+CONTENT=$(curl -s -u "$AUTH" "$ENC_URL")
+if [ "$CONTENT" != "$ENC_TEXT" ]; then
+	pass "CP037 content read with the default is not translated as CP037"
+else
+	fail "CP037 content read with the default is not translated as CP037" \
+		"the default read returned the CP037 text unchanged"
+fi
+
+echo ""
+echo "--- fileEncoding: unsupported value (issue #393) ---"
+
+HTTP_CODE=$(uss_enc_put "text;fileEncoding=BOGUS")
+assert_http_status "500" "$HTTP_CODE" "write with an unsupported encoding"
+BODY=$(cat /tmp/curl_uss_enc.json)
+assert_json_field "$BODY" ".category" "16" "unsupported encoding: category"
+assert_json_field "$BODY" ".rc" "121" "unsupported encoding: rc"
+assert_json_field "$BODY" ".message" "iconv_open() failed." "unsupported encoding: message"
+assert_stored "$ENC_037" "a refused write leaves the file untouched"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Data-Type: text;fileEncoding=IBM-37" "$ENC_URL")
+assert_http_status "500" "$HTTP_CODE" "read with IBM-37 (refused by the reference too)"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	-H "X-IBM-Data-Type: text; fileEncoding=BOGUS" "$ENC_URL")
+assert_http_status "200" "$HTTP_CODE" "a blank after ';' is not a fileEncoding"
+
+echo ""
+echo "--- Data type: BINARY, binary;param, record (issue #393) ---"
+
+# BINARY and binary;param used to fall back to text -- a translated download.
+for V in "BINARY" "binary;foo=bar" "binary;fileEncoding=BOGUS"; do
+	GOT=$(uss_hex "$V")
+	if [ "$GOT" = "$ENC_037" ]; then
+		pass "'$V' is a binary read"
+	else
+		fail "'$V' is a binary read" "got $GOT"
+	fi
+done
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_uss_enc.json -u "$AUTH" \
+	-H "X-IBM-Data-Type: Record" "$ENC_URL")
+assert_http_status "400" "$HTTP_CODE" "read with record is refused like the reference"
+BODY=$(cat /tmp/curl_uss_enc.json)
+assert_json_field "$BODY" ".category" "1" "record: category"
+assert_json_field "$BODY" ".reason" "12" "record: reason"
+assert_json_field "$BODY" ".message" "X-IBM-Data-Type" "record: message"
+
+HTTP_CODE=$(uss_enc_put "record")
+assert_http_status "400" "$HTTP_CODE" "write with record is refused"
+assert_stored "$ENC_037" "a refused record write leaves the file untouched"
+
+cleanup "$ENC_FILE"
+rm -f /tmp/curl_uss_enc.bin /tmp/curl_uss_enc.json
+
 echo ""
 echo "--- USS utilities: chtag list ---"
 

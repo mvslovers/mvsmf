@@ -35,7 +35,7 @@ deliberately.
 | API surface | Codepage | Table |
 |---|---|---|
 | USS / UFS files (`ussapi.c`) | **IBM-1047** | `httpx->xlate_1047` |
-| Datasets (`dsapi.c`) | **CP037** | `httpx->xlate_cp037` |
+| Datasets (`dsapi.c`) | **CP037**, or IBM-1047 by request | `ds_codepage()` -- `xlate_cp037` unless `X-IBM-Data-Type: text;fileEncoding=IBM-1047` (#391) |
 | Jobs (`jobsapi.c`) | **CP037** | `httpx->xlate_cp037` |
 | HTTPD server default | **CP037** | `http_xlate_init()` fallback |
 

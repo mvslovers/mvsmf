@@ -17,6 +17,7 @@
 #include "dsapi_err.h"
 #include "mvsmfmsg.h"
 #include "common.h"
+#include "datatype.h"
 #include "etag.h"
 #include "httpcgi.h"
 #include "reclines.h"
@@ -38,11 +39,6 @@
 #define MAX_QUALIFIED_DSN (MAX_DATASET_NAME + 1 + MAX_MEMBER_NAME + 1 + 1)
 #define HTTP_OK 200
 #define DEFAULT_JOB_CLASS 'A'
-
-// Data type constants
-#define DATA_TYPE_TEXT     1
-#define DATA_TYPE_BINARY   2
-#define DATA_TYPE_RECORD   3
 
 // Error codes
 #define ERR_INVALID_PARAM -1
@@ -389,7 +385,7 @@ get_fb_record_count(const char *dsname)
 __asm__("\n&FUNC    SETC 'read_and_send_ds'");
 static int
 read_and_send_dataset(Session *session, FILE *fp, int data_type,
-	long max_records, const char *etag)
+	const HTTPCP *cp, long max_records, const char *etag)
 {
 	int rc = 0;
 	char *buffer = NULL;
@@ -442,7 +438,7 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 				buffer[end] = '\n';
 				len = end + 1;
 			}
-			http_xlate((unsigned char *)buffer, len, httpx->xlate_cp037->etoa);
+			http_xlate((unsigned char *)buffer, len, cp->etoa);
 			if ((rc = send_all(session, (const UCHAR *)buffer, (int)len)) < 0) {
 				break;
 			}
@@ -805,15 +801,16 @@ require_pds(Session *session, const char *dsname)
     return 0;
 }
 
-// Helper function to parse X-IBM-Data-Type header
-static int parse_data_type(const char *data_type) {
-    if (!data_type) return DATA_TYPE_TEXT;  // Default is text
-    
-    if (strncmp(data_type, "text", 4) == 0) return DATA_TYPE_TEXT;
-    if (strcmp(data_type, "binary") == 0) return DATA_TYPE_BINARY;
-    if (strcmp(data_type, "record") == 0) return DATA_TYPE_RECORD;
-    
-    return DATA_TYPE_TEXT;  // Default to text for unknown values
+/* The table a text transfer goes through (issue #391).
+ *
+ * CP037 unless the request names IBM-1047 with X-IBM-Data-Type fileEncoding:
+ * MVS data is CP037 (#118), but C source typed with brackets at X'AD'/X'BD'
+ * is 1047, and without this a client had no way to say so. */
+static const HTTPCP *
+ds_codepage(Session *session, int encoding)
+{
+	return (encoding == FILE_ENC_IBM1047) ? httpx->xlate_1047
+	                                      : httpx->xlate_cp037;
 }
 
 /* Usable content bytes in one record of this data set.
@@ -931,7 +928,7 @@ static int flush_record(FILE *fp)
     return (err == 12) ? -2 : -1;
 }
 
-static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, size_t content_max)
+static int write_record(Session *session, FILE *fp, char *record_buffer, size_t record_length, size_t *total_written, int *line_count, int data_type, const HTTPCP *cp, size_t content_max)
 {
     int recfm = fp->recfm;  // Get record format from file handle
     int rc;                 // flush_record() result; -2 is out of space
@@ -1017,7 +1014,7 @@ static int write_record(Session *session, FILE *fp, char *record_buffer, size_t 
 
             // Convert to EBCDIC in place -- the caller's buffer is sized to the
             // data set and it does not read the ASCII back after this call.
-            http_xlate((unsigned char *)record_buffer, record_length, httpx->xlate_cp037->atoe);
+            http_xlate((unsigned char *)record_buffer, record_length, cp->atoe);
 
             // Write the converted record
             if (fwrite(record_buffer, 1, record_length, fp) != record_length) return -1;
@@ -1046,7 +1043,7 @@ static int write_record_open(Session *session, FILE **fp, const char *target,
                              const char *mode, char *record_buffer,
                              size_t record_length, size_t *total_written,
                              int *line_count, int data_type,
-                             size_t content_max)
+                             const HTTPCP *cp, size_t content_max)
 {
     int rc;
 
@@ -1055,7 +1052,7 @@ static int write_record_open(Session *session, FILE **fp, const char *target,
     }
 
     rc = write_record(session, *fp, record_buffer, record_length,
-                      total_written, line_count, data_type, content_max);
+                      total_written, line_count, data_type, cp, content_max);
 
     /* -2 is out of space, and this is the one frame that has both the failure
        and the name to put in the message.  The client's 500 cannot say more
@@ -1634,6 +1631,8 @@ int datasetGetHandler(Session *session)
     char *dsname = NULL;
     const char *data_type_str = NULL;
     int data_type;
+    int encoding;
+    const HTTPCP *cp;
     long max_records = -1;
     char etag[ETAG_SIZE] = {0};
     const char *etag_hdr = NULL;
@@ -1680,7 +1679,10 @@ int datasetGetHandler(Session *session)
     // Parse X-IBM-Data-Type header
     data_type_str = (char *) http_get_env(session->httpc,
         (const UCHAR *) "HTTP_X-IBM-Data-Type");
-    data_type = parse_data_type(data_type_str);
+    if (parse_data_type(data_type_str, &data_type, &encoding) < 0) {
+        return send_bad_encoding(session, data_type_str);
+    }
+    cp = ds_codepage(session, encoding);
 
     /* Hash pass first, before any DCB for the body is open. It always uses
        the FB record count, even when the body will be read as text: the
@@ -1720,7 +1722,7 @@ int datasetGetHandler(Session *session)
     }
     session_register_file(session, fp);
 
-    rc = read_and_send_dataset(session, fp, data_type, max_records, etag_hdr);
+    rc = read_and_send_dataset(session, fp, data_type, cp, max_records, etag_hdr);
 
     session_fclose(session, fp);
     return rc;
@@ -1750,6 +1752,8 @@ int datasetPutHandler(Session *session)
     char *rec = NULL;
     size_t rec_len = 0;
     int data_type;
+    int encoding;
+    const HTTPCP *cp;
     int recfm = 0;
     int lrecl = 0;
     int blksize = 0;
@@ -1804,7 +1808,10 @@ int datasetPutHandler(Session *session)
     content_length_str = (char *) http_get_env(session->httpc, (const UCHAR *) "HTTP_CONTENT-LENGTH");
 
     // Parse data type
-    data_type = parse_data_type(data_type_str);
+    if (parse_data_type(data_type_str, &data_type, &encoding) < 0) {
+        return send_bad_encoding(session, data_type_str);
+    }
+    cp = ds_codepage(session, encoding);
 
     // Check transfer encoding
     is_chunked = (transfer_encoding && strstr(transfer_encoding, "chunked") != NULL);
@@ -1905,7 +1912,7 @@ int datasetPutHandler(Session *session)
                             memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                             record_pos = eff_lrecl;
                         }
-                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing final record");
@@ -1915,7 +1922,7 @@ int datasetPutHandler(Session *session)
                     /* Text: a body whose last line has no terminator. Nothing
                        is pending when it ended on one, so a trailing newline
                        does not add a phantom record. */
-                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
@@ -1959,7 +1966,7 @@ int datasetPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -1984,7 +1991,7 @@ int datasetPutHandler(Session *session)
 
                     switch (recline_put(&rl, c, &rec, &rec_len)) {
                     case RECLINE_RECORD:
-                        if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -2027,7 +2034,7 @@ int datasetPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -2042,7 +2049,7 @@ int datasetPutHandler(Session *session)
                     memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                     record_pos = eff_lrecl;
                 }
-                if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -2065,7 +2072,7 @@ int datasetPutHandler(Session *session)
 
                 switch (recline_put(&rl, c, &rec, &rec_len)) {
                 case RECLINE_RECORD:
-                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -2079,7 +2086,7 @@ int datasetPutHandler(Session *session)
 
             /* A last line without a terminator is still a record */
             if (recline_flush(&rl, &rec, &rec_len)) {
-                if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dsname, mode_str, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -2575,6 +2582,8 @@ int memberGetHandler(Session *session)
     char *member = NULL;
     const char *data_type_str = NULL;
     int data_type;
+    int encoding;
+    const HTTPCP *cp;
     char dataset[MAX_QUALIFIED_DSN] = {0};
     char etag[ETAG_SIZE] = {0};
     const char *etag_hdr = NULL;
@@ -2621,7 +2630,10 @@ int memberGetHandler(Session *session)
     // Parse X-IBM-Data-Type header
     data_type_str = (char *) http_get_env(session->httpc,
         (const UCHAR *) "HTTP_X-IBM-Data-Type");
-    data_type = parse_data_type(data_type_str);
+    if (parse_data_type(data_type_str, &data_type, &encoding) < 0) {
+        return send_bad_encoding(session, data_type_str);
+    }
+    cp = ds_codepage(session, encoding);
 
     /* The ETag has to be known before the first response byte goes out, so
        the hash pass runs before the member is opened for the body -- never
@@ -2657,7 +2669,7 @@ int memberGetHandler(Session *session)
     session_register_file(session, fp);
 
     // PDS member: record count unknown, pass -1 (no limit)
-    rc = read_and_send_dataset(session, fp, data_type, -1, etag_hdr);
+    rc = read_and_send_dataset(session, fp, data_type, cp, -1, etag_hdr);
 
     session_fclose(session, fp);
     return rc;
@@ -2689,6 +2701,8 @@ int memberPutHandler(Session *session)
     char *rec = NULL;
     size_t rec_len = 0;
     int data_type;
+    int encoding;
+    const HTTPCP *cp;
     int recfm = 0;
     int lrecl = 0;
     int blksize = 0;
@@ -2757,7 +2771,10 @@ int memberPutHandler(Session *session)
     }
 
     // Parse data type
-    data_type = parse_data_type(data_type_str);
+    if (parse_data_type(data_type_str, &data_type, &encoding) < 0) {
+        return send_bad_encoding(session, data_type_str);
+    }
+    cp = ds_codepage(session, encoding);
 
     // Open file for writing
     char member_mode[3];
@@ -2880,7 +2897,7 @@ int memberPutHandler(Session *session)
                         // Pad to full LRECL for fixed-length binary records
                         memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                         record_pos = eff_lrecl;
-                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing final record");
@@ -2889,7 +2906,7 @@ int memberPutHandler(Session *session)
                 } else if (recline_flush(&rl, &rec, &rec_len)) {
                     /* Text: only a last line without a terminator is pending
                        here -- a body ending in a newline adds no record. */
-                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing final record");
@@ -2933,7 +2950,7 @@ int memberPutHandler(Session *session)
                     record_pos += n;
 
                     if (record_pos >= eff_lrecl) {
-                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -2956,7 +2973,7 @@ int memberPutHandler(Session *session)
 
                     switch (recline_put(&rl, c, &rec, &rec_len)) {
                     case RECLINE_RECORD:
-                        if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                        if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
                             return handle_error(session, ERR_IO, "Error writing record");
@@ -2999,7 +3016,7 @@ int memberPutHandler(Session *session)
                 record_pos += n;
 
                 if (record_pos >= eff_lrecl) {
-                    if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -3012,7 +3029,7 @@ int memberPutHandler(Session *session)
             if (record_pos > 0) {
                 memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
                 record_pos = eff_lrecl;
-                if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");
@@ -3033,7 +3050,7 @@ int memberPutHandler(Session *session)
 
                 switch (recline_put(&rl, c, &rec, &rec_len)) {
                 case RECLINE_RECORD:
-                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                    if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
                         return handle_error(session, ERR_IO, "Error writing record");
@@ -3047,7 +3064,7 @@ int memberPutHandler(Session *session)
 
             /* A last line without a terminator is still a record */
             if (recline_flush(&rl, &rec, &rec_len)) {
-                if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, content_max) < 0) {
+                if (write_record_open(session, &fp, dataset, member_mode, rec, rec_len, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);
                     return handle_error(session, ERR_IO, "Error writing final record");

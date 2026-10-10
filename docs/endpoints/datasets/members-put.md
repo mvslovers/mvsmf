@@ -21,7 +21,9 @@ PUT
 ## Request Headers
 - `Content-Length` or `Transfer-Encoding: chunked`: One of these is required
 - `X-IBM-Data-Type` (optional): Data transfer mode
-    - `text` (default): ASCII-to-EBCDIC conversion, records split at newlines
+    - `text` (default): ASCII-to-EBCDIC conversion, records split at newlines;
+      the code page is CP037 unless `text;fileEncoding=IBM-1047` asks for
+      IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes written without conversion, split at LRECL boundaries
     - `record`: **accepted but not implemented on write — do not use.** The read
       path emits a 4-byte big-endian length before every record; the write path
@@ -49,6 +51,9 @@ On successful completion, this request returns HTTP status code 204 (No Content)
       (`reason` 10, `The resource was modified since the supplied ETag was
       created`). Nothing was written.
 - HTTP 500 (Internal Server Error)
+    - `fileEncoding` names a code page other than IBM-037 or IBM-1047
+      (`category` 16, `rc` 121, see [encoding.md](encoding.md)); nothing was
+      written
     - The dataset exists but cannot be opened for writing (I/O error)
     - I/O error during write
     - The library ran out of space or directory blocks mid-upload. The write

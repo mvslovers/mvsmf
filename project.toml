@@ -106,6 +106,17 @@ rent = false          # mbtcheck.h keeps file-static counters
 reus = false
 sources = ["test/host/tsthost.c"]
 
+# TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
+# translation (IBM-1047 content was always read as CP037), and BINARY or
+# binary;param must not fall back to text. Portable C (test-host); the TU
+# #includes src/datatype.c so it drives the real parser dsapi.c calls — do not
+# list datatype.c here.
+[[test]]
+name = "TSTDTYP"
+rent = false          # mbtcheck.h keeps file-static counters
+reus = false
+sources = ["test/host/tstdtyp.c"]
+
 # TSTETAG: #152 — the ETag stamp must change on every content change (including
 # a same-length edit and a re-split record boundary) and stay stable otherwise,
 # and If-Match must accept bare, quoted, weak and list forms. #263 adds the read

@@ -19,7 +19,9 @@ GET
 
 ## Request Headers
 - `X-IBM-Data-Type` (optional): Data transfer mode
-    - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`
+    - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`;
+      the code page is CP037 unless `text;fileEncoding=IBM-1047` asks for
+      IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the dataset, for
@@ -43,6 +45,8 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
 - HTTP 404 (Not Found)
     - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)
+    - `fileEncoding` names a code page other than IBM-037 or IBM-1047
+      (`category` 16, `rc` 121, see [encoding.md](encoding.md))
     - The dataset exists but cannot be opened (I/O error)
     - Memory allocation failed
 

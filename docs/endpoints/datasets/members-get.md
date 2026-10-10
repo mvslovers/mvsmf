@@ -20,7 +20,9 @@ GET
 
 ## Request Headers
 - `X-IBM-Data-Type` (optional): Data transfer mode
-    - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`
+    - `text` (default): EBCDIC-to-ASCII conversion, Content-Type: `text/plain`;
+      the code page is CP037 unless `text;fileEncoding=IBM-1047` asks for
+      IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the member. Any
@@ -103,6 +105,8 @@ diagnosis (404, or 500 on an I/O error), which is the more specific answer.
     - Dataset not cataloged (`reason` 4, `Dataset not found`)
     - Dataset exists but has no such member (`reason` 5, `PDS member not found`)
 - HTTP 500 (Internal Server Error)
+    - `fileEncoding` names a code page other than IBM-037 or IBM-1047
+      (`category` 16, `rc` 121, see [encoding.md](encoding.md))
     - The member exists but cannot be opened (I/O error)
     - Memory allocation failed
 

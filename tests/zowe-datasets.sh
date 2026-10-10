@@ -522,6 +522,9 @@ RC=0
 OUTPUT=$(run_zowe files upload ftds "$ENCFILE" "${TEST_PDS}(ENCTEST)" --encoding IBM-1047) || RC=$?
 assert_rc 0 "$RC" "upload member with --encoding IBM-1047"
 
+# Zowe skips an existing --file ("skipped as it already exists") and still
+# exits 0, and mktemp has just created it -- so remove it first.
+rm -f "$ENCBIN"
 RC=0
 OUTPUT=$(run_zowe files download ds "${TEST_PDS}(ENCTEST)" --binary --file "$ENCBIN") || RC=$?
 assert_rc 0 "$RC" "download the member in binary"

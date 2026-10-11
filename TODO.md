@@ -16,7 +16,10 @@ unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
 stand runs a server that old. **#398 is new (2026-10-10) and not ranked
 either**: `P HTTPD` through the console API answers 503 with an empty body, so
-a client cannot tell whether the command ran. **#360's `__listpd()` half is unblocked since
+a client cannot tell whether the command ran. **#400 is new (2026-10-11) and
+not ranked either**: the REST suites run through mbt and take their connection
+from the target instead of `.env`; its second phase waits on mvslovers/mbt#239.
+**#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
 404 — see the 2026-10-01 comment on #360 (proposal: `__walkpd()`). The
@@ -470,6 +473,15 @@ mvsdev (build `d7f0004`, results on the PR). Activation is now `mbt deploy` +
 Makefile's `run-mvs` / `stop-mvs` / `deploy-desktop` are to come back as mbt
 commands (`tools/deploy-desktop.sh` meanwhile), and #398 came out of the
 restart.
+
+**PR #399, merged 2026-10-11** — each login gets a session of its own
+(mvslovers/httpd#288). `authLoginHandler` calls `http_new_session()` before it
+reads the token, so two clients logging on with the same credentials from one
+address no longer share a token, and one logout no longer ends both. That makes
+httpd 4.2.0-dev from `c81e38e` on a hard requirement (vector entry `0x144`, no
+run-time test — #363); `mbt.lock` pins it. TSTSESS 90/0 and every curl and Zowe
+suite green on mvsdev (results on the PR). Left over: a Basic response still
+carries the shared cache token as a cookie (#324).
 
 
 Pointers only — the reasoning lives in the closing comments.

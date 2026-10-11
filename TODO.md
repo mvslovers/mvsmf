@@ -16,9 +16,7 @@ unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
 stand runs a server that old. **#398 is new (2026-10-10) and not ranked
 either**: `P HTTPD` through the console API answers 503 with an empty body, so
-a client cannot tell whether the command ran. **#400 is new (2026-10-11) and
-not ranked either**: the REST suites run through mbt and take their connection
-from the target instead of `.env`; its second phase waits on mvslovers/mbt#239.
+a client cannot tell whether the command ran.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
@@ -482,6 +480,18 @@ httpd 4.2.0-dev from `c81e38e` on a hard requirement (vector entry `0x144`, no
 run-time test — #363); `mbt.lock` pins it. TSTSESS 90/0 and every curl and Zowe
 suite green on mvsdev (results on the PR). Left over: a Basic response still
 carries the shared cache token as a cookie (#324).
+
+**PR #401, merged 2026-10-11** — the REST suites run through mbt (#400):
+`mbt run rest-tests [-- SUITE|lua|curl|zowe|all ... [ARGS]]` hands them the
+target's URL, user and mbt's session token, never a password, through
+`tests/lib/conn.sh`; `mbt run deploy-desktop` does the same for the Desktop.
+`.env`, `.env.example` and `tests/test.sh` are gone. The tests that need a
+password (logon, wrong password, logout, two logins, the cookie on a Basic
+response) are Lua in `mbt/lua/restauth.lua`; the ordinary userid of the
+authorization tests is the target's further user `test2`. Every suite green
+on mvsdev (results on the PR). Left over: the 401 body in the `auth` suite is
+skipped until an mbt prerelease returns bodies on statuses >= 400 (mbt bug,
+fix under way), and the first run with `test2` waits for a slot.
 
 
 Pointers only — the reasoning lives in the closing comments.

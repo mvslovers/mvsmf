@@ -19,9 +19,12 @@
 
 local check = require("restcheck")
 
-local AUTH_PATH = "/zosmf/services/authenticate"
--- A gated endpoint, to prove a token is (or is no longer) accepted.
-local GATED = "/zosmf/restfiles/ds?dslevel=SYS1.**"
+-- Paths are below /zosmf: mbt puts that in front itself, and percent-encodes
+-- what is not in /?=&() or unreserved -- a '*' arrives as %2A.
+local AUTH_PATH = "/services/authenticate"
+-- A gated endpoint, to prove a token is (or is no longer) accepted. /info is
+-- authenticated like every other route (#324) and cheap to answer.
+local GATED = "/info"
 
 -- The LtpaToken2 value and the whole Set-Cookie line, or nil. mbt joins
 -- several Set-Cookie headers with a newline.
@@ -104,8 +107,11 @@ function M.auth(ctx)
     t.eq("8", json_number(body, "returnCode"), "bad login: returnCode")
     t.eq("1", json_number(body, "reasonCode"), "bad login: reasonCode")
   else
-    -- mvsMF's body appears only when httpd forwards the route (httpd#114).
-    t.skip("bad login z/OSMF JSON body -- httpd front-gated the 401 (httpd#114)")
+    -- No body to read. Either httpd answered the 401 itself (httpd#114), or
+    -- mbt dropped it: before the fix for that, ctx.mvs.request returned an
+    -- empty body on every status >= 400. curl sees mvsMF's body here (dev1,
+    -- 2026-10-11), so on a current stand this skip is mbt's.
+    t.skip("bad login z/OSMF JSON body -- empty 401 body (httpd#114, or an mbt without the 4xx body fix)")
   end
 
   -- A real wrong password: one failed logon per run, and only for the
@@ -178,7 +184,7 @@ function M.info_cookie(ctx)
   local t = check.new(ctx, "mvsMF Information service, session cookie - mbt (Lua) suite")
 
   t.section("implicit login (#324)")
-  local st, _, h = ctx.mvs.request{ path = "/zosmf/info", auth = "basic" }
+  local st, _, h = ctx.mvs.request{ path = "/info", auth = "basic" }
   t.eq(200, st, "Basic request on /zosmf/info")
   local token, line = ltpa_cookie(h)
   t.ok(token ~= nil, "Basic auth hands back the session cookie",
@@ -191,7 +197,7 @@ function M.info_cookie(ctx)
   -- A caller arriving with the cookie sends no Authorization, so nothing is
   -- re-issued. Absence is the assertion here.
   if token then
-    local st2, _, h2 = ctx.mvs.request{ path = "/zosmf/info", auth = "token",
+    local st2, _, h2 = ctx.mvs.request{ path = "/info", auth = "token",
                                         token = token }
     t.eq(200, st2, "the cookie alone authenticates")
     t.ok(not (h2 and h2["set-cookie"]),

@@ -15,9 +15,10 @@
  *
  * httpd resolves the client credential before dispatching here (Basic on the
  * login POST, LtpaToken2 cookie / Bearer on later calls) and exposes it via
- * the HTTPX auth export. These handlers only READ that state:
- *   - login  reads the session token (http_get_token) and hands it back as
- *            the LtpaToken2 cookie (base64 of httpd's opaque CREDTOK);
+ * the HTTPX auth export. These handlers only drive that state:
+ *   - login  makes it a session of its own (http_new_session, httpd#288),
+ *            reads that session's token (http_get_token) and hands it back
+ *            as the LtpaToken2 cookie (base64 of httpd's opaque CREDTOK);
  *   - logout drops the credential (http_logout -> credtok_logout).
  * mvsMF owns no credential-store logic and issues no per-request racf_login.
  *
@@ -164,13 +165,31 @@ int authLoginHandler(Session *session)
 	char *json = NULL;
 	int rc = 0;
 
-	/* httpd has already resolved the Basic credential into httpc->cred; we
-	   only read the resulting session token. 0 => no credential resolved
-	   (bad or missing credentials) => z/OSMF-shaped 401. */
-	toklen = http_get_token(httpc, token, sizeof(token));
-	if (toklen <= 0) {
+	/* httpd has already resolved the Basic credential into httpc->cred. No
+	   credential (bad or missing credentials) => z/OSMF-shaped 401. */
+	if (!http_get_acee(httpc)) {
 		json = auth_body(8, 1, AUTH_MSG_LOGIN_FAILED);
 		rc = auth_send(session, HTTP_STATUS_UNAUTHORIZED, NULL, json);
+		if (json) {
+			free(json);
+		}
+		return rc;
+	}
+
+	/* That credential is not this login's own: httpd finds it by address,
+	   userid and password, so every client logging on the same way from the
+	   same address resolves to it, and a logout with its token would end all
+	   of them (httpd#288). Turn the login into a session of its own first --
+	   its token is the one http_get_token() returns afterwards.
+
+	   Failing here, the credentials were good: RACF refused the second logon,
+	   the credential store is full, or this client already holds the most
+	   sessions httpd allows, all in use. None of that is the caller's
+	   password, so it is not the 401 above. */
+	if (http_new_session(httpc) != 0 ||
+	    (toklen = http_get_token(httpc, token, sizeof(token))) <= 0) {
+		json = auth_body(4, 40, AUTH_MSG_INTERNAL);
+		rc = auth_send(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL, json);
 		if (json) {
 			free(json);
 		}

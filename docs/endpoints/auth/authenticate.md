@@ -54,6 +54,17 @@ On success, HTTP status code **200 (OK)** with:
 `Path=/` scopes the cookie to the whole `/zosmf` API. No `Secure` attribute is
 set — the MVS deployment is plain HTTP.
 
+**Every login is a session of its own** (httpd#288). Two clients logging in
+with the same userid and password from the same address get two different
+tokens, and a logout ends only the session whose token it carries. Each login
+costs a RACF logon and a slot in httpd's credential store, so a client that
+does not log out holds its session until httpd's idle timeout
+(`SESSION_TIMEOUT`, 30 minutes by default) ends it. One client — same userid,
+password and address — holds at most 16 sessions: a further login ends its
+least recently used one, provided that one has been idle for a minute.
+
+This needs an httpd that provides `http_new_session()` (4.2.0 or later).
+
 ### Error Responses
 - HTTP **401 (Unauthorized)** — bad or missing credentials:
 
@@ -69,8 +80,11 @@ set — the MVS deployment is plain HTTP.
   failure returns `returnCode 8, reasonCode 1` (the z/OSMF default when detailed
   login errors are not exposed).
 
-- HTTP **500 (Internal Server Error)** — a server-side error (e.g. the token
-  could not be encoded): `returnCode 4, reasonCode 40`.
+- HTTP **500 (Internal Server Error)** — a server-side error:
+  `returnCode 4, reasonCode 40`. The credentials were good, but no session
+  could be created (httpd's credential store is full, or the client already
+  holds 16 sessions, all used within the last minute), or the token could not
+  be encoded.
 
 ---
 
@@ -98,6 +112,14 @@ LtpaToken2=deleted; Path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`.
 
 A request **without** a valid token is rejected with **401 (Unauthorized)**, no
 body — the z/OSMF spec requires a valid token to log out.
+
+A token from the login above ends only its own session. mvsMF also hands out
+an `LtpaToken2` cookie on any response to a request sent with
+`Authorization: Basic` (as z/OSMF does); that token is not a session of its
+own but the credential every Basic request from that client resolves to. A
+logout with it ends that credential for every holder of the same cookie.
+Clients sending Basic notice nothing, because the next request logs on again.
+Log out only with a token from the login endpoint.
 
 ---
 

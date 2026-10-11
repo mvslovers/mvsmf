@@ -13,31 +13,20 @@
 # delete tests run before create tests, write tests clean up via delete.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #   - UFSD subsystem must be running on the target MVS system
 #
 # Usage:
-#   ./tests/curl-uss.sh
+#   mbt run rest-tests -- curl-uss
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test directory path (root of UFS filesystem)
 TEST_DIR="${USS_TEST_DIR:-/}"
@@ -157,12 +146,12 @@ assert_json_field_gte() {
 
 # Silent cleanup helper — DELETE, ignoring errors
 cleanup() {
-	curl -s -X DELETE -u "$AUTH" \
+	curl -s -X DELETE -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/fs$1" >/dev/null 2>&1 || true
 }
 
 cleanup_recursive() {
-	curl -s -X DELETE -u "$AUTH" \
+	curl -s -X DELETE -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Option: recursive" \
 		"${BASE_URL}/zosmf/restfiles/fs$1" >/dev/null 2>&1 || true
 }
@@ -189,7 +178,7 @@ echo "========================================"
 # so the bytes on the wire are the ones in the repo file.
 # =========================================================================
 
-trap 'cleanup_recursive "${WORK_DIR}"' EXIT
+mvsmf_on_exit 'cleanup_recursive "${WORK_DIR}"'
 
 if [ ! -f "$FIXTURE_SRC" ]; then
 	echo "ERROR: fixture ${FIXTURE_SRC} is missing from the repo."
@@ -198,7 +187,7 @@ fi
 
 cleanup_recursive "${WORK_DIR}"
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory","mode":"rwxr-xr-x"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${WORK_DIR}")
@@ -208,7 +197,7 @@ if [ "$HTTP_CODE" != "201" ]; then
 	exit 1
 fi
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -K "$MVSMF_CURLRC" \
 	-H "Expect:" --data-binary "@${FIXTURE_SRC}" \
 	"${BASE_URL}/zosmf/restfiles/fs${TEST_FILE}")
 if [ "$HTTP_CODE" != "204" ]; then
@@ -224,7 +213,7 @@ echo ""
 echo "--- List directory ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_DIR}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -257,7 +246,7 @@ echo ""
 echo "--- List with X-IBM-Max-Items ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Max-Items: 2" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_DIR}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
@@ -285,7 +274,7 @@ fi
 # a limit nothing reaches is a complete listing: the header being present does
 # not make moreRows appear
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Max-Items: 10000" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_DIR}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
@@ -299,7 +288,7 @@ echo ""
 echo "--- List with X-IBM-Max-Items: 0 ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Max-Items: 0" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_DIR}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
@@ -313,14 +302,14 @@ echo ""
 echo "--- List error cases ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 
 assert_http_status "400" "$HTTP_CODE" "missing path returns 400"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=/nonexistent/path/that/does/not/exist")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 
@@ -330,7 +319,7 @@ echo ""
 echo "--- List file path (stat-like query) ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${TEST_FILE}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -372,7 +361,7 @@ echo "--- Read file (text mode, default) ---"
 
 TEXT_OUT=$(mktemp)
 HTTP_CODE=$(curl -s -o "$TEXT_OUT" -w '%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${TEST_FILE}")
 
 assert_http_status "200" "$HTTP_CODE" "read file text mode ${TEST_FILE}"
@@ -397,7 +386,7 @@ echo "--- Read file (binary mode) ---"
 
 BIN_OUT=$(mktemp)
 HTTP_CODE=$(curl -s -o "$BIN_OUT" -w '%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/fs${TEST_FILE}")
 
@@ -421,7 +410,7 @@ echo ""
 echo "--- Read file error cases ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs/nonexistent/file/path.txt")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 
@@ -445,7 +434,7 @@ echo ""
 echo "--- Write file (text mode) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "Hello from curl write test" \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 
@@ -453,7 +442,7 @@ assert_http_status "204" "$HTTP_CODE" "write file text mode ${WRITE_FILE}"
 
 # Read it back and verify content
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -469,7 +458,7 @@ echo ""
 echo "--- Write file (chunked transfer encoding) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Transfer-Encoding: chunked" \
 	-d "Hello from chunked transfer test" \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -478,7 +467,7 @@ assert_http_status "204" "$HTTP_CODE" "write file chunked mode ${WRITE_FILE}"
 
 # Read it back and verify content
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -494,7 +483,7 @@ echo ""
 echo "--- Write file (binary mode) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	-d "Binary test data" \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -520,13 +509,13 @@ ENC_1047="c9d5e340c1adf2bd5e15c9d5e340c2adf3bd5e15"
 ENC_037="c9d5e340c1baf2bb5e15c9d5e340c2baf3bb5e15"
 
 uss_hex() {	# uss_hex <data-type> -> hex of the body a GET returns
-	curl -s -o /tmp/curl_uss_enc.bin -u "$AUTH" -H "X-IBM-Data-Type: $1" "$ENC_URL"
+	curl -s -o /tmp/curl_uss_enc.bin -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: $1" "$ENC_URL"
 	od -An -tx1 /tmp/curl_uss_enc.bin | tr -d ' \n'
 }
 
 uss_enc_put() {	# uss_enc_put <data-type> -> HTTP code
 	curl -s -w '%{http_code}' -o /tmp/curl_uss_enc.json \
-		-X PUT -u "$AUTH" -H "Expect:" \
+		-X PUT -K "$MVSMF_CURLRC" -H "Expect:" \
 		-H "X-IBM-Data-Type: $1" \
 		--data-binary "${ENC_TEXT}"$'\n' "$ENC_URL"
 }
@@ -560,7 +549,7 @@ assert_http_status "204" "$HTTP_CODE" "write with fileEncoding=IBM-037"
 assert_stored "$ENC_037" "IBM-037 stores the brackets as CP037 (BA/BB)"
 
 for V in "text;fileEncoding=IBM-037" "text;fileEncoding=037" "TEXT;fileencoding=ibm-037"; do
-	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_URL")
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: $V" "$ENC_URL")
 	if [ "$CONTENT" = "$ENC_TEXT" ]; then
 		pass "'$V' reads CP037 content back"
 	else
@@ -568,7 +557,7 @@ for V in "text;fileEncoding=IBM-037" "text;fileEncoding=037" "TEXT;fileencoding=
 	fi
 done
 
-CONTENT=$(curl -s -u "$AUTH" "$ENC_URL")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" "$ENC_URL")
 if [ "$CONTENT" != "$ENC_TEXT" ]; then
 	pass "CP037 content read with the default is not translated as CP037"
 else
@@ -587,11 +576,11 @@ assert_json_field "$BODY" ".rc" "121" "unsupported encoding: rc"
 assert_json_field "$BODY" ".message" "iconv_open() failed." "unsupported encoding: message"
 assert_stored "$ENC_037" "a refused write leaves the file untouched"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: text;fileEncoding=IBM-37" "$ENC_URL")
 assert_http_status "500" "$HTTP_CODE" "read with IBM-37 (refused by the reference too)"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: text; fileEncoding=BOGUS" "$ENC_URL")
 assert_http_status "200" "$HTTP_CODE" "a blank after ';' is not a fileEncoding"
 
@@ -608,7 +597,7 @@ for V in "BINARY" "binary;foo=bar" "binary;fileEncoding=BOGUS"; do
 	fi
 done
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_uss_enc.json -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_uss_enc.json -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: Record" "$ENC_URL")
 assert_http_status "400" "$HTTP_CODE" "read with record is refused like the reference"
 BODY=$(cat /tmp/curl_uss_enc.json)
@@ -627,7 +616,7 @@ echo ""
 echo "--- USS utilities: chtag list ---"
 
 RESP=$(curl -s -w '\n%{http_code}' \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"request":"chtag","action":"list"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -654,7 +643,7 @@ echo ""
 echo "--- USS utilities: chtag set (no-op) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"request":"chtag","action":"set","type":"text","codeset":"IBM-1047"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -665,7 +654,7 @@ echo ""
 echo "--- USS utilities: chtag remove (no-op) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"request":"chtag","action":"remove"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -676,7 +665,7 @@ echo ""
 echo "--- USS utilities: unimplemented utility ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"request":"chmod","action":"set","mode":"0755"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${WRITE_FILE}")
@@ -698,14 +687,14 @@ echo "--- Directory as a file path ---"
 DIR_FIXTURE="${TEST_FILE}.dirtest"
 cleanup_recursive "$DIR_FIXTURE"
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
 assert_http_status "201" "$HTTP_CODE" "write-to-dir: create the fixture"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Length: 10" \
 	-d "some data!" \
 	"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
@@ -719,7 +708,7 @@ assert_http_status "400" "$HTTP_CODE" "write to directory returns 400 (ISDIR)"
 # The GET side of the same NULL open, on the same fixture -- kept next to
 # the write side so the two diagnoses of one condition stay together.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}")
 
 assert_http_status "400" "$HTTP_CODE" "read directory as file returns 400 (ISDIR)"
@@ -727,13 +716,13 @@ assert_http_status "400" "$HTTP_CODE" "read directory as file returns 400 (ISDIR
 # Neither answer may swallow a genuine 404: a path that is simply absent
 # is still not found, on both verbs.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}.nosuch")
 
 assert_http_status "404" "$HTTP_CODE" "read a missing path still returns 404"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "x" \
 	"${BASE_URL}/zosmf/restfiles/fs${DIR_FIXTURE}.nosuch/file.txt")
 
@@ -742,7 +731,7 @@ assert_http_status "404" "$HTTP_CODE" "write below a missing parent still return
 # The empty path is a different 400, and worth holding separately so the
 # two cannot be confused again.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "some data!" \
 	"${BASE_URL}/zosmf/restfiles/fs/")
 
@@ -773,13 +762,13 @@ get_etag() {
 }
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "LINE ONE AND LINE TWO" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "204" "$HTTP_CODE" "etag: seed the file"
 
 # An ETag costs an extra read pass, so it is opt-in: no header, no ETag.
-curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 if [ -z "$(get_etag /tmp/curl_uss_h1.txt)" ]; then
 	pass "etag: a plain GET returns no ETag"
@@ -788,7 +777,7 @@ else
 		"got $(get_etag /tmp/curl_uss_h1.txt)"
 fi
 
-curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h1.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 ETAG1=$(get_etag /tmp/curl_uss_h1.txt)
@@ -805,7 +794,7 @@ else
 fi
 
 # Stability: an unstable stamp 412s saves that should have succeeded.
-curl -s -o /dev/null -D /tmp/curl_uss_h2.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h2.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 ETAG2=$(get_etag /tmp/curl_uss_h2.txt)
@@ -818,7 +807,7 @@ fi
 # The stamp is over the stored bytes, so the read mode cannot change it.
 # Text and binary differ in the codepage translation on the way out; if
 # that reached the hash, a client reading text could not write binary.
-curl -s -o /dev/null -D /tmp/curl_uss_h3.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h3.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
@@ -831,13 +820,13 @@ fi
 
 # A stale If-Match must be refused, and must not have written anything.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: 0000000000000000" \
 	-d "OVERWRITTEN" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "412" "$HTTP_CODE" "etag: a stale If-Match is refused"
 
-BODY=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
+BODY=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 if echo "$BODY" | grep -q "LINE ONE AND LINE TWO"; then
 	pass "etag: the refused write left the file untouched"
 else
@@ -848,7 +837,7 @@ fi
 # The current stamp is accepted, and the PUT hands back the new one.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-D /tmp/curl_uss_h4.txt \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: ${ETAG1}" \
 	-H "X-IBM-Return-Etag: true" \
 	-d "LINE ONE AND LINE TWO CHANGED" \
@@ -864,7 +853,7 @@ fi
 
 # The PUT stamp comes from re-reading the closed file, so it must equal
 # what the next GET computes. If it did not, every second save would 412.
-curl -s -o /dev/null -D /tmp/curl_uss_h5.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h5.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 ETAG5=$(get_etag /tmp/curl_uss_h5.txt)
@@ -875,7 +864,7 @@ else
 fi
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: ${ETAG4}" \
 	-d "LINE ONE AND LINE TWO" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
@@ -883,25 +872,25 @@ assert_http_status "204" "$HTTP_CODE" \
 	"etag: a second save with the returned stamp"
 
 # The forms clients actually send: quoted and weak validators.
-curl -s -o /dev/null -D /tmp/curl_uss_h6.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h6.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 ETAG6=$(get_etag /tmp/curl_uss_h6.txt)
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: \"${ETAG6}\"" \
 	-d "QUOTED FORM" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "204" "$HTTP_CODE" "etag: a quoted If-Match is accepted"
 
-curl -s -o /dev/null -D /tmp/curl_uss_h7.txt -u "$AUTH" \
+curl -s -o /dev/null -D /tmp/curl_uss_h7.txt -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 ETAG7=$(get_etag /tmp/curl_uss_h7.txt)
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: W/\"${ETAG7}\"" \
 	-d "WEAK FORM" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
@@ -909,7 +898,7 @@ assert_http_status "204" "$HTTP_CODE" "etag: a weak If-Match is accepted"
 
 # "*" asserts only that the file exists.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: *" \
 	-d "WILDCARD FORM" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
@@ -921,14 +910,14 @@ assert_http_status "204" "$HTTP_CODE" \
 MISSING_FILE="${TEST_FILE}.etagmissing"
 cleanup "$MISSING_FILE"
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: *" \
 	-d "SHOULD NOT BE CREATED" \
 	"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
 assert_http_status "412" "$HTTP_CODE" \
 	"etag: If-Match: * on a missing file is refused"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
 assert_http_status "404" "$HTTP_CODE" \
 	"etag: the refused write created nothing"
@@ -941,14 +930,14 @@ assert_http_status "404" "$HTTP_CODE" \
 ETAG_DIR="${TEST_FILE}.etagdir"
 cleanup_recursive "$ETAG_DIR"
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
 assert_http_status "201" "$HTTP_CODE" "etag: create the directory fixture"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "If-Match: *" \
 	-d "some data!" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
@@ -959,7 +948,7 @@ cleanup_recursive "$ETAG_DIR"
 
 # A write with no If-Match is unconditional, as before the feature.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "UNCONDITIONAL" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "204" "$HTTP_CODE" \
@@ -982,14 +971,14 @@ echo "--- ETag: conditional reads / If-None-Match (issue #271) ---"
 # that pass ever drifted from the one behind X-IBM-Return-Etag, it would
 # surface here as a 200 where a 304 was asked for -- which is why the two
 # are hashed in one pass.
-curl -s -D /tmp/curl_uss_c1.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_uss_c1.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}"
 CETAG=$(get_etag /tmp/curl_uss_c1.txt)
 
 HTTP_CODE=$(curl -s -w '%{http_code}' \
 	-D /tmp/curl_uss_c2.txt -o /tmp/curl_uss_c2.body \
-	-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+	-K "$MVSMF_CURLRC" -H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "304" "$HTTP_CODE" "cond: a current If-None-Match is 304"
 
@@ -1017,7 +1006,7 @@ fi
 # does not exist", is the conditional-create semantic of a PUT.
 for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
 	"\"0000000000000000\", \"${CETAG}\"" "*"; do
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 		-H "If-None-Match: ${FORM}" \
 		"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 	assert_http_status "304" "$HTTP_CODE" \
@@ -1025,7 +1014,7 @@ for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
 done
 
 HTTP_CODE=$(curl -s -w '%{http_code}' \
-	-D /tmp/curl_uss_c3.txt -o /tmp/curl_uss_c3.body -u "$AUTH" \
+	-D /tmp/curl_uss_c3.txt -o /tmp/curl_uss_c3.body -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: 0000000000000000" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "200" "$HTTP_CODE" "cond: a stale If-None-Match is 200"
@@ -1050,7 +1039,7 @@ fi
 # The stamp is over the stored bytes, so it does not depend on
 # X-IBM-Data-Type -- and neither does the 304 it answers. The stamp above
 # came from a text read; this one asks in binary.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	-H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
@@ -1060,13 +1049,13 @@ assert_http_status "304" "$HTTP_CODE" "cond: a binary read is 304 too"
 # header having been seen once. Change the file and the same stamp must
 # stop matching.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "CHANGED UNDERNEATH THE POLL" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "204" "$HTTP_CODE" "cond: rewrite the file"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_uss_c4.txt -o /dev/null \
-	-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+	-K "$MVSMF_CURLRC" -H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "200" "$HTTP_CODE" "cond: a changed file is 200 again"
 
@@ -1080,13 +1069,13 @@ else
 		"got '$CETAGNEW', was '$CETAG'"
 fi
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: ${CETAGNEW}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
 assert_http_status "304" "$HTTP_CODE" "cond: the new stamp is 304 in turn"
 
 # Nothing to be fresh about: the 404 is the more specific answer and wins.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: *" \
 	"${BASE_URL}/zosmf/restfiles/fs${MISSING_FILE}")
 assert_http_status "404" "$HTTP_CODE" "cond: a missing file is 404, not 304"
@@ -1097,13 +1086,13 @@ assert_http_status "404" "$HTTP_CODE" "cond: a missing file is 404, not 304"
 # (issue #269). Adding If-None-Match must not change that.
 cleanup_recursive "$ETAG_DIR"
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
 assert_http_status "201" "$HTTP_CODE" "cond: create the directory fixture"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: *" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_DIR}")
 assert_http_status "400" "$HTTP_CODE" \
@@ -1115,7 +1104,7 @@ cleanup_recursive "$ETAG_DIR"
 # were wrong the next request on the same connection would hang or read the
 # previous response's tail -- curl reuses the connection when both URLs are
 # given in one invocation, so a second 304 here is the evidence.
-CODES=$(curl -s --max-time 30 -o /dev/null -w '%{http_code} ' -u "$AUTH" \
+CODES=$(curl -s --max-time 30 -o /dev/null -w '%{http_code} ' -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: ${CETAGNEW}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}" \
 	"${BASE_URL}/zosmf/restfiles/fs${ETAG_FILE}")
@@ -1151,20 +1140,20 @@ echo "--- Delete file ---"
 
 # Create a file to delete
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}" 2>&1
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}")
 
 assert_http_status "204" "$HTTP_CODE" "delete file ${DELETE_FILE}"
 
 # Verify it's gone
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_FILE}")
 
 assert_http_status "404" "$HTTP_CODE" "deleted file returns 404"
@@ -1173,7 +1162,7 @@ echo ""
 echo "--- Delete non-existent file ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs/nonexistent/file/path.txt")
 
 assert_http_status "404" "$HTTP_CODE" "delete non-existent file returns 404"
@@ -1183,13 +1172,13 @@ echo "--- Delete empty directory ---"
 
 # Create a directory to delete
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}" 2>&1
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR}")
 
 assert_http_status "204" "$HTTP_CODE" "delete empty directory"
@@ -1199,19 +1188,19 @@ echo "--- Delete non-empty directory (no recursive) ---"
 
 # Create dir with a file inside
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}" 2>&1
 
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}/child.txt" 2>&1
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}")
 
 assert_http_status "400" "$HTTP_CODE" "delete non-empty dir without recursive returns 400"
@@ -1220,7 +1209,7 @@ echo ""
 echo "--- Delete non-empty directory (recursive) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Option: recursive" \
 	"${BASE_URL}/zosmf/restfiles/fs${DELETE_DIR_REC}")
 
@@ -1228,7 +1217,7 @@ assert_http_status "204" "$HTTP_CODE" "delete non-empty dir with recursive"
 
 # Verify it's gone
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${DELETE_DIR_REC}")
 
 assert_http_status "404" "$HTTP_CODE" "recursively deleted dir returns 404"
@@ -1252,7 +1241,7 @@ echo ""
 echo "--- Create directory ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
@@ -1263,7 +1252,7 @@ echo ""
 echo "--- Create directory (already exists) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR}")
@@ -1274,7 +1263,7 @@ echo ""
 echo "--- Create file ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE}")
@@ -1285,7 +1274,7 @@ echo ""
 echo "--- Create file with mode ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file","mode":"rw-r--r--"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${CREATE_FILE_MODE}")
@@ -1296,7 +1285,7 @@ echo ""
 echo "--- Create directory (dir alias) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"dir"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${CREATE_DIR_ALIAS}")
@@ -1307,7 +1296,7 @@ echo ""
 echo "--- Create error cases ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"mode":"rwxr-xr-x"}' \
 	"${BASE_URL}/zosmf/restfiles/fs/tmp/test-no-type")
@@ -1315,7 +1304,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "400" "$HTTP_CODE" "create without type returns 400"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"symlink"}' \
 	"${BASE_URL}/zosmf/restfiles/fs/tmp/test-bad-type")
@@ -1323,7 +1312,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "400" "$HTTP_CODE" "create with invalid type returns 400"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs/nonexistent/parent/dir/file.txt")
@@ -1358,7 +1347,7 @@ echo "--- Integration: full CRUD lifecycle ---"
 
 # Create directory
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_DIR}")
@@ -1367,7 +1356,7 @@ assert_http_status "201" "$HTTP_CODE" "integration: create directory"
 
 # Create file inside directory
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
@@ -1376,7 +1365,7 @@ assert_http_status "201" "$HTTP_CODE" "integration: create file"
 
 # Write content to file
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-d "Integration test content line 1" \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
 
@@ -1384,7 +1373,7 @@ assert_http_status "204" "$HTTP_CODE" "integration: write file"
 
 # Read content back
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -1398,7 +1387,7 @@ fi
 
 # List directory and verify file appears
 RESP=$(curl -s -w '\n%{http_code}' \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${INT_DIR}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -1414,21 +1403,21 @@ fi
 
 # Delete file
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_FILE}")
 
 assert_http_status "204" "$HTTP_CODE" "integration: delete file"
 
 # Delete directory
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${INT_DIR}")
 
 assert_http_status "204" "$HTTP_CODE" "integration: delete empty directory"
 
 # Verify directory is gone
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${INT_DIR}")
 
 assert_http_status "404" "$HTTP_CODE" "integration: directory gone after delete"
@@ -1443,39 +1432,39 @@ NEST_FILE2="${NEST_SUB}/nested.txt"
 
 # Create nested structure: dir/top.txt + dir/subdir/nested.txt
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}" 2>&1
 
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE1}" 2>&1
 
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"directory"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_SUB}" 2>&1
 
 curl -s -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"type":"file"}' \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE2}" 2>&1
 
 # Non-recursive delete should fail
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}")
 
 assert_http_status "400" "$HTTP_CODE" "nested: non-recursive delete fails"
 
 # Recursive delete should succeed
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Option: recursive" \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_DIR}")
 
@@ -1483,13 +1472,13 @@ assert_http_status "204" "$HTTP_CODE" "nested: recursive delete succeeds"
 
 # Verify everything is gone
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs?path=${NEST_DIR}")
 
 assert_http_status "404" "$HTTP_CODE" "nested: directory tree gone after recursive delete"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/fs${NEST_FILE2}")
 
 assert_http_status "404" "$HTTP_CODE" "nested: nested file gone after recursive delete"
@@ -1513,11 +1502,11 @@ USS_LONG_PATH=$(printf 'a%.0s' $(seq 1 300))
 
 for USS_M in GET PUT POST DELETE; do
 	if [ "$USS_M" = "PUT" ]; then
-		BODY=$(curl -s -w '\n%{http_code}' -X PUT -u "$AUTH" -H "Expect:" \
+		BODY=$(curl -s -w '\n%{http_code}' -X PUT -K "$MVSMF_CURLRC" -H "Expect:" \
 			--data-binary 'hello' \
 			"${BASE_URL}/zosmf/restfiles/fs/${USS_LONG_PATH}")
 	else
-		BODY=$(curl -s -w '\n%{http_code}' -X "$USS_M" -u "$AUTH" -H "Expect:" \
+		BODY=$(curl -s -w '\n%{http_code}' -X "$USS_M" -K "$MVSMF_CURLRC" -H "Expect:" \
 			"${BASE_URL}/zosmf/restfiles/fs/${USS_LONG_PATH}")
 	fi
 	HTTP_CODE=$(echo "$BODY" | tail -1)

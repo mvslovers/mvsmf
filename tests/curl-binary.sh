@@ -6,36 +6,25 @@
 # Uploads a known binary file, downloads it back, and compares byte-exact.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #
 # Usage:
-#   ./tests/curl-binary.sh
+#   mbt run rest-tests -- curl-binary
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
 BINARY_FILE="${SCRIPT_DIR}/data/binary80.bin"
-
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
 
 if [ ! -f "$BINARY_FILE" ]; then
 	echo "ERROR: ${BINARY_FILE} not found."
 	exit 1
 fi
 
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
 # Test dataset names
 TEST_SEQ="${MVSMF_USER}.CURL.TESTBIN"
@@ -43,7 +32,7 @@ TEST_PDS="${MVSMF_USER}.CURL.TESTBPDS"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
-trap 'rm -f "$DOWNLOAD_FILE"' EXIT
+mvsmf_on_exit 'rm -f "$DOWNLOAD_FILE"'
 
 # --- state ---
 PASSED=0
@@ -92,8 +81,8 @@ assert_http_status() {
 # =========================================================================
 
 cleanup_datasets() {
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -119,7 +108,7 @@ echo "--- Create Sequential Dataset (FB80) ---"
 
 BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
@@ -129,7 +118,7 @@ echo ""
 echo "--- Upload Binary to Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	-H "X-IBM-Data-Type: binary" \
 	--data-binary @"$BINARY_FILE" \
@@ -140,7 +129,7 @@ echo ""
 echo "--- Download Binary from Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "200" "$HTTP_CODE" "download binary from sequential dataset"
@@ -161,7 +150,7 @@ echo ""
 echo "--- Delete Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "204" "$HTTP_CODE" "delete sequential dataset"
 
@@ -174,7 +163,7 @@ echo "--- Create PDS (FB80) ---"
 
 BODY='{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
@@ -184,7 +173,7 @@ echo ""
 echo "--- Upload Binary to PDS Member ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	-H "X-IBM-Data-Type: binary" \
 	--data-binary @"$BINARY_FILE" \
@@ -195,7 +184,7 @@ echo ""
 echo "--- Download Binary from PDS Member ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BINMBR)")
 assert_http_status "200" "$HTTP_CODE" "download binary from PDS member"
@@ -220,7 +209,7 @@ echo ""
 echo "--- Cleanup ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
 assert_http_status "204" "$HTTP_CODE" "cleanup: delete PDS"
 

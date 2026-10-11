@@ -10,58 +10,24 @@
 #   5. zowe files delete uss-file
 #
 # Prerequisites:
-#   - Copy tests/.config/zowe.config.json.example to
-#     tests/.config/zowe.config.json and fill in credentials
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - Zowe CLI must be installed (npm i -g @zowe/cli)
 #   - UFSD subsystem must be running on the target MVS system
 #
 # Usage:
-#   ./tests/zowe-uss.sh
+#   mbt run rest-tests -- zowe-uss
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
+MVS_USER="$MVSMF_USER"
 
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-MVS_USER="${MVSMF_USER:-}"
-if [ -z "$MVS_USER" ]; then
-	echo "ERROR: MVSMF_USER is not set in ${ENV_FILE}."
-	echo "  Without it every data set name is built from an empty prefix and the"
-	echo "  suite silently works on the wrong HLQ. Refusing to run. See issue #204."
-	exit 1
-fi
-
-# Every connection option goes on every invocation. A Zowe base profile is
-# merged into each command and overrides host and credentials silently --
-# passing --user/--password alone is not enough, the request still goes to
-# the base profile's host and comes back 401. See issue #204.
-ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
-	--protocol "${MVSMF_PROTOCOL:-http}"
-	--user "$MVS_USER" --password "$MVSMF_PASS"
-	--reject-unauthorized false)
-
-# CONFIG_DIR="${SCRIPT_DIR}/.config"
-# CONFIG_FILE="${CONFIG_DIR}/zowe.config.json"
-#
-# if [ ! -f "$CONFIG_FILE" ]; then
-# 	echo "ERROR: ${CONFIG_FILE} not found."
-# 	echo "Copy zowe.config.json.example to zowe.config.json and fill in your values."
-# 	exit 1
-# fi
-#
-# # Tell Zowe to use our local config
-# export ZOWE_CLI_HOME="$CONFIG_DIR"
+# ZOWE_CONN comes from conn.sh: the connection on every call, and the
+# session token in the environment rather than a password (#204, #400).
 
 # PID-based unique test directory to avoid collisions
 TEST_BASE="/tmp"

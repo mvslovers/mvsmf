@@ -11,14 +11,14 @@
 # is /www, so this is served as /mvsmf/). Override with DESKTOP_UFS_DIR
 # if your HTTPD DOCROOT differs, e.g. /wwwroot/mvsmf.
 #
-# Connection is read from .env at the repo root. It uses the same
-# MVSMF_* variables as the curl test suites, falling back to the mbt
-# MBT_MVS_* variables when those are not set.
+# The connection comes from the mbt target, the same way the REST test
+# suites get it (tests/lib/conn.sh): the target's mvsMF URL and user and
+# the token of mbt's session -- no password.
 #
 # Usage:
-#   tools/deploy-desktop.sh              deploy static/ to the UFS
-#   tools/deploy-desktop.sh --dry-run    print what would happen, no upload
-#   DESKTOP_UFS_DIR=/wwwroot/mvsmf tools/deploy-desktop.sh
+#   mbt run deploy-desktop                   deploy static/ to the UFS
+#   mbt run deploy-desktop -- --dry-run      print what would happen, no upload
+#   DESKTOP_UFS_DIR=/wwwroot/mvsmf mbt run deploy-desktop
 # =========================================================================
 set -uo pipefail
 
@@ -29,31 +29,13 @@ cd "$ROOT_DIR"
 DRY_RUN=0
 [ "${1:-}" = "--dry-run" ] || [ "${1:-}" = "-n" ] && DRY_RUN=1
 
-ENV_FILE="${ROOT_DIR}/.env"
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found. Copy .env.example to .env and fill it in." >&2
-	exit 1
-fi
-# shellcheck source=/dev/null
-. "$ENV_FILE"
+# shellcheck source=../tests/lib/conn.sh
+. "${ROOT_DIR}/tests/lib/conn.sh"
 
-# Prefer the test-suite variables; fall back to the mbt deploy variables.
-MVS_HOST="${MVSMF_HOST:-${MBT_MVS_HOST:-}}"
-MVS_PORT="${MVSMF_PORT:-${MBT_MVS_PORT:-1080}}"
-MVS_USER="${MVSMF_USER:-${MBT_MVS_USER:-}}"
-MVS_PASS="${MVSMF_PASS:-${MBT_MVS_PASS:-}}"
 DESKTOP_UFS_DIR="${DESKTOP_UFS_DIR:-/www/mvsmf}"
-
-if [ "$DRY_RUN" != "1" ] && { [ -z "$MVS_HOST" ] || [ -z "$MVS_USER" ]; }; then
-	echo "ERROR: set MVSMF_HOST/MVSMF_USER/MVSMF_PASS (or MBT_MVS_*) in .env" >&2
-	exit 1
-fi
-
-BASE_URL="http://${MVS_HOST}:${MVS_PORT}"
-AUTH="${MVS_USER}:${MVS_PASS}"
 API="${BASE_URL}/zosmf/restfiles/fs"
 
-echo "Deploying static/ -> ${BASE_URL}${DESKTOP_UFS_DIR}  (as ${MVS_USER})"
+echo "Deploying static/ -> ${BASE_URL}${DESKTOP_UFS_DIR}  (as ${MVSMF_USER})"
 [ "$DRY_RUN" = "1" ] && echo "(dry run — no requests sent)"
 
 FAILED=0
@@ -63,7 +45,7 @@ create_dir() {
 	local d="$1" code
 	if [ "$DRY_RUN" = "1" ]; then echo "  mkdir  ${d}"; return 0; fi
 	code=$(curl -s -o /dev/null -w '%{http_code}' \
-		-X POST -u "$AUTH" \
+		-X POST -K "$MVSMF_CURLRC" \
 		-H "Content-Type: application/json" \
 		-d '{"type":"directory"}' \
 		"${API}${d}")
@@ -79,7 +61,7 @@ put_file() {
 	local src="$1" dst="$2" code
 	if [ "$DRY_RUN" = "1" ]; then echo "  put    ${dst}"; return 0; fi
 	code=$(curl -s -o /dev/null -w '%{http_code}' \
-		-X PUT -u "$AUTH" \
+		-X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" \
 		-H "Content-Type: text/plain" \
 		--data-binary @"${src}" \

@@ -56,7 +56,7 @@ Practical consequences when reasoning about these checks:
   hold ALTER through the generic profile, so only `SYS1.SECURE.*` (where RAKFADM
   is capped at UPDATE) can refuse anything, and only for ALTER.
 - An **ordinary** userid is the one that exercises READ and UPDATE refusals.
-  `MVSMF_USER2`/`MVSMF_PASS2` in `.env` enable that section of
+  A further user `test2` of the mbt target enables that section of
   `tests/curl-datasets.sh`.
 - RAKF resolution is **not** "most specific wins": a universal `NONE` line is
   overridden by a group grant from the *generic* profile, while a group line on

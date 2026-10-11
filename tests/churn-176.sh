@@ -1,17 +1,11 @@
 #!/bin/bash
 # tests/churn-176.sh — concurrent unsol churn, every request reports
 set -u
-[ -f .env ] && . ./.env
+# The connection comes from the mbt target (tests/lib/conn.sh): run this
+# through `mbt run rest-tests -- churn-176`.
+. "$(dirname "$0")/lib/conn.sh"
 
-# The other suites in tests/ read MVSMF_*; deploy tooling sets MBT_MVS_*.
-# Accept either so this runs from the same .env as everything else.
-MVSMF_HOST="${MVSMF_HOST:-${MBT_MVS_HOST:-}}"
-MVSMF_PORT="${MVSMF_PORT:-${MBT_MVS_PORT:-}}"
-MVSMF_USER="${MVSMF_USER:-${MBT_MVS_USER:-}}"
-MVSMF_PASS="${MVSMF_PASS:-${MBT_MVS_PASS:-}}"
-
-B="http://${MVSMF_HOST}:${MVSMF_PORT}"
-A="${MVSMF_USER}:${MVSMF_PASS}"
+B="$BASE_URL"
 CT='Content-Type: application/json'
 CSRF='X-CSRF-ZOSMF-HEADER: true'
 CONS="$B/zosmf/restconsoles/consoles/defcn"
@@ -25,11 +19,11 @@ worker() { # $1 = id, $2 = mode
 	while true; do
 		n=$((n + 1))
 		if [ "$2" = "unsol" ]; then
-			c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X PUT "$CONS" -u "$A" \
+			c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X PUT "$CONS" -K "$MVSMF_CURLRC" \
 				-H "$CT" -H "$CSRF" \
 				-d '{"cmd":"D T","unsol-key":"ZZZNOMATCH","unsol-detect-sync":"Y","unsol-detect-timeout":"20"}')
 		else
-			c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X PUT "$CONS" -u "$A" \
+			c=$(curl -s -o /dev/null -w '%{http_code}' --max-time 90 -X PUT "$CONS" -K "$MVSMF_CURLRC" \
 				-H "$CT" -H "$CSRF" -d '{"cmd":"D T","async":"N"}')
 		fi
 		echo "$(date +%H:%M:%S) t$1 $n $c" >>"$LOG"

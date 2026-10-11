@@ -1,26 +1,20 @@
 #!/bin/bash
 # tests/loadtest-176.sh — hunt the intermittent S0C4 in the console handler
-# Usage: ./tests/loadtest-176.sh <A|B|C> [iterations]
+# Usage: mbt run rest-tests -- loadtest-176 <A|B|C> [iterations]
 #   A = full PUT      (MGCR + capture_response + correlate_once + nt_set)
 #   B = /test fn=cmd  (MGCR + MTT poll, no correlate_once, no nt_set)
 #   C = /v1/log       (MTT read only, no command)
 # Restart the HTTPD STC before every run.
 
 set -u
-[ -f .env ] && . ./.env
-
-# The other suites in tests/ read MVSMF_*; deploy tooling sets MBT_MVS_*.
-# Accept either so this runs from the same .env as everything else.
-MVSMF_HOST="${MVSMF_HOST:-${MBT_MVS_HOST:-}}"
-MVSMF_PORT="${MVSMF_PORT:-${MBT_MVS_PORT:-}}"
-MVSMF_USER="${MVSMF_USER:-${MBT_MVS_USER:-}}"
-MVSMF_PASS="${MVSMF_PASS:-${MBT_MVS_PASS:-}}"
+# The connection comes from the mbt target (tests/lib/conn.sh): run this
+# through `mbt run rest-tests -- loadtest-176`.
+. "$(dirname "$0")/lib/conn.sh"
 
 
 ARM="${1:?arm required: A, B or C}"
 N="${2:-500}"
-BASE="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
+BASE="$BASE_URL"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="loadtest-176-${ARM}-${STAMP}.log"
 
@@ -29,14 +23,14 @@ echo "arm=$ARM iterations=$N base=$BASE" | tee "$LOG"
 for i in $(seq 1 "$N"); do
 	case "$ARM" in
 	A) code=$(curl -s -o /dev/null -w '%{http_code}' -X PUT \
-		"$BASE/zosmf/restconsoles/consoles/defcn" -u "$AUTH" \
+		"$BASE/zosmf/restconsoles/consoles/defcn" -K "$MVSMF_CURLRC" \
 		-H 'Content-Type: application/json' \
 		-H 'X-CSRF-ZOSMF-HEADER: true' \
 		-d '{"cmd":"D T","async":"N"}') ;;
 	B) code=$(curl -s -o /dev/null -w '%{http_code}' \
-		"$BASE/zosmf/test?fn=cmd&cmd=D+T" -u "$AUTH") ;;
+		"$BASE/zosmf/test?fn=cmd&cmd=D+T" -K "$MVSMF_CURLRC") ;;
 	C) code=$(curl -s -o /dev/null -w '%{http_code}' \
-		"$BASE/zosmf/restconsoles/v1/log" -u "$AUTH") ;;
+		"$BASE/zosmf/restconsoles/v1/log" -K "$MVSMF_CURLRC") ;;
 	*)
 		echo "unknown arm: $ARM"
 		exit 2
@@ -49,9 +43,9 @@ for i in $(seq 1 "$N"); do
 	if [ "$code" != "200" ]; then
 		echo "FAILED arm=$ARM N=$i code=$code" | tee -a "$LOG"
 		# snapshot while the address space is still alive
-		curl -s "$BASE/zosmf/test?fn=mtt&step=3" -u "$AUTH" \
+		curl -s "$BASE/zosmf/test?fn=mtt&step=3" -K "$MVSMF_CURLRC" \
 			>"mtt-at-fail-${ARM}-${STAMP}.json"
-		curl -s "$BASE/zosmf/restconsoles/v1/log" -u "$AUTH" \
+		curl -s "$BASE/zosmf/restconsoles/v1/log" -K "$MVSMF_CURLRC" \
 			>"log-at-fail-${ARM}-${STAMP}.json"
 		echo "snapshots written" | tee -a "$LOG"
 		exit 1

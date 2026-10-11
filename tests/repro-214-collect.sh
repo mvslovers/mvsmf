@@ -32,39 +32,29 @@
 # Exit status: 0 = correct (expected), 1 = the defect is back, 2 = inconclusive
 # (the system did not give the script what it needs -- rerun).
 #
-# Usage:  ./tests/repro-214-collect.sh
+# Usage:  mbt run rest-tests -- repro-214-collect
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found. Copy .env.example and fill it in."
-	exit 2
-fi
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 CONSOLE="${BASE_URL}/zosmf/restconsoles/consoles/defcn"
 LOG="${BASE_URL}/zosmf/restconsoles/v1/log"
 
 DEFECTS=0
 
 issue() {  # $1 = json body -> whole response body
-	curl -s -m 30 -u "$AUTH" -X PUT -H 'Content-Type: application/json' \
+	curl -s -m 30 -K "$MVSMF_CURLRC" -X PUT -H 'Content-Type: application/json' \
 		-d "$1" "$CONSOLE"
 }
 collect() {  # $1 = key -> cmd-response with \r turned into newlines
-	curl -s -m 30 -u "$AUTH" "${CONSOLE}/solmsgs/$1" |
+	curl -s -m 30 -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/$1" |
 		jq -r '.["cmd-response"] // ""' | tr '\r' '\n'
 }
 newest_time() {  # newest IEE136I in the trace table -> its TIME=hh.mm.ss
-	curl -s -m 30 -u "$AUTH" "${LOG}?timeRange=5m" |
+	curl -s -m 30 -K "$MVSMF_CURLRC" "${LOG}?timeRange=5m" |
 		jq -r '[.items[] | select(.message | test("IEE136I"))] | last | .message' |
 		sed -n 's/.*LOCAL: TIME=\([0-9.]*\).*/\1/p'
 }

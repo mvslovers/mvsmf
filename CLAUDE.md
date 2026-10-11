@@ -217,10 +217,17 @@ use a gitignored `.mbt/deps.local.toml` `[override]`.
 ### Configuration
 
 mbt reaches MVS through a target in `~/.mbt/targets.toml` (per machine;
-`mbt target import .env --name <name>` converts a `.env`). The REST test
-suites in `tests/` still read `.env` (gitignored, template `.env.example`):
-`MBT_MVS_HOST`, `MBT_MVS_PORT`, `MBT_MVS_USER`, `MBT_MVS_PASS`, and optionally
-`MVSMF_USER2` / `MVSMF_PASS2`.
+`mbt target import .env --name <name>` converts an old `.env`). Nothing reads
+`.env` any more (#400): the REST suites and the Desktop deploy run through mbt
+(`mbt run rest-tests`, `mbt run deploy-desktop`, `mbt/init.lua`) and take the
+connection from that target. The authorization tests need a second, ordinary
+userid, a further user of the target:
+
+```toml
+[target.<name>.mvsmf.users.test2]
+user     = "..."
+password = { keychain = "..." }
+```
 
 clangd provides IDE diagnostics (configured in `.clangd`).
 
@@ -552,11 +559,32 @@ Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, 
 
 ### Integration Tests
 
-Test suites live in `tests/`:
+Test suites live in `tests/` and `mbt/lua/`, and run through mbt:
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`
+```bash
+mbt run rest-tests                        # everything but curl-diag and curl-nospace
+mbt run rest-tests -- curl-jobs zowe      # one suite, a group (lua, curl, zowe, all)
+mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each suite
+```
+
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh` and `curl-nospace.sh` by name only
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
-- **test.sh**: Top-level runner
+- **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
+- **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`
+
+**No suite sees a password, and no shell suite may log off.** mbt hands over
+the target's URL and user and its session token (`MVSMF_TOKEN`); curl sends it
+with `-K "$MVSMF_CURLRC"`, Zowe through the environment. Every suite of a run
+shares that one session, so a `DELETE /zosmf/services/authenticate` with it
+ends the run for every suite after. A test that needs a password -- a Basic
+logon, a wrong password, a logout, two logins -- goes into `mbt/lua/`, where
+`ctx.mvs.request{ auth = ... }` and `ctx.mvs.session{}` send the credentials
+and Lua sees only the answers (mbt's ML02-0002, "The Table ctx").
+
+Zowe runs from a home of its own outside the home directory (`conn.sh`): it
+merges every `zowe.config.json` from its working directory upwards, a
+`~/zowe.config.json` included, and a layer with a user and password wins over
+the token without a word -- the request goes out with Basic auth.
 
 Both curl and Zowe suites should cover every endpoint with all relevant variations (query parameters, headers, error cases). When touching a handler, verify the corresponding tests are complete and up to date.
 

@@ -241,15 +241,22 @@ unreleased dependency, use a gitignored `.mbt/deps.local.toml` override.
 `~/.mbt/targets.toml`, set up once per machine (`mbt target import .env --name
 <name>` converts an existing `.env`).
 
-The REST test suites in `tests/` read their connection from `.env` at the repo
-root (never committed — copy `.env.example`):
+The REST test suites run through mbt and take their connection from the same
+target — its mvsMF URL and user, and a session token, never the password:
 
-| Variable | Description |
-|----------|-------------|
-| `MBT_MVS_HOST` | IP or hostname of the MVS system |
-| `MBT_MVS_PORT` | mvsMF API port |
-| `MBT_MVS_USER` / `MBT_MVS_PASS` | MVS userid / password |
-| `MVSMF_USER2` / `MVSMF_PASS2` | Optional ordinary userid for the authorization tests |
+```bash
+mbt run rest-tests                     # all suites
+mbt run rest-tests -- curl-datasets    # one of them
+```
+
+The authorization tests need a second, ordinary userid. Give the target a
+further user `test2` for them; without one, that section is skipped:
+
+```toml
+[target.<name>.mvsmf.users.test2]
+user     = "USER2"
+password = { keychain = "mbt/<name>-test2" }
+```
 
 ## Usage
 

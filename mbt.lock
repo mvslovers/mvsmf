@@ -12,7 +12,7 @@
     "version": "1.4.0-dev"
   },
   "plugin:mvslovers/mbt-stc": {
-    "sha256": "0ef151ece6afdf95b272131a6c09feb893b7ae8c54c7726c1aaf5e2e936204a8",
-    "version": "0.1.3"
+    "sha256": "f2b6882fe28be89291c80e5d4631054fbad5f9487c8b4d9b906e18059ec6e412",
+    "version": "0.1.4"
   }
 }

@@ -9,30 +9,19 @@
 # responses, solicited-keyword detection, and the error cases.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #
 # Usage:
-#   ./tests/curl-console.sh
+#   mbt run rest-tests -- curl-console
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 CONSOLE="${BASE_URL}/zosmf/restconsoles/consoles/defcn"
 
 # --- state ---
@@ -88,7 +77,7 @@ assert_contains() {
 # PUT a command body, echo "BODY\nHTTP_CODE"
 issue() {
 	# $1 = json body, $2 = console url (optional, default $CONSOLE)
-	curl -s -w '\n%{http_code}' -u "$AUTH" -X PUT \
+	curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" -X PUT \
 		-H "Content-Type: application/json" \
 		-d "$1" "${2:-$CONSOLE}"
 }
@@ -204,7 +193,7 @@ echo "--- concurrency: no cross-request contamination ---"
 # refusal to issue, which is the point.
 cons_bg() {
 	for _ in 1 2 3 4 5 6 7 8 9 10; do
-		curl -s -o /dev/null -m 30 -u "$AUTH" -X PUT \
+		curl -s -o /dev/null -m 30 -K "$MVSMF_CURLRC" -X PUT \
 			-H 'Content-Type: application/json' \
 			-d '{"cmd":"F HTTPD,D P"}' "$CONSOLE" || true
 	done
@@ -263,12 +252,12 @@ KEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
 if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
 	sleep 5   # let the multi-line response land in the trace table
 	# first collect: the full response block
-	RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/${KEY}")
 	CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
 	assert_http_status "200" "$CODE" "collect #1"
 	assert_contains "$CBODY" '.["cmd-response"]' "IEE102I" "collect #1: returns the response"
 	# second collect: empty (cursor advanced -> done)
-	CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	CBODY=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/${KEY}")
 	assert_json_field "$CBODY" '.["cmd-response"]' "" "collect #2: empty (done)"
 else
 	fail "async issue returned no cmd-response-key"
@@ -278,11 +267,11 @@ fi
 RESP=$(issue '{"cmd":"D T"}')
 BODY=$(echo "$RESP" | sed '$d')
 KEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
-CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+CBODY=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/${KEY}")
 assert_json_field "$CBODY" '.["cmd-response"]' "" "collect after sync issue: empty"
 
 # unknown / stale key -> empty, HTTP 200 (not an error)
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/solmsgs/DEADBEEFCAFE0000")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/DEADBEEFCAFE0000")
 CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$CODE" "collect bogus key"
 assert_json_field "$CBODY" '.["cmd-response"]' "" "collect bogus: empty"
@@ -305,7 +294,7 @@ if [ -n "$KEY" ] && [ "$KEY" != "null" ]; then
 	sleep 2
 	issue '{"cmd":"D A,L"}' >/dev/null
 	sleep 1
-	CBODY=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${KEY}")
+	CBODY=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/${KEY}")
 	CRESP=$(echo "$CBODY" | jq -r '.["cmd-response"] // ""' 2>/dev/null)
 	case "$CRESP" in
 		*IEFPROC*) fail "collect: the 'D A' key kept its own block" \
@@ -335,7 +324,7 @@ assert_json_exists "$BODY" '.["detection-key"]' "async detect: detection-key pre
 assert_json_exists "$BODY" '.["detection-url"]' "async detect: detection-url present"
 if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
 	issue '{"cmd":"D T"}' >/dev/null         # fresh IEE136I, after the baseline
-	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	RESP=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/detections/${DKEY}")
 	assert_json_field "$RESP" '.status' "detected" "detection: detected after new IEE136I"
 	assert_contains   "$RESP" '.msg' "IEE136I" "detection: msg has IEE136I"
 fi
@@ -345,7 +334,7 @@ RESP=$(issue '{"cmd":"D T","unsol-key":"ZZNOMATCH99","detect-time":"60"}')
 BODY=$(echo "$RESP" | sed '$d')
 DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
 if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
-	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	RESP=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/detections/${DKEY}")
 	assert_json_field "$RESP" '.status' "waiting" "detection: waiting (no match yet)"
 fi
 
@@ -355,12 +344,12 @@ BODY=$(echo "$RESP" | sed '$d')
 DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)
 if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
 	sleep 3
-	RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+	RESP=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/detections/${DKEY}")
 	assert_json_field "$RESP" '.status' "expired" "detection: expired after window"
 fi
 
 # unknown detection key -> 500 / 5 / 9
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "${CONSOLE}/detections/DBADBAD0")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "${CONSOLE}/detections/DBADBAD0")
 CODE=$(echo "$RESP" | tail -1); CBODY=$(echo "$RESP" | sed '$d')
 assert_http_status "500" "$CODE" "detection unknown key"
 assert_json_field  "$CBODY" '.["reason-code"]' "9" "unknown detection: reason-code 9"
@@ -392,7 +381,7 @@ if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
 	CKEY=$(echo "$BODY" | jq -r '.["cmd-response-key"]' 2>/dev/null)
 	if [ -n "$DKEY" ] && [ "$DKEY" != "null" ]; then
 		sleep 3
-		RESP=$(curl -s -u "$AUTH" "${CONSOLE}/detections/${DKEY}")
+		RESP=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/detections/${DKEY}")
 		assert_json_field "$RESP" '.status' "detected" "P FTPD: ENDED detected (async)"
 		assert_contains   "$RESP" '.msg' "FTPD" "P FTPD: msg mentions FTPD"
 	fi
@@ -412,7 +401,7 @@ if [ "${RUN_FTPD_TESTS:-0}" = "1" ]; then
 	if [ -n "$CKEY" ] && [ "$CKEY" != "null" ]; then
 		COLLECTED=""
 		for _ in 1 2 3; do
-			MORE=$(curl -s -u "$AUTH" "${CONSOLE}/solmsgs/${CKEY}" |
+			MORE=$(curl -s -K "$MVSMF_CURLRC" "${CONSOLE}/solmsgs/${CKEY}" |
 				jq -r '.["cmd-response"] // ""' 2>/dev/null)
 			[ -n "$MORE" ] && COLLECTED="${COLLECTED}${MORE}"
 			sleep 1
@@ -459,7 +448,7 @@ echo "--- hardcopy log ---"
 LOG="${BASE_URL}/zosmf/restconsoles/v1/log"
 
 # default-ish window -> 200 with the expected envelope
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=5m")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$LOG?timeRange=5m")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$CODE" "log 5m"
 assert_json_field  "$BODY" '.source' "SYSLOG" "log: source SYSLOG"
@@ -469,8 +458,8 @@ assert_json_exists "$BODY" '.nextTimestamp' "log: nextTimestamp present"
 assert_json_exists "$BODY" '.items'         "log: items present"
 
 # the window actually moves: 600m must return >= the 5m count
-N5=$(curl -s -u "$AUTH" "$LOG?timeRange=5m"   | jq -r '.totalitems' 2>/dev/null)
-N600=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -r '.totalitems' 2>/dev/null)
+N5=$(curl -s -K "$MVSMF_CURLRC" "$LOG?timeRange=5m"   | jq -r '.totalitems' 2>/dev/null)
+N600=$(curl -s -K "$MVSMF_CURLRC" "$LOG?timeRange=600m" | jq -r '.totalitems' 2>/dev/null)
 if [ -n "$N5" ] && [ -n "$N600" ] && [ "$N600" -ge "$N5" ] 2>/dev/null; then
 	pass "log: wider window returns >= items (5m=$N5 600m=$N600)"
 else
@@ -478,7 +467,7 @@ else
 fi
 
 # items carry the expected per-message fields
-FIRST=$(curl -s -u "$AUTH" "$LOG?timeRange=600m" | jq -c '.items[0]' 2>/dev/null)
+FIRST=$(curl -s -K "$MVSMF_CURLRC" "$LOG?timeRange=600m" | jq -c '.items[0]' 2>/dev/null)
 if [ -n "$FIRST" ] && [ "$FIRST" != "null" ]; then
 	assert_json_exists "$FIRST" '.message'   "log item: message"
 	assert_json_exists "$FIRST" '.time'      "log item: time"
@@ -487,23 +476,23 @@ if [ -n "$FIRST" ] && [ "$FIRST" != "null" ]; then
 fi
 
 # hardcopy=operlog falls back to SYSLOG (no OPERLOG on 3.8j)
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=2m&hardcopy=operlog")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$LOG?timeRange=2m&hardcopy=operlog")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "200" "$CODE" "log hardcopy=operlog"
 assert_json_field  "$BODY" '.source' "SYSLOG" "log operlog: falls back to SYSLOG"
 
 # invalid params
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?timeRange=xyz")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$LOG?timeRange=xyz")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "400" "$CODE" "log bad timeRange"
 assert_json_field  "$BODY" '.["reason-code"]' "22" "log bad timeRange: reason 22"
 
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?sysName=TOOLONGNAME")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$LOG?sysName=TOOLONGNAME")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "400" "$CODE" "log sysName too long"
 assert_json_field  "$BODY" '.["reason-code"]' "24" "log sysName: reason 24"
 
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$LOG?direction=sideways")
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$LOG?direction=sideways")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "400" "$CODE" "log bad direction"
 assert_json_field  "$BODY" '.["reason-code"]' "22" "log bad direction: reason 22"
@@ -522,7 +511,7 @@ assert_json_field  "$BODY" '.["return-code"]' "1"  "missing cmd: return-code 1"
 assert_json_field  "$BODY" '.["reason-code"]' "13" "missing cmd: reason-code 13"
 
 # bad Content-Type -> 400 / 1 / 6
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" -X PUT \
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" -X PUT \
 	-H "Content-Type: text/plain" -d '{"cmd":"D T"}' "$CONSOLE")
 CODE=$(echo "$RESP" | tail -1); BODY=$(echo "$RESP" | sed '$d')
 assert_http_status "400" "$CODE" "bad content-type"

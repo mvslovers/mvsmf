@@ -15,11 +15,12 @@
 #  10. Volume prefix variants: -(vol)/...
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #
 # Usage:
-#   ./tests/curl-datasets.sh
+#   mbt run rest-tests -- curl-datasets
 # =========================================================================
 
 # When a skip is right, and when it is a failure wearing a disguise
@@ -41,20 +42,8 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # Test dataset names
 TEST_SEQ="${MVSMF_USER}.CURL.TESTSEQ"
@@ -142,7 +131,7 @@ assert_json_field_exists() {
 # bytes. The only observable difference is the S913 on the console -- which is
 # how that bug was found, and why this exists.
 mtt_abend_count() {
-	curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=mtt&step=3" 2>/dev/null \
+	curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=mtt&step=3" 2>/dev/null \
 		| grep -c "HANDLER ABEND" || true
 }
 
@@ -179,10 +168,10 @@ assert_json_field_absent() {
 # =========================================================================
 
 cleanup_datasets() {
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TESTENC" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TESTENC" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -205,7 +194,7 @@ echo "--- Create Sequential Dataset ---"
 
 BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_create.json \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
@@ -216,7 +205,7 @@ echo ""
 echo "--- Write Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'LINE 1 TEST DATA\nLINE 2 TEST DATA\nLINE 3 TEST DATA\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
@@ -226,7 +215,7 @@ assert_http_status "204" "$HTTP_CODE" "write sequential dataset"
 echo ""
 echo "--- Read Sequential Dataset ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -251,7 +240,7 @@ fi
 # straight into the stream, which surfaced as a stray ^U (0x15) on every line
 # but the first. Download to a file and check the raw bytes.
 RAW_FILE=$(mktemp)
-curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" > "$RAW_FILE"
+curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" > "$RAW_FILE"
 if LC_ALL=C grep -q $'\025' "$RAW_FILE"; then
 	fail "FB download has no stray control bytes" "found 0x15 (NEL/^U) in text output"
 else
@@ -263,7 +252,7 @@ rm -f "$RAW_FILE"
 echo ""
 echo "--- List Datasets (two-level prefix) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -284,7 +273,7 @@ VOLUME=$(echo "$CONTENT" | jq -r --arg dsn "$TEST_SEQ" \
 echo ""
 echo "--- List Datasets (exact name) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_SEQ}")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -295,7 +284,7 @@ assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
 echo ""
 echo "--- List Datasets (exact two-level name) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=SYS1.MACLIB")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -310,12 +299,12 @@ echo "--- List Datasets (two-level prefix semantics) ---"
 TEST_2LVL="${MVSMF_USER}.CURL"
 BODY_2LVL='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY_2LVL" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_2LVL}" >/dev/null 2>&1
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_2LVL}")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -344,13 +333,13 @@ else
 fi
 
 # Clean up the two-level dataset
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_2LVL}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_2LVL}" >/dev/null 2>&1 || true
 
 # --- List datasets (wildcard *) ---
 echo ""
 echo "--- List Datasets (wildcard *) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.*")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -367,7 +356,7 @@ fi
 echo ""
 echo "--- List Datasets (wildcard **) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.**")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -384,7 +373,7 @@ fi
 echo ""
 echo "--- List Datasets (partial wildcard) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL*")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -403,7 +392,7 @@ echo "--- Create PDS ---"
 
 BODY='{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_pds.json \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
@@ -413,7 +402,7 @@ assert_http_status "201" "$HTTP_CODE" "create PDS"
 echo ""
 echo "--- List Datasets (X-IBM-Max-Items) ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Max-Items: 1" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
@@ -439,7 +428,7 @@ fi
 # The other half: the header alone does not make a listing partial. A limit
 # nothing reaches is a complete answer, and a complete answer carries no
 # moreRows key at all (#279).
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Max-Items: 1000" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
 HTTP_CODE=$(echo "$BODY" | tail -1)
@@ -455,7 +444,7 @@ assert_json_field_absent "$CONTENT" 'has("moreRows")' \
 echo ""
 echo "--- List Datasets (start=) ---"
 
-ALL=$(curl -s -u "$AUTH" \
+ALL=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL" |
 	jq -r '.items[].dsname' 2>/dev/null)
 COUNT=$(echo "$ALL" | grep -c .)
@@ -471,7 +460,7 @@ if [ "$COUNT" -lt 2 ]; then
 else
 	SECOND=$(echo "$ALL" | sed -n 2p)
 
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${SECOND}")
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
@@ -493,12 +482,12 @@ else
 	# start=.
 	BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 	for D in "${MVSMF_USER}.CURL.EXACT" "${MVSMF_USER}.CURL.EXACT.CHILD"; do
-		curl -s -o /dev/null -X POST -u "$AUTH" \
+		curl -s -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 			-H "Content-Type: application/json" -d "$BODY" \
 			"${BASE_URL}/zosmf/restfiles/ds/${D}"
 	done
 
-	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Max-Items: 1" \
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Max-Items: 1" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL.EXACT")
 	if [ "$(echo "$CONTENT" | jq -r '.items[0].dsname' 2>/dev/null)" = "${MVSMF_USER}.CURL.EXACT" ] &&
 	   [ "$(echo "$CONTENT" | jq -r '.moreRows' 2>/dev/null)" = "true" ]; then
@@ -509,13 +498,13 @@ else
 	fi
 
 	for D in "${MVSMF_USER}.CURL.EXACT.CHILD" "${MVSMF_USER}.CURL.EXACT"; do
-		curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 			"${BASE_URL}/zosmf/restfiles/ds/${D}"
 	done
 
 	# past the last name is an empty page, not a full one -- and nothing may
 	# claim there is more to fetch, which since #279 means no moreRows key
-	CONTENT=$(curl -s -u "$AUTH" \
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=ZZZZZZZZ")
 	if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ]; then
 		pass "start= beyond the last dataset returns an empty page"
@@ -544,13 +533,13 @@ else
 	if [ "${#LONG_DSN}" -ne 44 ]; then
 		skip "over-long start= (no 44-character name fits under ${MVSMF_USER}.CURL)"
 	else
-		curl -s -o /dev/null -X POST -u "$AUTH" \
+		curl -s -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 			-H "Content-Type: application/json" \
 			-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' \
 			"${BASE_URL}/zosmf/restfiles/ds/${LONG_DSN}"
 
 		# 44 characters fit, so start= still names the first row
-		LIST=$(curl -s -u "$AUTH" \
+		LIST=$(curl -s -K "$MVSMF_CURLRC" \
 			"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${LONG_DSN}" |
 			jq -r '.items[].dsname' 2>/dev/null)
 
@@ -562,7 +551,7 @@ else
 		fi
 
 		# 45 do not, and the prefix must not readmit the name
-		LIST=$(curl -s -u "$AUTH" \
+		LIST=$(curl -s -K "$MVSMF_CURLRC" \
 			"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL&start=${LONG_DSN}X" |
 			jq -r '.items[].dsname' 2>/dev/null)
 
@@ -573,7 +562,7 @@ else
 				"got: $(echo "$LIST" | tr '\n' ' ') -- a truncated start= must not readmit the prefix"
 		fi
 
-		curl -s -o /dev/null -X DELETE -u "$AUTH" \
+		curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 			"${BASE_URL}/zosmf/restfiles/ds/${LONG_DSN}"
 	fi
 fi
@@ -610,7 +599,7 @@ assert_route_withdrawn() {
 	local what="$1"; shift
 	local body code content
 
-	body=$(curl -s -w '\n%{http_code}' -u "$AUTH" "$@")
+	body=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$@")
 	code=$(echo "$body" | tail -1)
 	content=$(echo "$body" | sed '$d')
 
@@ -648,14 +637,14 @@ if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 
 	# The refused writes must not have created anything -- a 404 that still
 	# wrote would be the old bug wearing a new status.
-	BODY=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+	BODY=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 	if echo "$BODY" | grep -q "VOLUME PREFIX WRITE TEST"; then
 		fail "a withdrawn PUT writes nothing" "the refused PUT reached ${TEST_SEQ}"
 	else
 		pass "a withdrawn PUT writes nothing"
 	fi
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)")
 	assert_http_status "404" "$HTTP_CODE" "a withdrawn PUT creates no member"
 else
@@ -667,7 +656,7 @@ echo ""
 echo "--- Delete Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "204" "$HTTP_CODE" "delete sequential dataset"
 
@@ -676,7 +665,7 @@ echo ""
 echo "--- Delete Dataset: not found ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent dataset"
 
@@ -685,7 +674,7 @@ echo ""
 echo "--- Write PDS Member ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'MEMBER TEST LINE 1\nMEMBER TEST LINE 2\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
@@ -695,7 +684,7 @@ assert_http_status "204" "$HTTP_CODE" "write PDS member"
 echo ""
 echo "--- List PDS Members ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -732,13 +721,13 @@ echo ""
 echo "--- List PDS Members (start=, issue #232) ---"
 
 for M in MBRA MBRB MBRC MBRF1 MBR03; do
-	curl -s -o /dev/null -X PUT -u "$AUTH" \
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "Content-Type: application/octet-stream" \
 		--data-binary "MEMBER ${M}" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"
 done
 
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC" |
 	jq -r '.items[].member' 2>/dev/null)
 
@@ -750,7 +739,7 @@ else
 		"got: $(echo "$LIST" | tr '\n' ' ')"
 fi
 
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBR03" |
 	jq -r '.items[].member' 2>/dev/null)
 
@@ -763,7 +752,7 @@ fi
 
 # the skipped members must not eat the page budget: with the skip applied
 # after the cap this returns zero items and moreRows true
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 2' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -783,7 +772,7 @@ fi
 # the listing no longer pads the names it returns (#154), but a client holding
 # an older list -- or padding a name itself -- still sends the blanks, and
 # start= has to keep tolerating them
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRC%20%20%20%20" |
 	jq -r '.items[].member' 2>/dev/null)
 
@@ -794,7 +783,7 @@ else
 		"got: $(echo "$LIST" | tr '\n' ' ')"
 fi
 
-CONTENT=$(curl -s -u "$AUTH" \
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=ZZZZZZZZ")
 if [ "$(echo "$CONTENT" | jq -r '.returnedRows' 2>/dev/null)" = "0" ]; then
 	pass "start= beyond the last member returns an empty page"
@@ -817,7 +806,7 @@ echo ""
 echo "--- List PDS Members (pattern=, issue #236) ---"
 
 pattern_list() {
-	curl -s -u "$AUTH" \
+	curl -s -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=$1" |
 		jq -r '.items[].member' 2>/dev/null | tr '\n' ' ' |
 		sed 's/ *$//'
@@ -840,7 +829,7 @@ assert_pattern 'MBRC'  'MBRC'
 assert_pattern 'NOSUCH*' ''
 
 # a filtered-out member must not consume a slot of the page
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H 'X-IBM-Max-Items: 2' \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 2' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=MBR%25")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -865,10 +854,10 @@ fi
 # MEMBER_COUNT, not TOTAL: TOTAL is the suite's own test counter, and assigning
 # to it here reset the run tally mid-suite -- which is why the summary line read
 # "188 passed, 0 failed, 2 skipped (141 total)".
-MEMBER_COUNT=$(curl -s -u "$AUTH" \
+MEMBER_COUNT=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member" |
 	jq -r '.returnedRows' 2>/dev/null)
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" -H "X-IBM-Max-Items: ${MEMBER_COUNT}" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" -H "X-IBM-Max-Items: ${MEMBER_COUNT}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -887,14 +876,14 @@ assert_json_field_absent "$CONTENT" 'has("moreRows")' \
 # pattern selects a different set of members, and answering 200 with that list
 # is a wrong answer rather than an error
 LONG_PATTERN=$(printf 'A%.0s' $(seq 1 60))
-HTTP_CODE=$(curl -s -o /tmp/curl_ds_pat.json -w '%{http_code}' -u "$AUTH" \
+HTTP_CODE=$(curl -s -o /tmp/curl_ds_pat.json -w '%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?pattern=${LONG_PATTERN}")
 assert_http_status "400" "$HTTP_CODE" "over-long pattern is rejected"
 assert_json_field "$(cat /tmp/curl_ds_pat.json)" '.reason' "9" \
 	"over-long pattern: reason 9 (pattern too long)"
 
 # pattern= and start= have to compose -- Zowe pages a filtered list
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRB&pattern=MBR%25" |
 	jq -r '.items[].member' 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
 
@@ -916,13 +905,13 @@ fi
 echo ""
 echo "--- List PDS Members (over-long start=, issue #240) ---"
 
-curl -s -o /dev/null -X PUT -u "$AUTH" \
+curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "MEMBER MBRCXXXX" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(MBRCXXXX)"
 
 # eight characters still fit, so start= keeps naming the first member of the page
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRCXXXX" |
 	jq -r '.items[].member' 2>/dev/null)
 
@@ -934,7 +923,7 @@ else
 fi
 
 # nine characters do not: MBRCXXXX sorts before MBRCXXXXY and must be dropped
-LIST=$(curl -s -u "$AUTH" \
+LIST=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member?start=MBRCXXXXY" |
 	jq -r '.items[].member' 2>/dev/null)
 
@@ -946,11 +935,11 @@ else
 		"got: $(echo "$LIST" | tr '\n' ' ') -- a truncated start= must not readmit the prefix"
 fi
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(MBRCXXXX)"
 
 for M in MBRA MBRB MBRC MBRF1 MBR03; do
-	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${M})"
 done
 
@@ -968,7 +957,7 @@ echo "--- List PDS Members: large directory (issue #212) ---"
 
 BIG_PDS="${BIG_PDS:-SYS1.SMPCDS}"
 
-HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 180 -u "$AUTH" \
+HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -m 180 -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member")
 
 if [ "$HTTP_CODE" = "404" ]; then
@@ -982,7 +971,7 @@ else
 	# SYS1.SMPCDS are binary. Emitted raw they produce control characters
 	# inside a JSON string, which no parser accepts, so the response has to
 	# survive an actual parse and not merely arrive with status 200.
-	if curl -s -m 180 -u "$AUTH" \
+	if curl -s -m 180 -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member" | jq -e . >/dev/null 2>&1; then
 		pass "${BIG_PDS} member list is valid JSON (binary names escaped)"
 	else
@@ -995,7 +984,7 @@ else
 	# output and the assertion would pass either way. Against a directory with
 	# thousands of entries the cap is the only thing that can produce 10 rows,
 	# and moreRows must then be true.
-	BODY=$(curl -s -w '\n%{http_code}' -m 180 -u "$AUTH" -H 'X-IBM-Max-Items: 10' \
+	BODY=$(curl -s -w '\n%{http_code}' -m 180 -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 10' \
 		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member")
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
@@ -1015,7 +1004,7 @@ else
 	# 10 members behind the key and give up there, not read 23000 entries.
 	# A timeout here is the regression.
 	START=$(date +%s)
-	BODY=$(curl -s -w '\n%{http_code}' -m 180 -u "$AUTH" -H 'X-IBM-Max-Items: 10' \
+	BODY=$(curl -s -w '\n%{http_code}' -m 180 -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 10' \
 		"${BASE_URL}/zosmf/restfiles/ds/${BIG_PDS}/member?start=A")
 	ELAPSED=$(( $(date +%s) - START ))
 	HTTP_CODE=$(echo "$BODY" | tail -1)
@@ -1030,7 +1019,7 @@ else
 	fi
 
 	# the regression: is MVSMF still loadable at all?
-	AFTER=$(curl -s -m 20 -u "$AUTH" "${BASE_URL}/zosmf/info")
+	AFTER=$(curl -s -m 20 -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/info")
 	case "$AFTER" in
 		*S80A*|"")
 			fail "server survives a large member list" \
@@ -1051,14 +1040,14 @@ echo ""
 echo "--- List PDS Members: wrong or missing target (issue #193) ---"
 
 LIST_SEQ="${MVSMF_USER}.CURL.LISTSEQ"
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-X POST -K "$MVSMF_CURLRC" -H "Content-Type: application/json" \
 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}")
 
 if [ "$HTTP_CODE" = "201" ]; then
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}/member")
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
@@ -1068,12 +1057,12 @@ if [ "$HTTP_CODE" = "201" ]; then
 	else
 		pass "list members of a sequential dataset does not abend"
 	fi
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIST_SEQ}" >/dev/null 2>&1 || true
 else
 	fail "list members of a sequential dataset" "could not create ${LIST_SEQ} (HTTP ${HTTP_CODE})"
 fi
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.LISTPDS/member")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -1084,7 +1073,7 @@ assert_json_field "$CONTENT" '.reason' "4" "missing dataset: reason 4 (dataset n
 echo ""
 echo "--- Read PDS Member ---"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -1102,14 +1091,14 @@ echo "--- Rename PDS Member ---"
 
 # rename TESTMBR -> TESTMBR2 (z/OSMF control request)
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"TESTMBR\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR2)")
 assert_http_status "204" "$HTTP_CODE" "rename PDS member TESTMBR -> TESTMBR2"
 
 # new member is readable and keeps the original content
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR2)")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -1121,13 +1110,13 @@ else
 fi
 
 # old member no longer exists
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "404" "$HTTP_CODE" "old member TESTMBR is gone after rename"
 
 # rename a non-existent member -> 404
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"NOSUCH\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WHATEVER)")
@@ -1135,7 +1124,7 @@ assert_http_status "404" "$HTTP_CODE" "rename non-existent member returns 404"
 
 # rename back so the remaining tests operate on TESTMBR
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"TESTMBR2\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
@@ -1146,7 +1135,7 @@ echo ""
 echo "--- Delete PDS Member ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "204" "$HTTP_CODE" "delete PDS member"
 
@@ -1155,7 +1144,7 @@ echo ""
 echo "--- Delete PDS Member: not found ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TESTMBR)")
 assert_http_status "404" "$HTTP_CODE" "delete non-existent member"
 
@@ -1167,7 +1156,7 @@ echo ""
 echo "--- Open failures: not found must be 404, not 500 (issue #191) ---"
 
 # missing sequential dataset
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.SEQDS")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -1175,7 +1164,7 @@ assert_http_status "404" "$HTTP_CODE" "read missing sequential dataset"
 assert_json_field "$BODY" '.reason' "4" "missing dataset: reason 4 (dataset not found)"
 
 # missing member of a dataset that does exist
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOSUCHMB)")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -1183,7 +1172,7 @@ assert_http_status "404" "$HTTP_CODE" "read missing member of an existing PDS"
 assert_json_field "$BODY" '.reason' "5" "missing member: reason 5 (member not found)"
 
 # member of a dataset that does not exist — the dataset is the reason, not the member
-RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS(M1)")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 BODY=$(echo "$RESP" | sed '$d')
@@ -1196,14 +1185,14 @@ assert_json_field "$BODY" '.reason' "4" "member of missing PDS: reason 4 (datase
 # Self-contained: TEST_SEQ has already been deleted by the delete tests at
 # this point, and a missing data set would answer 404 instead of 400.
 PROBE_SEQ="${MVSMF_USER}.CURL.NOTPDS"
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-X POST -K "$MVSMF_CURLRC" -H "Content-Type: application/json" \
 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}")
 
 if [ "$HTTP_CODE" = "201" ]; then
-	RESP=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	RESP=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}(M1)")
 	HTTP_CODE=$(echo "$RESP" | tail -1)
 	BODY=$(echo "$RESP" | sed '$d')
@@ -1213,7 +1202,7 @@ if [ "$HTTP_CODE" = "201" ]; then
 	else
 		pass "member of sequential dataset does not abend"
 	fi
-	curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${PROBE_SEQ}" >/dev/null 2>&1 || true
 else
 	fail "member of a sequential dataset" "could not create ${PROBE_SEQ} (HTTP ${HTTP_CODE})"
 fi
@@ -1223,17 +1212,17 @@ fi
 # RECFM=V sequential data set behind (same defect as issue #65 on the
 # sequential path). Assert both the status and that nothing was created.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'X\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS(M1)")
 assert_http_status "404" "$HTTP_CODE" "write member into a missing PDS"
 
-LOCBODY=$(curl -s -u "$AUTH" \
+LOCBODY=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/test?fn=locate&dsn=${MVSMF_USER}.NOSUCH.PDS")
 if echo "$LOCBODY" | grep -q '"rc": 0'; then
 	fail "failed member write must not create the dataset" "${MVSMF_USER}.NOSUCH.PDS now exists"
-	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.NOSUCH.PDS"
 else
 	pass "failed member write did not create the dataset"
@@ -1243,14 +1232,14 @@ fi
 # the regression guard for the write path: it must not inherit the read path's
 # member check, or creating a member would start answering 404.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'NEW MEMBER\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NEWMBR)")
 assert_http_status "204" "$HTTP_CODE" "create a new member in an existing PDS"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NEWMBR)")
+	-X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NEWMBR)")
 assert_http_status "204" "$HTTP_CODE" "delete the member just created"
 
 # --- Long DSN(member) name validation (Issue #133) ---
@@ -1262,7 +1251,7 @@ echo "--- Long DSN(member): individually valid names, combined >44 chars ---"
 # GET: long qualified name — validation passes, 404 because dataset doesn't exist on this system
 LONGDSN="IBMUSER.REXX370.V1R0M0D.REF.LINKLIB"  # 36 chars — valid MVS DSN
 LONGMBR="IRXTSPRM"                               # 8 chars  — valid MVS member
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -1274,10 +1263,10 @@ fi
 
 # DELETE: same long name — validation passes, 404 because dataset doesn't exist
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
 if [ "$HTTP_CODE" = "400" ]; then
-	BODY2=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
+	BODY2=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LONGDSN}(${LONGMBR})")
 	if echo "$BODY2" | grep -q "too long"; then
 		fail "long DSN(member) DELETE passes validation" "server still rejects valid name with 400 'too long'"
 	else
@@ -1290,12 +1279,12 @@ fi
 # GET: dsname > 44 chars — must still return 400 "too long" (dsname itself is invalid)
 # IBMUSER.REXX370.V1R0M0D.REF.LINKLIB.EXTRAS.XX = 45 chars (7+1+7+1+7+1+3+1+7+1+6+1+2)
 TOOLONG_DSN="IBMUSER.REXX370.V1R0M0D.REF.LINKLIB.EXTRAS.XX"  # 45 chars
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TOOLONG_DSN}(TESTMBR)")
 assert_http_status "400" "$HTTP_CODE" "GET with dsname >44 chars returns 400"
 
 # GET: member > 8 chars — must return 400 "too long" (member name itself is invalid)
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOLONGMEMBER)")
 assert_http_status "400" "$HTTP_CODE" "GET with member >8 chars returns 400"
 
@@ -1304,25 +1293,25 @@ echo ""
 echo "--- Rename Sequential Dataset ---"
 
 # self-contained: fresh source + clean target
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"  >/dev/null 2>&1 || true
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"  >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 
 CREATE_BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" -H "Content-Type: application/json" \
+	-X POST -K "$MVSMF_CURLRC" -H "Content-Type: application/json" \
 	-d "$CREATE_BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 
 if [ "$HTTP_CODE" = "201" ]; then
 	# rename TEST_SEQ -> TEST_SEQ2 (z/OSMF control request)
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X PUT -u "$AUTH" -H "Content-Type: application/json" \
+		-X PUT -K "$MVSMF_CURLRC" -H "Content-Type: application/json" \
 		--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_SEQ}\"}}" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}")
 	assert_http_status "204" "$HTTP_CODE" "rename sequential dataset TESTSEQ -> TESTSEQ2"
 
 	# the new name is cataloged
-	BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_SEQ2}")
 	HTTP_CODE=$(echo "$BODY" | tail -1)
 	CONTENT=$(echo "$BODY" | sed '$d')
@@ -1331,7 +1320,7 @@ if [ "$HTTP_CODE" = "201" ]; then
 
 	# rename a non-existent source -> 404
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X PUT -u "$AUTH" -H "Content-Type: application/json" \
+		-X PUT -K "$MVSMF_CURLRC" -H "Content-Type: application/json" \
 		--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_SEQ}.NOPE\"}}" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}.NOPE2")
 	assert_http_status "404" "$HTTP_CODE" "rename non-existent dataset returns 404"
@@ -1357,7 +1346,7 @@ BIGLINE=$(awk 'BEGIN { s = ""; while (length(s) < 4000) s = s "X"; print substr(
 
 BODY='{"dsorg":"PS","recfm":"VB","lrecl":4004,"blksize":8000,"alcunit":"TRK","primary":5,"secondary":5}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
@@ -1365,13 +1354,13 @@ assert_http_status "201" "$HTTP_CODE" "create VB dataset with LRECL 4004"
 
 printf '%s\n%s\n%s\n' "$BIGLINE" "$BIGLINE" "$BIGLINE" > /tmp/curl_ds_big.txt
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary @/tmp/curl_ds_big.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
 assert_http_status "204" "$HTTP_CODE" "write 4000-byte records (was S0C1)"
 
-BODY=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}")
 HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
@@ -1389,7 +1378,7 @@ echo "--- Large LRECL: binary member write (issue #198) ---"
 
 BODY='{"dsorg":"PO","recfm":"FB","lrecl":4004,"blksize":8008,"alcunit":"TRK","primary":5,"secondary":5,"dirblk":5}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}")
@@ -1399,7 +1388,7 @@ assert_http_status "201" "$HTTP_CODE" "create PDS with LRECL 4004"
 awk 'BEGIN { s = ""; while (length(s) < 8008) s = s "B"; printf "%s", substr(s, 1, 8008) }' \
 	> /tmp/curl_ds_big.bin
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	-H "X-IBM-Data-Type: binary" \
 	--data-binary @/tmp/curl_ds_big.bin \
@@ -1407,7 +1396,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "204" "$HTTP_CODE" "write binary member with LRECL 4004 (was S0C1)"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_big_rt.bin \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}(BIGBIN)")
 assert_http_status "200" "$HTTP_CODE" "read back binary member"
@@ -1443,14 +1432,14 @@ echo ""
 echo "--- Text framing: blank lines are records (issue #233) ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'ERSTE ZEILE\n\nDRITTE ZEILE\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
 assert_http_status "204" "$HTTP_CODE" "write member with a blank line"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_blank.bin \
-	-u "$AUTH" \
+	-K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
 assert_http_status "200" "$HTTP_CODE" "read back the member"
@@ -1463,7 +1452,7 @@ else
 		"expected 240 bytes (3 x 80), got $RT_SIZE"
 fi
 
-CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BLANKT)")
 LINE2=$(echo "$CONTENT" | sed -n '2p')
 if [ -z "$LINE2" ]; then
 	pass "the blank line reads back as an empty line"
@@ -1483,7 +1472,7 @@ for COLS in 77 78 79 80; do
 	awk -v n="$COLS" 'BEGIN { s = ""; while (length(s) < n) s = s "A"; print substr(s, 1, n) }' \
 		> /tmp/curl_ds_wide.txt
 	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-		-X PUT -u "$AUTH" \
+		-X PUT -K "$MVSMF_CURLRC" \
 		-H "Content-Type: application/octet-stream" \
 		--data-binary @/tmp/curl_ds_wide.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})")
@@ -1491,7 +1480,7 @@ for COLS in 77 78 79 80; do
 
 	# Binary read: one stored record is exactly LRECL bytes, whatever the
 	# line's own width, so this catches a line that was split in two.
-	curl -s -o /tmp/curl_ds_wide.bin -u "$AUTH" \
+	curl -s -o /tmp/curl_ds_wide.bin -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: binary" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})"
 	RT_SIZE=$(wc -c < /tmp/curl_ds_wide.bin | tr -d ' ')
@@ -1502,7 +1491,7 @@ for COLS in 77 78 79 80; do
 			"expected 80 bytes, got $RT_SIZE"
 	fi
 
-	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})")
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WIDE${COLS})")
 	RT_COLS=$(echo "$CONTENT" | head -1 | tr -d '\r' | awk '{ print length($0) }')
 	if [ "$RT_COLS" = "$COLS" ]; then
 		pass "all ${COLS} columns survive the round trip"
@@ -1518,7 +1507,7 @@ echo "--- Text framing: one column too many is truncated, not refused ---"
 awk 'BEGIN { s = ""; while (length(s) < 81) s = s "A"; print substr(s, 1, 81) }' \
 	> /tmp/curl_ds_wide.txt
 BODY=$(curl -s -w '\n%{http_code}' \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary @/tmp/curl_ds_wide.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)")
@@ -1536,7 +1525,7 @@ fi
 
 # ...and the record is there, cut to LRECL. The half of #243 that lost data was
 # that the write got abandoned instead.
-WIDE_RT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)" | sed -n 1p)
+WIDE_RT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(TOOWIDE)" | sed -n 1p)
 if [ "${#WIDE_RT}" = "80" ]; then
 	pass "the over-long record landed, cut to LRECL 80"
 else
@@ -1549,13 +1538,13 @@ echo "--- Text framing: terminators and chunked transfer (issue #233) ---"
 # CRLF endings, a body that does not end in a newline, and a body that does:
 # each must produce exactly two records and no phantom third one.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'ALPHA\r\nBETA\r\n' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CRLFT)")
 assert_http_status "204" "$HTTP_CODE" "write a CRLF body"
 
-curl -s -o /tmp/curl_ds_crlf.bin -u "$AUTH" \
+curl -s -o /tmp/curl_ds_crlf.bin -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CRLFT)"
 RT_SIZE=$(wc -c < /tmp/curl_ds_crlf.bin | tr -d ' ')
@@ -1566,13 +1555,13 @@ else
 fi
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary $'ALPHA\nBETA' \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOEOLT)")
 assert_http_status "204" "$HTTP_CODE" "write a body without a trailing newline"
 
-curl -s -o /tmp/curl_ds_noeol.bin -u "$AUTH" \
+curl -s -o /tmp/curl_ds_noeol.bin -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(NOEOLT)"
 RT_SIZE=$(wc -c < /tmp/curl_ds_noeol.bin | tr -d ' ')
@@ -1587,14 +1576,14 @@ fi
 # and a trailing newline must not add a blank record at the end.
 printf 'CHUNK ONE\n\nCHUNK THREE\n' > /tmp/curl_ds_chunk.txt
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	-H "Transfer-Encoding: chunked" \
 	--data-binary @/tmp/curl_ds_chunk.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CHUNKT)")
 assert_http_status "204" "$HTTP_CODE" "write a chunked body with a blank line"
 
-curl -s -o /tmp/curl_ds_chunk.bin -u "$AUTH" \
+curl -s -o /tmp/curl_ds_chunk.bin -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(CHUNKT)"
 RT_SIZE=$(wc -c < /tmp/curl_ds_chunk.bin | tr -d ' ')
@@ -1634,7 +1623,7 @@ ENC_TEXT=$'INT A[2];\nINT B[3];'
 
 enc_put() {	# enc_put <data-type> <url> -> HTTP code; body is ENC_TEXT
 	curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json \
-		-X PUT -u "$AUTH" \
+		-X PUT -K "$MVSMF_CURLRC" \
 		-H "Content-Type: text/plain" \
 		-H "X-IBM-Data-Type: $1" \
 		--data-binary "${ENC_TEXT}"$'\n' \
@@ -1642,7 +1631,7 @@ enc_put() {	# enc_put <data-type> <url> -> HTTP code; body is ENC_TEXT
 }
 
 enc_stored() {	# enc_stored <url> -> hex of the stored record(s)
-	curl -s -o /tmp/curl_ds_enc.bin -u "$AUTH" \
+	curl -s -o /tmp/curl_ds_enc.bin -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: binary" "$1"
 	hex_of /tmp/curl_ds_enc.bin
 }
@@ -1666,7 +1655,7 @@ case "$(enc_stored "$ENC_MBR")" in
 	*)          fail "IBM-1047 stores the brackets as AD/BD" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
 esac
 
-CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_MBR")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_MBR")
 if [ "$CONTENT" = "$ENC_TEXT" ]; then
 	pass "IBM-1047 content reads back with fileEncoding=IBM-1047"
 else
@@ -1675,7 +1664,7 @@ fi
 
 # The other spellings the reference accepts, and its case-insensitivity.
 for V in "text;fileEncoding=1047" "TEXT;fileencoding=ibm-1047" "text;crlf=true;fileEncoding=IBM-1047"; do
-	CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_MBR")
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: $V" "$ENC_MBR")
 	if [ "$CONTENT" = "$ENC_TEXT" ]; then
 		pass "'$V' selects IBM-1047"
 	else
@@ -1684,7 +1673,7 @@ for V in "text;fileEncoding=1047" "TEXT;fileencoding=ibm-1047" "text;crlf=true;f
 done
 
 # Read as CP037, the same bytes are what #390 reported: X'DD' and X'A8'.
-curl -s -o /tmp/curl_ds_enc.txt -u "$AUTH" "$ENC_MBR"
+curl -s -o /tmp/curl_ds_enc.txt -K "$MVSMF_CURLRC" "$ENC_MBR"
 case "$(hex_of /tmp/curl_ds_enc.txt)" in
 	*41dd32a8*) pass "IBM-1047 content read as CP037 is still Ý/¨ (the default is unchanged)" ;;
 	*)          fail "IBM-1047 content read as CP037 is still Ý/¨" "got $(hex_of /tmp/curl_ds_enc.txt)" ;;
@@ -1711,22 +1700,22 @@ case "$(enc_stored "$ENC_MBR")" in
 	*)          fail "a refused write leaves the member untouched" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
 esac
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: text;fileEncoding=IBM-37" "$ENC_MBR")
 assert_http_status "500" "$HTTP_CODE" "read member with IBM-37 (refused by the reference too)"
 
 # Measured on the reference: a blank after ';' hides the parameter, and binary
 # ignores fileEncoding entirely -- neither is an error.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: text; fileEncoding=BOGUS" "$ENC_MBR")
 assert_http_status "200" "$HTTP_CODE" "a blank after ';' is not a fileEncoding"
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary;fileEncoding=BOGUS" "$ENC_MBR")
 assert_http_status "200" "$HTTP_CODE" "binary ignores fileEncoding"
 
 # BINARY and binary;param used to fall back to text -- a translated download.
 for V in "BINARY" "binary;foo=bar"; do
-	curl -s -o /tmp/curl_ds_enc.bin -u "$AUTH" -H "X-IBM-Data-Type: $V" "$ENC_MBR"
+	curl -s -o /tmp/curl_ds_enc.bin -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: $V" "$ENC_MBR"
 	SIZE=$(wc -c < /tmp/curl_ds_enc.bin | tr -d ' ')
 	case "$(hex_of /tmp/curl_ds_enc.bin)" in
 		c9d5e340c1baf2bb*) [ "$SIZE" = "160" ] \
@@ -1736,16 +1725,16 @@ for V in "BINARY" "binary;foo=bar"; do
 	esac
 done
 
-curl -s -X DELETE -u "$AUTH" "$ENC_MBR" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "$ENC_MBR" >/dev/null 2>&1 || true
 
 echo ""
 echo "--- fileEncoding: sequential data set (issue #391) ---"
 
 ENC_SEQ="${BASE_URL}/zosmf/restfiles/ds/${TEST_ENC}"
-curl -s -X DELETE -u "$AUTH" "$ENC_SEQ" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "$ENC_SEQ" >/dev/null 2>&1 || true
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' \
 	"$ENC_SEQ")
@@ -1758,7 +1747,7 @@ case "$(enc_stored "$ENC_SEQ")" in
 	*)                 fail "IBM-1047 stores the brackets as AD/BD" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
 esac
 
-CONTENT=$(curl -s -u "$AUTH" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_SEQ")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: text;fileEncoding=IBM-1047" "$ENC_SEQ")
 if [ "$CONTENT" = "$ENC_TEXT" ]; then
 	pass "IBM-1047 content reads back with fileEncoding=IBM-1047"
 else
@@ -1772,12 +1761,12 @@ case "$(enc_stored "$ENC_SEQ")" in
 	*)                 fail "a refused write leaves the data set untouched" "got $(hex_of /tmp/curl_ds_enc.bin | cut -c1-24)" ;;
 esac
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_enc.json -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: text;fileEncoding=BOGUS" "$ENC_SEQ")
 assert_http_status "500" "$HTTP_CODE" "read sequential data set with an unsupported encoding"
 assert_json_field "$(cat /tmp/curl_ds_enc.json)" ".category" "16" "unsupported encoding: category"
 
-curl -s -X DELETE -u "$AUTH" "$ENC_SEQ" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "$ENC_SEQ" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_enc.json /tmp/curl_ds_enc.bin /tmp/curl_ds_enc.txt
 
 # --- ETag / optimistic locking (issue #152) ---
@@ -1792,14 +1781,14 @@ get_etag() {
 
 printf 'LINE ONE\nLINE TWO\n' > /tmp/curl_ds_etag.txt
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	--data-binary @/tmp/curl_ds_etag.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "204" "$HTTP_CODE" "etag: seed the member"
 
 # An ETag costs an extra read pass, so it is opt-in: no header, no ETag.
-curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 if [ -z "$(get_etag /tmp/curl_ds_h1.txt)" ]; then
 	pass "etag: a plain GET returns no ETag"
@@ -1807,7 +1796,7 @@ else
 	fail "etag: a plain GET returns no ETag" "got $(get_etag /tmp/curl_ds_h1.txt)"
 fi
 
-curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h1.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 ETAG1=$(get_etag /tmp/curl_ds_h1.txt)
@@ -1825,7 +1814,7 @@ fi
 
 # Stability: an unchanged member must stamp the same, or every save would
 # fail its own precondition.
-curl -s -D /tmp/curl_ds_h2.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h2.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 ETAG2=$(get_etag /tmp/curl_ds_h2.txt)
@@ -1837,7 +1826,7 @@ fi
 
 # The mode the client reads in must not change the stamp: a text read and a
 # binary read describe the same resource state.
-curl -s -D /tmp/curl_ds_h3.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h3.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	-H "X-IBM-Data-Type: binary" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
@@ -1851,14 +1840,14 @@ fi
 # A stale precondition must fail, and must fail BEFORE anything is written.
 printf 'LINE ONE\nLINE TWO CHANGED\n' > /tmp/curl_ds_etag2.txt
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: 0000000000000000" \
 	--data-binary @/tmp/curl_ds_etag2.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "412" "$HTTP_CODE" "etag: a stale If-Match is refused"
 
-curl -s -o /tmp/curl_ds_after412.txt -u "$AUTH" \
+curl -s -o /tmp/curl_ds_after412.txt -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 if grep -q 'LINE TWO$' /tmp/curl_ds_after412.txt; then
 	pass "etag: the refused write left the member untouched"
@@ -1870,7 +1859,7 @@ fi
 # The current stamp is accepted, and the response carries the stamp of what
 # was just written -- without it the next save would fail on a stale value.
 HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_h4.txt -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "X-IBM-Return-Etag: true" \
 	-H "If-Match: ${ETAG1}" \
@@ -1887,7 +1876,7 @@ fi
 
 # The round trip that makes repeated saves work: what the PUT handed back has
 # to be what the next GET computes.
-curl -s -D /tmp/curl_ds_h5.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h5.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 ETAG5=$(get_etag /tmp/curl_ds_h5.txt)
@@ -1900,7 +1889,7 @@ fi
 # Saving twice in a row with the stamp the previous save returned: the case
 # that breaks if the PUT hashes the request body instead of the stored member.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: ${ETAG4}" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1908,13 +1897,13 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "204" "$HTTP_CODE" "etag: a second save with the returned stamp"
 
 # Header forms clients actually send.
-curl -s -D /tmp/curl_ds_h6.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h6.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 ETAG6=$(get_etag /tmp/curl_ds_h6.txt)
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: \"${ETAG6}\"" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1922,7 +1911,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "204" "$HTTP_CODE" "etag: a quoted If-Match is accepted"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: W/\"${ETAG6}\"" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1930,7 +1919,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "204" "$HTTP_CODE" "etag: a weak If-Match is accepted"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: *" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1940,7 +1929,7 @@ assert_http_status "204" "$HTTP_CODE" "etag: If-Match * on an existing member"
 # "*" asserts the resource exists. A member that does not is the deletion case
 # the precondition is there to catch.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: *" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1949,7 +1938,7 @@ assert_http_status "412" "$HTTP_CODE" "etag: If-Match on a missing member is 412
 
 # Without If-Match nothing changes: last write wins, as before the feature.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	--data-binary @/tmp/curl_ds_etag2.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
@@ -1957,7 +1946,7 @@ assert_http_status "204" "$HTTP_CODE" "etag: a PUT without If-Match still writes
 
 # A missing PDS is still a 404 -- the more specific answer wins over 412.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: *" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -1968,25 +1957,25 @@ assert_http_status "404" "$HTTP_CODE" "etag: a missing data set is 404, not 412"
 # set rather than reusing TEST_SEQ: that one is deleted further up as part of
 # the DELETE test case and no longer exists by the time this section runs.
 TEST_ETAGSEQ="${MVSMF_USER}.CURL.TESTETG"
-curl -s -X DELETE -u "$AUTH" \
+curl -s -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
 
 BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X POST -u "$AUTH" \
+	-X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "$BODY" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "201" "$HTTP_CODE" "etag: allocate a sequential data set"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	--data-binary @/tmp/curl_ds_etag.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "204" "$HTTP_CODE" "etag: seed the sequential data set"
 
-curl -s -D /tmp/curl_ds_h7.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h7.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
 ETAG7=$(get_etag /tmp/curl_ds_h7.txt)
@@ -1997,7 +1986,7 @@ else
 fi
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: 0000000000000000" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -2005,7 +1994,7 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 assert_http_status "412" "$HTTP_CODE" "etag: sequential stale If-Match is refused"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_h8.txt -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "X-IBM-Return-Etag: true" \
 	-H "If-Match: ${ETAG7}" \
@@ -2025,7 +2014,7 @@ else
 	fail "etag: sequential PUT returns the new stamp" "no ETag header in response"
 fi
 
-curl -s -D /tmp/curl_ds_h9.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_h9.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
 ETAG9=$(get_etag /tmp/curl_ds_h9.txt)
@@ -2036,7 +2025,7 @@ else
 fi
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	-H "If-Match: ${ETAG8}" \
 	--data-binary @/tmp/curl_ds_etag.txt \
@@ -2051,14 +2040,14 @@ echo "--- ETag: conditional reads / If-None-Match (issue #263) ---"
 # The read half computes its own stamp for the comparison, so if that pass ever
 # drifted from the one behind X-IBM-Return-Etag, it would surface here as a 200
 # where a 304 was asked for -- which is why the two are hashed in one pass.
-curl -s -D /tmp/curl_ds_c1.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_c1.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 CETAG=$(get_etag /tmp/curl_ds_c1.txt)
 
 HTTP_CODE=$(curl -s -w '%{http_code}' \
 	-D /tmp/curl_ds_c2.txt -o /tmp/curl_ds_c2.body \
-	-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+	-K "$MVSMF_CURLRC" -H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "304" "$HTTP_CODE" "cond: a current If-None-Match is 304"
 
@@ -2086,7 +2075,7 @@ fi
 # exist", is the conditional-create semantic of a PUT.
 for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
 	"\"0000000000000000\", \"${CETAG}\"" "*"; do
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 		-H "If-None-Match: ${FORM}" \
 		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 	assert_http_status "304" "$HTTP_CODE" \
@@ -2094,7 +2083,7 @@ for FORM in "\"${CETAG}\"" "W/\"${CETAG}\"" \
 done
 
 HTTP_CODE=$(curl -s -w '%{http_code}' \
-	-D /tmp/curl_ds_c3.txt -o /tmp/curl_ds_c3.body -u "$AUTH" \
+	-D /tmp/curl_ds_c3.txt -o /tmp/curl_ds_c3.body -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: 0000000000000000" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "200" "$HTTP_CODE" "cond: a stale If-None-Match is 200"
@@ -2118,14 +2107,14 @@ fi
 # 304 has to be a statement about the current content, not about the header
 # having been seen once. Change the member and the same stamp must stop matching.
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X PUT -u "$AUTH" \
+	-X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: text/plain" \
 	--data-binary @/tmp/curl_ds_etag.txt \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "204" "$HTTP_CODE" "cond: rewrite the member"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -D /tmp/curl_ds_c7.txt -o /dev/null \
-	-u "$AUTH" -H "If-None-Match: ${CETAG}" \
+	-K "$MVSMF_CURLRC" -H "If-None-Match: ${CETAG}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
 assert_http_status "200" "$HTTP_CODE" "cond: a changed member is 200 again"
 
@@ -2140,7 +2129,7 @@ else
 fi
 
 # Nothing to be fresh about: the 404 is the more specific answer and wins.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: *" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGNON)")
 assert_http_status "404" "$HTTP_CODE" "cond: a missing member is 404, not 304"
@@ -2149,11 +2138,11 @@ assert_http_status "404" "$HTTP_CODE" "cond: a missing member is 404, not 304"
 # wrong the next request on the same connection would hang or read the previous
 # response's tail -- curl reuses the connection when both URLs are given in one
 # invocation, so a second 304 here is the evidence.
-curl -s -D /tmp/curl_ds_c4.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_c4.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)"
 CETAG2=$(get_etag /tmp/curl_ds_c4.txt)
-CODES=$(curl -s --max-time 30 -o /dev/null -w '%{http_code} ' -u "$AUTH" \
+CODES=$(curl -s --max-time 30 -o /dev/null -w '%{http_code} ' -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: ${CETAG2}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)")
@@ -2167,31 +2156,31 @@ fi
 # The sequential path, where the hash pass is bounded by get_fb_record_count()
 # rather than reading to EOF. A bound copied from the member path would hash
 # the residue of the last block as well, and this 304 would come back 200.
-curl -s -D /tmp/curl_ds_c5.txt -o /dev/null -u "$AUTH" \
+curl -s -D /tmp/curl_ds_c5.txt -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Return-Etag: true" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}"
 SETAG=$(get_etag /tmp/curl_ds_c5.txt)
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: ${SETAG}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "304" "$HTTP_CODE" "cond: sequential current stamp is 304"
 
 # The stamp does not depend on X-IBM-Data-Type, so neither does the 304.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	-H "X-IBM-Data-Type: binary" \
 	-H "If-None-Match: ${SETAG}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "304" "$HTTP_CODE" "cond: sequential binary read is 304 too"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_c6.body -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /tmp/curl_ds_c6.body -K "$MVSMF_CURLRC" \
 	-H "If-None-Match: 0000000000000000" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}")
 assert_http_status "200" "$HTTP_CODE" "cond: sequential stale stamp is 200"
 
-curl -s -X DELETE -u "$AUTH" \
+curl -s -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ETAGT)" >/dev/null 2>&1 || true
-curl -s -X DELETE -u "$AUTH" \
+curl -s -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_ETAGSEQ}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_etag.txt /tmp/curl_ds_etag2.txt /tmp/curl_ds_after412.txt \
 	/tmp/curl_ds_h1.txt /tmp/curl_ds_h2.txt /tmp/curl_ds_h3.txt \
@@ -2213,12 +2202,13 @@ ATOM_PDS="${MVSMF_USER}.CURL.ATOMPDS"
 # Announce a Content-Length and then close the sending half, so the handler's
 # very first recv() fails. curl cannot express this, hence the raw request.
 put_dies_before_body() {
-	python3 - "$MVSMF_HOST" "$MVSMF_PORT" "$AUTH" "$1" >/dev/null 2>&1 <<-'PYEOF'
-		import base64, socket, sys, time
-		host, port, auth, target = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+	# The token comes from the environment, so it is never an argument.
+	python3 - "$MVSMF_HOST" "$MVSMF_PORT" "$1" >/dev/null 2>&1 <<-'PYEOF'
+		import os, socket, sys, time
+		host, port, target = sys.argv[1], int(sys.argv[2]), sys.argv[3]
 		req = (f"PUT /zosmf/restfiles/ds/{target} HTTP/1.1\r\n"
 		       f"Host: {host}:{port}\r\n"
-		       f"Authorization: Basic {base64.b64encode(auth.encode()).decode()}\r\n"
+		       f"Cookie: LtpaToken2={os.environ['MVSMF_TOKEN']}\r\n"
 		       f"X-IBM-Data-Type: text\r\nContent-Length: 500\r\n\r\n")
 		s = socket.create_connection((host, port), timeout=30)
 		s.sendall(req.encode()); time.sleep(0.5); s.shutdown(socket.SHUT_WR)
@@ -2245,7 +2235,7 @@ printf 'ORIGINAL LINE ONE\nORIGINAL LINE TWO\n' > /tmp/curl_ds_atom_good.txt
 assert_truncated_body() {
 	local uri="$1" label="$2"
 	local body n l1 l2 l3
-	body=$(curl -s -u "$AUTH" "$uri")
+	body=$(curl -s -K "$MVSMF_CURLRC" "$uri")
 	n=$(printf '%s\n' "$body" | grep -c .)
 	l1=$(printf '%s\n' "$body" | sed -n 1p)
 	l2=$(printf '%s\n' "$body" | sed -n 2p)
@@ -2270,25 +2260,25 @@ assert_truncated_body() {
 	pass "$label (3 records, the long one cut to 80, the one after it kept)"
 }
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
-HTTP_CODE2=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE2=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":800,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}")
 
 if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 	# --- sequential: a mid-body failure (issue #243) ---
-	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_good.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}"
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_long.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}")
@@ -2298,11 +2288,11 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 		"seq: over-long record truncated, body written in full"
 
 	# --- member: the same, where CLOSE is what commits (issue #243) ---
-	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_good.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)"
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_long.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
@@ -2314,7 +2304,7 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 	# Re-seed: the mid-body case above deliberately damaged the member, and the
 	# #246 case below has to start from a known state or it measures the wrong
 	# thing -- it would compare against content the previous case already ate.
-	curl -s -o /dev/null -X PUT -u "$AUTH" -H "X-IBM-Data-Type: text" -H "Expect:" \
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" -H "X-IBM-Data-Type: text" -H "Expect:" \
 		--data-binary @/tmp/curl_ds_atom_good.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)"
 
@@ -2323,14 +2313,14 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 	# of the directory entry versus DS1LSTAR at CLOSE -- so both are covered.
 	if command -v python3 >/dev/null 2>&1; then
 		for ATOM_T in "${ATOM_PDS}(KEEPME)" "${ATOM_SEQ}"; do
-			curl -s -o /dev/null -X PUT -u "$AUTH" \
+			curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 				-H "X-IBM-Data-Type: text" -H "Expect:" \
 				--data-binary @/tmp/curl_ds_atom_good.txt \
 				"${BASE_URL}/zosmf/restfiles/ds/${ATOM_T}"
 
 			put_dies_before_body "$ATOM_T"
 
-			CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_T}")
+			CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_T}")
 			if [ "$CONTENT" = "$(cat /tmp/curl_ds_atom_good.txt)" ]; then
 				pass "${ATOM_T}: a PUT that dies before the body leaves the content intact"
 			else
@@ -2344,12 +2334,12 @@ if [ "$HTTP_CODE" = "201" ] && [ "$HTTP_CODE2" = "201" ]; then
 
 	# --- the negative: an empty body must still empty the target ---
 	# The lazy open must not turn "PUT nothing" into "change nothing".
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" -H "Expect:" -H "Content-Length: 0" \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
 	assert_http_status "204" "$HTTP_CODE" "member: empty body is accepted"
 
-	CONTENT=$(curl -s -w '%{size_download}' -o /dev/null -u "$AUTH" \
+	CONTENT=$(curl -s -w '%{size_download}' -o /dev/null -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}(KEEPME)")
 	if [ "$CONTENT" = "0" ]; then
 		pass "member: an empty body still empties the member"
@@ -2361,8 +2351,8 @@ else
 	fail "failed-PUT atomicity" "could not create ${ATOM_SEQ}/${ATOM_PDS}"
 fi
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${ATOM_PDS}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_atom_good.txt /tmp/curl_ds_atom_long.txt
 
 # =========================================================================
@@ -2382,9 +2372,9 @@ SLOW_SEQ="${MVSMF_USER}.CURL.SLOWSEQ"
 # EWOULDBLOCK at once, and mvsMF used to read that as "client gone" and abandon
 # the write with 500 -- over a target already open for output.
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":5,"secondary":5}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
@@ -2395,13 +2385,13 @@ if [ "$HTTP_CODE" = "201" ]; then
 		> /tmp/curl_ds_slow.txt
 
 	# --- a body arriving slower than mvsMF consumes it (~130 KB/s) ---
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" --limit-rate 32k \
 		--data-binary @/tmp/curl_ds_slow.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
 	assert_http_status "204" "$HTTP_CODE" "slow client: throttled PUT succeeds"
 
-	RECS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
+	RECS=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
 	if [ "$RECS" = "800" ]; then
 		pass "slow client: all 800 records written"
 	else
@@ -2415,13 +2405,13 @@ if [ "$HTTP_CODE" = "201" ]; then
 	# an empty buffer, which is #247 at byte zero.
 	printf 'EXPECT LINE ONE\nEXPECT LINE TWO\n' > /tmp/curl_ds_expect.txt
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 		-H "X-IBM-Data-Type: text" -H "Expect: 100-continue" \
 		--data-binary @/tmp/curl_ds_expect.txt \
 		"${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}")
 	assert_http_status "204" "$HTTP_CODE" "Expect: 100-continue PUT succeeds"
 
-	RECS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
+	RECS=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" | grep -c .)
 	if [ "$RECS" = "2" ]; then
 		pass "Expect: 100-continue: body written in full"
 	else
@@ -2431,7 +2421,7 @@ else
 	fail "slow client" "could not create ${SLOW_SEQ}"
 fi
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${SLOW_SEQ}" >/dev/null 2>&1 || true
 rm -f /tmp/curl_ds_slow.txt /tmp/curl_ds_expect.txt
 
 # =========================================================================
@@ -2467,7 +2457,7 @@ ALLOW_DS="${MVSMF_USER}.CURL.NOSUCH228"
 ABEND_BEFORE=$(mtt_abend_count)
 
 # 1. delete: ALTER refused
-RESP=$(curl -s -w '\n%{http_code}' -X DELETE -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
 HTTP_CODE=$(echo "$RESP" | tail -1)
 CONTENT=$(echo "$RESP" | sed '$d')
@@ -2493,7 +2483,7 @@ fi
 
 # 2. the control: same verb, a name the caller MAY alter. Must get past the
 #    gate and fail on the catalog lookup instead.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}")
 ALLOW_CODE="$HTTP_CODE"
 assert_http_status "404" "$HTTP_CODE" "auth: delete with ALTER reaches the catalog"
@@ -2501,7 +2491,7 @@ assert_http_status "404" "$HTTP_CODE" "auth: delete with ALTER reaches the catal
 # 3. rename INTO a protected namespace: the source is permitted, so only the
 #    target-side check can refuse this. Without it, ALTER over your own
 #    qualifier would be enough to move a data set anywhere.
-RESP=$(curl -s -w '\n%{http_code}' -X PUT -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${DENY_DS}")
@@ -2511,7 +2501,7 @@ assert_http_status "500" "$HTTP_CODE" "auth: rename into a protected name is ref
 assert_json_field "$CONTENT" '.category' "4" "auth: rename refusal category"
 
 # 4. control for 3: both names permitted, so it must reach the catalog.
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${ALLOW_DS}\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${ALLOW_DS}2")
@@ -2564,7 +2554,7 @@ assert_no_new_abend "$ABEND_BEFORE" "auth: a refused request performs no operati
 echo ""
 echo "--- Allocation failure report (issue #317) ---"
 
-RESP=$(curl -s -w '\n%{http_code}' -X POST -u "$AUTH" \
+RESP=$(curl -s -w '\n%{http_code}' -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary '{"dsorg":"PS","alcunit":"CYL","primary":999999,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TOOBIG317")
@@ -2579,7 +2569,7 @@ assert_json_field "$CONTENT" '.reason' "7" "alloc: reason matches z/OSMF"
 assert_json_field "$CONTENT" '.message' "Dynamic allocation Error" "alloc: message matches z/OSMF"
 
 # nothing may be left behind by a failed create
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TOOBIG317")
 assert_http_status "404" "$HTTP_CODE" "alloc: a failed create leaves nothing behind"
 
@@ -2588,8 +2578,12 @@ assert_http_status "404" "$HTTP_CODE" "alloc: a failed create leaves nothing beh
 # The checks above run as whoever MVSMF_USER is. On a system where that is an
 # admin, only ONE attribute is refusable (ALTER under a prefix the admin group
 # does not hold), so READ and UPDATE refusals are unreachable and the suite
-# cannot see a regression in either. Set MVSMF_USER2/MVSMF_PASS2 to an ordinary
-# userid to cover them.
+# cannot see a regression in either. Give the mbt target a further user test2,
+# an ordinary userid, to cover them:
+#
+#   [target.<name>.mvsmf.users.test2]
+#   user     = "..."
+#   password = { keychain = "..." }
 #
 # This is also the only place the refusal is verified by its EFFECT rather than
 # its answer: the target exists and holds known content, so a gate that sends
@@ -2599,43 +2593,42 @@ assert_http_status "404" "$HTTP_CODE" "alloc: a failed create leaves nothing beh
 echo ""
 echo "--- Authorization: non-admin refusals (issue #228) ---"
 
-if [ -z "${MVSMF_USER2:-}" ] || [ -z "${MVSMF_PASS2:-}" ]; then
-	skip "auth: non-admin refusals (set MVSMF_USER2/MVSMF_PASS2 to enable)"
+if [ -z "${MVSMF_CURLRC2:-}" ]; then
+	skip "auth: non-admin refusals (give the mbt target a further user test2 to enable)"
 else
-	AUTH2="${MVSMF_USER2}:${MVSMF_PASS2}"
 	VICTIM="${MVSMF_USER}.CURL.A228"
 	ABEND_BEFORE2=$(mtt_abend_count)
 
-	curl -s -o /dev/null -X POST -u "$AUTH" \
+	curl -s -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 		-H "Content-Type: application/json" \
 		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
-	curl -s -o /dev/null -X PUT -u "$AUTH" -H "Content-Type: text/plain" \
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" -H "Content-Type: text/plain" \
 		--data-binary "ORIGINAL CONTENT" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}"
 
 	# READ is permitted -- the generic profile grants it -- so this is the
 	# control that proves the id is not simply refused everything.
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC2" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
 	assert_http_status "200" "$HTTP_CODE" "auth2: read of another user's data set is permitted"
 
 	# UPDATE and ALTER on someone else's data set are not.
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC2" \
 		-H "Content-Type: text/plain" --data-binary "OVERWRITTEN" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
 	assert_http_status "500" "$HTTP_CODE" "auth2: write to another user's data set is refused"
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -K "$MVSMF_CURLRC2" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
 	assert_http_status "500" "$HTTP_CODE" "auth2: delete of another user's data set is refused"
 
 	# The effect, which is the part the response cannot show.
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
 	assert_http_status "200" "$HTTP_CODE" "auth2: the refused delete did not delete"
 
-	CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${VICTIM}")
 	if echo "$CONTENT" | grep -q "ORIGINAL CONTENT"; then
 		pass "auth2: the refused write did not write"
 	else
@@ -2648,24 +2641,24 @@ else
 	# the owner READ/UPDATE/ALTER implicitly, which the generic DATASET * READ
 	# rule alone would not suggest. If this breaks, the checks are too strict.
 	OWN="${MVSMF_USER2}.CURL.OWN228"
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC2" \
 		-H "Content-Type: application/json" \
 		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
 		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
 	assert_http_status "201" "$HTTP_CODE" "auth2: create in own qualifier"
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC2" \
 		-H "Content-Type: text/plain" --data-binary "own data" \
 		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
 	assert_http_status "204" "$HTTP_CODE" "auth2: write in own qualifier"
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH2" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -K "$MVSMF_CURLRC2" \
 		"${BASE_URL}/zosmf/restfiles/ds/${OWN}")
 	assert_http_status "204" "$HTTP_CODE" "auth2: delete in own qualifier"
 
 	# #317: a create refused for authority must be INDISTINGUISHABLE from the
 	# space failure above -- that is what the reference does.
-	RESP=$(curl -s -w '\n%{http_code}' -X POST -u "$AUTH2" \
+	RESP=$(curl -s -w '\n%{http_code}' -X POST -K "$MVSMF_CURLRC2" \
 		-H "Content-Type: application/json" \
 		--data-binary '{"dsorg":"PS","alcunit":"TRK","primary":1,"secondary":1,"recfm":"FB","lrecl":80,"blksize":800}' \
 		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.HOLE317")
@@ -2680,11 +2673,11 @@ else
 			"authority body '${CONTENT}' differs from space body '${ALLOC_FAIL_BODY:-<unset>}'"
 	fi
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.HOLE317")
 	assert_http_status "404" "$HTTP_CODE" "auth2: the refused create created nothing"
 
-	curl -s -o /dev/null -X DELETE -u "$AUTH" \
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds/${VICTIM}" || true
 fi
 
@@ -2705,13 +2698,13 @@ echo "--- Lower-case names are folded (issue #334) ---"
 PDS_LOWER=$(echo "$TEST_PDS" | tr '[:upper:]' '[:lower:]')
 
 # a member to look for, written under the upper-case name
-curl -s -o /dev/null -X PUT -u "$AUTH" \
+curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "FOLDED" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD1)"
 
 # 1. dslevel= -- the reported symptom: an empty listing, not an error
-COUNT=$(curl -s -u "$AUTH" \
+COUNT=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${PDS_LOWER}" |
 	jq -r '.items | length' 2>/dev/null)
 if [ "${COUNT:-0}" -ge 1 ]; then
@@ -2722,12 +2715,12 @@ else
 fi
 
 # 2. member list under a lower-case data set name
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}/member")
 assert_http_status "200" "$HTTP_CODE" "lower-case dsname: member list"
 
 # 3. read a member, both names lower case
-CONTENT=$(curl -s -u "$AUTH" \
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold1)")
 if echo "$CONTENT" | grep -q "FOLDED"; then
 	pass "lower-case dsname and member: read"
@@ -2738,13 +2731,13 @@ fi
 
 # 4. a write through the lower-case name must land on the UPPER-case member --
 #    proving the name was folded, not that a second lower-case name was created
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "WRITTEN VIA LOWER CASE" \
 	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold2)")
 assert_http_status "204" "$HTTP_CODE" "lower-case dsname and member: write"
 
-CONTENT=$(curl -s -u "$AUTH" \
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD2)")
 if echo "$CONTENT" | grep -q "WRITTEN VIA LOWER CASE"; then
 	pass "the lower-case write landed on the upper-case member"
@@ -2754,11 +2747,11 @@ else
 fi
 
 # 5. delete through the lower-case name
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${PDS_LOWER}(fold2)")
 assert_http_status "204" "$HTTP_CODE" "lower-case dsname and member: delete"
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD1)"
 
 # --- An over-long dslevel is refused, not copied (issue #337) ---
@@ -2779,19 +2772,19 @@ LEVEL44=$(printf 'A%.0s' $(seq 1 44))
 LEVEL45=$(printf 'A%.0s' $(seq 1 45))
 LEVEL200=$(printf 'A%.0s' $(seq 1 200))
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL44}")
 assert_http_status "200" "$HTTP_CODE" "dslevel at the 44-character limit is accepted"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL45}")
 assert_http_status "400" "$HTTP_CODE" "dslevel one character over the limit is refused"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LEVEL200}")
 assert_http_status "400" "$HTTP_CODE" "a 200-character dslevel is refused"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long dslevels"
 
@@ -2807,15 +2800,15 @@ echo "--- Over-long name in the path is refused (issue #337) ---"
 
 NAME45=$(printf 'A%.0s' $(seq 1 45))
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${NAME45}")
 assert_http_status "400" "$HTTP_CODE" "over-long dsname in the path is refused"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(${NAME45})")
 assert_http_status "400" "$HTTP_CODE" "over-long member name in the path is refused"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
 assert_http_status "200" "$HTTP_CODE" "the server still answers after the over-long path names"
 
@@ -2833,63 +2826,63 @@ FOLD_DST="${MVSMF_USER}.CURL.FOLDDST"
 FOLD_NEW_LOWER=$(echo "$FOLD_NEW" | tr '[:upper:]' '[:lower:]')
 FOLD_SRC_LOWER=$(echo "$FOLD_SRC" | tr '[:upper:]' '[:lower:]')
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}" || true
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}" || true
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}" || true
 
 ALLOC='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
 
 # create through a lower-case name ...
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" -d "$ALLOC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW_LOWER}")
 assert_http_status "201" "$HTTP_CODE" "create through a lower-case name"
 
 # ... and the data set exists under the upper-case name
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}")
 assert_http_status "200" "$HTTP_CODE" "the lower-case create landed on the upper-case name"
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_NEW}"
 
 # data set rename with a lower-case source in the control body
-curl -s -o /dev/null -X POST -u "$AUTH" \
+curl -s -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" -d "$ALLOC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${FOLD_SRC_LOWER}\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
 assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source data set"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}")
 assert_http_status "200" "$HTTP_CODE" "the renamed data set is there"
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}"
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_DST}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${FOLD_SRC}"
 
 # member rename with a lower-case source member in the control body
-curl -s -o /dev/null -X PUT -u "$AUTH" \
+curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "RENAME ME" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD3)"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"fold3\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
 assert_http_status "204" "$HTTP_CODE" "rename with a lower-case source member"
 
-CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)")
 if echo "$CONTENT" | grep -q "RENAME ME"; then
 	pass "the renamed member kept its content"
 else
 	fail "the renamed member kept its content" "got '${CONTENT}'"
 fi
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD4)"
 
 # An over-long member name in the control body must not rename a DIFFERENT
@@ -2898,12 +2891,12 @@ curl -s -o /dev/null -X DELETE -u "$AUTH" \
 # "ABCDEFGHIJ" into "ABCDEFGH" -- an existing member -- and __renmem() would
 # rename that one and answer 204. The extraction buffer is deliberately wider
 # than the limit so the length refusal happens on the real value.
-curl -s -o /dev/null -X PUT -u "$AUTH" \
+curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "DO NOT RENAME ME" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	--data-binary "{\"request\":\"rename\",\"from-dataset\":{\"dsn\":\"${TEST_PDS}\",\"member\":\"ABCDEFGHIJ\"}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)")
@@ -2914,7 +2907,7 @@ else
 	pass "an over-long source member is refused (HTTP $HTTP_CODE)"
 fi
 
-CONTENT=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)")
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)")
 if echo "$CONTENT" | grep -q "DO NOT RENAME ME"; then
 	pass "the truncation target was left alone"
 else
@@ -2922,9 +2915,9 @@ else
 		"ABCDEFGH no longer holds its content -- it was renamed by a truncated name"
 fi
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(ABCDEFGH)"
-curl -s -o /dev/null -X DELETE -u "$AUTH" \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(WRONGTGT)" || true
 
 # --- Create modelled on an existing data set: like= (issue #338) ---
@@ -2941,23 +2934,23 @@ echo "--- Create with like= (issue #338) ---"
 LIKE_NEW="${MVSMF_USER}.CURL.LIKENEW"
 LIKE_OVR="${MVSMF_USER}.CURL.LIKEOVR"
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}" || true
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}" || true
 
 # the model's own attributes, straight from the listing
-MODEL=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
+MODEL=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
 M_DSORG=$(echo "$MODEL" | jq -r '.items[0].dsorg')
 M_RECFM=$(echo "$MODEL" | jq -r '.items[0].recfm')
 M_LRECL=$(echo "$MODEL" | jq -r '.items[0].lrecl')
 M_BLKSZ=$(echo "$MODEL" | jq -r '.items[0].blksz')
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "{\"like\":\"${TEST_PDS}\"}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}")
 assert_http_status "201" "$HTTP_CODE" "create with like= only"
 
-NEWDS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_NEW}")
+NEWDS=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_NEW}")
 assert_json_field "$NEWDS" '.items[0].dsorg' "$M_DSORG" "like: dsorg copied from the model"
 assert_json_field "$NEWDS" '.items[0].recfm' "$M_RECFM" "like: recfm copied from the model"
 assert_json_field "$NEWDS" '.items[0].lrecl' "$M_LRECL" "like: lrecl copied from the model"
@@ -2965,37 +2958,37 @@ assert_json_field "$NEWDS" '.items[0].blksz' "$M_BLKSZ" "like: blksize copied fr
 
 # the new PDS must actually be usable as one -- a directory with no blocks is
 # the failure mode LIKE_DIRBLK exists to avoid, and it only shows on a write
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/octet-stream" \
 	--data-binary "MEMBER IN A MODELLED PDS" \
 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}(LIKEMBR)")
 assert_http_status "204" "$HTTP_CODE" "like: the modelled PDS takes a member"
 
 # an explicit field overrides the model
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "{\"like\":\"${TEST_PDS}\",\"blksize\":800}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}")
 assert_http_status "201" "$HTTP_CODE" "create with like= plus an override"
 
-OVRDS=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_OVR}")
+OVRDS=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds?dslevel=${LIKE_OVR}")
 assert_json_field "$OVRDS" '.items[0].blksz' "800" "like: an explicit blksize wins over the model"
 assert_json_field "$OVRDS" '.items[0].lrecl' "$M_LRECL" "like: the unspecified lrecl still comes from the model"
 
 # a model that does not exist is a 404, not the generic dynalloc 500
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "{\"like\":\"${MVSMF_USER}.NO.SUCH.MODEL\"}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
 assert_http_status "404" "$HTTP_CODE" "like: a missing model is a 404"
 
 # ... and it created nothing
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
 assert_http_status "404" "$HTTP_CODE" "like: the refused create created nothing"
 
 # an over-long model name must be refused, not truncated into a real one
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" \
 	-d "{\"like\":\"$(printf 'A%.0s' $(seq 1 60))\"}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
@@ -3007,7 +3000,7 @@ else
 fi
 
 # a body with neither like= nor the five required fields is still a 400
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" \
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
 	-H "Content-Type: application/json" -d '{"recfm":"FB"}' \
 	"${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.LIKEBAD")
 assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is still a 400"
@@ -3024,15 +3017,15 @@ assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is sti
 # ?fn=dscb -- asserting only on what the listing shows would pass either way,
 # and that is how this got shipped in the first place.
 
-DSCB_SEC() { curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.secondary'; }
-DSCB_UNIT() { curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
+DSCB_SEC() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.secondary'; }
+DSCB_UNIT() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
 
-assert_json_field "$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
 
 LIKE_CYL="${MVSMF_USER}.CURL.LIKECYL"
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}" || true
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}" || true
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
 assert_http_status "201" "$HTTP_CODE" "like: create with an explicit primary in cylinders"
 
 CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
@@ -3052,7 +3045,7 @@ else
 	fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
 fi
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}"
 
 # --- like= a sequential model, but asking for a PDS -------------------------
 #
@@ -3061,36 +3054,36 @@ curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE
 LIKE_PS="${MVSMF_USER}.CURL.LIKEPS"
 LIKE_PO="${MVSMF_USER}.CURL.LIKEPO"
 for D in "$LIKE_PS" "$LIKE_PO"; do
-	curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${D}" || true
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${D}" || true
 done
 
-curl -s -o /dev/null -X POST -u "$AUTH" -H "Content-Type: application/json" 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PS}"
+curl -s -o /dev/null -X POST -K "$MVSMF_CURLRC" -H "Content-Type: application/json" 	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PS}"
 
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -u "$AUTH" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${LIKE_PS}\",\"dsorg\":\"PO\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}")
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${LIKE_PS}\",\"dsorg\":\"PO\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}")
 assert_http_status "201" "$HTTP_CODE" "like: a PS model with an explicit dsorg=PO"
 
 # the proof is that it works as a PDS -- zero directory blocks only shows here
-HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -u "$AUTH" 	-H "Content-Type: application/octet-stream" --data-binary "MEMBER" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}(DIRMBR)")
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X PUT -K "$MVSMF_CURLRC" 	-H "Content-Type: application/octet-stream" --data-binary "MEMBER" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_PO}(DIRMBR)")
 assert_http_status "204" "$HTTP_CODE" "like: that PDS got directory blocks and takes a member"
 
 for D in "$LIKE_PS" "$LIKE_PO"; do
-	curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${D}"
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${D}"
 done
 
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}"
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}"
 
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}" >/dev/null 2>&1 || true
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIG}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BIGPDS}" >/dev/null 2>&1 || true
 
-curl -s -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
+curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
-	-X DELETE -u "$AUTH" \
+	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
 assert_http_status "204" "$HTTP_CODE" "cleanup: delete PDS"
 

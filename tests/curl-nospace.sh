@@ -23,30 +23,19 @@
 # reaches the block boundary, which is the regression #366 fixed.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl must be installed
 #
 # Usage:
-#   ./tests/curl-nospace.sh
+#   mbt run rest-tests -- curl-nospace
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 TEST_DS="${MVSMF_USER}.CURL.NOSPACE"
 
 # One track, no secondary: the target has to fill. LRECL/BLKSIZE give the
@@ -67,19 +56,19 @@ fail() {
 info() { echo "  ..   $1"; }
 
 cleanup() {
-	curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
 }
-trap cleanup EXIT
+mvsmf_on_exit cleanup
 
 # put <n>  -> echoes "<status> <records on disk>"
 put() {
 	local n=$1 st got
 	st=$(awk -v n="$n" -v w=$((LRECL - 8)) \
 	       'BEGIN{for(i=1;i<=n;i++) printf "%0*d\n", w, i}' \
-	     | curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" -X PUT \
+	     | curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X PUT \
 	       -H 'Content-Type: text/plain' -H 'X-IBM-Data-Type: text' \
 	       --data-binary @- "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}")
-	got=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}" | grep -c .)
+	got=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}" | grep -c .)
 	echo "$st $got"
 }
 
@@ -87,8 +76,8 @@ echo "=== mvsMF out-of-space write (#366) ==="
 echo
 
 echo "Allocating ${TEST_DS} (PS FB/${LRECL}, BLKSIZE ${BLKSIZE}, TRK(1,0))..."
-curl -s -o /dev/null -X DELETE -u "$AUTH" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
-alloc=$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" -X POST \
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
+alloc=$(curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X POST \
 	-H 'Content-Type: application/json' \
 	-d "{\"dsorg\":\"PS\",\"alcunit\":\"TRK\",\"primary\":1,\"secondary\":0,\"recfm\":\"FB\",\"blksize\":${BLKSIZE},\"lrecl\":${LRECL}}" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}")

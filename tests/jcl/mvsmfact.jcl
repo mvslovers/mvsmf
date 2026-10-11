@@ -53,15 +53,15 @@
 //*   The port matters as much as the name. There is more than
 //*   one httpd on this network, and a second one on the same
 //*   HOST answers a different port from a different STEPLIB and
-//*   a different MVS system entirely. Read MBT_MVS_PORT from
-//*   .env, ask THAT server which STC is active, and take the
-//*   STEPLIB from THAT job -- the whole chain, not just the
-//*   host name. Measured wrong once (2026-09-06, port 8083 vs
-//*   8080): every step was green and the module went to an
-//*   unrelated system.
+//*   a different MVS system entirely. Read the port from the
+//*   mbt target's mvsMF URL, ask THAT server which STC is
+//*   active, and take the STEPLIB from THAT job -- the whole
+//*   chain, not just the host name. Measured wrong once
+//*   (2026-09-06, port 8083 vs 8080): every step was green and
+//*   the module went to an unrelated system.
 //*
 //*   The deploy library is the one `make deploy` reports as its
-//*   target, built from MBT_MVS_HLQ in .env.
+//*   target, built from the HLQ of the mbt target.
 //*
 //*   IT MOVES WITH THE PROJECT VERSION. The V1R0M1D above is
 //*   [project].version in project.toml, so every version bump

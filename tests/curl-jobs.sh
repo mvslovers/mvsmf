@@ -12,11 +12,12 @@
 #   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge)
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #
 # Usage:
-#   ./tests/curl-jobs.sh [--setup] [--cleanup]
+#   mbt run rest-tests -- curl-jobs [--setup] [--cleanup]
 #     --setup    Create test PDS and upload JCL member (for dataset submit)
 #     --cleanup  Delete test PDS after tests
 # =========================================================================
@@ -24,22 +25,11 @@
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 # mvsMF reads the userid from the ACEE, where RACF keeps it canonical (upper
-# case). .env may hold it in any case, so fold a copy for value comparisons.
+# case). conn.sh folds MVSMF_USER already; this copy keeps the comparisons
+# readable on their own.
 MVSMF_USER_UC=$(printf '%s' "${MVSMF_USER}" | tr '[:lower:]' '[:upper:]')
 JCL_DIR="${SCRIPT_DIR}/jcl"
 TEST_PDS="${MVSMF_USER}.MVSMF.TESTJCL"
@@ -169,7 +159,7 @@ assert_json_array_nonempty() {
 # earlier run -- which is most of the time.
 have_test_pds() {
 	local resp
-	resp=$(curl -s -w '\n%{http_code}' -u "$AUTH" \
+	resp=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}")
 	local body status
 	status=$(echo "$resp" | tail -n1)
@@ -182,7 +172,7 @@ have_test_pds() {
 do_curl() {
 	local method="$1"
 	shift
-	curl -s -w '\n%{http_code}' -X "$method" -u "$AUTH" "$@"
+	curl -s -w '\n%{http_code}' -X "$method" -K "$MVSMF_CURLRC" "$@"
 }
 
 # Split curl output into STATUS and BODY
@@ -545,6 +535,11 @@ test_submit_user_on_card_is_overwritten() {
 	#   IEF452I JOBFAIL  JOB NOT RUN - JCL ERROR
 	#   IEF652I MUTUALLY EXCLUSIVE KEYWORDS
 	# A JCL ERROR here is that regression; CC 0000 is the fix.
+	#
+	# It also proves the PASSWORD= is right on a token. This suite runs on mbt's
+	# session token, not Basic auth (#400), so the password mvsMF injects comes
+	# from the session's own copy of the credential (httpd#289). Without that
+	# copy there is no password to inject, and the job does not run (#164).
 	local jcl
 	jcl=$(printf '%s\n%s\n%s\n' \
 		"//USRCARD  JOB (ACCT),'USER ON CARD',CLASS=A,MSGCLASS=H," \
@@ -1472,7 +1467,7 @@ test_spool_records_stale_checkpoint() {
 	local jobname jobid ids probe
 	jobname="SYSLOG"
 	# the probe writes HTTP text lines: strip CR or the $ anchors never match
-	probe=$(curl -s -u "$AUTH" "${BASE_URL}/zosmf/test?fn=syslog&step=4" 2>/dev/null | tr -d '\r')
+	probe=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=syslog&step=4" 2>/dev/null | tr -d '\r')
 	jobid=$(printf '%s\n' "$probe" | sed -n 's/.*jobid=\([A-Z0-9]*\).*/\1/p' | head -1)
 
 	if [ -n "$jobid" ]; then

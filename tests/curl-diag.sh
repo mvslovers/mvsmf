@@ -22,32 +22,21 @@
 #      every endpoint answering S80A until the STC was restarted.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #   - a server that may be abended on purpose: this suite DOES fault the
 #     worker, several times, by design
 #
 # Usage:
-#   ./tests/curl-diag.sh
+#   mbt run rest-tests -- curl-diag
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 TEST_URL="${BASE_URL}/zosmf/test"
 
 PASSED=0
@@ -69,7 +58,7 @@ assert_http_status() {
 # GET a test fn, echo "BODY\nHTTP_CODE"
 get_fn() {
 	# $1 = fn value
-	curl -s -w '\n%{http_code}' -u "$AUTH" "${TEST_URL}?fn=$1"
+	curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "${TEST_URL}?fn=$1"
 }
 
 echo ""
@@ -81,7 +70,7 @@ echo "========================================"
 
 # storage sample: echo the largest free block, or empty on failure
 storage_largest() {
-	curl -s -u "$AUTH" "${TEST_URL}?fn=storage&total=1" |
+	curl -s -K "$MVSMF_CURLRC" "${TEST_URL}?fn=storage&total=1" |
 		sed -n 's/.*"total": \([0-9]*\).*/\1/p'
 }
 
@@ -131,7 +120,7 @@ assert_http_status "500" "$CODE" "fn=jesabend -> caught, formatted error"
 
 echo ""
 echo "--- jobs API still works after the abend ---"
-CODE2=$(curl -s -o /dev/null -w '%{http_code}' -u "$AUTH" \
+CODE2=$(curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restjobs/jobs?owner=*&prefix=HTTPD*")
 assert_http_status "200" "$CODE2" "jobs list after fn=jesabend"
 
@@ -146,7 +135,7 @@ assert_http_status "200" "$CODE2" "jobs list after fn=jesabend"
 echo ""
 echo "--- storage after the abends (the guard that replaced the gate) ---"
 for _ in 1 2 3 4 5; do
-	curl -s -o /dev/null -u "$AUTH" "${TEST_URL}?fn=abend"
+	curl -s -o /dev/null -K "$MVSMF_CURLRC" "${TEST_URL}?fn=abend"
 done
 CODE2=$(get_fn version | tail -1)
 assert_http_status "200" "$CODE2" "server alive after five more abends"
@@ -182,7 +171,7 @@ fi
 # =========================================================================
 echo ""
 echo "--- the response is framed (issue #355) ---"
-HDRS=$(curl -s -D - -o /dev/null -u "$AUTH" "${TEST_URL}?fn=version")
+HDRS=$(curl -s -D - -o /dev/null -K "$MVSMF_CURLRC" "${TEST_URL}?fn=version")
 
 if echo "$HDRS" | grep -qi "^Transfer-Encoding: chunked"; then
 	pass "fn=version response is chunked"

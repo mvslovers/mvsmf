@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # storage-classes.sh -- the sampling protocol from issue #287.
 #
@@ -22,21 +22,18 @@
 # is ever in flight while a sample runs.
 #
 # Usage:
-#   tests/storage-classes.sh                    # all classes, 200 requests each
-#   COUNT=50 tests/storage-classes.sh info      # one class, shorter run
+#   mbt run rest-tests -- storage-classes                # all classes, 200 requests each
+#   COUNT=50 mbt run rest-tests -- storage-classes info  # one class, shorter run
 #
-# Reads .env for MBT_MVS_HOST / _PORT / _USER / _PASS.
+# The connection comes from the mbt target (tests/lib/conn.sh): run this
+# through `mbt run rest-tests -- storage-classes`.
 
 set -u
 
 cd "$(dirname "$0")/.." || exit 1
-[ -f .env ] || { echo "no .env"; exit 1; }
-set -a
-. ./.env
-set +a
+. tests/lib/conn.sh
 
-BASE="http://${MBT_MVS_HOST}:${MBT_MVS_PORT}"
-CRED="${MBT_MVS_USER}:${MBT_MVS_PASS}"
+BASE="$BASE_URL"
 COUNT="${COUNT:-200}"
 EVERY="${EVERY:-50}"
 
@@ -73,7 +70,7 @@ CLASSES="${*:-static dm info datasets uss jobs static}"
 # One sample -> "largest total blocks".  Parsed with sed rather than a JSON
 # tool so this runs anywhere curl does.
 sample() {
-    out=$(curl -s -u "$CRED" "$BASE/zosmf/test?fn=storage&total=1")
+    out=$(curl -s -K "$MVSMF_CURLRC" "$BASE/zosmf/test?fn=storage&total=1")
     largest=$(echo "$out" | sed -n 's/.*"largest": \([0-9]*\).*/\1/p')
     total=$(echo "$out" | sed -n 's/.*"total": \([0-9]*\).*/\1/p')
     blocks=$(echo "$out" | sed -n 's/.*"blocks": \([0-9]*\).*/\1/p')
@@ -98,7 +95,7 @@ sample() {
 emit() { printf '%s,%s,%s,%s,%s,%s,%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "$7"; }
 
 echo "# base=$BASE count=$COUNT every=$EVERY"
-echo "# build=$(curl -s -u "$CRED" "$BASE/zosmf/test?fn=version" |
+echo "# build=$(curl -s -K "$MVSMF_CURLRC" "$BASE/zosmf/test?fn=version" |
               sed -n 's/.*"build": "\([^"]*\)".*/\1/p')"
 emit class requests largest total blocks probes seconds
 
@@ -109,7 +106,7 @@ for class in $CLASSES; do
     url=$(url_for "$class")
     [ -n "$url" ] || { echo "unknown class: $class" >&2; continue; }
 
-    code=$(curl -s -o /dev/null -w '%{http_code}' -u "$CRED" "$BASE$url")
+    code=$(curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" "$BASE$url")
     case "$code" in
     200) ;;
     *)   echo "$class: $url answered $code, skipping" >&2; continue ;;
@@ -118,7 +115,7 @@ for class in $CLASSES; do
     i=0
     t0=$(date +%s)
     while [ "$i" -lt "$COUNT" ]; do
-        curl -s -o /dev/null -u "$CRED" "$BASE$url"
+        curl -s -o /dev/null -K "$MVSMF_CURLRC" "$BASE$url"
         i=$((i + 1))
         if [ $((i % EVERY)) -eq 0 ]; then
             t=$(( $(date +%s) - t0 ))

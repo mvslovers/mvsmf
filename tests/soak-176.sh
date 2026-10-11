@@ -1,7 +1,11 @@
 #!/bin/bash
 # tests/soak-176.sh — long-running mixed console load.
 #
-# Usage: nohup ./tests/soak-176.sh > /dev/null 2>&1 &
+# Usage: nohup mbt run rest-tests -- soak-176 > /dev/null 2>&1 &
+#
+#        It runs on mbt's session token, not on Basic auth, so it ends when
+#        httpd's session max-age does (SESSION_MAXAGE, 480 minutes unless the
+#        Parmlib says otherwise): every request answers 401 from then on.
 #        tail -f soak-176-*.log
 #
 # Tunables (env): DELAY SLOW_SECS MAXTIME RING_EVERY SOAK_HERC_LOG
@@ -24,17 +28,11 @@
 #       a hang is the state from BEFORE it.
 
 set -u
-[ -f .env ] && . ./.env
+# The connection comes from the mbt target (tests/lib/conn.sh): run this
+# through `mbt run rest-tests -- soak-176`.
+. "$(dirname "$0")/lib/conn.sh"
 
-# The other suites in tests/ read MVSMF_*; deploy tooling sets MBT_MVS_*.
-# Accept either so this runs from the same .env as everything else.
-MVSMF_HOST="${MVSMF_HOST:-${MBT_MVS_HOST:-}}"
-MVSMF_PORT="${MVSMF_PORT:-${MBT_MVS_PORT:-}}"
-MVSMF_USER="${MVSMF_USER:-${MBT_MVS_USER:-}}"
-MVSMF_PASS="${MVSMF_PASS:-${MBT_MVS_PASS:-}}"
-
-BASE="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
+BASE="$BASE_URL"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 LOG="soak-176-${STAMP}.log"
 TRIAGE="soak-triage-${STAMP}.txt"
@@ -104,7 +102,7 @@ triage() { # triage <why>
 		while IFS='|' read -r name url; do
 			[ -z "$name" ] && continue
 			printf '  %-14s ' "$name"
-			curl -s -o /dev/null -m 10 -u "$AUTH" \
+			curl -s -o /dev/null -m 10 -K "$MVSMF_CURLRC" \
 				-w 'HTTP %{http_code}  %{time_total}s\n' "$url" \
 				|| echo "no answer within 10s"
 		done <<-PROBES
@@ -130,7 +128,7 @@ triage() { # triage <why>
 # exactly the state a post-mortem capture can no longer reach.
 ring_snapshot() {
 	local f="mtt-ring-${STAMP}-$((N / RING_EVERY % RING_KEEP)).json"
-	curl -s -m 20 -u "$AUTH" "$BASE/zosmf/test?fn=mtt&step=3" > "$f" 2>/dev/null
+	curl -s -m 20 -K "$MVSMF_CURLRC" "$BASE/zosmf/test?fn=mtt&step=3" > "$f" 2>/dev/null
 }
 
 req() { # req <label> <curl args...>
@@ -173,22 +171,22 @@ while true; do
 
 	if [ "$R" -lt 50 ]; then
 		CMD="${COMMANDS[$((RANDOM % ${#COMMANDS[@]}))]}"
-		req "cmd[$CMD]" -X PUT "$CONSOLE" -u "$AUTH" \
+		req "cmd[$CMD]" -X PUT "$CONSOLE" -K "$MVSMF_CURLRC" \
 			-H "$CT" -H "$CSRF" \
 			-d "{\"cmd\":\"$CMD\",\"async\":\"N\"}"
 
 	elif [ "$R" -lt 80 ]; then
-		req "log45m" "$BASE/zosmf/restconsoles/v1/log?timeRange=45m" -u "$AUTH"
+		req "log45m" "$BASE/zosmf/restconsoles/v1/log?timeRange=45m" -K "$MVSMF_CURLRC"
 
 	elif [ "$R" -lt 92 ]; then
 		for TR in 5m 15m 2h; do
-			req "log$TR" "$BASE/zosmf/restconsoles/v1/log?timeRange=$TR" -u "$AUTH"
+			req "log$TR" "$BASE/zosmf/restconsoles/v1/log?timeRange=$TR" -K "$MVSMF_CURLRC"
 		done
 
 	else
 		# unsol_sync — holds a worker in the poll loop.
 		# Dominant heap-churn driver: cmtt_new/cmtt_free per iteration.
-		req "unsol" -X PUT "$CONSOLE" -u "$AUTH" -H "$CT" -H "$CSRF" \
+		req "unsol" -X PUT "$CONSOLE" -K "$MVSMF_CURLRC" -H "$CT" -H "$CSRF" \
 			-d '{"cmd":"D T","unsol-key":"ZZZNOMATCH","unsol-detect-sync":"Y","unsol-detect-timeout":"10"}'
 	fi
 

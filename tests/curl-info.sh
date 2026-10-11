@@ -17,35 +17,24 @@
 #
 # The endpoint is NOT unauthenticated, though it was documented as such
 # until #324 -- including in this header. Every request below therefore
-# carries -u, and the last test pins the credential-less 401 down so the
-# exemption does not get added back off a stale doc line.
+# carries the session cookie, and the last tests pin the credential-less 401
+# down so the exemption does not get added back off a stale doc line.
 #
 # Prerequisites:
-#   - Copy .env.example to .env at the repo root and fill in
+#   - Run through mbt (see Usage), which hands over the target's
+#     connection (tests/lib/conn.sh)
 #   - curl and jq must be installed
 #
 # Usage:
-#   ./tests/curl-info.sh
+#   mbt run rest-tests -- curl-info
 # =========================================================================
 
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="${ROOT_DIR}/.env"
+. "${SCRIPT_DIR}/lib/conn.sh"
 
-if [ ! -f "$ENV_FILE" ]; then
-	echo "ERROR: ${ENV_FILE} not found."
-	echo "Copy .env.example to .env and fill in your values."
-	exit 1
-fi
-
-# shellcheck source=../.env
-. "$ENV_FILE"
-
-BASE_URL="http://${MVSMF_HOST}:${MVSMF_PORT}"
 INFO_URL="${BASE_URL}/zosmf/info"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
 
 # The name used in the Host header under test. Deliberately not the address
 # curl dials, so a response echoing it proves the header was the source.
@@ -75,12 +64,12 @@ assert_json_field() {
 }
 
 BODYF=$(mktemp)
-trap 'rm -f "$BODYF"' EXIT
+mvsmf_on_exit 'rm -f "$BODYF"'
 
 # GET /zosmf/info with the given extra headers; sets CODE and BODY.
 # Every argument is passed to curl verbatim (use one -H per header).
 info() {
-	CODE=$(curl -s -u "$AUTH" -o "$BODYF" -w '%{http_code}' "$@" "$INFO_URL")
+	CODE=$(curl -s -K "$MVSMF_CURLRC" -o "$BODYF" -w '%{http_code}' "$@" "$INFO_URL")
 	BODY=$(cat "$BODYF")
 }
 
@@ -291,31 +280,14 @@ assert_header "WWW-Authenticate: Basic" "a z/OSMF API client still gets the chal
 
 # =========================================================================
 # 7. Implicit login (issue #324 C1)
+#
+# A Basic-authenticated request gets the session cookie back, and a caller
+# presenting it gets none re-issued. Both need the password, so they are in
+# mbt/lua/restauth.lua (`mbt run rest-tests -- info-cookie`), where mbt sends
+# it. What needs no credential stays here.
 # =========================================================================
 echo ""
 echo "--- implicit login ---"
-
-# The reference establishes its session on any Basic-authenticated request,
-# not only at the login endpoint, and does not re-issue it to a caller that
-# already presents the cookie.
-HDRS=$(curl -s -D- -o /dev/null -u "$AUTH" "$INFO_URL")
-assert_header "Set-Cookie: LtpaToken2" "Basic auth hands back the session cookie"
-
-if echo "$HDRS" | grep -iq "^Set-Cookie: LtpaToken2=[^;]*; Path=/; HttpOnly; SameSite=Strict"; then
-	pass "the cookie carries Path, HttpOnly and SameSite"
-else
-	fail "the cookie carries Path, HttpOnly and SameSite" \
-		 "attributes missing -- without HttpOnly the token is readable from JS"
-fi
-
-# A caller arriving with the cookie sends no Authorization, so nothing is
-# re-issued. Absence is the assertion here.
-JAR=$(mktemp)
-curl -s -c "$JAR" -o /dev/null -u "$AUTH" "$INFO_URL"
-HDRS=$(curl -s -D- -o /dev/null -b "$JAR" "$INFO_URL")
-assert_http_status "200" "$(echo "$HDRS" | head -1 | grep -oE '[0-9]{3}')" "the cookie alone authenticates"
-assert_no_header "Set-Cookie" "no cookie is re-issued to a caller that has one"
-rm -f "$JAR"
 
 # No credential at all: there is no token to hand out.
 info_anon_hdrs

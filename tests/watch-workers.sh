@@ -2,7 +2,7 @@
 # tests/watch-workers.sh — catch the FIRST httpd worker that wedges, and record
 # the exact instruction it is sitting on.
 #
-# Usage:  ./tests/watch-workers.sh &            # alongside a soak run
+# Usage:  mbt run rest-tests -- watch-workers &   # alongside a soak run
 #         SOAKLOG=soak-176-*.log ./tests/watch-workers.sh &
 #
 # Tunables (env): INTERVAL SOAKLOG HERC_HOST HERC_PORT SSH_HOST HERC_LOG
@@ -39,16 +39,11 @@
 #   in a temp file deliberately, not as a style choice.
 
 set -u
-[ -f .env ] && . ./.env
+# The connection comes from the mbt target (tests/lib/conn.sh): run this
+# through `mbt run rest-tests -- watch-workers`.
+. "$(dirname "$0")/lib/conn.sh"
 
-# The other suites in tests/ read MVSMF_*; deploy tooling sets MBT_MVS_*.
-MVSMF_HOST="${MVSMF_HOST:-${MBT_MVS_HOST:-}}"
-MVSMF_PORT="${MVSMF_PORT:-${MBT_MVS_PORT:-}}"
-MVSMF_USER="${MVSMF_USER:-${MBT_MVS_USER:-}}"
-MVSMF_PASS="${MVSMF_PASS:-${MBT_MVS_PASS:-}}"
-
-BASE_HTTP="http://${MVSMF_HOST}:${MVSMF_PORT}"
-AUTH="${MVSMF_USER}:${MVSMF_PASS}"
+BASE_HTTP="$BASE_URL"
 
 # Hercules' own HTTP server, used only to issue MVS console commands.
 HERC_HOST="${HERC_HOST:-$MVSMF_HOST}"
@@ -67,7 +62,7 @@ OUT="worker-watch-$(date +%Y%m%d-%H%M%S).txt"
 herc() { curl -s -m 20 -G --data-urlencode "command=$1" "$HERC" >/dev/null; }
 
 dm() { # dm <addr> [len] -> "+00000 wwwwwwww wwwwwwww ..."
-	curl -s -m 30 -u "$AUTH" "$BASE_HTTP/.dm?memory=$1&length=${2:-48}&chunk=16" \
+	curl -s -m 30 -K "$MVSMF_CURLRC" "$BASE_HTTP/.dm?memory=$1&length=${2:-48}&chunk=16" \
 		| LC_ALL=C sed -e 's/<[^>]*>/ /g' | LC_ALL=C tr -s ' \n' ' \n' | grep -aE '^\+'
 }
 
@@ -97,7 +92,7 @@ snap() {
 
 echo "watching every ${INTERVAL}s -> $OUT" | tee "$OUT"
 PREV=$(mktemp)
-trap 'rm -f "$PREV"' EXIT
+mvsmf_on_exit 'rm -f "$PREV"'
 round=0
 
 while true; do

@@ -7,8 +7,9 @@
 #   DELETE /zosmf/services/authenticate   (log out -> 204)
 #
 # Covers: login (200 + Set-Cookie + body), token replay on a gated endpoint,
-# invalid credentials (401), logout (204), no-token logout, and that the token
-# is rejected after logout.
+# invalid credentials (401), logout (204), no-token logout, that the token
+# is rejected after logout, and that two logins of one client are two sessions
+# (httpd#288).
 #
 # One assertion adapts to the httpd route policy: the z/OSMF-shaped JSON body on
 # a bad login only appears when httpd forwards the authenticate route to mvsMF
@@ -194,6 +195,48 @@ if [ -n "$TOKEN" ]; then
 	assert_http_status "401" "$CODE" "logged-out token is rejected"
 else
 	skip "post-logout replay (no token captured)"
+fi
+
+# =========================================================================
+# 7. Two logins from one client are two sessions (httpd#288)
+#
+# Same userid, same password, same address: before httpd#288 both logins got
+# the SAME token, so logging one of them out ended the other. Uses the second
+# userid when .env has one, so that against an httpd without the fix this
+# section ends only its own credential, not the one every other client on this
+# machine is using.
+# =========================================================================
+echo ""
+echo "--- two logins, one logout (httpd#288) ---"
+if [ -n "${MVSMF_USER2:-}" ]; then AUTH2="${MVSMF_USER2}:${MVSMF_PASS2}"
+else AUTH2="$AUTH"; fi
+login "$AUTH2"
+TOKEN_A=$(cookie_token)
+login "$AUTH2"
+TOKEN_B=$(cookie_token)
+if [ -z "$TOKEN_A" ] || [ -z "$TOKEN_B" ]; then
+	fail "two logins: both return a token" "A=${#TOKEN_A} B=${#TOKEN_B} chars"
+else
+	if [ "$TOKEN_A" != "$TOKEN_B" ]; then pass "two logins: two different tokens"
+	else fail "two logins: two different tokens" "both logins got the same token"; fi
+
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+		-H 'X-CSRF-ZOSMF-HEADER: *' \
+		-H "Cookie: LtpaToken2=${TOKEN_A}" "$AUTH_URL")
+	assert_http_status "204" "$CODE" "two logins: logout of the first"
+
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+		-H "Cookie: LtpaToken2=${TOKEN_B}" "$GATED_URL")
+	assert_http_status "200" "$CODE" "two logins: the second session survives the first's logout"
+
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' \
+		-H "Cookie: LtpaToken2=${TOKEN_A}" "$GATED_URL")
+	assert_http_status "401" "$CODE" "two logins: the first token is dead"
+
+	CODE=$(curl -s -o /dev/null -w '%{http_code}' -X DELETE \
+		-H 'X-CSRF-ZOSMF-HEADER: *' \
+		-H "Cookie: LtpaToken2=${TOKEN_B}" "$AUTH_URL")
+	assert_http_status "204" "$CODE" "two logins: logout of the second"
 fi
 
 # =========================================================================

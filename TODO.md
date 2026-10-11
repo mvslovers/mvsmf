@@ -489,9 +489,9 @@ target's URL, user and mbt's session token, never a password, through
 password (logon, wrong password, logout, two logins, the cookie on a Basic
 response) are Lua in `mbt/lua/restauth.lua`; the ordinary userid of the
 authorization tests is the target's further user `test2`. Every suite green
-on mvsdev (results on the PR). Left over: the 401 body in the `auth` suite is
-skipped until an mbt prerelease returns bodies on statuses >= 400 (mbt bug,
-fix under way), and the first run with `test2` waits for a slot.
+on mvsdev, with `test2` too: `auth` 21/0 and `curl-datasets` 306/0, no skips,
+on mbt `fee3c9d`, which returns the body on an error status (results on the
+PR).
 
 
 Pointers only — the reasoning lives in the closing comments.

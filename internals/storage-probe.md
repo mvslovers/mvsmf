@@ -93,8 +93,8 @@ concurrency fences off free holes of roughly one stack each
 injection of the day against the same fragmented space — **8 of 8 requests
 failed before the change, 8 of 8 succeeded after it.**
 
-`link_stack` is read from `PPASTKLN`, the length `@@crt0`/`@@crt1` actually
-GETMAINed (`ST R8,PPASTKLN`), so it follows `__stklen` and cannot drift from
+`link_stack` is read from `PPASTKLN`, the length the C startup `@@CRT0`
+actually GETMAINed (`ST R8,PPASTKLN`), so it follows `__stklen` and cannot drift from
 it.
 
 **Stack headroom, since a too-small stack overruns rather than failing

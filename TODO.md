@@ -9,8 +9,8 @@ than code, and the per-issue hazard that makes an obvious-looking fix not one.
 the issue thread, the PR, `internals/uss-spec.md` — this file points at it and stops.
 
 *Last reconciled against the tracker: 2026-09-06 after the **1.0.0 release**,
-20 issues open — fifteen entries below: one pairs two issues, one is a **block
-of three** (#244 → #361 → #245, entry 5), and **#360 and #363 are not ranked
+20 issues open — sixteen entries below (#371 added 2026-10-12): one pairs
+two issues, one is a **block of three** (#244 → #361 → #245, entry 6), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
@@ -27,9 +27,10 @@ the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
 404 — see the 2026-10-01 comment on #360 (proposal: `__walkpd()`). The
 `__listds()` half still waits on `libc370#157`. #361 is new (2026-09-06) and moved
-#245 down: they are one subsystem and must be done in sequence. **Tier 1 is empty** —
-#336's reject half landed in PR #358, #210 in PR #359, and #362 and #357 in
-PR #364 — so the top of the queue is Tier 2's #251.*
+#245 down: they are one subsystem and must be done in sequence. **Tier 1 holds
+#371 since 2026-10-12** — a full library answered a member PUT with 204 and
+kept none of the body; before that it was empty (#336's reject half landed in
+PR #358, #210 in PR #359, and #362 and #357 in PR #364).*
 
 ---
 
@@ -37,50 +38,61 @@ PR #364 — so the top of the queue is Tier 2's #251.*
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #251 | Optimistic Path stop pattern | nothing |
-| 2 | #209 | client-visible, cheap on 3.8j | nothing |
-| 3 | #326 | its trigger has fired | nothing |
-| 4 | #76 | the one externally reported defect | nothing |
-| 5 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
-| 6 | #215 | latent, one place, every caller benefits | nothing |
-| 7 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 8 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
-| 9 | #234 | `type:research` | measuring the reference |
-| 10 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 11 | #345 | `type:research` | **a policy** — see *RAKF* |
-| 12 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
-| 13 | #291 | reclassified — hygiene, not stability | nothing |
-| 14 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
-| 15 | #336 | routes withdrawn; now a feature request | `libc370#143` for half of it |
+| 1 | #371 | **a 204 for data that is not there** | nothing |
+| 2 | #251 | Optimistic Path stop pattern | nothing |
+| 3 | #209 | client-visible, cheap on 3.8j | nothing |
+| 4 | #326 | its trigger has fired | nothing |
+| 5 | #76 | the one externally reported defect | nothing |
+| 6 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
+| 7 | #215 | latent, one place, every caller benefits | nothing |
+| 8 | #257, #335 | one class, two tickets | a repro without a proxy |
+| 9 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
+| 10 | #234 | `type:research` | measuring the reference |
+| 11 | #329 | `type:research` | **one measurement** — see *RAKF* |
+| 12 | #345 | `type:research` | **a policy** — see *RAKF* |
+| 13 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
+| 14 | #291 | reclassified — hygiene, not stability | nothing |
+| 15 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
+| 16 | #336 | routes withdrawn; now a feature request | `libc370#143` for half of it |
 
 ---
 
 ## Tier 1 — now
 
-**Empty.** #336 was its only entry and PR #358 took the cheap half — the seven
-routes are withdrawn, so nothing here answers a client wrongly any more. What
-is left of it is a feature request, ranked last; see Tier 5. The top of the
-queue is Tier 2's #251.
+### 1 · #371 — a PUT answers 204 when the close-time write fails
+
+The last, partial block of a PUT is written at CLOSE, and `session_fclose()`
+(`src/router.c:235`) is `void`: libc370 reports the failure since
+`libc370#182` (`fclose()` → `EOF`, `errno` `ENOSPC`), and mvsMF throws it away.
+#366 measured the narrow band — 195..199 records into a 190-record target lose
+the tail. oftp370 found the wide one on mvsdev 2026-10-12: 47 FB-80 records
+into a full `BLKSIZE=19040` PDS, all of them inside the one partial block, so
+no in-loop `fflush()` ever failed — **204, a directory entry, zero records**
+(comment on #371). A client that trusts the 204 holds a backup that does not
+exist; that is why this outranks everything below. Nothing to wait on: we link
+libc370 2.x. The plan, the doc sites and the `curl-nospace.sh` KNOWN GAP to
+turn into a check are in the issue. Not measured: whether an *existing* member
+is replaced by an empty one.
 
 ---
 
 ## Tier 2 — cheap and client-visible
 
-### 1 · #251 — console log answers 200 with an empty body on allocation failure
+### 2 · #251 — console log answers 200 with an empty body on allocation failure
 
 `consapi.c:1100` collapses a NULL `cmtt_new()` into `n = 0`. The MTT copy is the
 largest allocation on that path — the one most likely to fail exactly when a
 silent empty answer misleads most. The sibling `malloc()` three lines below
 already returns 500. Textbook **Optimistic Path**; check `:266` and `:457` too.
 
-### 2 · #209 — `exec-system` and `exec-member` are never emitted
+### 3 · #209 — `exec-system` and `exec-member` are never emitted
 
 3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
 libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
 (`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
 the code.
 
-### 3 · #326 — five sources missing from the CLAUDE.md list
+### 4 · #326 — five sources missing from the CLAUDE.md list
 
 `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
 "next time `CLAUDE.md` is touched", so fold it into the next edit of that file
@@ -91,7 +103,7 @@ which is how the list drifted in the first place.
 
 ## Tier 3 — correctness, needs care
 
-### 4 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
+### 5 · #76 — DSORG=DA in `datasetPutHandler` via BDAM
 
 *the only defect on this list someone outside the project reported*
 
@@ -106,7 +118,7 @@ is a measured deviation nobody has reported and #215 has never been seen at all.
 What holds it out of Tier 1 is that `ufsd-utils upload` does the job today — a
 workaround, not an absence of impact.
 
-### 5 · #244 → #361 → #245 — the RECFM=V block, in that order
+### 6 · #244 → #361 → #245 — the RECFM=V block, in that order
 
 *three tickets, one subsystem; the order is a constraint, not a preference*
 
@@ -164,7 +176,7 @@ keeps #244's old slot above #215 because it is where #244 already sat and the
 three are one edit's worth of context — not on impact, where #215's unparseable
 response reaches every `consapi.c` caller and this reaches none.
 
-### 6 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 7 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -174,7 +186,7 @@ Honest scope, per the issue: **no observed failure**. #212 fixed this locally in
 The subtlety from #212, easy to lose: `http_printf()` translates on the way out,
 so the printability test applies to the **translated** byte, via `xlate_cp037`.
 
-### 7 · #257 + #335 — early 4xx on a PUT with a body still in flight
+### 8 · #257 + #335 — early 4xx on a PUT with a body still in flight
 
 **One class, two tickets — rank and fix them together.** Every early return in the
 PUT handlers answers before draining the announced body (`dsapi.c:1156, 1180,
@@ -191,7 +203,7 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 8 · #347 — restconsoles authorizes nothing at all
+### 9 · #347 — restconsoles authorizes nothing at all
 
 *an authenticated user can stop the system*
 
@@ -229,7 +241,7 @@ reaching for the obvious: a display-only allow-list **breaks a real workflow** �
 `P FTPD` / `S FTPD` are group-1 (SYS) commands and are in use today (#346's
 transcript). Decide with #345 and `ftpd#90`.
 
-### 9 · #234 — what should the API do with non-ASCII input?
+### 10 · #234 — what should the API do with non-ASCII input?
 
 Byte-wise through CP037 with no UTF-8 decoding — and **invisible through the API**,
 because `etoa` inverts `atoe`, so only ISPF and the program reading the member see
@@ -245,7 +257,7 @@ ASCII side, `Content-Type: …;charset=`.
 `xmit370`'s split between well-formed UTF-8 and Latin-1 is worth borrowing. Decide
 GET and PUT together; a reject changes the round-trip property.
 
-### 10 · #329 — dataset create is authorized only by the ambient ACEE
+### 11 · #329 — dataset create is authorized only by the ambient ACEE
 
 **The endpoint is not unauthorized and the response shape is settled** (#315,
 #317): RAKF refuses the allocation and the refusal must stay indistinguishable
@@ -256,7 +268,7 @@ open is only **which identity decides** — SVC 99 runs under whatever sits in
 The cheap unblocked step is a measurement, and it decides whether the fix exists
 at all: what does RACHECK answer for a name with no catalog entry and no DSCB?
 
-### 11 · #345 — restjobs has no authorization model
+### 12 · #345 — restjobs has no authorization model
 
 `grep -c 'http_check_auth\|require_access' src/jobsapi.c` → **0**, against 25 in
 `dsapi.c`. `owner=*` switches the default off, and the four by-jobid paths —
@@ -270,7 +282,7 @@ Whatever refusal is chosen must keep #229's constraint: "not yours" must not be
 distinguishable from "does not exist". Establish `jescanj()`'s own behaviour on a
 foreign purge, on a throwaway job. Decide together with `mvslovers/ftpd#90`.
 
-### 12 · #195 — detections intermittently report `waiting` for a message that was emitted
+### 13 · #195 — detections intermittently report `waiting` for a message that was emitted
 
 **Split out of #214 on 2026-08-23: they are not the same bug.** Structural, no
 measurement needed — `detect_count()` never reads `MTT_SRC_OFF`, never anchors an
@@ -310,7 +322,7 @@ truncating the snapshot.
 
 ## Tier 5 — larger work
 
-### 13 · #291 — large bodies fully buffered, twice on submit
+### 14 · #291 — large bodies fully buffered, twice on submit
 
 **Reclassify: memory hygiene, not stability.** Its motivation — stopping long-held
 requests acting as the anvil for httpd#195's fragmentation — is gone: #287 closed,
@@ -324,7 +336,7 @@ holds 2 MB. Cheapest item, and independent of the streaming work.
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
 
-### 14 · #186 — console log: deep history beyond the MTT window
+### 15 · #186 — console log: deep history beyond the MTT window
 
 **No longer blocked — the issue text says it is, and that is out of date.** Its
 hard dependency `libc370#21` is **closed and verified on target** (PR#31,
@@ -353,7 +365,7 @@ operational requirements (`VARY SYSLOG,HARDCPY`, and spinning to a held class)
 belong in `docs/endpoints/console/hardcopy-log.md`, and mvsMF can issue
 `WRITELOG H` through the console API it already has.
 
-### 15 · #336 — `-({volume-serial})` addressing, now a feature rather than a lie
+### 16 · #336 — `-({volume-serial})` addressing, now a feature rather than a lie
 
 **The routes are gone (PR #358), so this no longer misleads anyone** — that is
 the whole reason it fell from rank 1 to last. Until then seven routes accepted
@@ -655,7 +667,7 @@ Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
   build: `fclose()` now returns `EOF` with `ENOSPC`. The residue is ours now** —
   `curl-nospace.sh` still reported the KNOWN GAP at 5 record counts on mvsdev
   2026-10-01, because mvsMF discards `fclose()`'s result (`session_fclose()`
-  and friends in `dsapi.c`). Needs a ticket. Original description: a close-time
+  and friends in `dsapi.c`). That is **#371, Tier 1**. Original description: a close-time
   out-of-space was invisible. `@@ACLOSE` ends
   `FUNEXIT RC=0` unconditionally and `fclose()` discards even that, so a PUT
   whose last block is *partial* loses those records and answers 204, with

@@ -17,6 +17,11 @@ need a place in the order; #363 is the lower of the two, since no maintained
 stand runs a server that old. **#398 is new (2026-10-10) and not ranked
 either**: `P HTTPD` through the console API answers 503 with an empty body, so
 a client cannot tell whether the command ran.
+**#402 is new (2026-10-12) and waits on `libc370#519`**: the `dslevel`
+listing cuts a data set name at its first hyphen and reports the stub with
+empty attributes, because `__listds()` takes `-` as a delimiter. Nothing here
+changes for the fix; what #402 holds is the `curl-datasets.sh` test and the
+rebuild once libc370 has it. Cheap and client-visible then, so Tier 2.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
@@ -638,6 +643,11 @@ open), `libc370#30`
 `ftpd#90` (decide with #345), and — filed 2026-08-25 — **`libc370#143`**
 (volume-addressed SCRATCH/RENAME, the half of #336 that is not ours; the read
 and write half needs nothing from there).
+
+Filed 2026-10-12: **`libc370#519`** -- `__listds()` reads the entry name with
+`" -\n"` as delimiters, so a name with a hyphen is cut at it (the catalog name
+after `IN-CAT` too). Gates #402; like every libc370 fix it arrives by install,
+rebuild, deploy and restart, never by `mbt deps` (see below).
 
 Filed 2026-09-14 out of the libc370 1.0.6 relink (#366):
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================================
-# mvsMF Datasets REST API - out-of-space write test (#366)
+# mvsMF Datasets REST API - out-of-space write test (#366, #371)
 #
 # A PUT that fills its target must not answer 2xx. Before #366 it could:
 # libc370 1.0.6 turned an out-of-space write from ABEND SD37 into a return
@@ -15,12 +15,13 @@
 # block is the one whose write can fail inside a PUT, and that is the case
 # this test pins.
 #
-# KNOWN GAP, deliberately not a failure here: a PUT whose last block is
-# PARTIAL is written by libc370's @@ACLOSE, which ends FUNEXIT RC=0
-# unconditionally, and fclose() discards even that. Those records are still
-# lost silently and nothing in mvsMF can see it -- libc370#182. The test
-# reports that band so it stays visible, and fails only if the silent band
-# reaches the block boundary, which is the regression #366 fixed.
+# A PUT whose last block is PARTIAL fails later, at CLOSE: libc370's
+# @@ACLOSE writes that block, and fclose() reports it since libc370#182 --
+# EOF with errno ENOSPC. mvsMF discarded that result until #371, so the
+# counts between the capacity and the next block boundary answered 204 with
+# records missing. And a body smaller than one block, written as a member
+# into a full PDS, answered 204 and left a member with no records at all.
+# Both must answer 500 now.
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -37,6 +38,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/lib/conn.sh"
 
 TEST_DS="${MVSMF_USER}.CURL.NOSPACE"
+TEST_PDS="${MVSMF_USER}.CURL.NOSPACE.PDS"
 
 # One track, no secondary: the target has to fill. LRECL/BLKSIZE give the
 # blocking factor, which is where the boundary sits.
@@ -57,6 +59,7 @@ info() { echo "  ..   $1"; }
 
 cleanup() {
 	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}"
 }
 mvsmf_on_exit cleanup
 
@@ -72,7 +75,7 @@ put() {
 	echo "$st $got"
 }
 
-echo "=== mvsMF out-of-space write (#366) ==="
+echo "=== mvsMF out-of-space write (#366, #371) ==="
 echo
 
 echo "Allocating ${TEST_DS} (PS FB/${LRECL}, BLKSIZE ${BLKSIZE}, TRK(1,0))..."
@@ -151,26 +154,81 @@ else
 	fail "${silent_above} counts above the boundary still answer 204 with records missing"
 fi
 
-# --- 4. the known CLOSE-time gap, reported but not failed -----------------
-# A partial last block goes out at CLOSE, where libc370 reports nothing at
-# all. Keep it visible: when libc370#182 lands this band should shrink to
-# zero, and this block is where that will show.
-gap=0
+# --- 4. nor below it: a partial last block fails at CLOSE (#371) -----------
+# Every count between the capacity and the boundary ends in a partial block,
+# which goes out in fclose(). Its failure is the only report of those records.
+silent_close=0
 n=$((CAP + 1))
 while [ "$n" -lt "$BOUND" ]; do
 	read -r st got <<<"$(put "$n")"
-	[ "$st" = "204" ] && [ "$got" -lt "$n" ] && gap=$((gap + 1))
+	if [ "${st:0:1}" = "2" ] && [ "$got" -lt "$n" ]; then
+		silent_close=$((silent_close + 1))
+		info "N=${n}: ${st} with ${got} stored"
+	fi
 	n=$((n + 1))
 done
-echo
-if [ "$gap" -gt 0 ]; then
-	echo "  KNOWN GAP: ${gap} record counts between ${CAP} and ${BOUND} answer 204"
-	echo "             with records missing (partial last block, written at CLOSE)."
-	echo "             Not a defect in this repo -- libc370#182. When that is"
-	echo "             fixed this number should reach 0."
+if [ "$silent_close" -eq 0 ]; then
+	pass "no silent loss below the block boundary (partial last block, CLOSE)"
 else
-	echo "  NOTE: the CLOSE-time gap is gone -- libc370#182 appears to be fixed."
-	echo "        Tighten this test to assert 0 rather than report it."
+	fail "${silent_close} counts between ${CAP} and ${BOUND} answer 2xx with records missing" \
+	     "#371: the fclose() result is not being checked"
+fi
+
+# --- 5. a member smaller than one block into a full PDS (#371) -------------
+# The shape that lost a whole body: no record of it completes a block, so no
+# fflush() fails, and the one block it fills is written at CLOSE. Fill a
+# one-track PDS first; that PUT itself is #366's case and must fail too.
+echo
+echo "Allocating ${TEST_PDS} (PO FB/${LRECL}, BLKSIZE ${BLKSIZE}, TRK(1,0), 1 directory block)..."
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}"
+alloc=$(curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X POST \
+	-H 'Content-Type: application/json' \
+	-d "{\"dsorg\":\"PO\",\"alcunit\":\"TRK\",\"primary\":1,\"secondary\":0,\"dirblk\":1,\"recfm\":\"FB\",\"blksize\":${BLKSIZE},\"lrecl\":${LRECL}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
+case "$alloc" in
+	20*) info "allocated (${alloc})" ;;
+	*) fail "allocate ${TEST_PDS} returned ${alloc}" ;;
+esac
+
+if [ "${alloc:0:1}" = "2" ]; then
+	# put_member <member> <records>  -> echoes the status
+	put_member() {
+		awk -v n="$2" -v w=$((LRECL - 8)) \
+		    'BEGIN{for(i=1;i<=n;i++) printf "%0*d\n", w, i}' \
+		| curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X PUT \
+		  -H 'Content-Type: text/plain' -H 'X-IBM-Data-Type: text' \
+		  --data-binary @- "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}($1)"
+	}
+
+	st=$(put_member FILL $((CAP + 4 * BLKFACT)))
+	case "$st" in
+		2*) fail "filling ${TEST_PDS} with more than a track answered ${st}" ;;
+		*)  info "filled: FILL answered ${st}" ;;
+	esac
+
+	# A short block can still fit where a full one did not, so a small member
+	# may legitimately land in the rest of the track. Add them until one does
+	# not fit; that one must not answer 2xx.
+	small=$((BLKFACT / 2))
+	verdict=""
+	for i in 1 2 3 4 5 6 7 8; do
+		st=$(put_member "SMALL${i}" "$small")
+		if [ "${st:0:1}" != "2" ]; then
+			pass "a member smaller than one block into a full PDS is reported (${st})"
+			verdict=done
+			break
+		fi
+		got=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(SMALL${i})" | grep -c .)
+		if [ "$got" -lt "$small" ]; then
+			fail "a ${small}-record member into the full PDS answered ${st} with ${got} stored" \
+			     "#371: the whole body sat in the block written at CLOSE"
+			verdict=done
+			break
+		fi
+		info "SMALL${i}: ${small} records still fit (${st})"
+	done
+	[ -n "$verdict" ] || fail "eight ${small}-record members fit after the PDS was full" \
+		"the full-PDS case was not exercised"
 fi
 
 echo

@@ -232,11 +232,11 @@ void session_unregister_file(Session *session, FILE *fp)
 }
 
 __asm__("\n&FUNC    SETC 'ses_fclose'");
-void session_fclose(Session *session, FILE *fp)
+int session_fclose(Session *session, FILE *fp)
 {
-    if (!session || !fp) return;
+    if (!session || !fp) return 0;
     session_unregister_file(session, fp);
-    fclose(fp);
+    return fclose(fp);
 }
 
 __asm__("\n&FUNC    SETC 'ses_reg_jes'");

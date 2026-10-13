@@ -30,6 +30,11 @@ is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). Cancel is `jescanj(…, 0)`; hold/release need SVC 34; any of it widens
 #345. #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
+**#421 is new (2026-10-13) and not ranked either**, and probably belongs high:
+`abort_response()` clears `keepalive` but not `httpc->chunked`, so httpd's
+`httpdone()` closes a chunked data set GET with a clean `0\r\n\r\n` after a
+read error — the truncated 200 #362 exists to prevent. Read from the code and
+consistent with a client's report; not yet seen on the wire.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with

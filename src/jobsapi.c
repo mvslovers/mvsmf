@@ -484,6 +484,10 @@ int jobSubmitHandler(Session *session)
 
 	/* read request content */
 	rc = read_request_content(session, &data, &data_size);
+	if (rc != REQBODY_OK && rc != REQBODY_BAD) {
+		send_body_error(session, rc);
+		goto quit;
+	}
 	if (rc < 0) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 						RC_ERROR, REASON_INVALID_REQUEST,
@@ -564,6 +568,15 @@ int jobSubmitHandler(Session *session)
 	}
 
 quit:
+	/* A failure that answered nothing still has to answer: no storage for
+	   the line table, an internal reader that refused a card. Ending the
+	   request without a response closes the connection, and the client
+	   cannot tell that from a network failure (#412). */
+	if (rc < 0 && !session->headers_sent) {
+		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+						ERR_MSG_SERVER_ERROR, NULL, 0);
+	}
 	if (intrdr) {
 		jesircls(intrdr);
 	}

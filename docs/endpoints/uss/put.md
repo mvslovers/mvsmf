@@ -119,6 +119,9 @@ off the UFS session rather than off the (absent) file handle.
 | 500    | No space left on device or I/O error (64 KB limit) |
 | 500    | `fileEncoding` names a code page other than IBM-037 or IBM-1047 (`category` 16, `rc` 121); nothing is written |
 | 400    | Unsupported USS utility (Content-Type: application/json with unknown request) |
+| 400    | The body could not be read: a malformed `Content-Length`, or a client that stopped sending |
+| 413    | `Content-Length` of 16 MB or more -- more than 24-bit storage can hold. Nothing is read, and the connection is closed |
+| 500    | No storage for the request body (`category` 7, `rc` 16). The body is read to its end first, so the answer reaches the client (#412) |
 | 503    | UFSD subsystem not available |
 
 ## Max File Size

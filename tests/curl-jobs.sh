@@ -805,6 +805,32 @@ test_submit_large_jcl() {
 	fi
 }
 
+test_submit_body_length_errors() {
+	echo ""
+	echo "--- Submit Job: Content-Length it cannot hold or parse (issue #412) ---"
+
+	# No body is sent in either case, so nothing is left unread on the socket
+	# and the answer cannot be reset away -- the status is what is tested.
+	# 16 MB is all of 24-bit storage: answered 413 before a byte is read.
+	local resp
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		-H "Content-Length: 16777216" \
+		--data-binary '' \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "413" "$HTTP_STATUS" "submit with a 16 MB Content-Length"
+
+	# It used to be read as an empty body.
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		-H "Content-Length: abc" \
+		--data-binary '' \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit with a malformed Content-Length"
+}
+
 test_submit_from_dataset_without_notify() {
 	echo ""
 	echo "--- Submit Job: from dataset, card without NOTIFY (issue #307) ---"
@@ -1776,6 +1802,7 @@ test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type
 test_submit_large_jcl
+test_submit_body_length_errors
 test_submit_from_dataset
 test_submit_from_dataset_without_notify
 test_submit_dataset_missing_file_field

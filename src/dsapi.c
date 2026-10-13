@@ -3251,7 +3251,11 @@ process_rename(Session *session, const char *target_dsn,
 	int	rc;
 
 	// Read and EBCDIC-translate the JSON control body
-	if (read_request_content(session, &body, &body_len) < 0) {
+	rc = read_request_content(session, &body, &body_len);
+	if (rc != REQBODY_OK && rc != REQBODY_BAD) {
+		return send_body_error(session, rc);
+	}
+	if (rc != REQBODY_OK) {
 		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
 			CATEGORY_SERVICE, RC_ERROR, REASON_INVALID_RENAME_REQUEST,
 			ERR_MSG_INVALID_RENAME_REQUEST, NULL, 0);

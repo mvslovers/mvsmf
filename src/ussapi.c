@@ -851,8 +851,11 @@ uss_handle_utilities(Session *session, const char *filepath)
 	if (body && *body) {
 		body_len = strlen(body);
 	} else {
-		if (read_request_content(session, &body, &body_len) < 0 ||
-				body_len == 0) {
+		rc = read_request_content(session, &body, &body_len);
+		if (rc != REQBODY_OK && rc != REQBODY_BAD) {
+			return send_body_error(session, rc);
+		}
+		if (rc != REQBODY_OK || body_len == 0) {
 			if (body) free(body);
 			return sendErrorResponse(session, 400, 2, 8, 1,
 				"Failed to read request body", NULL, 0);
@@ -937,7 +940,12 @@ int ussPutHandler(Session *session)
 	}
 
 	// Read request body (supports Content-Length and chunked encoding)
-	if (read_request_content(session, &body, &body_len) < 0) {
+	rc = read_request_content(session, &body, &body_len);
+	if (rc != REQBODY_OK && rc != REQBODY_BAD) {
+		send_body_error(session, rc);
+		return -1;
+	}
+	if (rc != REQBODY_OK) {
 		sendErrorResponse(session, 400, 2, 8, 1,
 			"Failed to read request body", NULL, 0);
 		return -1;
@@ -1159,8 +1167,11 @@ int ussCreateHandler(Session *session)
 	if (body && *body) {
 		body_len = strlen(body);
 	} else {
-		if (read_request_content(session, &body, &body_len) < 0 ||
-				body_len == 0) {
+		rc = read_request_content(session, &body, &body_len);
+		if (rc != REQBODY_OK && rc != REQBODY_BAD) {
+			return send_body_error(session, rc);
+		}
+		if (rc != REQBODY_OK || body_len == 0) {
 			if (body) free(body);
 			return sendErrorResponse(session, 400, 2, 8, 1,
 				"Failed to read request body", NULL, 0);

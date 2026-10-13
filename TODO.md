@@ -419,6 +419,15 @@ policy vacuum.
 
 ## Recently closed
 
+**mvsMF 1.2.0 released 2026-10-13** — tag `v1.2.0` (`aeabef8`), FMID
+`TZMF120` deleting `TZMF110`, built against libc370 2.10.3, httpd 4.2.0, ufsd
+1.4.0 and crypto370 1.0.1 (PR #414 moved the floors off the prereleases).
+`main` is `1.3.0-dev` (`TZMF130` by derivation). The dist's `inst.jcl` was
+read: `++VER(Z038) DELETE(TZMF110)`, ACCEPT gated `COND=(4,LT,APPLY)`. Smoke
+run on mvsdev with the release build: 665 of 665 across the four curl suites,
+`auth` 21 of 21 and `info-cookie` 5 of 5. The stand installs (SMP) are MBT's
+rollout; #412 is re-checked on the stand that reported it once it has 1.2.0.
+
 **PR #413, merged 2026-10-13** — #412 (left open, see the header): a
 `Content-Length` body was grown by doubling, so 72 KB asked for one 128 KB
 block while holding 64 KB, and a failed read lost its answer to the reset that

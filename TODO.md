@@ -73,9 +73,10 @@ that from its side, so the fix is in libc370 (a candidate, untried: set
 error path of a write that fails mid-body, so a truncated member presumably
 replaces the old one there too — inferred, not measured. The red section is
 draft PR #409 (red on mvsdev, 2026-10-13); the pin bump goes into it. The
-libc370 side is `libc370#524`, **released in libc370 2.10.3** (2026-10-13), so
-#409 can pin it now. 1.2.0 waits for that: the release-prep PR #411 (#410)
-lists #406 as a known limitation until #409 moves it to *Fixed*.
+libc370 side is `libc370#524`, **released in libc370 2.10.3** (2026-10-13).
+**PR #409 pins it and is ready**: section 5 red on 2.10.2, green on 2.10.3
+(6 of 6, `curl-datasets` 313 of 313 after it), with the CHANGELOG entry moved
+to *Fixed*. 1.2.0 waits for it.
 
 ---
 
@@ -425,6 +426,12 @@ policy vacuum.
 ---
 
 ## Recently closed
+
+**PR #411, merged 2026-10-13** — #410, the 1.2.0 preparation: the
+`CHANGELOG.md` section, httpd 4.2.0 as the floor in the install guide and the
+README (the token login needs HTTPX `0x144`, and nothing checks for it, #363),
+and FMID `TZMF120` in the README. mbt 3 reads no `CHANGELOG.md`; the section
+goes onto the release page by hand.
 
 **PR #408, merged 2026-10-13** — #251: the hardcopy log answered a failed
 MTT snapshot with 200 and no items. A missing array is 500 8/1 now, and an

@@ -50,22 +50,24 @@ every console message mvsMF can write.
 ### Prerequisites
 
 - An MVS 3.8j system (TK4‑, TK5, MVSCE, or local Hercules)
-- **httpd** ≥ `4.0.2` installed and configured. **4.0.1 is a hard floor, not a
-  recommendation:** mvsMF reaches the server through the HTTPX function vector,
-  and the `http_realm` entry it uses to build the `WWW-Authenticate` challenge
-  is the last member of that vector, added in 4.0.1. On an older server the
-  call reads past the end of the table and **every unauthenticated request
-  abends the CGI with S0C4** — the client sees a truncated 401 and the console
-  fills with `External program MVSMF failed with S0C4 ABEND`
-  ([#363](https://github.com/mvslovers/mvsmf/issues/363)). A quick check on a
-  server you did not install yourself: `printf 'GET / HTTP/9.9\r\n\r\n' | nc
-  <host> <port>` answers **505** on a current build and 500 on one that predates
-  it.
+- **httpd** ≥ `4.2.0` installed and configured. **This is a hard floor, not a
+  recommendation:** mvsMF reaches the server through the HTTPX function vector
+  and cannot test at run time whether an entry is there
+  ([#363](https://github.com/mvslovers/mvsmf/issues/363)). The token login uses
+  `http_new_session()`, added in 4.2.0; an older server has no entry at that
+  offset, and the login abends the CGI. Below 4.0.1 it is worse:
+  `http_realm`, which builds the `WWW-Authenticate` challenge, is missing too,
+  and **every unauthenticated request abends the CGI with S0C4**. The client
+  sees a truncated 401, and the console fills with `External program MVSMF
+  failed with S0C4 ABEND`. On a server you did not install yourself, the
+  startup message `HTTPD001I HTTPD <version> READY` names the level. From a
+  client, `printf 'GET / HTTP/9.9\r\n\r\n' | nc <host> <port>` answers
+  **505** on a recent build and 500 on a very old one. It cannot tell 4.2.0
+  from 4.1.x.
 
-  4.0.2 on top of that floor is the release that carries the libc370 1.0.4 stdio
-  fixes into the server. mvsMF is a separate load module with its own statically
-  linked runtime, so relinking one does nothing for the other: both sides want
-  to be current.
+  mvsMF is a separate load module with its own statically linked runtime, so
+  relinking the server does nothing for mvsMF and the other way round: both
+  sides want to be current.
 - **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — see below
 - JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`
 
@@ -146,7 +148,7 @@ See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install
 
-mvsMF ships as an **SMP Release 4** install package (FMID `TZMF110`).
+mvsMF ships as an **SMP Release 4** install package (FMID `TZMF120`).
 **[docs/installation.md](docs/installation.md)** is the guide — it covers the
 two install jobs, the APF entry the library needs, the STEPLIB concatenation,
 and the route definitions. [docs/uninstall.md](docs/uninstall.md) is the way

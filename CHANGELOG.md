@@ -9,6 +9,92 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
+## [1.2.0] - Unreleased
+
+The release that moves mvsMF to **libc370 2.x**, which is why the minor moves.
+FMID `TZMF120`, and its SYSMOD deletes `TZMF110`, so an upgrade from 1.1.0
+needs nothing beyond the package.
+
+Built against **libc370 2.10.2**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
+**crypto370 1.0.1**. **httpd 4.2.0 is a hard minimum**: see *Read this first*.
+
+### Read this first
+
+- **httpd 4.2.0 or later is required, and nothing checks it.** The token login
+  (`POST /zosmf/services/authenticate`) now calls a server function that first
+  appeared in httpd 4.2.0. mvsMF reaches the server through a function vector
+  and cannot test at run time whether an entry is there (#363). On an older
+  server the login abends the CGI. Install httpd first, then mvsMF.
+
+### Added
+
+- **`X-IBM-Data-Type: text;fileEncoding=...`** (#391, #393). `IBM-037` (or
+  `037`) and `IBM-1047` (or `1047`) select the code page a text transfer is
+  translated with, on reads and writes, for data sets, members and USS files.
+  The defaults stay as they were: CP037 for data sets, IBM-1047 for USS files.
+  Any other value is answered `500` with the reference's
+  `"iconv_open() failed."` body. On a write that check runs before the target
+  is opened, so the target is left as it was. On USS files `record` is answered
+  `400`, as on the reference. Data sets keep the record mode they already had.
+
+### Changed
+
+- **Each token login gets a session of its own** (#399). Two clients logging
+  on with the same userid and password from the same address used to get the
+  same token, so a logout by one ended the other. A login whose credentials are
+  good but for which no session can be created now answers `500` with
+  `returnCode 4, reasonCode 40`. That happens when the server's credential
+  store is full, or when the client already holds 16 sessions. Not covered:
+  the `LtpaToken2` cookie set on a Basic-authenticated response is still the
+  shared credential's token, so a logout with that cookie ends it for every
+  holder of the cookie.
+- **Rebuilt on libc370 2.x** (#378), now 2.10.2, with the cc370 1.6 toolchain.
+  Base64 comes from crypto370, a new static dependency; it adds nothing to
+  install. The build now treats every warning as an error
+  (`-Wall -Wextra -Werror`). The fixes this needed are not meant to change
+  behaviour.
+- **Built with mbt 3** (#396). This matters only when building from source:
+  `mbt build`, `mbt deploy` and `mbt run restart -- HTTPD` replace the make
+  targets. The build id `/zosmf/test?fn=version` reports gains a `-dirty`
+  suffix when the tree differed from the commit.
+
+### Fixed
+
+- **A PUT whose last, partial block does not fit is reported** (#371). This
+  was the known limitation of 1.1.0. The last block of a write is usually
+  partial and is written only when the data set is closed. libc370 reports a
+  failed close now, and mvsMF answers `500` "Error writing the last block" and
+  writes `MVSMF107E`, where it used to answer `204` with the tail missing. The
+  same applies to a member smaller than one block written into a full PDS,
+  which answers `500` now but still loses the member: see *Known
+  limitations*.
+- **The `dslevel` listing keeps a name with a hyphen whole** (#402). A data set
+  such as `A.B-C` used to be listed as `A.B`, with empty attributes.
+- **An empty spool data set reads as empty** (#376). A program that allocates
+  its own SYSOUT data sets dynamically and frees one without writing to it
+  leaves that data set pointing at the first record of the next one. Reading
+  the empty one answered `500`. It answers `200` with no records now; the
+  neighbour still reads in full.
+- **`X-IBM-Data-Type: BINARY` and `binary;...` are binary** (#391, #393).
+  Anything but the exact string `binary` used to be translated as text.
+- **The hardcopy log reports a failed snapshot** (#251). When the copy of the
+  Master Trace Table could not be allocated, the log answered `200` with no
+  items. It answers `500` with reason code 8/1 now. An empty window is still
+  `200`.
+
+### Known limitations
+
+- **A member PUT that runs out of space still replaces the member** (#406).
+  The `500` is right, but libc370 2.10.2 still writes the directory entry when
+  it closes the member: a failed new member stays in the directory with no
+  records, and a failed overwrite leaves the existing member empty. The fix is
+  in libc370 (`libc370#524`).
+- **Collect and detections still read a failed snapshot as "no matches"**
+  (#407). Under a storage shortage a detection can report `detected` for a
+  message that was there before the command, and a collect can return the
+  block of a later identical command. The hardcopy log is fixed (above); these
+  two need a change of convention and come later.
+
 ## [1.1.0] - 2026-09-14
 
 The release that makes mvsMF **SMP4 installable**, which is why the minor

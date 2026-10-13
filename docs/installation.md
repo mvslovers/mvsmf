@@ -15,7 +15,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 |---|---|
 | **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
 | **UFSD** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. |
-| **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See the README. |
+| **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See [The `SYZJ201` usermod](https://github.com/mvslovers/mvsmf/blob/main/README.md#the-syzj201-usermod) in the project README. |
 
 **None of these is an SMP prerequisite, and that is deliberate.** SMP's `REQ()`
 takes exact SYSMOD ids and has no range syntax, so a prerequisite could only
@@ -33,6 +33,19 @@ The package contains the usual pair of jobs. Run them in order:
 |---|---|
 | `MVSMFALC` | Allocates the target and distribution libraries |
 | `MVSMFINS` | RECEIVE, APPLY CHECK, APPLY, ACCEPT |
+
+**On MVS/CE the install job needs one more change.** Both `RECEIVE` commands in
+it (steps `RECV1` and `RECV2`) need a `VOLUME()` operand naming the volume to
+allocate on — `PUB000` on a stock MVS/CE:
+
+```
+  RECEIVE INDSN('CHANGE.ME.MVSMFLOD') -
+    DATASET('MVSMF.MVSMFLOD') -
+    VOLUME('PUB000')
+```
+
+The job's own comment says the `CHANGE.ME` lines are the only ones to change;
+on MVS/CE that is not so. On TK5 the job runs as shipped.
 
 **Verify the install by listing the members of `MVSMF.LINKLIB`, never by the
 condition codes.** SMP keys element ownership on `MOD(name)`, and a SYSMOD that
@@ -115,7 +128,7 @@ See `MVSMF.SAMPLIB(MVSMFSTC)`. Edit the STEPLIB DD of your HTTPD procedure:
 ```
 
 `MVSMF.LINKLIB` goes **first** on purpose. If a copy of `MVSMF` was ever placed
-into `HTTPD.LINKLIB` by hand — the development deploy does exactly that —
+into `HTTPD.LINKLIB` by hand — older development setups did exactly that —
 whichever library comes first wins, and an install into the other one activates
 nothing while every step reports success. Better still: delete the hand-placed
 copy.
@@ -179,6 +192,45 @@ install is about to use.
 refused once the FMID has been accepted, which the install job does in the same
 run as the APPLY.
 
+## Coming from a hand-copied MVSMF
+
+mvsMF 1.0.0 and 1.0.1 shipped without an install package, so a system that ran
+them has the `MVSMF` module in a library SMP knows nothing about. Two shapes
+have been met: a library of its own (`MVSMF.V1R0M0.LINKLIB` on TK5), and a
+copy placed into a non-SMP `HTTPD.LINKLIB` beside HTTPD itself (MVS/CE). There
+is no SMP level to upgrade from; treat it as a fresh install and retire the
+copy:
+
+1. **Install as above** (steps 1 to 4). The package's SYSMOD names its
+   predecessor for deletion. On a system that never had it, nothing is deleted
+   and the APPLY still ends RC 00. SMP still records the deletion: a `LIST` of
+   the predecessor id is expected to show `TYPE = FUNCTION` / `DELBY = …`, a
+   tombstone SMP leaves even for an id that was never installed. It marks the
+   id as spent, and an uninstall has to name it.
+2. **Put `MVSMF.LINKLIB` first in the STEPLIB** (step 3). While the
+   hand-copied module sits in a library ahead of it, that copy is what runs.
+3. **Replace the old route lines** with the three of step 4. A `MOD=MVSMF`
+   line without `AUTH=` is public to HTTPD. After the restart an
+   unauthenticated request must be refused:
+
+   ```
+   curl -i 'http://your.host:port/zosmf/restjobs/jobs'      # expect 401
+   ```
+
+4. **Restart and check the level** with `?fn=version` (step 5). Once it
+   reports the release you installed, retire the old library, so the copy
+   cannot come back to the front of a concatenation later. A library of its own
+   can simply be scratched.
+
+**If the old copy sits in a non-SMP `HTTPD.LINKLIB`,** that library is HTTPD's
+problem before it is mvsMF's: HTTPD's own allocation job cannot allocate
+`HTTPD.LINKLIB` while the old one exists. Rename it aside first (IDCAMS
+`ALTER HTTPD.LINKLIB NEWNAME(…)`, which renames catalog entry and VTOC entry on
+MVS 3.8j), install HTTPD and then mvsMF through SMP, and scratch the renamed
+library whole once both run — the hand-copied `MVSMF` and anything copied in
+alongside it go with it. HTTPD's side of this is
+[mvslovers/httpd#295](https://github.com/mvslovers/httpd/issues/295).
+
 ## Removing mvsMF
 
-See [uninstall.md](uninstall.md).
+See [uninstall.md](https://github.com/mvslovers/mvsmf/blob/main/docs/uninstall.md).

@@ -13,7 +13,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 
 | | |
 |---|---|
-| **httpd** | **4.1.0 or later.** 4.0.1 is a hard floor for anything (`http_realm()`); the console services need the `cgictx` API from 4.0.0-dev; 4.1.0 is the first release carrying unversioned product data sets, which is what these instructions assume. |
+| **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
 | **UFSD** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. |
 | **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See the README. |
 

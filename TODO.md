@@ -24,11 +24,6 @@ data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 the cause is open. **#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
 false `detected`, and #214's mis-anchor reopened.
-**#412 is new (2026-10-13), fixed in PR #413 and deliberately left open**:
-large submits on the stand that reported it (mvsMF 1.0.0, an older httpd)
-lost their connection after a big upload. Not reproducible on mvsdev; it
-closes after a re-check there once that stand has 1.2.0 through SMP. That is
-a check, not code, so it is not ranked.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with

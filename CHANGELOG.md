@@ -87,6 +87,21 @@ Built against **libc370 2.10.3**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
   Master Trace Table could not be allocated, the log answered `200` with no
   items. It answers `500` with reason code 8/1 now. An empty window is still
   `200`.
+- **A request body is allocated once, at its size, and a failure is answered**
+  (#412). A body with a `Content-Length` (a job submitted as JCL, a USS file,
+  a console command) started in a 4 KB buffer that doubled, so a 72 KB body
+  asked for one contiguous 128 KB block while holding a 64 KB one. A region
+  without a 128 KB hole failed a body it had room for. When the read failed,
+  the client saw the connection close instead of an error: the rest of the
+  body was still unread, and closing such a socket resets the connection.
+  The body is now allocated once. A body there is no storage for is read to
+  its end and answered `500`. A `Content-Length` of 16 MB or more, more than
+  24-bit storage holds, is answered `413` without reading. A submit that ran
+  out of storage for its line table, or whose job the internal reader
+  refused, ended with no answer at all; it answers `500`. The submit no
+  longer holds a second copy of the JCL. A malformed `Content-Length` such as
+  `abc` is answered `400`; it used to be read as an empty body, and on a USS
+  PUT that emptied the file.
 
 ### Known limitations
 

@@ -89,7 +89,7 @@ static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, co
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
 static int open_intrdr(Session *session, VSFILE **intrdr);
-static int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length, 
+static int submit_jcl_content(Session *session, VSFILE *intrdr, char *content, size_t content_length, 
                               char *jobname, char *jobid, char *jobclass);
 static const char *extract_file_value(char *json, size_t len);
 static int submit_file(Session *session, VSFILE *intrdr, const char *filename,
@@ -2372,11 +2372,10 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
 
 __asm__("\n&FUNC    SETC 'submit_jcl_content'");
 static 
-int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, size_t content_length, 
+int submit_jcl_content(Session *session, VSFILE *intrdr, char *content, size_t content_length, 
                       char *jobname, char *jobid, char *jobclass) 
 {
     int rc = 0;
-    char *ebcdic_content = NULL;
     char **lines = NULL;
     char *lines_buf = NULL;
     int num_lines = 0;
@@ -2387,18 +2386,10 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
     memset(jobname, 0, JOBNAME_STR_SIZE + 1);
     memset(jobid, 0, JOBID_STR_SIZE + 1);
 
-    /* Use malloc+memcpy instead of strdup to ensure all bytes are copied
-     * even if content contains embedded nulls */
-    ebcdic_content = (char *)malloc(content_length + 1);
-    if (!ebcdic_content) {
-        wtof(MSG_STORAGE_FAILED, ALLOC_JCL_TEXT);
-        rc = -1;
-        goto quit;
-    }
-    memcpy(ebcdic_content, content, content_length);
-    ebcdic_content[content_length] = '\0';
-
-    http_xlate((unsigned char *)ebcdic_content, content_length, httpx->xlate_cp037->atoe);
+    /* Translated and split where it lies. The body is the caller's and is
+     * not read again, and read_request_content() NUL-terminated it. A copy
+     * here held a second body-sized block for the whole submit (#412). */
+    http_xlate((unsigned char *)content, content_length, httpx->xlate_cp037->atoe);
 
     /* Allocate lines array + contiguous buffer */
     lines = (char **)calloc(capacity, sizeof(char *));
@@ -2417,7 +2408,7 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, const char *content, si
 
     char delimiter[2] = {EBCDIC_NEL, '\0'}; // CP037 A2E maps ASCII LF to NEL (0x15)
     char *saveptr = NULL;
-    char *line = tokenize(ebcdic_content, delimiter, &saveptr);
+    char *line = tokenize(content, delimiter, &saveptr);
 
     // Collect all lines
     while (line != NULL) {
@@ -2530,10 +2521,6 @@ quit:
     }
     if (lines_buf) {
         free((void *) lines_buf);
-    }
-
-    if (ebcdic_content) {
-        free((void *) ebcdic_content);
     }
 
     return rc;

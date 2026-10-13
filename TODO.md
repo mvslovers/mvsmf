@@ -24,6 +24,11 @@ data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 the cause is open. **#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
 false `detected`, and #214's mis-anchor reopened.
+**#412 is new (2026-10-13), fixed in PR #413 and deliberately left open**:
+large submits on the stand that reported it (mvsMF 1.0.0, an older httpd)
+lost their connection after a big upload. Not reproducible on mvsdev; it
+closes after a re-check there once that stand has 1.2.0 through SMP. That is
+a check, not code, so it is not ranked.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
@@ -59,8 +64,9 @@ reject half in PR #358, #210 in PR #359, and #362 and #357 in PR #364.*
 
 ## Tier 1 — now
 
-**Empty.** #406 was its only entry and landed in PR #409 (see *Recently
-closed*). The top of the queue is Tier 2's #209.
+**Empty.** #406 was its only entry and landed in PR #409, and #412 landed in
+PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
+#209.
 
 ---
 
@@ -310,9 +316,11 @@ requests acting as the anvil for httpd#195's fragmentation — is gone: #287 clo
 httpd#195 closed, and `__stklen` (#290) cut mvsMF's demand from 262328 to 65584
 bytes, which fits every hole that mechanism produced.
 
-What survives is worth doing on a 24-bit target anyway. Start with
-`jobsapi.c:2061` — a full-size EBCDIC copy beside the raw body, so a 1 MB submit
-holds 2 MB. Cheapest item, and independent of the streaming work.
+What survives is worth doing on a 24-bit target anyway. Two of the issue's
+four sites are gone since PR #413 (#412): `read_request_content()` allocates a
+`Content-Length` body once instead of doubling, and the submit translates the
+JCL in place instead of holding a second copy. Left: streaming PUT bodies into
+their target instead of buffering them whole, and the JSON builder.
 
 **`receive_raw_data()` stays byte-at-a-time** (PR #22 / #42, the TCP ring-buffer
 bug). Streaming changes what we do with the bytes, not how they are read.
@@ -410,6 +418,17 @@ policy vacuum.
 ---
 
 ## Recently closed
+
+**PR #413, merged 2026-10-13** — #412 (left open, see the header): a
+`Content-Length` body was grown by doubling, so 72 KB asked for one 128 KB
+block while holding 64 KB, and a failed read lost its answer to the reset that
+closing a socket with unread data causes. The reader is `src/reqbody.c` now:
+allocated once, drained before a 500 when there is no storage, 413 from 16 MB,
+400 for a malformed length; the submit answers every failure and no longer
+copies the JCL. TSTBODY red on the old algorithm, 51 of 51 on the new; on
+mvsdev 665 of 665 across curl-jobs/-uss/-console/-datasets, and an 8 MB submit
+(more than the largest free block) got its 500 after the full upload, with
+one `MVSMF006E`.
 
 **PR #409, merged 2026-10-13** — #406: a member PUT that ran out of space
 answered 500 but still replaced the member, because libc370's CLOSE STOWed it

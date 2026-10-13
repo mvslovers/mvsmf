@@ -30,11 +30,16 @@ is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). Cancel is `jescanj(…, 0)`; hold/release need SVC 34; any of it widens
 #345. #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
-**#421 is new (2026-10-13) and not ranked either**, and probably belongs high:
-`abort_response()` clears `keepalive` but not `httpc->chunked`, so httpd's
-`httpdone()` closes a chunked data set GET with a clean `0\r\n\r\n` after a
-read error — the truncated 200 #362 exists to prevent. Read from the code and
-consistent with a client's report; not yet seen on the wire.
+**#421 has its fix in PR #422 (open)**: `abort_response()` cleared `keepalive`
+but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET
+with a clean `0\r\n\r\n` after a read error — the truncated 200 #362 exists to
+prevent. Measured on mvsdev before/after (curl exit 0 → 18, curl-datasets
+313 → 314 of 314); fixture `tests/jcl/wronglen.jcl`. Merge it before anything
+else touches the streaming paths.
+**#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
+`ufs_ferror()` check after its read loop, so a failed read ends as a clean 200
+there too. Needs #422 first, and a first `MVSMF3xx` id; the hard part is
+provoking a mid-file UFSD read error at all.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with

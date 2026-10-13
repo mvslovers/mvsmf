@@ -9,13 +9,13 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
-## [1.2.0] - Unreleased
+## [1.2.0] - 2026-10-13
 
 The release that moves mvsMF to **libc370 2.x**, which is why the minor moves.
 FMID `TZMF120`, and its SYSMOD deletes `TZMF110`, so an upgrade from 1.1.0
 needs nothing beyond the package.
 
-Built against **libc370 2.10.3**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
+Built against **libc370 2.10.3**, **httpd 4.2.0**, **ufsd 1.4.0** and
 **crypto370 1.0.1**. **httpd 4.2.0 is a hard minimum**: see *Read this first*.
 
 ### Read this first

@@ -4,12 +4,12 @@
     "version": "1.0.1"
   },
   "mvslovers/httpd": {
-    "sha256": "9197c203ffb67e2ffca1ca3fe5f090f34a65e8a2ec8ae8c20f4b4223a1070d01",
-    "version": "4.2.0-dev"
+    "sha256": "061e077324940212f1a37110d6225f57fb05958b1c1de9580555bd1f6b483183",
+    "version": "4.2.0"
   },
   "mvslovers/ufsd": {
-    "sha256": "c2eb5f98317769e07c39363f29e4884fec1fd22f803582cfb36de5f7e67ea548",
-    "version": "1.4.0-dev"
+    "sha256": "6b040b90a81fdfd340c0770ffff7627a6ca03120a3044bf7452f7e7c46ef2394",
+    "version": "1.4.0"
   },
   "plugin:mvslovers/mbt-stc": {
     "sha256": "f2b6882fe28be89291c80e5d4631054fbad5f9487c8b4d9b906e18059ec6e412",

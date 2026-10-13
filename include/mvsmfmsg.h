@@ -179,7 +179,6 @@
  * into an uppercase literal.
  */
 #define ALLOC_REQUEST_BODY	"THE REQUEST BODY"
-#define ALLOC_JCL_TEXT		"THE JCL TEXT"
 #define ALLOC_JCL_LINES		"THE JCL LINE TABLE"
 #define ALLOC_SPOOL_BLOCK	"A SPOOL BLOCK"
 

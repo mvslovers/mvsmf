@@ -785,7 +785,18 @@ int consoleIssueHandler(Session *session)
 	}
 
 	/* read + EBCDIC-convert the JSON body */
-	if (read_request_content(session, &body, &body_len) < 0 || !body) {
+	rc = read_request_content(session, &body, &body_len);
+	if (rc == REQBODY_NOMEM) {
+		send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, 8, 1,
+		    "Storage for the request body could not be obtained.");
+		return -1;
+	}
+	if (rc == REQBODY_TOO_LARGE) {
+		send_console_error(session, HTTP_STATUS_PAYLOAD_TOO_LARGE, 1, 12,
+		    "The request body is too large.");
+		return -1;
+	}
+	if (rc != REQBODY_OK || !body) {
 		send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 12,
 		    "The body of the request is not in JSON format.");
 		return -1;

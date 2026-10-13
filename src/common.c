@@ -11,9 +11,10 @@
 #include "httpcgi.h"
 #include "json.h"
 #include "mvsmfmsg.h"
+#include "reqbody.h"
 #include "sendall.h"
+#include "zosmferr.h"
 
-#define INITIAL_BUFFER_SIZE 4096
 
 //
 // private function prototypes
@@ -748,174 +749,123 @@ receive_raw_some(HTTPC *httpc, char *buf, int len)
 }
 
 //
+// The request body reader's services, bound to this session. The reader
+// itself is src/reqbody.c, apart from this file so the host test drives the
+// real one (#412); see include/reqbody.h.
+//
+
+__asm__("\n&FUNC    SETC 'body_op_recv'");
+static int
+body_op_recv(void *ctx, char *buf, int len)
+{
+	Session *session = (Session *)ctx;
+
+	return receive_raw_data(session->httpc, buf, len);
+}
+
+__asm__("\n&FUNC    SETC 'body_op_alloc'");
+static void *
+body_op_alloc(void *ctx, size_t size)
+{
+	(void)ctx;
+
+	return malloc(size);
+}
+
+__asm__("\n&FUNC    SETC 'body_op_resize'");
+static void *
+body_op_resize(void *ctx, void *ptr, size_t size)
+{
+	(void)ctx;
+
+	return realloc(ptr, size);
+}
+
+__asm__("\n&FUNC    SETC 'body_op_release'");
+static void
+body_op_release(void *ctx, void *ptr)
+{
+	(void)ctx;
+
+	free(ptr);
+}
+
+__asm__("\n&FUNC    SETC 'body_op_nomem'");
+static void
+body_op_nomem(void *ctx)
+{
+	(void)ctx;
+
+	wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
+}
+
+__asm__("\n&FUNC    SETC 'body_op_atoe'");
+static void
+body_op_atoe(void *ctx, char *buf, int len)
+{
+	Session *session = (Session *)ctx;
+
+	http_atoe((UCHAR *)buf, len);
+}
+
+// RENT: read-only, so it may be static. A writable static would S0C4.
+static const BODY_OPS body_ops = {
+	body_op_recv,
+	body_op_alloc,
+	body_op_resize,
+	body_op_release,
+	body_op_nomem,
+	body_op_atoe
+};
+
+//
 // Read the full request body into a malloc'd buffer.
 // Supports both Content-Length and Transfer-Encoding: chunked.
 // Caller must free the returned buffer via free().
-// Returns 0 on success, -1 on error.
+//
+// Any failure clears keepalive. Only a storage failure drains the body; every
+// other one may leave bytes of it on the socket, and the next request read
+// from that socket would start inside them.
 //
 
 int
 read_request_content(Session *session, char **content, size_t *content_size)
 {
-	size_t buffer_size = 0;
-	int bytes_received = 0;
-	int has_content_length = 0;
-	size_t content_length = 0;
-	int is_chunked = 0;
-	int done = 0;
-
-	// Check Content-Length header
-	const char *cl_str = getHeaderParam(session, "Content-Length");
-	if (cl_str != NULL) {
-		has_content_length = 1;
-		content_length = strtoul(cl_str, NULL, 10);
-	}
-
-	// Check Transfer-Encoding header
 	const char *te = getHeaderParam(session, "Transfer-Encoding");
-	if (te != NULL && strstr(te, "chunked") != NULL) {
-		is_chunked = 1;
+	int chunked = te != NULL && strstr(te, "chunked") != NULL;
+	int rc;
+
+	rc = read_body(session, &body_ops,
+		getHeaderParam(session, "Content-Length"), chunked,
+		content, content_size);
+
+	if (rc != REQBODY_OK && session->httpc) {
+		session->httpc->keepalive = 0;
 	}
 
-	if (!is_chunked && !has_content_length) {
-		return -1;
+	return rc;
+}
+
+//
+// Answer a body the server could not hold (#412). Neither is the request's
+// fault, so neither is the caller's 400: no storage is the 500 server-error
+// report, and a length no 24-bit address space can hold is 413, which the
+// z/OSMF status list has for exactly that.
+//
+
+__asm__("\n&FUNC    SETC 'send_body_error'");
+int
+send_body_error(Session *session, int rc)
+{
+	if (rc == REQBODY_TOO_LARGE) {
+		return sendErrorResponse(session, HTTP_STATUS_PAYLOAD_TOO_LARGE,
+			CATEGORY_SERVICE, RC_ERROR, REASON_SERVER_ERROR,
+			ERR_MSG_BODY_TOO_LARGE, NULL, 0);
 	}
 
-	// Allocate initial buffer
-	*content = malloc(INITIAL_BUFFER_SIZE);
-	if (!*content) {
-		wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
-		return -1;
-	}
-	buffer_size = INITIAL_BUFFER_SIZE;
-	*content_size = 0;
-
-	if (is_chunked) {
-		while (!done) {
-			char chunk_size_str[10];
-			int i = 0;
-
-			// Read chunk size line (hex + CRLF)
-			while (i < (int)sizeof(chunk_size_str) - 1) {
-				if (receive_raw_data(session->httpc,
-						chunk_size_str + i, 1) != 1) {
-					free(*content);
-					*content = NULL;
-					return -1;
-				}
-				if (chunk_size_str[i] == '\r') {
-					chunk_size_str[i] = '\0';
-					receive_raw_data(session->httpc,
-						chunk_size_str + i, 1);
-					break;
-				}
-				i++;
-			}
-
-			http_atoe((unsigned char *)chunk_size_str, i);
-			{
-				int chunk_size = (int)strtoul(chunk_size_str, NULL, 16);
-				int bytes_read = 0;
-
-				if (chunk_size == 0) {
-					// Drain the terminating CRLF of the chunked body (RFC 7230 4.1).
-					// Leaving it unread keeps 2 bytes in the socket; closing the
-					// connection with unread inbound data triggers a TCP RST that
-					// strict HTTP clients (Zowe/Node) report as ECONNRESET /
-					// "socket hang up". Best-effort: the body is already complete
-					// here, so do not fail on a short read. Trailers are not
-					// expected (Zowe sends none); mirrors dsapi.c.
-					char crlf[2];
-					(void)receive_raw_data(session->httpc, crlf, 2);
-					done = 1;
-					break;
-				}
-
-				// Ensure buffer capacity
-				if (*content_size + chunk_size > buffer_size) {
-					char *new_buf = realloc(*content,
-						*content_size + chunk_size + 1);
-					if (!new_buf) {
-						wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
-						free(*content);
-						*content = NULL;
-						return -1;
-					}
-					*content = new_buf;
-					buffer_size = *content_size + chunk_size;
-				}
-
-				// Read chunk data
-				while (bytes_read < chunk_size) {
-					bytes_received = receive_raw_data(session->httpc,
-						*content + *content_size + bytes_read,
-						chunk_size - bytes_read);
-					if (bytes_received <= 0) {
-						free(*content);
-						*content = NULL;
-						return -1;
-					}
-					bytes_read += bytes_received;
-				}
-
-				*content_size += chunk_size;
-			}
-
-			// Consume trailing CRLF after chunk data
-			{
-				char crlf[2];
-				if (receive_raw_data(session->httpc, crlf, 2) != 2) {
-					free(*content);
-					*content = NULL;
-					return -1;
-				}
-			}
-		}
-	} else {
-		char recv_buffer[1024];
-		while (*content_size < content_length) {
-			size_t remaining = content_length - *content_size;
-			size_t to_read = remaining < sizeof(recv_buffer)
-				? remaining : sizeof(recv_buffer);
-
-			if (*content_size + sizeof(recv_buffer) > buffer_size) {
-				char *new_buf = realloc(*content, buffer_size * 2);
-				if (!new_buf) {
-					wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
-					free(*content);
-					*content = NULL;
-					return -1;
-				}
-				*content = new_buf;
-				buffer_size *= 2;
-			}
-
-			bytes_received = receive_raw_data(session->httpc,
-				*content + *content_size, (int)to_read);
-			if (bytes_received <= 0) {
-				free(*content);
-				*content = NULL;
-				return -1;
-			}
-
-			*content_size += bytes_received;
-		}
-	}
-
-	// Ensure null termination
-	if (*content_size + 1 > buffer_size) {
-		char *new_buf = realloc(*content, *content_size + 1);
-		if (!new_buf) {
-			wtof(MSG_STORAGE_FAILED, ALLOC_REQUEST_BODY);
-			free(*content);
-			*content = NULL;
-			return -1;
-		}
-		*content = new_buf;
-	}
-	(*content)[*content_size] = '\0';
-
-	return 0;
+	return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+		ERR_MSG_BODY_NOMEM, NULL, 0);
 }
 
 //

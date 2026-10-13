@@ -57,9 +57,12 @@ a status poll issued inside that same window can still show an empty `owner`.
     - `JOB card too long: no room left for the NOTIFY, USER and PASSWORD operands mvsMF adds` (reason 12) — the submitted card's own operands leave under 72 columns for the ones mvsMF injects
     - Unsupported `Content-Type` (anything other than `application/json` or `text/plain`)
     - Missing `file` field in JSON body
-    - Failed to read request content
-    - JCL memory allocation failure
+    - Failed to read request content: a malformed `Content-Length`, or a client that stopped sending
+- HTTP 413 (Request entity too large)
+    - `Content-Length` of 16 MB or more -- more than 24-bit storage can hold. Nothing is read, and the connection is closed
 - HTTP 500 (Internal Server Error)
+    - `Storage for the request body could not be obtained` (category 7, rc 16). The body is read to its end before the answer goes out, so the answer reaches the client; until #412 the client saw the connection close instead
+    - No storage for the JCL line table, or the internal reader refused a card (category 7, rc 16). Until #412 these ended the request with no answer at all
     - Failed to open internal reader
     - Failed to process job card
 

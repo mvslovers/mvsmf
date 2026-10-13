@@ -51,6 +51,8 @@ No response body.
 | Status | Condition |
 |--------|-----------|
 | 400    | Missing filepath, missing or invalid `type`, file/directory already exists, path too long, or parent directory not found |
+| 413    | `Content-Length` of 16 MB or more -- more than 24-bit storage can hold. Nothing is read, and the connection is closed |
+| 500    | No storage for the request body (`category` 7, `rc` 16). The body is read to its end first, so the answer reaches the client (#412) |
 | 503    | UFSD subsystem not available |
 
 ## Examples

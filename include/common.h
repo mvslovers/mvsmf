@@ -10,6 +10,7 @@
  */
 
 #include "json.h"
+#include "reqbody.h"
 #include "router.h"
 #include <stddef.h>
 
@@ -55,6 +56,7 @@
 #define HTTP_STATUS_UNAUTHORIZED 401          /**< Unauthorized */
 #define HTTP_STATUS_NOT_FOUND 404             /**< Resource not found */
 #define HTTP_STATUS_PRECONDITION_FAILED 412   /**< If-Match ETag no longer current */
+#define HTTP_STATUS_PAYLOAD_TOO_LARGE 413     /**< Body beyond 24-bit storage (#412) */
 #define HTTP_STATUS_TOO_MANY_REQUESTS 429     /**< Console lock busy (#214) */
 #define HTTP_STATUS_INTERNAL_SERVER_ERROR 500 /**< Server error */
 #define HTTP_STATUS_SERVICE_UNAVAILABLE 503  /**< Service unavailable */
@@ -388,13 +390,39 @@ int send_bad_encoding(Session *session, const char *value) asm("CMN0023");
  * Uses single-byte recv() to work around the MVS 3.8j TCP/IP
  * ring buffer bug. Caller must free the returned buffer.
  *
+ * A Content-Length body is allocated once, at its size (#412). Any failure
+ * clears keepalive. REQBODY_NOMEM and REQBODY_TOO_LARGE are the server's,
+ * not the request's: answer them with send_body_error(), and only
+ * REQBODY_BAD with the caller's own 400.
+ *
  * @param session Current session context
  * @param content Output pointer to allocated buffer (caller frees)
  * @param content_size Output size of received content
- * @return 0 on success, -1 on error
+ * @return REQBODY_OK (0), or a negative REQBODY_* code (reqbody.h)
  */
 int read_request_content(Session *session, char **content,
                         size_t *content_size) asm("CMN0020");
+
+/** @brief Message for a body there was no storage for (#412). */
+#define ERR_MSG_BODY_NOMEM \
+	"Storage for the request body could not be obtained"
+
+/** @brief Message for a body no 24-bit address space can hold (#412). */
+#define ERR_MSG_BODY_TOO_LARGE \
+	"The request body is too large"
+
+/**
+ * @brief Answers a request body the server could not hold (#412)
+ *
+ * REQBODY_TOO_LARGE is 413; REQBODY_NOMEM (and anything else) is the 500
+ * server-error report. Call it only for those two -- REQBODY_BAD is the
+ * request's fault and keeps the caller's 400.
+ *
+ * @param session Current session context
+ * @param rc      What read_request_content() returned
+ * @return 0 on success, negative on send failure
+ */
+int send_body_error(Session *session, int rc) asm("CMN0024");
 
 /**
  * @brief Reads exactly @p len bytes, waiting out an empty receive buffer

@@ -151,6 +151,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTSEND]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTBODY: #412 — a request body with a Content-Length is allocated once, at
+# its size; doubling asked a fragmented region for 128 KB to hold 72 KB. And a
+# failure the server caused drains the body, or TCP resets the answer away.
+# Portable C (`mbt test`); the TU #includes src/reqbody.c so it drives the real
+# reader read_request_content() calls — do not list reqbody.c here.
+[test.TSTBODY]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTSPLN: #314 — JES2 writes a pointer record into JESJCLIN behind every
 # in-stream DD * card, and the PDDB record count does not include them. The
 # #158 cap counted them anyway, so the listing lost one real card off the tail

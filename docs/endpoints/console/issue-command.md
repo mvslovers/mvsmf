@@ -146,7 +146,9 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 400 | 1 | 17 | Command length > 126 |
 | 400 | 1 | 25 | Regex `sol-key`/`unsol-key` not supported |
 | 400 | 1 | 5  | `system` is not the local system |
+| 413 | 1 | 12 | `Content-Length` of 16 MB or more; nothing is read and the connection is closed. Shares 1 / 12 with the 400 above: both are a body that cannot be used, and the status tells them apart. |
 | 429 | 8 | 16 | Another console command is in progress; the command was **not** issued. |
+| 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
 | 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
 | 503 | 8 | 17 | Server quiescing; the command was **not** issued. |

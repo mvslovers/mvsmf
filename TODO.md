@@ -24,6 +24,12 @@ data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 the cause is open. **#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
 false `detected`, and #214's mis-anchor reopened.
+**#417 and #418 are new (2026-10-13) and not ranked either**, both from a
+client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|release`
+is not implemented and answers 404 (a hung job had to be `$C`'d from the
+console). Cancel is `jescanj(…, 0)`; hold/release need SVC 34; any of it widens
+#345. #418 is the 404 itself: a known path with an unregistered method should
+perhaps be 405 — measure the reference first.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with
@@ -413,6 +419,13 @@ policy vacuum.
 ---
 
 ## Recently closed
+
+**PR #420, merged 2026-10-13** — #419, the installation guide after the 1.2.0
+rollout to four stands: `VOLUME()` on both RECEIVEs on MVS/CE (generator side
+is mbt#267), absolute links so the package README reaches `uninstall.md` and the
+SYZJ201 section, and a section for systems coming from a hand-copied MVSMF —
+including a non-SMP `HTTPD.LINKLIB` that has to be renamed aside (httpd#295).
+Docs only.
 
 **mvsMF 1.2.0 released 2026-10-13** — tag `v1.2.0` (`aeabef8`), FMID
 `TZMF120` deleting `TZMF110`, built against libc370 2.10.3, httpd 4.2.0, ufsd

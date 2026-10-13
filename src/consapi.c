@@ -1395,7 +1395,19 @@ int consoleLogHandler(Session *session)
 	/* ---- snapshot the MTT, reconstruct each entry's UNIX time ---- */
 	cmtt = cmtt_new();
 	arr  = cmtt ? cmtt_get_array(cmtt) : (MTENTRY **)0;
-	n    = arr ? array_count(&arr) : 0;
+
+	/* No array is a failure, never an empty log (#251): cmtt_new() returns
+	 * NULL when it cannot copy the table, and the copy is the largest
+	 * allocation on this path. An empty table still gives an array, with no
+	 * entries in it, and stays a 200. No WTO, like the allocations below: a
+	 * client polling the log through a shortage would write one line per
+	 * poll into the table it is trying to read. */
+	if (!arr) {
+		if (cmtt) cmtt_free(&cmtt);
+		return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		    8, 1, "An error occurred during the retrieval of the hardcopy log.");
+	}
+	n = array_count(&arr);
 
 	if (n) {
 		esecs = (time_t *)malloc(n * sizeof(time_t));

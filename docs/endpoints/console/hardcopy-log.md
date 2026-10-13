@@ -55,7 +55,7 @@ Console error body (`return-code` / `reason-code` / `reason`):
 | 400  | 1 | 22 | A parameter is invalid (`timeRange`, `direction`, `hardcopy`, `timestamp`) |
 | 400  | 1 | 23 | The supplied `time`/`timestamp` is in the future |
 | 400  | 1 | 24 | `sysName` exceeds 8 characters |
-| 500  | 8 | 1  | Error retrieving the hardcopy log |
+| 500  | 8 | 1  | Error retrieving the hardcopy log: the copy of the Master Trace Table or the time table could not be made (storage). An empty window is 200 with no items, never this |
 
 ## Implementation (MVS 3.8j)
 MVS 3.8j has **no OPERLOG** (no System Logger), and the **active SYSLOG on the

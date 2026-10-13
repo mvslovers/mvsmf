@@ -30,15 +30,10 @@ is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). Cancel is `jescanj(…, 0)`; hold/release need SVC 34; any of it widens
 #345. #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
-**#421 has its fix in PR #422 (open)**: `abort_response()` cleared `keepalive`
-but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET
-with a clean `0\r\n\r\n` after a read error — the truncated 200 #362 exists to
-prevent. Measured on mvsdev before/after (curl exit 0 → 18, curl-datasets
-313 → 314 of 314); fixture `tests/jcl/wronglen.jcl`. Merge it before anything
-else touches the streaming paths.
 **#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
 `ufs_ferror()` check after its read loop, so a failed read ends as a clean 200
-there too. Needs #422 first, and a first `MVSMF3xx` id; the hard part is
+there too. #422 (merged) made `abort_response()` able to say so; it needs a
+first `MVSMF3xx` id; the hard part is
 provoking a mid-file UFSD read error at all.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
@@ -429,6 +424,16 @@ policy vacuum.
 ---
 
 ## Recently closed
+
+**PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
+but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET
+with a clean `0\r\n\r\n` after a read error — the truncated 200 #362 exists to
+prevent. Found from a client's report on m38b (stale never-opened data sets,
+`MVSMF106E` on the console, 200 at the client). Measured on mvsdev: before,
+200 with an empty body and curl exit 0; after, curl exit 18; curl-datasets
+313 → 314 of 314. The fixture is a label/block mismatch
+(`tests/jcl/wronglen.jcl`), because a never-opened data set failed its read
+only 1 of 2 times. Deployed on mvsdev as `d1e2e46`.
 
 **PR #420, merged 2026-10-13** — #419, the installation guide after the 1.2.0
 rollout to four stands: `VOLUME()` on both RECEIVEs on MVS/CE (generator side

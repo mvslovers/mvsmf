@@ -23,10 +23,13 @@ kind = "application"
 # (mvslovers/libc370#470) -- a CGI module runs on one of httpd's workers.
 # 2.10.2: __listds() returns a name with a hyphen whole; up to 2.10.1 the
 # data set listing cut it at the '-' (mvslovers/libc370#519, #402).
+# 2.10.3: a member whose write failed is no longer STOWed at CLOSE; up to
+# 2.10.2 a failed member PUT emptied the member it replaced
+# (mvslovers/libc370#524, #406).
 # cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
 # macros in maclib370; 1.6.1 is current.
 cc370 = "1.6.1"
-libc370 = "2.10.2"
+libc370 = "2.10.3"
 mbt = "3.0"
 
 [dependencies]

@@ -200,8 +200,8 @@ then read its JESJCL (file id 3) for `XXSTEPLIB DD DISP=SHR,DSN=…`.
 ```toml
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"
-"mvslovers/httpd" = ">=4.2.0-dev"
-"mvslovers/ufsd" = ">=1.4.0-dev"
+"mvslovers/httpd" = ">=4.2.0"
+"mvslovers/ufsd" = ">=1.4.0"
 
 [plugins]
 "mvslovers/mbt-stc" = "^0.1"

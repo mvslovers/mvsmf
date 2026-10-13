@@ -600,14 +600,27 @@ send_all(Session *session, const UCHAR *buf, int len)
 // of every later call paying its own 10 second budget for a peer that is gone
 // (httpd#203).
 //
-// It does NOT close the socket, though: DONE is the normal completion state,
-// and httpd walks DONE -> REPORT -> RESET, where httprese() keeps the
-// connection open if keepalive is still set. That is fine for a response that
-// finished and wrong for this one -- the body is short of the Content-Length
-// it announced, so the next response on the socket would be appended to a
-// truncated one and the client would read the two as a single corrupt reply.
-// Clearing keepalive sends httprese() down its CSTATE_CLOSE branch. httpd's
-// chunked path clears the same flag for the same reason.
+// DONE alone does not say "broken", though: it is the normal completion state,
+// and httpd treats it as one. Two flags decide what the client sees, and both
+// must go -- httpd's own chunked send path clears the same two on a short
+// send, for the same reasons:
+//
+// - chunked: at DONE, httpdone() ends a chunked body with "0\r\n\r\n",
+//   the terminator that tells the client the body is complete. Left set, a
+//   read error mid-body reached the client as a clean 200 with a truncated
+//   body -- measured on mvsdev, a data set that was never opened came back as
+//   200 with an empty body, curl exit 0, and MVSMF106E only on the console
+//   (#421). The data set GET is always chunked, so both read-error sites in
+//   dsapi.c were affected. send_all() was not: httpd had already cleared
+//   chunked itself when the send failed.
+// - keepalive: httpd then walks DONE -> REPORT -> RESET, where httprese()
+//   keeps the connection open if keepalive is still set, and the next
+//   response on the socket would be appended to the truncated one. Clearing
+//   it sends httprese() down its CSTATE_CLOSE branch.
+//
+// With both cleared the connection closes mid-body: short of the
+// Content-Length it announced, or without the terminating chunk -- both of
+// which a client can tell from a complete body.
 //
 // Two callers, and they are the same situation from opposite ends: send_all()
 // when the bytes cannot be delivered, and a streaming handler when the bytes
@@ -625,6 +638,7 @@ abort_response(Session *session)
 	if (session->httpc->state < CSTATE_DONE) {
 		session->httpc->state = CSTATE_DONE;
 	}
+	session->httpc->chunked = 0;
 	session->httpc->keepalive = 0;
 }
 

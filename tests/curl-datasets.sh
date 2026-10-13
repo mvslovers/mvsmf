@@ -3129,6 +3129,69 @@ done
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_NEW}"
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_OVR}"
 
+# =========================================================================
+# A read error mid-body must reach the client as a broken transfer (#421)
+# =========================================================================
+echo ""
+echo "--- Read error mid-body: no clean end (issue #421) ---"
+
+# The fixture (tests/jcl/wronglen.jcl) is a data set whose label says VB/129
+# while its first block is a 160-byte FB block, so every read of it ends in a
+# wrong-length record: MVSMF106E on the console, after the 200 has gone out.
+# The only honest answer left then is to break the connection. Before #421 the
+# chunked body was closed with a clean terminator instead: 200, curl exit 0,
+# and an empty body that looked complete.
+#
+# A data set that was allocated and never opened (no end-of-file mark) is the
+# case that was reported, but it is no fixture: whether its read fails depends
+# on what earlier data sets left on its tracks -- measured on mvsdev, 1 of 2.
+WLEN_DSN="${MVSMF_USER}.CURL.WRONGLEN"
+
+wlen_errors() {
+	curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restconsoles/v1/log?timeRange=5m" 2>/dev/null \
+		| grep -o "MVSMF106E I/O ERROR READING ${WLEN_DSN} " | wc -l | tr -d ' '
+}
+
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${WLEN_DSN}" 2>/dev/null || true
+
+WLEN_JCL=$(sed "s/@DSN@/${WLEN_DSN}/" "${SCRIPT_DIR}/jcl/wronglen.jcl")
+WLEN_JOB=$(curl -s -X PUT -K "$MVSMF_CURLRC" -H "Content-Type: text/plain" \
+	--data-binary "$WLEN_JCL" "${BASE_URL}/zosmf/restjobs/jobs" | jq -r '.jobid // empty')
+
+WLEN_RC=""
+if [ -n "$WLEN_JOB" ]; then
+	for _ in $(seq 1 30); do
+		WLEN_RC=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restjobs/jobs/WRONGLEN/${WLEN_JOB}" \
+			| jq -r 'select(.status == "OUTPUT") | .retcode // empty')
+		[ -n "$WLEN_RC" ] && break
+		sleep 1
+	done
+fi
+
+if [ "$WLEN_RC" != "CC 0000" ]; then
+	# created through the API under test -- its absence is red, not a skip (#304)
+	fail "wronglen: fixture job" "job '${WLEN_JOB:-none}' ended '${WLEN_RC:-not at all}'"
+else
+	BEFORE=$(wlen_errors)
+	curl -s -o /dev/null -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${WLEN_DSN}"
+	CURL_RC=$?
+	AFTER=$(wlen_errors)
+
+	if [ "$AFTER" = "$BEFORE" ]; then
+		fail "wronglen: the read reports an I/O error" \
+			"no new MVSMF106E for ${WLEN_DSN}: the fixture did not fail its read, so nothing below was tested"
+	elif [ "$CURL_RC" -ne 0 ]; then
+		pass "wronglen: a read error breaks the transfer (curl exit ${CURL_RC})"
+	else
+		fail "wronglen: a read error breaks the transfer" \
+			"MVSMF106E was written, but the response ended cleanly (curl exit 0): a truncated body that looks complete"
+	fi
+fi
+
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${WLEN_DSN}" 2>/dev/null || true
+[ -n "$WLEN_JOB" ] && curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restjobs/jobs/WRONGLEN/${WLEN_JOB}" 2>/dev/null
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

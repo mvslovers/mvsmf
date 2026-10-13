@@ -1,6 +1,6 @@
 # Test JCL
 
-Fixtures used by `tests/curl-jobs.sh` and by hand.
+Fixtures used by `tests/curl-jobs.sh`, `tests/curl-datasets.sh` and by hand.
 
 | file | job ends as | `JCTCNVRC` | `JCTJTFLG` | `retcode` |
 |---|---|---|---|---|
@@ -56,6 +56,13 @@ any stand. The file is kept only for allocating the PDS by hand; prefer the
 suites' `--setup`.
 
 `largejcl.jcl` is a 130 KB body for the submit path, not part of the matrix.
+
+`wronglen.jcl` is `curl-datasets.sh`'s, not part of the matrix: a data set whose
+label says VB/125/129 while its first block is a 160-byte FB block, so every
+read of it ends in a wrong-length record — an I/O error after the status has
+gone out (#421). The suite substitutes `@DSN@`. A data set that was allocated
+and never opened would be the obvious fixture and is not one: whether its read
+fails depends on what earlier data sets left on its tracks.
 
 `emptydd.jcl` is not part of the matrix either. In TSO batch it dynamically
 allocates a SYSOUT data set, lets IEBGENER open and close it without a record,

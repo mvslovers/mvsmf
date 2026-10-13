@@ -27,7 +27,7 @@
 //* names the route at startup in HTTPD002I:
 //*
 //*   AUTHORIZED BY SVC      SVC 244 from RAKF. No APF entry, no IPL.
-//*                          The usual route on TK4- and TK5.
+//*                          HTTPD's normal route on TK4-/TK5.
 //*   AUTHORIZED BY LIBRARY  EVERY library in this STEPLIB is in
 //*                          SYS1.PARMLIB(IEAAPF00).
 //*
@@ -37,7 +37,8 @@
 //*   MVSMF.LINKLIB WORK00,
 //*
 //* One library missing does not break anything: the step starts
-//* unauthorized and HTTPD falls back to SVC 244, without a warning.
+//* unauthorized and HTTPD falls back to SVC 244. No warning is
+//* written; HTTPD002I names the SVC route instead of LIBRARY.
 //* The volume is part of the entry: one naming a different volume
 //* authorizes nothing. MVS 3.8j reads IEAAPF00 at IPL only, so this
 //* route needs an IPL.

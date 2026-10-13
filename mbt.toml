@@ -63,7 +63,8 @@ mbt = "3.0"
 # over the installed level; take it out to go back. Where HTTPD is authorized
 # by library (HTTPD002I AUTHORIZED BY LIBRARY), it needs its own IEAAPF00 entry:
 # one STEPLIB library missing from the list and the step starts unauthorized,
-# so HTTPD falls back to SVC 244 without a warning (#415).
+# so HTTPD falls back to SVC 244 -- no warning, only HTTPD002I naming the SVC
+# route instead of LIBRARY (#415).
 
 # Single load module: a CGI program that runs under httpd.  It includes its
 # own request router + API handlers; the CGI launcher (cgistart, providing

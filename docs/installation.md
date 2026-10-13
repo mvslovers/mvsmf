@@ -71,11 +71,12 @@ HTTPD002I AUTHORIZED BY SVC (MODULE KEY 8)         SVC 244, from RAKF
 HTTPD002I AUTHORIZED BY LIBRARY (MODULE KEY 0)     every STEPLIB library in IEAAPF00
 ```
 
-**SVC 244 — no APF entry, no IPL.** This is the usual route on a stock TK4- or
-TK5, and the one to take unless you have a reason not to. HTTPD needs RAKF
-anyway; with RAKF in place, `MVSMF.LINKLIB` goes into the STEPLIB in step 3
-and that is all. Without RAKF *and* without an APF entry HTTPD does not start
-at all (`HTTPD012E`), so a server that is up is authorized.
+**SVC 244 — no APF entry, no IPL.** HTTPD's documentation calls this the normal
+route on a stock TK4- or TK5, and it is the one to take unless you have a reason
+not to. HTTPD needs RAKF anyway; with RAKF in place, `MVSMF.LINKLIB` goes into
+the STEPLIB in step 3 and that is all. Without RAKF *and* without an APF entry
+HTTPD does not start at all (`HTTPD012E`, see HTTPD's message reference), so a
+server that is up is authorized.
 
 **The APF list.** If you want HTTPD authorized by library, add
 `MVSMF.LINKLIB` to `SYS1.PARMLIB(IEAAPF00)` with the volume it was allocated
@@ -87,10 +88,11 @@ MVSMF.LINKLIB WORK00,
 
 On MVS a STEPLIB concatenation is authorized only if *every* library in it is,
 so this route needs an entry for **each** of them — `HTTPD.LINKLIB`, a
-development library you put in front, and this one. A single library missing
-does not break anything: the step starts unauthorized and HTTPD falls back to
-SVC 244. It does so without a warning, so read `HTTPD002I` rather than assume
-the route.
+development library you put in front, and this one. Because the rule is
+all-or-nothing, a single library missing does not break anything either: the
+step starts unauthorized and HTTPD falls back to SVC 244. No warning is
+written, but `HTTPD002I` names the SVC route instead of `LIBRARY` — read it
+rather than assume the route.
 
 The volume is part of the entry rather than decoration: an entry naming a
 different volume than the allocation authorizes nothing — **so read the volume

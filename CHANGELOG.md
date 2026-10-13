@@ -15,7 +15,7 @@ The release that moves mvsMF to **libc370 2.x**, which is why the minor moves.
 FMID `TZMF120`, and its SYSMOD deletes `TZMF110`, so an upgrade from 1.1.0
 needs nothing beyond the package.
 
-Built against **libc370 2.10.2**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
+Built against **libc370 2.10.3**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
 **crypto370 1.0.1**. **httpd 4.2.0 is a hard minimum**: see *Read this first*.
 
 ### Read this first
@@ -48,7 +48,7 @@ Built against **libc370 2.10.2**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
   the `LtpaToken2` cookie set on a Basic-authenticated response is still the
   shared credential's token, so a logout with that cookie ends it for every
   holder of the cookie.
-- **Rebuilt on libc370 2.x** (#378), now 2.10.2, with the cc370 1.6 toolchain.
+- **Rebuilt on libc370 2.x** (#378), now 2.10.3, with the cc370 1.6 toolchain.
   Base64 comes from crypto370, a new static dependency; it adds nothing to
   install. The build now treats every warning as an error
   (`-Wall -Wextra -Werror`). The fixes this needed are not meant to change
@@ -65,9 +65,15 @@ Built against **libc370 2.10.2**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
   partial and is written only when the data set is closed. libc370 reports a
   failed close now, and mvsMF answers `500` "Error writing the last block" and
   writes `MVSMF107E`, where it used to answer `204` with the tail missing. The
-  same applies to a member smaller than one block written into a full PDS,
-  which answers `500` now but still loses the member: see *Known
-  limitations*.
+  same applies to a member smaller than one block written into a full PDS.
+- **A member PUT that runs out of space leaves the member as it was** (#406).
+  libc370 up to 2.10.2 wrote the directory entry when it closed a member whose
+  write had failed: a failed new member stayed in the directory with no
+  records, and a failed overwrite left the existing member empty, although
+  the PUT answered `500`. With libc370 2.10.3 a failed new member does not
+  appear, and an existing one keeps its old content. Measured on MVS: a PDS
+  filled member by member until one fails, with the previous libc370 as the
+  control.
 - **The `dslevel` listing keeps a name with a hyphen whole** (#402). A data set
   such as `A.B-C` used to be listed as `A.B`, with empty attributes.
 - **An empty spool data set reads as empty** (#376). A program that allocates
@@ -84,11 +90,6 @@ Built against **libc370 2.10.2**, **httpd 4.2.0-dev**, **ufsd 1.4.0-dev** and
 
 ### Known limitations
 
-- **A member PUT that runs out of space still replaces the member** (#406).
-  The `500` is right, but libc370 2.10.2 still writes the directory entry when
-  it closes the member: a failed new member stays in the directory with no
-  records, and a failed overwrite leaves the existing member empty. The fix is
-  in libc370 (`libc370#524`).
 - **Collect and detections still read a failed snapshot as "no matches"**
   (#407). Under a storage shortage a detection can report `detected` for a
   message that was there before the command, and a collect can return the

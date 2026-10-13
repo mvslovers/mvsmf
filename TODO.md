@@ -421,9 +421,12 @@ policy vacuum.
 read: `++VER(Z038) DELETE(TZMF110)`, ACCEPT gated `COND=(4,LT,APPLY)`. Smoke
 run on mvsdev with the release build: 665 of 665 across the four curl suites,
 `auth` 21 of 21 and `info-cookie` 5 of 5. The stand installs (SMP) are MBT's
-rollout; #412 is re-checked on the stand that reported it once it has 1.2.0.
+rollout; done for the two TK5 stands the same day, by SVC 244 with no APF
+entry (#415/PR #416 made the guide say that is enough).
 
-**PR #413, merged 2026-10-13** — #412 (left open, see the header): a
+**PR #413, merged 2026-10-13** — #412, closed the same day after the re-check
+on the stand that reported it (76–154 KB submits, all answered; HTTPD moved to
+4.2.0 in the same cut-over, so which change removed it is open — see #412): a
 `Content-Length` body was grown by doubling, so 72 KB asked for one 128 KB
 block while holding 64 KB, and a failed read lost its answer to the reset that
 closing a socket with unread data causes. The reader is `src/reqbody.c` now:

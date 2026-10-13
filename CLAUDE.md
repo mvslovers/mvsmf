@@ -672,6 +672,12 @@ clear `keepalive` in the same breath: `CSTATE_DONE` is *normal completion*, so
 httpd walks `DONE → REPORT → RESET` and `httprese()` reuses the socket if the
 flag is still set — appending the next response to a body that is short of the
 Content-Length it announced. A hang traded for a corrupt stream is not a fix.
+Both flags are cleared by `abort_response()` (`common.c`), together with
+`chunked`: left set, httpd's `httpdone()` closes a chunked body with a clean
+`0\r\n\r\n`, and a read error mid-body reaches the client as a complete-looking
+200 (#421 — every data set GET is chunked). httpd's own send path already
+clears `chunked` when a send fails; the read-error callers in `dsapi.c` had
+nothing that did.
 
 The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
 the real one on the host; its four MVS/httpd services are injected through

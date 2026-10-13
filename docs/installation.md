@@ -40,7 +40,8 @@ allocate on — `PUB000` on a stock MVS/CE:
 
 ```
   RECEIVE INDSN('CHANGE.ME.MVSMFLOD') -
-    DATASET('MVSMF.MVSMFLOD') VOLUME('PUB000')
+    DATASET('MVSMF.MVSMFLOD') -
+    VOLUME('PUB000')
 ```
 
 The job's own comment says the `CHANGE.ME` lines are the only ones to change;
@@ -194,15 +195,18 @@ run as the APPLY.
 ## Coming from a hand-copied MVSMF
 
 mvsMF 1.0.0 and 1.0.1 shipped without an install package, so a system that ran
-them usually has the `MVSMF` module copied by hand into some library —
-frequently `HTTPD.LINKLIB` itself. There is no SMP level to upgrade from; treat
-it as a fresh install and retire the copy:
+them has the `MVSMF` module in a library SMP knows nothing about. Two shapes
+have been met: a library of its own (`MVSMF.V1R0M0.LINKLIB` on TK5), and a
+copy placed into a non-SMP `HTTPD.LINKLIB` beside HTTPD itself (MVS/CE). There
+is no SMP level to upgrade from; treat it as a fresh install and retire the
+copy:
 
 1. **Install as above** (steps 1 to 4). The package's SYSMOD names its
    predecessor for deletion. On a system that never had it, nothing is deleted
-   and the APPLY still ends RC 00; afterwards `LIST` shows the predecessor id as
-   `TYPE = FUNCTION` / `DELBY = …`. That entry is expected — it marks the id as
-   spent — and an uninstall has to name it.
+   and the APPLY still ends RC 00. SMP still records the deletion: a `LIST` of
+   the predecessor id is expected to show `TYPE = FUNCTION` / `DELBY = …`, a
+   tombstone SMP leaves even for an id that was never installed. It marks the
+   id as spent, and an uninstall has to name it.
 2. **Put `MVSMF.LINKLIB` first in the STEPLIB** (step 3). While the
    hand-copied module sits in a library ahead of it, that copy is what runs.
 3. **Replace the old route lines** with the three of step 4. A `MOD=MVSMF`
@@ -214,9 +218,18 @@ it as a fresh install and retire the copy:
    ```
 
 4. **Restart and check the level** with `?fn=version` (step 5). Once it
-   reports the release you installed, delete the hand-copied `MVSMF` member —
-   and anything copied in alongside it — from the old library, so it cannot
-   come back to the front of a concatenation later.
+   reports the release you installed, retire the old library, so the copy
+   cannot come back to the front of a concatenation later. A library of its own
+   can simply be scratched.
+
+**If the old copy sits in a non-SMP `HTTPD.LINKLIB`,** that library is HTTPD's
+problem before it is mvsMF's: HTTPD's own allocation job cannot allocate
+`HTTPD.LINKLIB` while the old one exists. Rename it aside first (IDCAMS
+`ALTER HTTPD.LINKLIB NEWNAME(…)`, which renames catalog entry and VTOC entry on
+MVS 3.8j), install HTTPD and then mvsMF through SMP, and scratch the renamed
+library whole once both run — the hand-copied `MVSMF` and anything copied in
+alongside it go with it. HTTPD's side of this is
+[mvslovers/httpd#295](https://github.com/mvslovers/httpd/issues/295).
 
 ## Removing mvsMF
 

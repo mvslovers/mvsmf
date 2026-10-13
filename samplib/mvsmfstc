@@ -20,19 +20,25 @@
 //* delete the hand-placed copy; two copies of a load module are a
 //* question nobody wants to answer during an incident.
 //*
-//* APF: EVERY LIBRARY IN AN AUTHORIZED STEPLIB CONCATENATION MUST BE
-//* APF-AUTHORIZED. HTTPD.LINKLIB is, because httpd and mvsMF do
-//* authorized work -- SVC 34 for operator commands, ACEE handling for
-//* identity. Concatenating a library that is NOT authorized silently
-//* de-authorizes the whole task, and the failure that follows does not
-//* name the cause.
+//* AUTHORIZATION: USUALLY NOTHING TO DO.
 //*
-//* So add MVSMF.LINKLIB to SYS1.PARMLIB(IEAAPF00) with the volume it
-//* actually lives on:
+//* mvsMF runs with HTTPD's authorization -- it needs an authorized
+//* task, not an authorized library. HTTPD gets it one of two ways and
+//* names the route at startup in HTTPD002I:
+//*
+//*   AUTHORIZED BY SVC      SVC 244 from RAKF. No APF entry, no IPL.
+//*                          HTTPD's normal route on TK4-/TK5.
+//*   AUTHORIZED BY LIBRARY  EVERY library in this STEPLIB is in
+//*                          SYS1.PARMLIB(IEAAPF00).
+//*
+//* For the library route add MVSMF.LINKLIB to IEAAPF00 with the volume
+//* it actually lives on, next to HTTPD.LINKLIB:
 //*
 //*   MVSMF.LINKLIB WORK00,
 //*
-//* The volume is part of the entry, not decoration: an APF entry naming
-//* a different volume than the allocation does not authorize anything.
-//* MVS 3.8j reads IEAAPF00 at IPL and has no dynamic APF update, so this
-//* change needs an IPL before the library is usable.
+//* One library missing does not break anything: the step starts
+//* unauthorized and HTTPD falls back to SVC 244. No warning is
+//* written; HTTPD002I names the SVC route instead of LIBRARY.
+//* The volume is part of the entry: one naming a different volume
+//* authorizes nothing. MVS 3.8j reads IEAAPF00 at IPL only, so this
+//* route needs an IPL.

@@ -9,6 +9,17 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
+## [Unreleased]
+
+### Changed
+
+- **No APF entry is needed for `MVSMF.LINKLIB`** (#415). The installation
+  guide called it "not optional". mvsMF runs with HTTPD's authorization, and
+  HTTPD authorizes itself through SVC 244 from RAKF when its STEPLIB is not
+  all in `IEAAPF00`; `HTTPD002I` names the route it took. The guide now
+  describes both routes: SVC 244, with no entry and no IPL, and the APF list,
+  which needs an entry for every library in the STEPLIB.
+
 ## [1.2.0] - 2026-10-13
 
 The release that moves mvsMF to **libc370 2.x**, which is why the minor moves.

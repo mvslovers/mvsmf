@@ -150,9 +150,9 @@ See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 mvsMF ships as an **SMP Release 4** install package (FMID `TZMF120`).
 **[docs/installation.md](docs/installation.md)** is the guide — it covers the
-two install jobs, the APF entry the library needs, the STEPLIB concatenation,
-and the route definitions. [docs/uninstall.md](docs/uninstall.md) is the way
-back out.
+two install jobs, authorization (SVC 244, or an APF entry), the STEPLIB
+concatenation, and the route definitions. [docs/uninstall.md](docs/uninstall.md)
+is the way back out.
 
 The short version of the configuration, which is the part people get wrong:
 

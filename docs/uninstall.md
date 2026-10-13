@@ -85,7 +85,7 @@ starting at all.
 
 Then `P HTTPD` / `S HTTPD`.
 
-Leaving the APF entry in `SYS1.PARMLIB(IEAAPF00)` is harmless — it names a data
+If you added an APF entry to `SYS1.PARMLIB(IEAAPF00)`, leaving it is harmless — it names a data
 set that no longer exists and authorizes nothing — but removing it keeps the
 member honest. That part needs an IPL, so it can wait for the next one.
 

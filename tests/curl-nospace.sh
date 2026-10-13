@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================================
-# mvsMF Datasets REST API - out-of-space write test (#366, #371)
+# mvsMF Datasets REST API - out-of-space write test (#366, #371, #406)
 #
 # A PUT that fills its target must not answer 2xx. Before #366 it could:
 # libc370 1.0.6 turned an out-of-space write from ABEND SD37 into a return
@@ -19,10 +19,16 @@
 # @@ACLOSE writes that block, and fclose() reports it since libc370#182 --
 # EOF with errno ENOSPC. mvsMF discarded that result until #371, so the
 # counts between the capacity and the next block boundary answered 204 with
-# records missing. They must answer 500 now. The other shape #371 reports,
-# a member smaller than one block into a full PDS, is not reproduced here:
-# a one-track PDS filled by a failed PUT refused the next small member with
-# 500 on the unfixed build as well, so that check proved nothing.
+# records missing. They must answer 500 now.
+#
+# The other shape #371 reports, a member smaller than one block into a full
+# PDS, is section 5. The PDS has to be filled by SUCCESSFUL PUTs: one filled
+# by a failed PUT refused the next small member with 500 on the unfixed build
+# as well, so that check proved nothing. Since #403 the failed member PUT
+# answers 500, but libc370's CLOSE still writes the directory entry: a failed
+# new member stays with no records, and a failed overwrite leaves the existing
+# member EMPTY (#406, libc370#524). Section 5 asserts that neither happens,
+# and fails until a libc370 release with the fix is pinned.
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -39,6 +45,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/lib/conn.sh"
 
 TEST_DS="${MVSMF_USER}.CURL.NOSPACE"
+TEST_PDS="${MVSMF_USER}.CURL.NOSPACE.PDS"
 
 # One track, no secondary: the target has to fill. LRECL/BLKSIZE give the
 # blocking factor, which is where the boundary sits.
@@ -59,6 +66,7 @@ info() { echo "  ..   $1"; }
 
 cleanup() {
 	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_DS}"
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}"
 }
 mvsmf_on_exit cleanup
 
@@ -74,7 +82,7 @@ put() {
 	echo "$st $got"
 }
 
-echo "=== mvsMF out-of-space write (#366, #371) ==="
+echo "=== mvsMF out-of-space write (#366, #371, #406) ==="
 echo
 
 echo "Allocating ${TEST_DS} (PS FB/${LRECL}, BLKSIZE ${BLKSIZE}, TRK(1,0))..."
@@ -171,6 +179,85 @@ if [ "$silent_close" -eq 0 ]; then
 else
 	fail "${silent_close} counts between ${CAP} and ${BOUND} answer 2xx with records missing" \
 	     "#371: the fclose() result is not being checked"
+fi
+echo
+
+# --- 5. a failed member PUT must leave the directory alone (#406) ----------
+# A member of 47 records is smaller than one block, so each one reaches DASD
+# only at CLOSE. Members are added until one fails; how many fit depends on
+# the volume, so the loop finds out. Then the PDS is full, and two things must
+# hold: the member that failed is not in the directory, and overwriting an
+# existing member that does not fit leaves its old content in place.
+# Measured on mvsdev before the libc370 fix (2026-10-13, 2 of 2): eight
+# members fit, the ninth answered 500 and was listed with no records, and the
+# failed overwrite of M1 answered 500 and left M1 empty.
+MEMRECS=47
+
+# mput <member> <prefix> -> echoes the status; mcount <member> <prefix> ->
+# echoes how many records of the member start with the prefix
+mput() {
+	awk -v n=$MEMRECS -v t="$2" 'BEGIN{for(i=1;i<=n;i++) printf "%s%068d\n", t, i}' \
+	| curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X PUT \
+	  -H 'Content-Type: text/plain' -H 'X-IBM-Data-Type: text' \
+	  --data-binary @- "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}($1)"
+}
+mcount() {
+	curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}($1)" | grep -c "^$2"
+}
+
+echo "Allocating ${TEST_PDS} (PO FB/${LRECL}, BLKSIZE 19040, TRK(2,0), 1 directory block)..."
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}"
+alloc=$(curl -s -o /dev/null -w '%{http_code}' -K "$MVSMF_CURLRC" -X POST \
+	-H 'Content-Type: application/json' \
+	-d "{\"dsorg\":\"PO\",\"alcunit\":\"TRK\",\"primary\":2,\"secondary\":0,\"dirblk\":1,\"recfm\":\"FB\",\"blksize\":19040,\"lrecl\":${LRECL}}" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
+case "$alloc" in
+	20*) info "allocated (${alloc})" ;;
+	*) fail "allocate ${TEST_PDS} returned ${alloc}" ;;
+esac
+
+if [ "${alloc:0:1}" = "2" ]; then
+	full=0
+	m=1
+	while [ "$m" -le 40 ]; do
+		st=$(mput "M$m" "MEMBER$m-")
+		if [ "${st:0:1}" != "2" ]; then
+			full=$m
+			break
+		fi
+		m=$((m + 1))
+	done
+
+	if [ "$full" -eq 0 ]; then
+		fail "the PDS did not fill within 40 members" \
+		     "section 5 needs a member that fits and one that does not"
+	elif [ "$full" -eq 1 ]; then
+		fail "the first member into the empty PDS answered ${st}" \
+		     "section 5 needs a member that fits and one that does not"
+	else
+		info "filled: M1..M$((full - 1)) answered 2xx, M${full} answered ${st}"
+
+		if curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member" \
+		   | tr -d ' \n' | grep -q "\"member\":\"M${full}\""; then
+			fail "the member whose PUT failed (M${full}) is in the directory" \
+			     "#406: CLOSE wrote the directory entry after the failed write"
+		else
+			pass "a member whose PUT failed is not left in the directory"
+		fi
+
+		st=$(mput M1 "REPLACE1-")
+		old=$(mcount M1 "MEMBER1-")
+		new=$(mcount M1 "REPLACE1-")
+		if [ "${st:0:1}" = "2" ]; then
+			fail "an overwrite into the full PDS answered ${st} (${new} new records)" \
+			     "the PDS was not full, so this proved nothing"
+		elif [ "$old" -eq "$MEMRECS" ] && [ "$new" -eq 0 ]; then
+			pass "a failed overwrite leaves the old member in place (${st})"
+		else
+			fail "a failed overwrite (${st}) left M1 with ${old} old and ${new} new records" \
+			     "#406: the old content of the member is lost"
+		fi
+	fi
 fi
 
 echo

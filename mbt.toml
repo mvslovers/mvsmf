@@ -21,9 +21,12 @@ kind = "application"
 # mbt v2.2.0 does not look for.
 # 2.6.1: the stdio lock fix for code in a threaded address space
 # (mvslovers/libc370#470) -- a CGI module runs on one of httpd's workers.
-# cc370: libc370 2.4.0 and later need cc370 >= 1.4.0; 1.4.0 is current.
-cc370 = "1.4.0"
-libc370 = "2.6.1"
+# 2.10.2: __listds() returns a name with a hyphen whole; up to 2.10.1 the
+# data set listing cut it at the '-' (mvslovers/libc370#519, #402).
+# cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
+# macros in maclib370; 1.6.1 is current.
+cc370 = "1.6.1"
+libc370 = "2.10.2"
 mbt = "3.0"
 
 [dependencies]

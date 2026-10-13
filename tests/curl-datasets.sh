@@ -49,6 +49,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_SEQ="${MVSMF_USER}.CURL.TESTSEQ"
 TEST_SEQ2="${MVSMF_USER}.CURL.TESTSEQ2"
 TEST_PDS="${MVSMF_USER}.CURL.TESTPDS"
+TEST_HYPH="${MVSMF_USER}.CURL.HY-PHEN"
 # Large-LRECL fixtures for issue #198 (records above the old 1024-byte limit)
 TEST_BIG="${MVSMF_USER}.CURL.TESTBIG"
 TEST_BIGPDS="${MVSMF_USER}.CURL.TESTBGP"
@@ -172,6 +173,7 @@ cleanup_datasets() {
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ2}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TESTENC" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_HYPH}" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -2753,6 +2755,60 @@ assert_http_status "204" "$HTTP_CODE" "lower-case dsname and member: delete"
 
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(FOLD1)"
+
+# --- A hyphen in a qualifier survives the level listing (issue #402) ---
+#
+# A '-' is valid in a qualifier after its first character. The level listing
+# comes from libc370's __listds(), which read the name out of the LISTCAT
+# output with '-' as a delimiter -- the same character as the dashes in
+# "NONVSAM ------- name" -- so the name ended at its first hyphen
+# (libc370#519, fixed in 2.10.2). mvsMF then looked up the short name, found
+# no DSCB and listed it with empty attributes. Only the LEVEL listing went that
+# way: a dslevel naming the data set exactly takes __locate() instead, and a
+# GET by name never lists at all. So the checks below list the level above.
+echo ""
+echo "--- Hyphen in a qualifier survives the level listing (issue #402) ---"
+
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_HYPH}"
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":0}' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_HYPH}")
+assert_http_status "201" "$HTTP_CODE" "create ${TEST_HYPH}"
+
+HYPH_STUB="${TEST_HYPH%%-*}"
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Attributes: base" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${MVSMF_USER}.CURL")
+ITEM=$(echo "$CONTENT" | jq -c --arg dsn "$TEST_HYPH" \
+	'[.items[] | select(.dsname == $dsn)][0] // empty' 2>/dev/null)
+if [ -n "$ITEM" ]; then
+	pass "the level listing names ${TEST_HYPH} whole"
+	assert_json_field "$ITEM" '.dsorg' "PS" "its attributes are the data set's"
+	assert_json_field "$ITEM" '.recfm' "FB" "its attributes are the data set's"
+	assert_json_field "$ITEM" '.lrecl' "80" "its attributes are the data set's"
+else
+	fail "the level listing names ${TEST_HYPH} whole" \
+		"names: $(echo "$CONTENT" | jq -r '[.items[].dsname] | join(" ")' 2>/dev/null)"
+fi
+STUBS=$(echo "$CONTENT" | jq --arg dsn "$HYPH_STUB" \
+	'[.items[] | select(.dsname == $dsn)] | length' 2>/dev/null)
+if [ "${STUBS:-0}" = "0" ]; then
+	pass "no entry cut at the hyphen (${HYPH_STUB})"
+else
+	fail "no entry cut at the hyphen (${HYPH_STUB})" \
+		"the listing carries ${STUBS} entry named ${HYPH_STUB}"
+fi
+
+# the filter sees the whole name too: a pattern across the hyphen
+CONTENT=$(curl -s -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${HYPH_STUB}-*")
+assert_json_field "$CONTENT" \
+	"any(.items[]; .dsname == \"${TEST_HYPH}\")" "true" \
+	"dslevel=${HYPH_STUB}-* finds ${TEST_HYPH}"
+
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_HYPH}"
 
 # --- An over-long dslevel is refused, not copied (issue #337) ---
 #

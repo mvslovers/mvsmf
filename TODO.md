@@ -27,8 +27,9 @@ false `detected`, and #214's mis-anchor reopened.
 **#417 and #418 are new (2026-10-13) and not ranked either**, both from a
 client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|release`
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
-console). Cancel is `jescanj(…, 0)`; hold/release need SVC 34; any of it widens
-#345. #418 is the 404 itself: a known path with an unregistered method should
+console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
+**#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
+SVC 34, verified against the JQE hold bit). Any of it widens #345. #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
 **#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
 `ufs_ferror()` check after its read loop, so a failed read ends as a clean 200

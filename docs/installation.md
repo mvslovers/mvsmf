@@ -55,21 +55,42 @@ HMA2380 COPY SUCCESSFUL - MOD=MVSMF - LMOD=MVSMF - LIBRARY=…
 
 If that line is not in the job log, nothing was copied.
 
-## 2. Authorize the library — needs an IPL
+## 2. Authorization — usually nothing to do
 
-Add `MVSMF.LINKLIB` to `SYS1.PARMLIB(IEAAPF00)` with the volume it was
-allocated on:
+mvsMF does authorized work: every authenticated request switches the task's
+identity (ACEE handling in key 0), and the console API issues operator commands
+(SVC 34). It does not authorize anything itself. It is never a job step
+program; HTTPD LINKs it per request, so it runs with **HTTPD's** authorization,
+and what it needs is an authorized task, not an authorized library.
+
+HTTPD gets that authorization one of two ways, and says at startup which one it
+took:
+
+```
+HTTPD002I AUTHORIZED BY SVC (MODULE KEY 8)         SVC 244, from RAKF
+HTTPD002I AUTHORIZED BY LIBRARY (MODULE KEY 0)     every STEPLIB library in IEAAPF00
+```
+
+**SVC 244 — no APF entry, no IPL.** This is the usual route on a stock TK4- or
+TK5, and the one to take unless you have a reason not to. HTTPD needs RAKF
+anyway; with RAKF in place, `MVSMF.LINKLIB` goes into the STEPLIB in step 3
+and that is all. Without RAKF *and* without an APF entry HTTPD does not start
+at all (`HTTPD012E`), so a server that is up is authorized.
+
+**The APF list.** If you want HTTPD authorized by library, add
+`MVSMF.LINKLIB` to `SYS1.PARMLIB(IEAAPF00)` with the volume it was allocated
+on:
 
 ```
 MVSMF.LINKLIB WORK00,
 ```
 
-**This is not optional.** The next step concatenates the library into HTTPD's
-STEPLIB, and on MVS *every* library in an authorized STEPLIB concatenation must
-be APF-authorized — one that is not silently de-authorizes the whole task.
-httpd and mvsMF both do authorized work (SVC 34 for operator commands, ACEE
-handling for identity), so the server stops working, and the failure that
-follows does not name the cause.
+On MVS a STEPLIB concatenation is authorized only if *every* library in it is,
+so this route needs an entry for **each** of them — `HTTPD.LINKLIB`, a
+development library you put in front, and this one. A single library missing
+does not break anything: the step starts unauthorized and HTTPD falls back to
+SVC 244. It does so without a warning, so read `HTTPD002I` rather than assume
+the route.
 
 The volume is part of the entry rather than decoration: an entry naming a
 different volume than the allocation authorizes nothing — **so read the volume
@@ -79,8 +100,8 @@ a second run on a fuller system can choose a different one (`mbt#102`). The
 allocation job's `IEF285I` lines name what it actually used; `LISTCAT` or
 `GET /zosmf/restfiles/ds?dslevel=MVSMF` answers it afterwards.
 
-MVS 3.8j reads `IEAAPF00` at IPL and has no dynamic APF update, so **this step
-needs an IPL** before the library can be used.
+MVS 3.8j reads `IEAAPF00` at IPL and has no dynamic APF update, so **this route
+needs an IPL** before the entry takes effect.
 
 ## 3. Concatenate it into HTTPD's STEPLIB
 

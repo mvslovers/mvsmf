@@ -60,9 +60,10 @@ mbt = "3.0"
 # Anyone sharing an httpd shares the running level anyway.
 #
 # Put it FIRST in the concatenation, ahead of MVSMF.LINKLIB, so a deploy wins
-# over the installed level; take it out to go back. And it needs its own
-# IEAAPF00 entry: every library in an authorized STEPLIB concatenation must be
-# APF-authorized or the whole task silently loses authorization.
+# over the installed level; take it out to go back. Where HTTPD is authorized
+# by library (HTTPD002I AUTHORIZED BY LIBRARY), it needs its own IEAAPF00 entry:
+# one STEPLIB library missing from the list and the step starts unauthorized,
+# so HTTPD falls back to SVC 244 without a warning (#415).
 
 # Single load module: a CGI program that runs under httpd.  It includes its
 # own request router + API handlers; the CGI launcher (cgistart, providing

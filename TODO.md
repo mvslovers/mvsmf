@@ -73,7 +73,9 @@ that from its side, so the fix is in libc370 (a candidate, untried: set
 error path of a write that fails mid-body, so a truncated member presumably
 replaces the old one there too — inferred, not measured. The red section is
 draft PR #409 (red on mvsdev, 2026-10-13); the pin bump goes into it. The
-libc370 side is `libc370#524`.
+libc370 side is `libc370#524`, **released in libc370 2.10.3** (2026-10-13), so
+#409 can pin it now. 1.2.0 waits for that: the release-prep PR #411 (#410)
+lists #406 as a known limitation until #409 moves it to *Fixed*.
 
 ---
 

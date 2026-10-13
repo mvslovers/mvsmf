@@ -909,12 +909,9 @@ static int open_write_target(Session *session, FILE **fp, const char *target,
  * exit, which is out of space (libc370#176).  -2 carries that distinction up
  * to write_record_open(), which has the data set name the operator needs.
  *
- * A failure at CLOSE time is NOT covered and cannot be, from here or anywhere
- * else in this repo: a partial last block is written by @@ACLOSE, which ends
- * FUNEXIT RC=0 unconditionally, and fclose() discards even that.  In the same
- * measurement that band is 195..199 records -- still silently lost.  Closing
- * it needs libc370 to report a failed close; until then do not add a check
- * here that pretends to cover it.
+ * A failure at CLOSE time is not seen here: a partial last block is written
+ * by @@ACLOSE, after the last record.  close_write_target() reads that one
+ * (#371).
  */
 __asm__("\n&FUNC    SETC 'flush_record'");
 static int flush_record(FILE *fp)
@@ -1066,6 +1063,34 @@ static int write_record_open(Session *session, FILE **fp, const char *target,
     }
 
     return rc;
+}
+
+/* Close the write target and say whether the close wrote what was left.
+ *
+ * The last block of a write is usually partial, and a partial block reaches
+ * DASD only here, in @@ACLOSE -- after every fflush() reported success.  When
+ * it does not fit, fclose() answers EOF with errno ENOSPC (libc370#182), and
+ * that is the only report there is.  Discarding it answered 204 with records
+ * missing: 195..199 records into a 190-record target lost the tail (#366),
+ * and a body smaller than one block, written into a full PDS, left a member
+ * with no records at all (#371).  So the success paths close through here,
+ * before anything is sent, and an out-of-space close gets the same WTO as an
+ * out-of-space record.
+ *
+ * NULL is nothing to close and succeeds.  Returns 0, or -1 after the WTO for
+ * ENOSPC; any other failure is EIO and the caller's 500 says enough.
+ */
+__asm__("\n&FUNC    SETC 'close_write_target'");
+static int close_write_target(Session *session, FILE *fp, const char *target)
+{
+    if (session_fclose(session, fp) == 0) {
+        return 0;
+    }
+
+    if (errno == ENOSPC) {
+        wtof(MSG_DS_WRITE_NOSPACE, target);
+    }
+    return -1;
 }
 
 /*
@@ -2107,8 +2132,11 @@ int datasetPutHandler(Session *session)
         return handle_error(session, ERR_IO, "Cannot open dataset for writing");
     }
 
-    session_fclose(session, fp);
+    rc = close_write_target(session, fp, dsname);
     fp = NULL;
+    if (rc < 0) {
+        return handle_error(session, ERR_IO, "Error writing the last block");
+    }
 
     /* An over-long record is truncated to the record length and the body is
        written in full; the request then fails. Measured against real z/OSMF
@@ -3084,8 +3112,11 @@ int memberPutHandler(Session *session)
             "Cannot open dataset member for writing");
     }
 
-    session_fclose(session, fp);
+    rc = close_write_target(session, fp, dataset);
     fp = NULL;
+    if (rc < 0) {
+        return handle_error(session, ERR_IO, "Error writing the last block");
+    }
 
     /* An over-long record is truncated to the record length and the body is
        written in full; the request then fails. Measured against real z/OSMF

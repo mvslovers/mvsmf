@@ -1,6 +1,6 @@
 #!/bin/bash
 # =========================================================================
-# mvsMF Datasets REST API - out-of-space write test (#366)
+# mvsMF Datasets REST API - out-of-space write test (#366, #371)
 #
 # A PUT that fills its target must not answer 2xx. Before #366 it could:
 # libc370 1.0.6 turned an out-of-space write from ABEND SD37 into a return
@@ -15,12 +15,14 @@
 # block is the one whose write can fail inside a PUT, and that is the case
 # this test pins.
 #
-# KNOWN GAP, deliberately not a failure here: a PUT whose last block is
-# PARTIAL is written by libc370's @@ACLOSE, which ends FUNEXIT RC=0
-# unconditionally, and fclose() discards even that. Those records are still
-# lost silently and nothing in mvsMF can see it -- libc370#182. The test
-# reports that band so it stays visible, and fails only if the silent band
-# reaches the block boundary, which is the regression #366 fixed.
+# A PUT whose last block is PARTIAL fails later, at CLOSE: libc370's
+# @@ACLOSE writes that block, and fclose() reports it since libc370#182 --
+# EOF with errno ENOSPC. mvsMF discarded that result until #371, so the
+# counts between the capacity and the next block boundary answered 204 with
+# records missing. They must answer 500 now. The other shape #371 reports,
+# a member smaller than one block into a full PDS, is not reproduced here:
+# a one-track PDS filled by a failed PUT refused the next small member with
+# 500 on the unfixed build as well, so that check proved nothing.
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -72,7 +74,7 @@ put() {
 	echo "$st $got"
 }
 
-echo "=== mvsMF out-of-space write (#366) ==="
+echo "=== mvsMF out-of-space write (#366, #371) ==="
 echo
 
 echo "Allocating ${TEST_DS} (PS FB/${LRECL}, BLKSIZE ${BLKSIZE}, TRK(1,0))..."
@@ -151,26 +153,24 @@ else
 	fail "${silent_above} counts above the boundary still answer 204 with records missing"
 fi
 
-# --- 4. the known CLOSE-time gap, reported but not failed -----------------
-# A partial last block goes out at CLOSE, where libc370 reports nothing at
-# all. Keep it visible: when libc370#182 lands this band should shrink to
-# zero, and this block is where that will show.
-gap=0
+# --- 4. nor below it: a partial last block fails at CLOSE (#371) -----------
+# Every count between the capacity and the boundary ends in a partial block,
+# which goes out in fclose(). Its failure is the only report of those records.
+silent_close=0
 n=$((CAP + 1))
 while [ "$n" -lt "$BOUND" ]; do
 	read -r st got <<<"$(put "$n")"
-	[ "$st" = "204" ] && [ "$got" -lt "$n" ] && gap=$((gap + 1))
+	if [ "${st:0:1}" = "2" ] && [ "$got" -lt "$n" ]; then
+		silent_close=$((silent_close + 1))
+		info "N=${n}: ${st} with ${got} stored"
+	fi
 	n=$((n + 1))
 done
-echo
-if [ "$gap" -gt 0 ]; then
-	echo "  KNOWN GAP: ${gap} record counts between ${CAP} and ${BOUND} answer 204"
-	echo "             with records missing (partial last block, written at CLOSE)."
-	echo "             Not a defect in this repo -- libc370#182. When that is"
-	echo "             fixed this number should reach 0."
+if [ "$silent_close" -eq 0 ]; then
+	pass "no silent loss below the block boundary (partial last block, CLOSE)"
 else
-	echo "  NOTE: the CLOSE-time gap is gone -- libc370#182 appears to be fixed."
-	echo "        Tighten this test to assert 0 rather than report it."
+	fail "${silent_close} counts between ${CAP} and ${BOUND} answer 2xx with records missing" \
+	     "#371: the fclose() result is not being checked"
 fi
 
 echo

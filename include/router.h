@@ -178,8 +178,11 @@ void session_unregister_file(Session *session, FILE *fp) asm("RTR0007");
 
 /**
  * @brief Unregister and close a tracked FILE handle
+ * @return fclose()'s result: 0, or EOF with errno set when the close failed --
+ *         on an output stream that is the last, partial block not reaching
+ *         DASD (ENOSPC for out of space, #371). 0 for a NULL handle.
  */
-void session_fclose(Session *session, FILE *fp) asm("RTR0008");
+int session_fclose(Session *session, FILE *fp) asm("RTR0008");
 
 /**
  * @brief Register the JES spool handle for ESTAE recovery cleanup

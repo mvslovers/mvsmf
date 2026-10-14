@@ -1473,11 +1473,13 @@ int testHandler(Session *session) {
      * Two samples of one build at one load point must agree block for
      * block; a block that does not was written to.  Only at one load point:
      * relocated address constants make every block that holds one differ
-     * between two loads.  The CDE address and its use count are there to
-     * tell "the same copy" from "a fresh copy at the same address" -- if
-     * the use count ever dropped to 0 MVS could reload the module, and a
-     * damaged copy would vanish unseen.  The last block is shorter when the
-     * module length is not a multiple of the block. */
+     * between two loads.  A different load point or CDE address proves a
+     * reload; the same ones do not prove the same copy: MVS deletes the
+     * module whenever its use count drops to 0 (measured, #425), and the
+     * next LINK usually gets the same free block and CDE cell.  A damaged
+     * copy survives only while requests overlap.
+     * The last block is shorter when the module length is not a multiple
+     * of the block. */
   } else if (strcmp(fn, "textsum") == 0) {
     unsigned start, len, entry, cdeaddr, use, off;
 

@@ -625,9 +625,15 @@ block that changed was overwritten. On a stand whose STEPLIB is not APF the
 module sits in key-8 storage and a stray store lands there silently; APF does
 not fully protect either, because a store from a key-0 path (MODESET for
 `fn=cmd`, the ACEE handling) reaches the key-0 copy too. Only compare samples
-at one load point, and with the same `cde` address: relocated address
-constants differ between loads, and a fresh copy at the same address would
-hide a damaged one. `textdump`'s `off` is from the load point, which is also
+at one load point: relocated address constants differ between loads. A
+different load point or `cde` address proves a reload; the same ones do not
+prove the same copy. **MVS deletes MVSMF whenever its use count drops to 0**
+(measured on dev1 by walking HTTPD's job pack queue through `/.dm` while idle:
+no MVSMF CDE, and its CDE cell and storage taken by HTTPDM). httpd holds no
+LOAD of its own, so every request after an idle gap fetches a fresh copy,
+usually into the same free block and CDE cell. A damaged copy survives only
+while requests overlap, and `textsum` -- itself a request -- sees only damage
+that is present while it runs. `textdump`'s `off` is from the load point, which is also
 the link map's module offset; from an `MVSMF913I` `EP+X'n'` it is file370's
 `entry=` plus `n`. Both are gated to the CDE extent of this copy of MVSMF, as
 `MVSMF914I` is.

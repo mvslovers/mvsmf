@@ -36,6 +36,18 @@ perhaps be 405 — measure the reference first.
 there too. #422 (merged) made `abort_response()` able to say so; it needs a
 first `MVSMF3xx` id; the hard part is
 provoking a mid-file UFSD read error at all.
+**#425 is new (2026-10-14) and not ranked either**: S0C7/S0C1 *at function
+entries* -- the loaded MVSMF code was overwritten (m38b dump: the 6-byte
+instruction executed at `find_and_send_job_status`'s entry is not the linked
+`B 30(0,15)`). On the TK5 stands the STEPLIB is not APF, so MVSMF sits in
+key-8 storage and a stray store lands in the code silently (measured, probe on
+m38r). About 1 in 1,900 status polls on m38r; on m38b the server hung
+afterwards (four workers would not stop, `SA03`). **PR #427** (open) adds
+`MVSMF913I`, the PSW and R14 of every caught abend as entry-point offsets
+(libc370 2.11.0 `tryinfo()`); the writer itself is still unknown.
+**#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
+while JES2 keeps the job (output held on a device waiting for setup). What the
+reference answers for a purge that is only requested has to be measured first.
 **#360's `__listpd()` half is unblocked since
 the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 `diagnose_open_failure()` now answers a shortage or an unreadable directory with

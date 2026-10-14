@@ -86,3 +86,15 @@ abend_ep_offset(unsigned addr, unsigned ep)
 {
 	return (long) (addr & 0x00FFFFFF) - (long) (ep & 0x00FFFFFF);
 }
+
+#ifdef __MVS__
+__asm__("\n&FUNC	SETC 'abend_in_range'");
+#endif
+int
+abend_in_range(unsigned addr, unsigned start, unsigned len)
+{
+	unsigned a = addr  & 0x00FFFFFF;
+	unsigned s = start & 0x00FFFFFF;
+
+	return len != 0 && a >= s && a - s < len;
+}

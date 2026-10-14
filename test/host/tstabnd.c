@@ -193,5 +193,21 @@ int main(void)
 		      "entry + offset is the module offset the link map lists");
 	}
 
+	/* 8. the MVSMF914I gate: only MVSMF's own storage reaches the console */
+	{
+		CHECK(abend_in_range(0x5DE478, 0x5DE478, 0x50B88),
+		      "the load point itself is inside");
+		CHECK(abend_in_range(0x62EFFF, 0x5DE478, 0x50B88),
+		      "the last byte is inside");
+		CHECK(!abend_in_range(0x62F000, 0x5DE478, 0x50B88),
+		      "the byte after the module is outside");
+		CHECK(!abend_in_range(0x5DE477, 0x5DE478, 0x50B88),
+		      "the byte before the module is outside");
+		CHECK(abend_in_range(0x805DE478, 0x005DE478, 0x50B88),
+		      "the high byte of the address is ignored");
+		CHECK(!abend_in_range(0x5DE478, 0x5DE478, 0),
+		      "an unknown extent (length 0) is never inside");
+	}
+
 	return mbt_test_summary("TSTABND");
 }

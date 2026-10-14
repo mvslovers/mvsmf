@@ -2,6 +2,9 @@
 #include <string.h>
 #include <mvs/wto.h>
 #include <mvs/recovery.h>
+#include <mvs/link.h>   /* clib_find_cde -- MVSMF914I's module extent (#425) */
+#include <ibm/mvs/ihacde.h>
+#include <ibm/mvs/ihaxtlst.h>
 #include <mvs/jes2.h>
 #include <mvs/lock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
@@ -223,17 +226,35 @@ static void report_abend_where(void)
 
     // MVSMF914I: what the bytes there are. In #425 the code at a function
     // entry was not what was linked, and these bytes are the only trace of
-    // whatever wrote them. Read under try(): the address can be anything a
-    // wild branch reached, and a second abend here must cost this message
-    // only. After MVSMF913I, since this try() resets tryinfo().
+    // whatever wrote them. Only for an instruction inside this copy of MVSMF:
+    // the console is readable by every authenticated user, and outside the
+    // module the 16 bytes could be a buffer with another session's request
+    // or credentials. The extent comes from the CDE whose entry point is
+    // ours; no such CDE, no message. Read under try(): a second abend here
+    // must cost this message only. After MVSMF913I, since this try() resets
+    // tryinfo().
     {
         unsigned char code[16];
         unsigned      w[4];
+        unsigned      start = 0;
+        unsigned      len   = 0;
+        unsigned      instr = abend_instr_addr(ti->psw);
+        CDE          *cde   = clib_find_cde("MVSMF");
         int           i;
 
+        if (cde && !(cde->CDATTR & CDMIN) && cde->xtlst
+            && (cde->CDENTPT & 0x00FFFFFF) == (ep & 0x00FFFFFF)) {
+            start = cde->xtlst->xtlmsbad;
+            len   = cde->xtlst->xtlmsbln;
+        }
+        // the whole 16-byte window, not just the instruction, must be ours
+        if (!abend_in_range(instr - 8, start, len)
+            || !abend_in_range(instr + 7, start, len)) {
+            return;
+        }
+
         memset(code, 0, sizeof(code));
-        if (try(peek_code_thunk,
-                (const unsigned char *) (abend_instr_addr(ti->psw) - 8),
+        if (try(peek_code_thunk, (const unsigned char *) (instr - 8),
                 code) != 0) {
             return;
         }

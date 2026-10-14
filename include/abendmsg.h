@@ -85,7 +85,7 @@ const char *abend_denial_detail(unsigned sys);
  * @param psw   the BC-mode PSW, two words as tryinfo() returns them.
  * @return      the 24-bit address of the failing instruction.
  */
-unsigned abend_instr_addr(const unsigned psw[2]);
+unsigned abend_instr_addr(const unsigned psw[2]) asm("ABDINSTR");
 
 /**
  * The signed distance of a 24-bit address from the module's entry point.
@@ -97,6 +97,17 @@ unsigned abend_instr_addr(const unsigned psw[2]);
  * @param addr  any address; the high byte is ignored.
  * @param ep    the entry point; the high byte is ignored.
  */
-long abend_ep_offset(unsigned addr, unsigned ep);
+long abend_ep_offset(unsigned addr, unsigned ep) asm("ABDEPOFF");
+
+/**
+ * Whether a 24-bit address lies in [start, start + len).
+ *
+ * The gate for MVSMF914I: storage around the failing instruction goes to the
+ * console only when it is MVSMF's own load module. Anywhere else it could be
+ * a buffer holding another session's request or credentials, and the console
+ * is readable by every authenticated user through /zosmf/restconsoles.
+ * A length of 0 (extent unknown) is never inside.
+ */
+int abend_in_range(unsigned addr, unsigned start, unsigned len) asm("ABDINRNG");
 
 #endif /* ABENDMSG_H */

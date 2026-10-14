@@ -72,10 +72,15 @@ const char *abend_denial_detail(unsigned sys);
  * Where the failing instruction starts, from the PSW a caught abend left
  * behind (libc370 tryinfo(), issue #425).
  *
- * For a program check the PSW address is the instruction *after* the one that
- * failed; the ILC (bits 32-33 of a BC-mode PSW, in halfwords) says how far
- * back that one starts. For an SVC 13 abend it is the SVC itself. An ILC of 0
- * leaves the address as it is.
+ * For a program check the PSW address is normally the instruction *after*
+ * the one that failed; the ILC (bits 32-33 of a BC-mode PSW, in halfwords)
+ * says how far back that one starts. For an SVC 13 abend it is the SVC itself.
+ * Two interruption codes are the exception: segment translation (0010) and
+ * page translation (0011) *nullify* the instruction, so the PSW still points
+ * AT it and nothing is subtracted -- the S0C4-10/-11 of a reference to storage
+ * that is not allocated. That rule is the architecture's, from the
+ * Principles of Operation, and has not been measured here. An ILC of 0 leaves
+ * the address as it is.
  *
  * @param psw   the BC-mode PSW, two words as tryinfo() returns them.
  * @return      the 24-bit address of the failing instruction.

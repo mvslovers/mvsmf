@@ -67,6 +67,13 @@ abend_instr_addr(const unsigned psw[2])
 {
 	unsigned addr = psw[1] & 0x00FFFFFF;
 	unsigned ilc  = (psw[1] >> 30) & 3;
+	unsigned intc = psw[0] & 0xFFFF;
+
+	/* segment / page translation nullify: the PSW points at the failing
+	   instruction already (see abendmsg.h) */
+	if (intc == 0x0010 || intc == 0x0011) {
+		return addr;
+	}
 
 	return (addr - ilc * 2) & 0x00FFFFFF;
 }

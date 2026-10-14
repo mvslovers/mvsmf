@@ -176,7 +176,8 @@
 
 /** MVSMF913I where the abend of the MVSMF901E before it happened (#425):
     the PSW, its ILC and interruption code, and the failing instruction and
-    R14 as signed offsets from the module entry point */
+    R14 as signed offsets from the module entry point; docs/messages.md says
+    how to read them */
 #define MSG_HANDLER_PSW \
 	"MVSMF913I PSW %08X %08X ILC %u INTC %04X: INSTRUCTION AT EP%cX'%lX', R14 AT EP%cX'%lX'"
 

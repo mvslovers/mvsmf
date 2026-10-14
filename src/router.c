@@ -28,6 +28,7 @@ struct handler_ctx {
 
 static int handler_thunk(struct handler_ctx *ctx);
 static void report_abend_where(void);
+static int peek_code_thunk(const unsigned char *from, unsigned char *to);
 static int safe_fclose_thunk(FILE *fp);
 
 static int route_matching_middleware(Session *session);
@@ -219,6 +220,37 @@ static void report_abend_where(void)
          (ti->psw[1] >> 30) & 3, ti->psw[0] & 0xFFFF,
          at < 0 ? '-' : '+', at < 0 ? -at : at,
          r14 < 0 ? '-' : '+', r14 < 0 ? -r14 : r14);
+
+    // MVSMF914I: what the bytes there are. In #425 the code at a function
+    // entry was not what was linked, and these bytes are the only trace of
+    // whatever wrote them. Read under try(): the address can be anything a
+    // wild branch reached, and a second abend here must cost this message
+    // only. After MVSMF913I, since this try() resets tryinfo().
+    {
+        unsigned char code[16];
+        unsigned      w[4];
+        int           i;
+
+        memset(code, 0, sizeof(code));
+        if (try(peek_code_thunk,
+                (const unsigned char *) (abend_instr_addr(ti->psw) - 8),
+                code) != 0) {
+            return;
+        }
+        for (i = 0; i < 4; i++) {
+            w[i] = (unsigned) code[i * 4] << 24 | (unsigned) code[i * 4 + 1] << 16
+                 | (unsigned) code[i * 4 + 2] << 8 | (unsigned) code[i * 4 + 3];
+        }
+        wtof(MSG_HANDLER_CODE, w[0], w[1], w[2], w[3]);
+    }
+}
+
+// Thunk for the MVSMF914I read: copy 16 bytes, ESTAE-protected by the caller.
+__asm__("\n&FUNC    SETC 'peek_code_thunk'");
+static int peek_code_thunk(const unsigned char *from, unsigned char *to)
+{
+    memcpy(to, from, 16);
+    return 0;
 }
 
 // Thunk for ESTAE-protected handler invocation.

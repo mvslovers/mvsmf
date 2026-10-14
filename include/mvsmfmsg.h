@@ -181,6 +181,12 @@
 #define MSG_HANDLER_PSW \
 	"MVSMF913I PSW %08X %08X ILC %u INTC %04X: INSTRUCTION AT EP%cX'%lX', R14 AT EP%cX'%lX'"
 
+/** MVSMF914I the storage around the failing instruction of the MVSMF913I
+    before it: 8 bytes before it, then (after the '*') 8 bytes from it.
+    Code that was overwritten shows what overwrote it (#425) */
+#define MSG_HANDLER_CODE \
+	"MVSMF914I STORAGE AT INSTRUCTION-8: %08X %08X *%08X %08X"
+
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted
  * into an uppercase literal.

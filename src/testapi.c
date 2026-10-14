@@ -367,7 +367,8 @@ static void stg_comb(unsigned sp, unsigned *sizes, int max_sizes, int *nsizes,
  * functions then answer with an error and read nothing.
  */
 __asm__("\n&FUNC	SETC 'text_extent'");
-static int text_extent(unsigned *start, unsigned *len, unsigned *entry) {
+static int text_extent(unsigned *start, unsigned *len, unsigned *entry,
+                       unsigned *cdeaddr, unsigned *use) {
   CDE *cde = clib_find_cde("MVSMF");
   unsigned self = (unsigned)(unsigned long)text_extent;
 
@@ -376,6 +377,8 @@ static int text_extent(unsigned *start, unsigned *len, unsigned *entry) {
   *start = cde->xtlst->xtlmsbad;
   *len = cde->xtlst->xtlmsbln;
   *entry = cde->CDENTPT & 0x00FFFFFF;
+  *cdeaddr = (unsigned)(unsigned long)cde & 0x00FFFFFF;
+  *use = cde->CDUSE;
   if (!abend_in_range(self, *start, *len))
     return -1;
   return 0;
@@ -1468,12 +1471,17 @@ int testHandler(Session *session) {
     /* --- fn=textsum (is the loaded MVSMF still what was linked? #425) */
     /* One FNV-1a sum per TEXTSUM_BLOCK of the module, plus the load point.
      * Two samples of one build at one load point must agree block for
-     * block; a block that does not was written to.  The last block is
-     * shorter when the module length is not a multiple of the block. */
+     * block; a block that does not was written to.  Only at one load point:
+     * relocated address constants make every block that holds one differ
+     * between two loads.  The CDE address and its use count are there to
+     * tell "the same copy" from "a fresh copy at the same address" -- if
+     * the use count ever dropped to 0 MVS could reload the module, and a
+     * damaged copy would vanish unseen.  The last block is shorter when the
+     * module length is not a multiple of the block. */
   } else if (strcmp(fn, "textsum") == 0) {
-    unsigned start, len, entry, off;
+    unsigned start, len, entry, cdeaddr, use, off;
 
-    if (text_extent(&start, &len, &entry) != 0) {
+    if (text_extent(&start, &len, &entry, &cdeaddr, &use) != 0) {
       rc = http_printf(session->httpc,
                        "{ \"fn\": \"textsum\", \"error\": \"no CDE for this"
                        " copy of MVSMF\" }\n");
@@ -1482,8 +1490,10 @@ int testHandler(Session *session) {
     rc = http_printf(session->httpc,
                      "{ \"fn\": \"textsum\", \"build\": \"%s\","
                      " \"load\": \"0x%06X\", \"len\": %u,"
-                     " \"entry\": \"0x%06X\", \"block\": %u, \"sums\": [",
-                     MBT_COMMIT, start, len, entry, TEXTSUM_BLOCK);
+                     " \"entry\": \"0x%06X\", \"cde\": \"0x%06X\","
+                     " \"use\": %u, \"block\": %u, \"sums\": [",
+                     MBT_COMMIT, start, len, entry, cdeaddr, use,
+                     TEXTSUM_BLOCK);
     if (rc < 0)
       goto quit;
     for (off = 0; off < len; off += TEXTSUM_BLOCK) {
@@ -1497,25 +1507,31 @@ int testHandler(Session *session) {
     rc = http_printf(session->httpc, " ] }\n");
 
     /* --- fn=textdump&off=HEX&len=N (bytes of the loaded MVSMF, #425) -- */
-    /* off is relative to the load point, as fn=textsum's blocks are; len
-     * is at most TEXTDUMP_MAX.  Only inside MVSMF's own extent (see
-     * text_extent), read under try() so a fault costs this answer only. */
+    /* off is relative to the load point, as fn=textsum's blocks are, and
+     * so is the link map's module offset.  From an MVSMF913I EP+X'n':
+     * off = (entry - load, file370's entry=) + n.  len is at most
+     * TEXTDUMP_MAX.  Only inside MVSMF's own extent (see text_extent),
+     * read under try() so a fault costs this answer only. */
   } else if (strcmp(fn, "textdump") == 0) {
     char *offv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_OFF");
     char *lenv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_LEN");
-    unsigned start, mlen, entry, i;
-    unsigned off = offv ? (unsigned)strtoul(offv, NULL, 16) : 0;
+    unsigned start, mlen, entry, cdeaddr, use, i;
+    char *end = NULL;
+    unsigned off = offv ? (unsigned)strtoul(offv, &end, 16) : 0;
     unsigned n = lenv ? (unsigned)atoi(lenv) : 64;
+    int badoff = offv && (end == offv || *end != '\0');
     unsigned char buf[TEXTDUMP_MAX];
     struct text_copy tc;
 
-    if (text_extent(&start, &mlen, &entry) != 0) {
+    if (text_extent(&start, &mlen, &entry, &cdeaddr, &use) != 0) {
       rc = http_printf(session->httpc,
                        "{ \"fn\": \"textdump\", \"error\": \"no CDE for this"
                        " copy of MVSMF\" }\n");
       goto quit;
     }
-    if (n == 0 || n > TEXTDUMP_MAX || off >= mlen || n > mlen - off) {
+    /* a non-hex off must not quietly dump offset 0 */
+    if (badoff || n == 0 || n > TEXTDUMP_MAX || off >= mlen ||
+        n > mlen - off) {
       rc = http_printf(session->httpc,
                        "{ \"fn\": \"textdump\", \"error\": \"off (hex) and"
                        " len (1..%u) must lie inside the module, length %u\" }\n",
@@ -1567,7 +1583,7 @@ int testHandler(Session *session) {
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=textsum             (load point + FNV-1a per 4K block of the loaded MVSMF; mvsmf#425)\","
-        " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF; mvsmf#425)\","
+        " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF, off from the load point = entry-load + MVSMF913I EP offset; mvsmf#425)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","
         " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery)\""
         " ] }\n");

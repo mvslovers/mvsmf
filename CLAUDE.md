@@ -622,8 +622,15 @@ See [internals/storage-probe.md](internals/storage-probe.md).
 load point plus one FNV-1a sum per 4 K block, and up to 256 bytes at an offset.
 MVSMF is RENT, so two samples of one build at one load point must agree; a
 block that changed was overwritten. On a stand whose STEPLIB is not APF the
-module sits in key-8 storage and a stray store lands there silently. Both are
-gated to the CDE extent of this copy of MVSMF, as `MVSMF914I` is.
+module sits in key-8 storage and a stray store lands there silently; APF does
+not fully protect either, because a store from a key-0 path (MODESET for
+`fn=cmd`, the ACEE handling) reaches the key-0 copy too. Only compare samples
+at one load point, and with the same `cde` address: relocated address
+constants differ between loads, and a fresh copy at the same address would
+hide a damaged one. `textdump`'s `off` is from the load point, which is also
+the link map's module offset; from an `MVSMF913I` `EP+X'n'` it is file370's
+`entry=` plus `n`. Both are gated to the CDE extent of this copy of MVSMF, as
+`MVSMF914I` is.
 
 **The endpoint has no per-function gate any more, and must not grow one back
 (#343).** `fn=abend`, `fn=jesabend` and `fn=denyopen` were gated on

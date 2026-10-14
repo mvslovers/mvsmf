@@ -2,6 +2,9 @@
 #include <string.h>
 #include <mvs/wto.h>
 #include <mvs/recovery.h>
+#include <mvs/link.h>   /* clib_find_cde -- MVSMF914I's module extent (#425) */
+#include <ibm/mvs/ihacde.h>
+#include <ibm/mvs/ihaxtlst.h>
 #include <mvs/jes2.h>
 #include <mvs/lock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
@@ -27,6 +30,8 @@ struct handler_ctx {
 //
 
 static int handler_thunk(struct handler_ctx *ctx);
+static void report_abend_where(void);
+static int peek_code_thunk(const unsigned char *from, unsigned char *to);
 static int safe_fclose_thunk(FILE *fp);
 
 static int route_matching_middleware(Session *session);
@@ -153,6 +158,8 @@ int handle_request(Router *router, Session *session)
         // recovery path where a second abend would be unrecoverable
         char msg[ABEND_MSG_SIZE];
         wtof(MSG_HANDLER_ABEND, sys, usr, method, path);
+        // before session_cleanup(): its try()s would overwrite tryinfo()
+        report_abend_where();
         session_cleanup(session);
         if (!session->headers_sent) {
             /* An S913 is not a failure, it is a refusal OPEN made, and the
@@ -186,6 +193,85 @@ int handle_request(Router *router, Session *session)
         return -1;
     }
     return ctx.rc;
+}
+
+// The module entry point (ld370 -e @@CRT0). MVSMF913I measures from it
+// because it is the one address the running copy and the link map share:
+// `file370 -v` prints it as entry=.
+extern char mvsmf_ep[] asm("@@CRT0");
+
+// MVSMF913I: where the abend just reported by MVSMF901E happened (#425). Until
+// libc370 2.11.0 only the completion code survived the retry, so a stray abend
+// could be located only from a dump, and the S0C7/S0C1 of #425 took none when
+// they happened. Silent when there is no PSW to report.
+__asm__("\n&FUNC    SETC 'report_abend_where'");
+static void report_abend_where(void)
+{
+    const TRYINFO *ti = tryinfo();
+    unsigned ep = (unsigned) mvsmf_ep;
+    long at;
+    long r14;
+
+    if (!ti || (ti->psw[0] == 0 && ti->psw[1] == 0)) {
+        return;
+    }
+
+    at  = abend_ep_offset(abend_instr_addr(ti->psw), ep);
+    r14 = abend_ep_offset(ti->r14, ep);
+
+    wtof(MSG_HANDLER_PSW, ti->psw[0], ti->psw[1],
+         (ti->psw[1] >> 30) & 3, ti->psw[0] & 0xFFFF,
+         at < 0 ? '-' : '+', at < 0 ? -at : at,
+         r14 < 0 ? '-' : '+', r14 < 0 ? -r14 : r14);
+
+    // MVSMF914I: what the bytes there are. In #425 the code at a function
+    // entry was not what was linked, and these bytes are the only trace of
+    // whatever wrote them. Only for an instruction inside this copy of MVSMF:
+    // the console is readable by every authenticated user, and outside the
+    // module the 16 bytes could be a buffer with another session's request
+    // or credentials. The extent comes from the CDE whose entry point is
+    // ours; no such CDE, no message. Read under try(): a second abend here
+    // must cost this message only. After MVSMF913I, since this try() resets
+    // tryinfo().
+    {
+        unsigned char code[16];
+        unsigned      w[4];
+        unsigned      start = 0;
+        unsigned      len   = 0;
+        unsigned      instr = abend_instr_addr(ti->psw);
+        CDE          *cde   = clib_find_cde("MVSMF");
+        int           i;
+
+        if (cde && !(cde->CDATTR & CDMIN) && cde->xtlst
+            && (cde->CDENTPT & 0x00FFFFFF) == (ep & 0x00FFFFFF)) {
+            start = cde->xtlst->xtlmsbad;
+            len   = cde->xtlst->xtlmsbln;
+        }
+        // the whole 16-byte window, not just the instruction, must be ours
+        if (!abend_in_range(instr - 8, start, len)
+            || !abend_in_range(instr + 7, start, len)) {
+            return;
+        }
+
+        memset(code, 0, sizeof(code));
+        if (try(peek_code_thunk, (const unsigned char *) (instr - 8),
+                code) != 0) {
+            return;
+        }
+        for (i = 0; i < 4; i++) {
+            w[i] = (unsigned) code[i * 4] << 24 | (unsigned) code[i * 4 + 1] << 16
+                 | (unsigned) code[i * 4 + 2] << 8 | (unsigned) code[i * 4 + 3];
+        }
+        wtof(MSG_HANDLER_CODE, w[0], w[1], w[2], w[3]);
+    }
+}
+
+// Thunk for the MVSMF914I read: copy 16 bytes, ESTAE-protected by the caller.
+__asm__("\n&FUNC    SETC 'peek_code_thunk'");
+static int peek_code_thunk(const unsigned char *from, unsigned char *to)
+{
+    memcpy(to, from, 16);
+    return 0;
 }
 
 // Thunk for ESTAE-protected handler invocation.

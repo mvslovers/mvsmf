@@ -58,3 +58,43 @@ abend_denial_detail(unsigned sys)
 	return "Authorization failed - You may not use this protected data set."
 	       " Open 913 abend.";
 }
+
+#ifdef __MVS__
+__asm__("\n&FUNC	SETC 'abend_instr_addr'");
+#endif
+unsigned
+abend_instr_addr(const unsigned psw[2])
+{
+	unsigned addr = psw[1] & 0x00FFFFFF;
+	unsigned ilc  = (psw[1] >> 30) & 3;
+	unsigned intc = psw[0] & 0xFFFF;
+
+	/* segment / page translation nullify: the PSW points at the failing
+	   instruction already (see abendmsg.h) */
+	if (intc == 0x0010 || intc == 0x0011) {
+		return addr;
+	}
+
+	return (addr - ilc * 2) & 0x00FFFFFF;
+}
+
+#ifdef __MVS__
+__asm__("\n&FUNC	SETC 'abend_ep_offset'");
+#endif
+long
+abend_ep_offset(unsigned addr, unsigned ep)
+{
+	return (long) (addr & 0x00FFFFFF) - (long) (ep & 0x00FFFFFF);
+}
+
+#ifdef __MVS__
+__asm__("\n&FUNC	SETC 'abend_in_range'");
+#endif
+int
+abend_in_range(unsigned addr, unsigned start, unsigned len)
+{
+	unsigned a = addr  & 0x00FFFFFF;
+	unsigned s = start & 0x00FFFFFF;
+
+	return len != 0 && a >= s && a - s < len;
+}

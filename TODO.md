@@ -48,7 +48,15 @@ entry-point offsets (libc370 2.11.0 `tryinfo()`), and `MVSMF914I`, the bytes
 around the instruction; the writer itself is still unknown. Re-reading
 never-opened data sets (740 read errors on m38b) did not reproduce it on dev1
 or m38r; the open lead is uptime -- both real hits came from an HTTPD running
-since the previous day. m38r carries the debug build to catch the next one.
+since the previous day. **PR #429** (merged 2026-10-14) added `fn=textsum` /
+`fn=textdump` and measured that MVS deletes MVSMF whenever its use count drops
+to 0: every request after an idle gap fetches a fresh copy, so a damaged copy
+lives only while requests overlap and the writer runs concurrently. The S0C7
+(ILC 3) means the overwrite started with X'F8'-X'FD' or X'DE'/X'DF' -- EBCDIC
+digits or packed data, not an ECB POST. m38r carries `99a423c` with
+`MVSMF914I` armed, deliberately without a pinned LOAD. Pinning registered
+modules in httpd (program fetch per request, region fragmentation) goes to
+httpd.
 **#428 is new (2026-10-14) and not ranked either**: a ~20 MB binary PUT
 (`mbt deploy`) on m38b ended `MVSMF007W` -- no body byte for 10 s, the client
 got EPIPE. Neither mbt nor Hercules' X'75' RECV path holds data back (both

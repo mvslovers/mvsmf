@@ -8,6 +8,10 @@
 #include <mvs/mtt.h>
 #include <mvs/wto.h>
 #include <mvs/racf.h>
+#include <mvs/recovery.h>
+#include <mvs/link.h>     /* clib_find_cde -- fn=textsum (#425) */
+#include <ibm/mvs/ihacde.h>
+#include <ibm/mvs/ihaxtlst.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -19,6 +23,8 @@
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
 #include "mvsmfmsg.h"
 #include "zosmferr.h"          /* CATEGORY_SERVICE, REASON_SERVER_ERROR */
+#include "abendmsg.h"          /* abend_in_range -- fn=textsum/textdump (#425) */
+#include "textsum.h"
 
 /* fn=checkauth reply sentinels.  Kept out of the SAF rc range (0/4/8/12...) and
  * out of http_check_auth()'s -1 so a probe answer is never ambiguous. */
@@ -349,6 +355,43 @@ static void stg_comb(unsigned sp, unsigned *sizes, int max_sizes, int *nsizes,
     if (stg_freemain(addr[n], len[n], sp) != 0)
       (*free_errors)++;
   }
+}
+
+/* --- fn=textsum / fn=textdump (issue #425) ------------------------------
+ * Is MVSMF's loaded code still what was linked?  See textsum.h.
+ *
+ * The extent comes from the CDE named MVSMF, and only when this very
+ * function lies inside it -- the same gate MVSMF914I uses, for the same
+ * reason: a dump of anything outside our own module could be a buffer with
+ * another session's request or credentials.  No such CDE, no extent: both
+ * functions then answer with an error and read nothing.
+ */
+__asm__("\n&FUNC	SETC 'text_extent'");
+static int text_extent(unsigned *start, unsigned *len, unsigned *entry) {
+  CDE *cde = clib_find_cde("MVSMF");
+  unsigned self = (unsigned)(unsigned long)text_extent;
+
+  if (!cde || (cde->CDATTR & CDMIN) || !cde->xtlst)
+    return -1;
+  *start = cde->xtlst->xtlmsbad;
+  *len = cde->xtlst->xtlmsbln;
+  *entry = cde->CDENTPT & 0x00FFFFFF;
+  if (!abend_in_range(self, *start, *len))
+    return -1;
+  return 0;
+}
+
+/* Thunk for the fn=textdump read: copy, ESTAE-protected by the caller. */
+struct text_copy {
+  const unsigned char *from;
+  unsigned char *to;
+  unsigned len;
+};
+
+__asm__("\n&FUNC	SETC 'text_copy_thunk'");
+static int text_copy_thunk(struct text_copy *tc) {
+  memcpy(tc->to, tc->from, tc->len);
+  return 0;
 }
 
 int testHandler(Session *session) {
@@ -1422,6 +1465,86 @@ int testHandler(Session *session) {
                      cls, dsn, attrname, attr, via,
                      acee ? "non-null" : "NULL", raw_rc, vec_rc);
 
+    /* --- fn=textsum (is the loaded MVSMF still what was linked? #425) */
+    /* One FNV-1a sum per TEXTSUM_BLOCK of the module, plus the load point.
+     * Two samples of one build at one load point must agree block for
+     * block; a block that does not was written to.  The last block is
+     * shorter when the module length is not a multiple of the block. */
+  } else if (strcmp(fn, "textsum") == 0) {
+    unsigned start, len, entry, off;
+
+    if (text_extent(&start, &len, &entry) != 0) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"textsum\", \"error\": \"no CDE for this"
+                       " copy of MVSMF\" }\n");
+      goto quit;
+    }
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"textsum\", \"build\": \"%s\","
+                     " \"load\": \"0x%06X\", \"len\": %u,"
+                     " \"entry\": \"0x%06X\", \"block\": %u, \"sums\": [",
+                     MBT_COMMIT, start, len, entry, TEXTSUM_BLOCK);
+    if (rc < 0)
+      goto quit;
+    for (off = 0; off < len; off += TEXTSUM_BLOCK) {
+      unsigned n = len - off < TEXTSUM_BLOCK ? len - off : TEXTSUM_BLOCK;
+
+      rc = http_printf(session->httpc, "%s\"%08X\"", off ? ", " : "",
+                       text_sum((const unsigned char *)(start + off), n));
+      if (rc < 0)
+        goto quit;
+    }
+    rc = http_printf(session->httpc, " ] }\n");
+
+    /* --- fn=textdump&off=HEX&len=N (bytes of the loaded MVSMF, #425) -- */
+    /* off is relative to the load point, as fn=textsum's blocks are; len
+     * is at most TEXTDUMP_MAX.  Only inside MVSMF's own extent (see
+     * text_extent), read under try() so a fault costs this answer only. */
+  } else if (strcmp(fn, "textdump") == 0) {
+    char *offv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_OFF");
+    char *lenv = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_LEN");
+    unsigned start, mlen, entry, i;
+    unsigned off = offv ? (unsigned)strtoul(offv, NULL, 16) : 0;
+    unsigned n = lenv ? (unsigned)atoi(lenv) : 64;
+    unsigned char buf[TEXTDUMP_MAX];
+    struct text_copy tc;
+
+    if (text_extent(&start, &mlen, &entry) != 0) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"textdump\", \"error\": \"no CDE for this"
+                       " copy of MVSMF\" }\n");
+      goto quit;
+    }
+    if (n == 0 || n > TEXTDUMP_MAX || off >= mlen || n > mlen - off) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"textdump\", \"error\": \"off (hex) and"
+                       " len (1..%u) must lie inside the module, length %u\" }\n",
+                       TEXTDUMP_MAX, mlen);
+      goto quit;
+    }
+    tc.from = (const unsigned char *)(start + off);
+    tc.to = buf;
+    tc.len = n;
+    if (try(text_copy_thunk, &tc) != 0) {
+      rc = http_printf(session->httpc,
+                       "{ \"fn\": \"textdump\", \"error\": \"read abended,"
+                       " %06X\" }\n", tryrc());
+      goto quit;
+    }
+    rc = http_printf(session->httpc,
+                     "{ \"fn\": \"textdump\", \"build\": \"%s\","
+                     " \"load\": \"0x%06X\", \"off\": \"0x%06X\","
+                     " \"len\": %u, \"hex\": \"",
+                     MBT_COMMIT, start, off, n);
+    if (rc < 0)
+      goto quit;
+    for (i = 0; i < n; i++) {
+      rc = http_printf(session->httpc, "%02X", buf[i]);
+      if (rc < 0)
+        goto quit;
+    }
+    rc = http_printf(session->httpc, "\" }\n");
+
     /* --- fn=help (default) ---------------------------------------- */
   } else {
     rc = http_printf(
@@ -1443,6 +1566,8 @@ int testHandler(Session *session) {
         " \"?fn=token               (session token length; value withheld)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
         " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
+        " \"?fn=textsum             (load point + FNV-1a per 4K block of the loaded MVSMF; mvsmf#425)\","
+        " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF; mvsmf#425)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","
         " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery)\""
         " ] }\n");

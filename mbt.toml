@@ -123,6 +123,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTABND]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTTXSM: #425 — the block sums behind /zosmf/test?fn=textsum, which find an
+# overwritten piece of MVSMF's loaded code before it runs. Portable C (`mbt
+# test`); the TU #includes src/textsum.c so it drives the real function
+# testapi.c calls — do not list textsum.c here.
+[test.TSTTXSM]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTHOST: #260 — a Host header with no name in front of the colon parsed as
 # success with an empty string, so /zosmf/info's fallback never ran. Portable C
 # (`mbt test`); the TU #includes src/hostparse.c so it drives the real parser

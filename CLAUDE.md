@@ -618,6 +618,13 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
 See [internals/storage-probe.md](internals/storage-probe.md).
 
+`fn=textsum` and `fn=textdump` watch MVSMF's own loaded code (#425): the
+load point plus one FNV-1a sum per 4 K block, and up to 256 bytes at an offset.
+MVSMF is RENT, so two samples of one build at one load point must agree; a
+block that changed was overwritten. On a stand whose STEPLIB is not APF the
+module sits in key-8 storage and a stray store lands there silently. Both are
+gated to the CDE extent of this copy of MVSMF, as `MVSMF914I` is.
+
 **The endpoint has no per-function gate any more, and must not grow one back
 (#343).** `fn=abend`, `fn=jesabend` and `fn=denyopen` were gated on
 `MVSMF_ABEND_TEST` in the server environment from the days when a CGI abend

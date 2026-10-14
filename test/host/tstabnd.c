@@ -150,5 +150,37 @@ int main(void)
 		      "decimal 913 (S391) is not the denial code");
 	}
 
+	/* 7. where the abend happened (#425): the failing instruction from the
+	 * PSW, and offsets from the entry point. Known answers: the two S0C7 of
+	 * #425 on m38b (MVSMF loaded with entry 6113C8; the dump's SDWA has
+	 * PSW FF850007 E05F6F8A, R14 605F2FBC) and libc370's own tsttryi run
+	 * (S0C1 at 096030, PSW FF850001 40096032). */
+	{
+		const unsigned s0c7[2] = { 0xFF850007, 0xE05F6F8A };
+		const unsigned s0c1[2] = { 0xFF850001, 0x40096032 };
+		const unsigned ilc0[2] = { 0xFF850004, 0x00123456 };
+
+		CHECK(abend_instr_addr(s0c7) == 0x5F6F84,
+		      "S0C7 ILC 3: the instruction starts 6 bytes before the PSW address");
+		CHECK(abend_instr_addr(s0c1) == 0x096030,
+		      "S0C1 ILC 1: the instruction starts 2 bytes before the PSW address");
+		CHECK(abend_instr_addr(ilc0) == 0x123456,
+		      "ILC 0: the PSW address is left as it is");
+
+		CHECK(abend_ep_offset(0x5F6F84, 0x006113C8) == -0x1A444L,
+		      "an address below the entry point is a negative offset");
+		CHECK(abend_ep_offset(0x605F2FBC, 0x006113C8) == -0x1E40CL,
+		      "R14's high byte (ILC and CC) is ignored");
+		CHECK(abend_ep_offset(0x611400, 0x806113C8) == 0x38L,
+		      "an address above the entry point is a positive offset");
+
+		/* cross-check against the release module: entry 0x32F50, so the
+		 * instruction sits at module offset 0x32F50 - 0x1A444 = 0x18B0C --
+		 * find_and_send_job_status, as the dump analysis in #425 found */
+		CHECK(0x32F50L + abend_ep_offset(abend_instr_addr(s0c7), 0x6113C8)
+		      == 0x18B0CL,
+		      "entry + offset is the module offset the link map lists");
+	}
+
 	return mbt_test_summary("TSTABND");
 }

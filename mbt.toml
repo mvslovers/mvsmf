@@ -26,10 +26,12 @@ kind = "application"
 # 2.10.3: a member whose write failed is no longer STOWed at CLOSE; up to
 # 2.10.2 a failed member PUT emptied the member it replaced
 # (mvslovers/libc370#524, #406).
+# 2.11.0: tryinfo() -- the PSW and R14 of an abend try() caught, which
+# MVSMF913I reports after MVSMF901E (mvslovers/libc370#530, #425).
 # cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
 # macros in maclib370; 1.6.1 is current.
 cc370 = "1.6.1"
-libc370 = "2.10.3"
+libc370 = "2.11.0"
 mbt = "3.0"
 
 [dependencies]

@@ -68,4 +68,30 @@ void abend_message(char *buf, size_t size, unsigned sys, unsigned usr);
  */
 const char *abend_denial_detail(unsigned sys);
 
+/**
+ * Where the failing instruction starts, from the PSW a caught abend left
+ * behind (libc370 tryinfo(), issue #425).
+ *
+ * For a program check the PSW address is the instruction *after* the one that
+ * failed; the ILC (bits 32-33 of a BC-mode PSW, in halfwords) says how far
+ * back that one starts. For an SVC 13 abend it is the SVC itself. An ILC of 0
+ * leaves the address as it is.
+ *
+ * @param psw   the BC-mode PSW, two words as tryinfo() returns them.
+ * @return      the 24-bit address of the failing instruction.
+ */
+unsigned abend_instr_addr(const unsigned psw[2]);
+
+/**
+ * The signed distance of a 24-bit address from the module's entry point.
+ *
+ * What MVSMF901E's companion message reports, because the entry point is the
+ * one address both the running module and its link map know: `file370 -v`
+ * prints it as `entry=`, so a listed offset is entry + this value.
+ *
+ * @param addr  any address; the high byte is ignored.
+ * @param ep    the entry point; the high byte is ignored.
+ */
+long abend_ep_offset(unsigned addr, unsigned ep);
+
 #endif /* ABENDMSG_H */

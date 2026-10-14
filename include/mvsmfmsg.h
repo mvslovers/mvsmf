@@ -174,6 +174,12 @@
 #define MSG_RECOVERY_CONSLK_ABEND \
 	"MVSMF912W RECOVERY DEQ ABENDED, CONSOLE COMMANDS WILL BE REFUSED"
 
+/** MVSMF913I where the abend of the MVSMF901E before it happened (#425):
+    the PSW, its ILC and interruption code, and the failing instruction and
+    R14 as signed offsets from the module entry point */
+#define MSG_HANDLER_PSW \
+	"MVSMF913I PSW %08X %08X ILC %u INTC %04X: INSTRUCTION AT EP%cX'%lX', R14 AT EP%cX'%lX'"
+
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted
  * into an uppercase literal.

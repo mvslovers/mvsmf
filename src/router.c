@@ -27,6 +27,7 @@ struct handler_ctx {
 //
 
 static int handler_thunk(struct handler_ctx *ctx);
+static void report_abend_where(void);
 static int safe_fclose_thunk(FILE *fp);
 
 static int route_matching_middleware(Session *session);
@@ -153,6 +154,8 @@ int handle_request(Router *router, Session *session)
         // recovery path where a second abend would be unrecoverable
         char msg[ABEND_MSG_SIZE];
         wtof(MSG_HANDLER_ABEND, sys, usr, method, path);
+        // before session_cleanup(): its try()s would overwrite tryinfo()
+        report_abend_where();
         session_cleanup(session);
         if (!session->headers_sent) {
             /* An S913 is not a failure, it is a refusal OPEN made, and the
@@ -186,6 +189,36 @@ int handle_request(Router *router, Session *session)
         return -1;
     }
     return ctx.rc;
+}
+
+// The module entry point (ld370 -e @@CRT0). MVSMF913I measures from it
+// because it is the one address the running copy and the link map share:
+// `file370 -v` prints it as entry=.
+extern char mvsmf_ep[] asm("@@CRT0");
+
+// MVSMF913I: where the abend just reported by MVSMF901E happened (#425). Until
+// libc370 2.11.0 only the completion code survived the retry, so a stray abend
+// could be located only from a dump, and the S0C7/S0C1 of #425 took none when
+// they happened. Silent when there is no PSW to report.
+__asm__("\n&FUNC    SETC 'report_abend_where'");
+static void report_abend_where(void)
+{
+    const TRYINFO *ti = tryinfo();
+    unsigned ep = (unsigned) mvsmf_ep;
+    long at;
+    long r14;
+
+    if (!ti || (ti->psw[0] == 0 && ti->psw[1] == 0)) {
+        return;
+    }
+
+    at  = abend_ep_offset(abend_instr_addr(ti->psw), ep);
+    r14 = abend_ep_offset(ti->r14, ep);
+
+    wtof(MSG_HANDLER_PSW, ti->psw[0], ti->psw[1],
+         (ti->psw[1] >> 30) & 3, ti->psw[0] & 0xFFFF,
+         at < 0 ? '-' : '+', at < 0 ? -at : at,
+         r14 < 0 ? '-' : '+', r14 < 0 ? -r14 : r14);
 }
 
 // Thunk for ESTAE-protected handler invocation.

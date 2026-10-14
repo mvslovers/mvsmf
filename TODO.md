@@ -42,9 +42,17 @@ instruction executed at `find_and_send_job_status`'s entry is not the linked
 `B 30(0,15)`). On the TK5 stands the STEPLIB is not APF, so MVSMF sits in
 key-8 storage and a stray store lands in the code silently (measured, probe on
 m38r). About 1 in 1,900 status polls on m38r; on m38b the server hung
-afterwards (four workers would not stop, `SA03`). **PR #427** (open) adds
-`MVSMF913I`, the PSW and R14 of every caught abend as entry-point offsets
-(libc370 2.11.0 `tryinfo()`); the writer itself is still unknown.
+afterwards (four workers would not stop, `SA03`). **PR #427** (merged
+2026-10-14) added `MVSMF913I`, the PSW and R14 of every caught abend as
+entry-point offsets (libc370 2.11.0 `tryinfo()`), and `MVSMF914I`, the bytes
+around the instruction; the writer itself is still unknown. Re-reading
+never-opened data sets (740 read errors on m38b) did not reproduce it on dev1
+or m38r; the open lead is uptime -- both real hits came from an HTTPD running
+since the previous day. m38r carries the debug build to catch the next one.
+**#428 is new (2026-10-14) and not ranked either**: a ~20 MB binary PUT
+(`mbt deploy`) on m38b ended `MVSMF007W` -- no body byte for 10 s, the client
+got EPIPE. Neither mbt nor Hercules' X'75' RECV path holds data back (both
+read); next is a host-side `ss`/`tcpdump` during a large PUT.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.

@@ -148,7 +148,7 @@ See [Job Status → Limitations](docs/endpoints/jobs/status.md#limitations).
 
 ### Install
 
-mvsMF ships as an **SMP Release 4** install package (FMID `TZMF120`).
+mvsMF ships as an **SMP Release 4** install package (FMID `TZMF130`).
 **[docs/installation.md](docs/installation.md)** is the guide — it covers the
 two install jobs, authorization (SVC 244, or an APF entry), the STEPLIB
 concatenation, and the route definitions. [docs/uninstall.md](docs/uninstall.md)

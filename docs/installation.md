@@ -188,6 +188,21 @@ upgrade is RECEIVE/APPLY/ACCEPT of the new package and nothing else. Do **not**
 run the uninstall job's `DELETE` step in between: it names the data sets the new
 install is about to use.
 
+**Stop HTTPD before the install job and start it afterwards:**
+
+```
+P HTTPD
+(run the install job)
+S HTTPD
+```
+
+The APPLY replaces `MVSMF` in `MVSMF.LINKLIB`, which a running HTTPD holds in
+its STEPLIB and loads the module from on every request. A request that arrives
+while the member is being replaced can find no module, and a copy that lands
+in a new extent may not be visible to the running server. Neither has been
+measured; stopping first avoids both. Upgrading HTTPD in the same window needs
+only the one stop and start. Then check the level as in step 5.
+
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same
 run as the APPLY.

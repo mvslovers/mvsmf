@@ -60,7 +60,19 @@ httpd.
 **#428 is new (2026-10-14) and not ranked either**: a ~20 MB binary PUT
 (`mbt deploy`) on m38b ended `MVSMF007W` -- no body byte for 10 s, the client
 got EPIPE. Neither mbt nor Hercules' X'75' RECV path holds data back (both
-read); next is a host-side `ss`/`tcpdump` during a large PUT.
+read), and 6 + 6 such PUTs on m38r and m38b ran clean with the host's Recv-Q
+never empty. Not reproduced; if it recurs, `ss -tnio` on the host while it
+hangs separates the emulator from the sender.
+**#430 is new (2026-10-15) and not mvsMF's**: every CGI request costs about
+137 bytes of subpool 0 for good -- mvsMF's `fn=version` and httpd's own `/.dm`
+alike, a 404 without a CGI nothing; pinning MVSMF changes nothing. About 50,000
+CGI requests exhaust a fresh HTTPD (m38b: 4.7 MB in 30,869). Cause found in
+libc370: `__CRTRES` never frees `ppa->ppacrt`, 128 bytes per LINKed C module
+run; the fix is `libc370#546`, released in libc370 2.12.1. It sits in each
+module's own C runtime, so MVSMF itself has to be relinked against 2.12.1 (and
+the `[toolchain] libc370` pin moved, or the release still carries it); an HTTPD
+rebuild does nothing for it. Closes once a 2.12.1 MVSMF measures flat on m38r
+(300 x `fn=version`, was -40,960).
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.
@@ -73,6 +85,26 @@ the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
 empty again** — #406 landed in PR #409 and #371 in PR #403, both on
 2026-10-13, and before them #336's
 reject half in PR #358, #210 in PR #359, and #362 and #357 in PR #364.*
+
+**State of play, 2026-10-15** (one mvsMF session from here on; the second one
+handed its list over). In hand, in this order:
+- **#345** waits on two **maintainer decisions**: the FACILITY profile names, and
+  how a job without an owner is treated. The reference is measured (comment
+  6162968561 on #345): listing, status and file list of a foreign job are open,
+  only the spool content is refused (500 / category 6 / rc 12 / reason 1).
+- **#417** (cancel) together with #345 or right after it -- it widens the same
+  gap.
+- **#418** waits on a read-only zxp measurement (404 or 405 for a known path
+  with an unregistered method).
+- **#423**: the hard part is provoking a mid-file UFSD read error.
+- **#424** is blocked on `libc370#529`.
+
+Passive: **#425** (m38r keeps `99a423c` with `MVSMF914I` armed; nobody samples
+it any more), **#428** (not reproduced: 12 clean 20 MB PUTs on m38r and m38b;
+plic370 reports the next case). **#430** needs MVSMF relinked against libc370 2.12.1
+(pin bump, deploy to m38r, 300 x `fn=version` expecting 0). MBT holds the m38r revert -- debug build back to SMP 1.2.0, the
+`/.dm` line out of HTTPPRM0, `MVSMF.DEV.LINKLIB` out of the STEPLIB -- until #425
+is done **and** httpd-db is finished with m38r; tell MBT when #425 closes.
 
 ---
 
@@ -89,7 +121,7 @@ reject half in PR #358, #210 in PR #359, and #362 and #357 in PR #364.*
 | 7 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 10 | #345 | `type:research` | **a policy** — see *RAKF* |
+| 10 | #345 | `type:research` | **two maintainer decisions**: FACILITY profile names, ownerless jobs (reference measured 2026-10-14) |
 | 11 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
 | 12 | #291 | reclassified — hygiene, not stability | nothing |
 | 13 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |

@@ -28,10 +28,13 @@ kind = "application"
 # (mvslovers/libc370#524, #406).
 # 2.11.0: tryinfo() -- the PSW and R14 of an abend try() caught, which
 # MVSMF913I reports after MVSMF901E (mvslovers/libc370#530, #425).
+# 2.12.1: the C runtime termination frees its 128-byte CRT block; up to
+# 2.12.0 every run of the module lost it in subpool 0, so each request
+# shrank HTTPD's free storage for good (mvslovers/libc370#546, #430).
 # cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
 # macros in maclib370; 1.6.1 is current.
 cc370 = "1.6.1"
-libc370 = "2.11.0"
+libc370 = "2.12.1"
 mbt = "3.0"
 
 [dependencies]

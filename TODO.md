@@ -70,11 +70,15 @@ relinked against 2.12.1. On m38r, MVSMF `ed8e981`: 900 x `fn=version`, delta 0
 (was -40,960 per 300); HTTPDM, still on 2.12.0, kept leaking in the same window.
 Still open: the mixed-load runs read 111-165 B/req against 128 -- the long-term
 run on m38b after the 1.3.0 rollout shows whether anything remains.
-**mvsMF 1.3.0 in preparation (2026-10-15, Mike's decision)**: #432/PR #433
-(CHANGELOG, FMID `TZMF130`), smoke run on dev1 (slot from MBT), cut, then MBT
-installs HTTPD 4.3.0 and mvsMF 1.3.0 on all four M38 stands -- on m38r in the
-same pass `MVSMF.DEV.LINKLIB` leaves the STEPLIB and `/.dm` leaves HTTPPRM0 --
-and the long-term run on m38b, with pl1c370's load in parallel.
+**mvsMF 1.3.0 released 2026-10-15** -- tag `v1.3.0` (`d454edf`), FMID
+`TZMF130` deleting `TZMF120`, built against libc370 2.12.1, httpd 4.2.0, ufsd
+1.4.0, crypto370 1.0.1 (#432/PR #433). `main` is `1.4.0-dev` (`TZMF140`).
+`inst.jcl` read: `++VER(Z038) DELETE(TZMF120)`, ACCEPT `COND=(4,LT,APPLY)`.
+Smoke run on dev1 with `d0bb975` (same code): curl-datasets/-jobs/-uss/-console,
+`auth` and `info-cookie` all passed. Next: MBT installs HTTPD 4.3.0, then mvsMF
+1.3.0 on all four M38 stands (on m38r in the same pass `MVSMF.DEV.LINKLIB` leaves
+the STEPLIB and `/.dm` leaves HTTPPRM0), then the long-term run on m38b with
+pl1c370's load in parallel.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.

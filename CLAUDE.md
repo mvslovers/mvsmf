@@ -961,7 +961,7 @@ its predecessor:
 
 ```toml
 [smp]
-prefix = "TZMF"   # mbt 3 derives both: 1.3.0 is TZMF130, deleting TZMF120
+prefix = "TZMF"   # mbt 3 derives both: 1.4.0 is TZMF140, deleting TZMF130
 ```
 
 **No version component may ever exceed 9** — a 7-character id has no room for
@@ -971,8 +971,9 @@ mvsmf 1.2.10 cannot be expressed and must not be released.
 `TZMF110` is 1.1.0, released 2026-09-14 -- the first level, so it carried no
 `delete`. `TZMF120` is 1.2.0, released 2026-10-13, deleting `TZMF110`: the
 libc370 2.0 port moved the minor, so 1.1.1 was never cut and `TZMF111` is
-unspent and unassigned. `main` is 1.3.0-dev, so the next is **`TZMF130`**,
-deleting `TZMF120`. A patch release (1.2.1) needs an explicit `fmid` and
+unspent and unassigned. `TZMF130` is 1.3.0, released 2026-10-15, deleting
+`TZMF120` (libc370 2.12.1, #430). `main` is 1.4.0-dev, so the next is
+**`TZMF140`**, deleting `TZMF130`. A patch release (1.3.1) needs an explicit `fmid` and
 `delete` in `mbt.toml` until mbt builds PTFs. 1.0.0 and 1.0.1 shipped with no
 `[distribution]`, so nothing below `TZMF110` was ever assigned.
 

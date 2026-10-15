@@ -75,10 +75,12 @@ run on m38b after the 1.3.0 rollout shows whether anything remains.
 1.4.0, crypto370 1.0.1 (#432/PR #433). `main` is `1.4.0-dev` (`TZMF140`).
 `inst.jcl` read: `++VER(Z038) DELETE(TZMF120)`, ACCEPT `COND=(4,LT,APPLY)`.
 Smoke run on dev1 with `d0bb975` (same code): curl-datasets/-jobs/-uss/-console,
-`auth` and `info-cookie` all passed. Next: MBT installs HTTPD 4.3.0, then mvsMF
-1.3.0 on all four M38 stands (on m38r in the same pass `MVSMF.DEV.LINKLIB` leaves
-the STEPLIB and `/.dm` leaves HTTPPRM0), then the long-term run on m38b with
-pl1c370's load in parallel.
+`auth` and `info-cookie` all passed. Installed 2026-10-15 by MBT, HTTPD 4.3.0
+first and HTTPD stopped around both installs: m38r JOB00892, m38l 1709, m38x
+630, m38b 1518 (each `HMA2380` for MVSMF, APPLY RC 04 on `HMA2461 TZMF120`,
+`fn=version` 1.3.0). On m38r the #425 debug wiring is gone (`MVSMF.DEV.LINKLIB`
+out of the STEPLIB and scratched, `/.dm` out of HTTPPRM0). The long-term run on
+m38b with pl1c370's load started the same day.
 **PR #435, merged 2026-10-15** -- #434: the installation guide's Upgrading
 section says stop HTTPD, run the install job, start HTTPD. An APPLY into
 `MVSMF.LINKLIB` under a running server was never measured; the v1.3.0 release
@@ -109,8 +111,8 @@ handed its list over). In hand, in this order:
 - **#423**: the hard part is provoking a mid-file UFSD read error.
 - **#424** is blocked on `libc370#529`.
 
-Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, so all four
-stands carry them after the rollout; m38r runs `ed8e981` until then),
+Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, which runs
+on all four M38 stands since 2026-10-15),
 **#428** (not reproduced: 12 clean 20 MB PUTs on m38r and m38b; plic370 reports
 the next case).
 

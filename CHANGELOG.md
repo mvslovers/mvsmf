@@ -11,6 +11,41 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-15
+
+The release that stops every request from costing the server storage for
+good. FMID `TZMF130`, and its SYSMOD deletes `TZMF120`, so an upgrade from
+1.2.0 needs nothing beyond the package. A drop-in: no configuration changes.
+
+Built against **libc370 2.12.1**, **httpd 4.2.0**, **ufsd 1.4.0** and
+**crypto370 1.0.1**. httpd 4.2.0 stays the minimum (see 1.2.0).
+
+### Fixed
+
+- **A request no longer leaks 128 bytes of the server's storage** (#430).
+  Every run of a C module built against libc370 up to 2.12.0 left its
+  128-byte runtime block in subpool 0 when it ended. HTTPD runs mvsMF once per
+  request, so the server's free storage shrank by about 137 bytes per request
+  until a restart; at that rate 7 MB of free storage lasts about 50,000 mvsMF is
+  built against libc370 2.12.1, which frees the block. Measured on MVS: 900
+  requests, no storage lost; 300 cost 40,960 bytes before. Other CGI modules
+  in the same server leak until they are relinked too.
+- **A read error after the response started breaks the transfer** (#421).
+  When reading a data set failed after the status line had been sent, the
+  client got a complete-looking `200` with the data missing. The
+  connection is now dropped, so the client sees a failed transfer.
+
+### Added
+
+- **`MVSMF913I` and `MVSMF914I` say where a caught abend happened** (#425).
+  After every `MVSMF901E` the PSW, the failing instruction and R14 follow,
+  as offsets from the module's entry point, and, when they lie inside
+  mvsMF, the 16 bytes around the failing instruction. See
+  `docs/messages.md` for how to look the offsets up in the link map.
+- **`fn=textsum` and `fn=textdump` on the test endpoint** (#425). A checksum
+  per 4 KB block of the loaded module, and the bytes at an offset, so that
+  code overwritten while it is loaded can be seen before it runs.
+
 ### Changed
 
 - **No APF entry is needed for `MVSMF.LINKLIB`** (#415). The installation
@@ -19,6 +54,11 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
   all in `IEAAPF00`; `HTTPD002I` names the route it took. The guide now
   describes both routes: SVC 244, with no entry and no IPL, and the APF list,
   which needs an entry for every library in the STEPLIB.
+- **The installation guide covers MVS/CE and hand-copied installs** (#419).
+  Both `RECEIVE`s of the install job need `VOLUME()` on MVS/CE. A new section
+  describes moving from a hand-copied `MVSMF` to the SMP install. The links
+  to `uninstall.md` and the `SYZJ201` section now work from inside the
+  package.
 
 ## [1.2.0] - 2026-10-13
 

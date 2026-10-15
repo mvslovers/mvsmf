@@ -31,15 +31,17 @@ distribution zone. Skip one and the id survives there.
 //UCLIN   EXEC SMPAPP
 //SMPCNTL  DD  *
  UCLIN CDS .
-  DEL SYSMOD(TZMF120) MOD(MVSMF) .
+  DEL SYSMOD(TZMF130) MOD(MVSMF) .
   DEL MOD(MVSMF) .
   DEL LMOD(MVSMF) .
+  DEL SYSMOD(TZMF130) .
   DEL SYSMOD(TZMF120) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
  UCLIN ACDS .
-  DEL SYSMOD(TZMF120) MOD(MVSMF) .
+  DEL SYSMOD(TZMF130) MOD(MVSMF) .
   DEL MOD(MVSMF) .
+  DEL SYSMOD(TZMF130) .
   DEL SYSMOD(TZMF120) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
@@ -47,6 +49,8 @@ distribution zone. Skip one and the id survives there.
 //LIST    EXEC SMPAPP
 //SMPCNTL  DD  *
  RESETRC .
+ LIST CDS  SYSMOD(TZMF130) .
+ LIST ACDS SYSMOD(TZMF130) .
  LIST CDS  SYSMOD(TZMF120) .
  LIST ACDS SYSMOD(TZMF120) .
  LIST CDS  SYSMOD(TZMF110) .
@@ -60,7 +64,7 @@ check: **RC 04 with the id reported as not found means it is free.** A hit
 prints `TYPE`, `STATUS` and the FMID it belongs to — the id is still taken.
 
 **Name every level that was ever installed on the system, not only the current
-one.** The block above lists `TZMF120` and `TZMF110`; add a pair for each
+one.** The block above lists `TZMF130`, `TZMF120` and `TZMF110`; add a pair for each
 further level if the system has seen more. A level that an upgrade already
 deleted is left as a tombstone — `TYPE = FUNCTION / DELBY = …` — which `LIST`
 reports at **RC 00**, so it still reads as occupied and still has to go.

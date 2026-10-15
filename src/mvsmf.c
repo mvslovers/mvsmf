@@ -17,6 +17,9 @@
 #include "authapi.h"
 #include "testapi.h"
 #include "router.h"
+#include "mvsmfctx.h"
+#include <mvs/link.h>   /* __load */
+#include <mvs/lock.h>   /* lock / unlock, LOCK_EXC */
 
 /* C stack size for this module, read by libc370's @@crt0/@@crt1 through the
  * WXTRN @@STKLEN (issue #290).  Without it the startup takes the default:
@@ -76,6 +79,29 @@ int identity_middleware(Session *session)
 	return 0;
 }
 
+/* TEST ONLY (#425, branch issue-425-pin, never merged): keep MVSMF loaded.
+ * httpd LINKs this module per request and holds no LOAD of its own, so MVS
+ * deletes it whenever its use count drops to 0 and fetches a fresh copy after
+ * every idle gap. One LOAD from the first request keeps the use count above 0
+ * for as long as the worker task that issued it lives. The entry point is kept
+ * in MVSMF_CTX (address-space lifetime, not a static -- MVSMF is RENT);
+ * rsvd[0] is the console lock anchor, so rsvd[1] carries it. */
+__asm__("\n&FUNC	SETC 'mvsmf_pin'");
+static void mvsmf_pin(HTTPD *httpd)
+{
+	MVSMF_CTX *ctx = mvsmf_ctx_get(httpd);
+
+	if (!ctx || ctx->rsvd[1]) {
+		return;
+	}
+
+	lock((void *)&ctx->rsvd[1], LOCK_EXC);
+	if (!ctx->rsvd[1]) {
+		ctx->rsvd[1] = __load(NULL, "MVSMF", NULL, NULL);
+	}
+	unlock((void *)&ctx->rsvd[1], LOCK_EXC);
+}
+
 int main(int argc, char **argv)
 {
 	int irc = 0;
@@ -103,6 +129,8 @@ int main(int argc, char **argv)
 
 		return 12;
 	}
+
+	mvsmf_pin(httpd);
 
 	/* save for our exit/external programs */
 	if (crt) {

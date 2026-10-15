@@ -79,6 +79,10 @@ Smoke run on dev1 with `d0bb975` (same code): curl-datasets/-jobs/-uss/-console,
 1.3.0 on all four M38 stands (on m38r in the same pass `MVSMF.DEV.LINKLIB` leaves
 the STEPLIB and `/.dm` leaves HTTPPRM0), then the long-term run on m38b with
 pl1c370's load in parallel.
+**PR #435, merged 2026-10-15** -- #434: the installation guide's Upgrading
+section says stop HTTPD, run the install job, start HTTPD. An APPLY into
+`MVSMF.LINKLIB` under a running server was never measured; the v1.3.0 release
+page and the stand rollout already do it that way. Docs only.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.

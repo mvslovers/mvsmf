@@ -199,9 +199,9 @@ S HTTPD
 The APPLY replaces `MVSMF` in `MVSMF.LINKLIB`, which a running HTTPD holds in
 its STEPLIB and loads the module from on every request. A request that arrives
 while the member is being replaced can find no module, and a copy that lands
-in a new extent is not seen by the running server at all. Upgrading HTTPD in
-the same window needs only the one stop and start. Then check the level as in
-step 5.
+in a new extent may not be visible to the running server. Neither has been
+measured; stopping first avoids both. Upgrading HTTPD in the same window needs
+only the one stop and start. Then check the level as in step 5.
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same

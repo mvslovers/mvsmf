@@ -63,16 +63,18 @@ got EPIPE. Neither mbt nor Hercules' X'75' RECV path holds data back (both
 read), and 6 + 6 such PUTs on m38r and m38b ran clean with the host's Recv-Q
 never empty. Not reproduced; if it recurs, `ss -tnio` on the host while it
 hangs separates the emulator from the sender.
-**#430 is new (2026-10-15) and not mvsMF's**: every CGI request costs about
-137 bytes of subpool 0 for good -- mvsMF's `fn=version` and httpd's own `/.dm`
-alike, a 404 without a CGI nothing; pinning MVSMF changes nothing. About 50,000
-CGI requests exhaust a fresh HTTPD (m38b: 4.7 MB in 30,869). Cause found in
-libc370: `__CRTRES` never frees `ppa->ppacrt`, 128 bytes per LINKed C module
-run; the fix is `libc370#546`, released in libc370 2.12.1. It sits in each
-module's own C runtime, so MVSMF itself has to be relinked against 2.12.1 (and
-the `[toolchain] libc370` pin moved, or the release still carries it); an HTTPD
-rebuild does nothing for it. Closes once a 2.12.1 MVSMF measures flat on m38r
-(300 x `fn=version`, was -40,960).
+**#430 closed 2026-10-15** (PR #431): every CGI request cost about 137 bytes
+of subpool 0 for good, because libc370 up to 2.12.0 never freed the CRT block
+(`libc370#546`). It sits in each module's own runtime, so MVSMF had to be
+relinked against 2.12.1. On m38r, MVSMF `ed8e981`: 900 x `fn=version`, delta 0
+(was -40,960 per 300); HTTPDM, still on 2.12.0, kept leaking in the same window.
+Still open: the mixed-load runs read 111-165 B/req against 128 -- the long-term
+run on m38b after the 1.3.0 rollout shows whether anything remains.
+**mvsMF 1.3.0 in preparation (2026-10-15, Mike's decision)**: #432/PR #433
+(CHANGELOG, FMID `TZMF130`), smoke run on dev1 (slot from MBT), cut, then MBT
+installs HTTPD 4.3.0 and mvsMF 1.3.0 on all four M38 stands -- on m38r in the
+same pass `MVSMF.DEV.LINKLIB` leaves the STEPLIB and `/.dm` leaves HTTPPRM0 --
+and the long-term run on m38b, with pl1c370's load in parallel.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.
@@ -99,12 +101,10 @@ handed its list over). In hand, in this order:
 - **#423**: the hard part is provoking a mid-file UFSD read error.
 - **#424** is blocked on `libc370#529`.
 
-Passive: **#425** (m38r keeps `99a423c` with `MVSMF914I` armed; nobody samples
-it any more), **#428** (not reproduced: 12 clean 20 MB PUTs on m38r and m38b;
-plic370 reports the next case). **#430** needs MVSMF relinked against libc370 2.12.1
-(pin bump, deploy to m38r, 300 x `fn=version` expecting 0). MBT holds the m38r revert -- debug build back to SMP 1.2.0, the
-`/.dm` line out of HTTPPRM0, `MVSMF.DEV.LINKLIB` out of the STEPLIB -- until #425
-is done **and** httpd-db is finished with m38r; tell MBT when #425 closes.
+Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, so all four
+stands carry them after the rollout; m38r runs `ed8e981` until then),
+**#428** (not reproduced: 12 clean 20 MB PUTs on m38r and m38b; plic370 reports
+the next case).
 
 ---
 

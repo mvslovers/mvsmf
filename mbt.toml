@@ -2,7 +2,7 @@ schema = 3
 
 [project]
 name = "mvsmf"
-version = "1.3.0-dev"
+version = "1.3.0"
 kind = "application"
 
 [toolchain]

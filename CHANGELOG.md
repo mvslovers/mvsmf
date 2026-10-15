@@ -26,10 +26,11 @@ Built against **libc370 2.12.1**, **httpd 4.2.0**, **ufsd 1.4.0** and
   Every run of a C module built against libc370 up to 2.12.0 left its
   128-byte runtime block in subpool 0 when it ended. HTTPD runs mvsMF once per
   request, so the server's free storage shrank by about 137 bytes per request
-  until a restart; at that rate 7 MB of free storage lasts about 50,000 mvsMF is
-  built against libc370 2.12.1, which frees the block. Measured on MVS: 900
-  requests, no storage lost; 300 cost 40,960 bytes before. Other CGI modules
-  in the same server leak until they are relinked too.
+  until a restart; at that rate 7 MB of free storage lasts about 50,000
+  requests. mvsMF is built against libc370 2.12.1, which frees the block.
+  Measured on MVS: 900 requests, no storage lost; 300 cost 40,960 bytes
+  before. Other CGI modules in the same server leak until they are relinked
+  too.
 - **A read error after the response started breaks the transfer** (#421).
   When reading a data set failed after the status line had been sent, the
   client got a complete-looking `200` with the data missing. The

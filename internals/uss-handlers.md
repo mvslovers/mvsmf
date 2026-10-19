@@ -188,8 +188,16 @@ static int recursive_delete(UFS *ufs, const char *path) {
 
 ### File Size Limit
 
-- Max file size: 64 KB (UFSD Phase 1 — direct blocks only)
-- ufs_fwrite beyond 64K → UFSD_RC_NOSPACE → HTTP 500
+- Max file size: 16 direct + one single-indirect block, `(16 + blksize/4) × blksize`
+  = 1040 blocks, 4,259,840 bytes (4.06 MB) at BLKSIZE=4096 -- every released UFSD
+  (`blk_resolve`/`blk_alloc_at` in ufsd `src/ufsd#fil.c`); double/triple indirect
+  are not implemented
+- ufs_fwrite beyond it → UFSD_RC_NOSPACE → HTTP 500, category 8; the "w" open has
+  already truncated the file and the part that fit stays
+- mvsMF adds no file-size limit: GET streams 4 KB (`USS_READ_BUFSZ`) until EOF;
+  PUT holds the whole body in one buffer of its Content-Length (413 from 16 MB,
+  500 category 7 when the storage is not there), libufs splits the write into
+  4 KB requests
 
 
 ### Testing Requirements (when implemented)

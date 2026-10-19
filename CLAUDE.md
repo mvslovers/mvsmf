@@ -56,9 +56,8 @@ change): `internals/codepage.md`.
 ## Development Workflow
 
 1. Every bug fix or feature requires a **GitHub Issue**. If none exists, create one first.
-2. **Plan and analyze first**; implementation follows.
-3. Develop each fix/feature on a **feature branch**.
-4. When done, merge via **Pull Request** and close the issue with a short comment.
+2. Develop each fix/feature on a **feature branch**.
+3. When done, merge via **Pull Request** and close the issue with a short comment.
 
 `/fix-issue <number>` and `/sync-docs` are defined in `.claude/commands/`.
 

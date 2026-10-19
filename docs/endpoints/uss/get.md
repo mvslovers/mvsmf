@@ -141,8 +141,15 @@ with **400**, and so does mvsMF. It used to fall back to text.
 
 ## Max File Size
 
-64 KB (UFSD Phase 1 — direct blocks only). Reads beyond this limit
-will return partial data up to the UFSD_RC_NOSPACE boundary.
+mvsMF sets no limit of its own on a read: the file is streamed to the
+client in 4 KB pieces until UFSD reports its end, so the whole file is
+returned whatever its size.
+
+The ceiling is UFSD's, and it applies when a file is written (see the
+PUT page): 16 direct blocks plus one single-indirect block, which is
+1040 blocks or 4,259,840 bytes (4.06 MB) at the default block size of
+4096. In general it is `(16 + blksize/4) × blksize` bytes for the block
+size the file system was formatted with.
 
 ## Examples
 

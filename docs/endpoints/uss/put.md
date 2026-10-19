@@ -116,7 +116,7 @@ off the UFS session rather than off the (absent) file handle.
 | 404    | Parent directory not found |
 | 412    | `If-Match` was supplied and the file no longer matches it — including a file that no longer exists |
 | 400    | Path name too long |
-| 500    | No space left on device or I/O error (64 KB limit) |
+| 500    | No space left on device (also: the file would exceed UFSD's maximum file size, see below) or I/O error |
 | 500    | `fileEncoding` names a code page other than IBM-037 or IBM-1047 (`category` 16, `rc` 121); nothing is written |
 | 400    | Unsupported USS utility (Content-Type: application/json with unknown request) |
 | 400    | The body could not be read: a malformed `Content-Length`, or a client that stopped sending |
@@ -126,7 +126,23 @@ off the UFS session rather than off the (absent) file handle.
 
 ## Max File Size
 
-64 KB (UFSD Phase 1 — direct blocks only).
+UFSD stores a file in 16 direct blocks plus one single-indirect block;
+double and triple indirect blocks are not implemented. That is 1040
+blocks, 4,259,840 bytes (4.06 MB), at the default block size of 4096 --
+in general `(16 + blksize/4) × blksize` bytes for the block size the file
+system was formatted with.
+
+A write past that point fails in UFSD with `UFSD_RC_NOSPACE`, which
+mvsMF answers 500 "No space left on device" (`category` 8). The file has
+already been truncated by the open and holds the part that fit, so the
+previous content is gone.
+
+mvsMF itself reads the whole request body into one buffer of the
+`Content-Length` before writing it, so a large upload needs that much
+contiguous storage in the HTTPD region; a body that does not fit is
+answered 500 (`category` 7, `rc` 16), and one of 16 MB or more is
+answered 413 (see Error Responses). The write to UFSD is split into
+pieces by the UFS client library and has no limit of its own.
 
 ## Examples
 

@@ -324,6 +324,10 @@ ufs_fclose(&fp)
 
 **Maximale Dateigröße:** 64 KB (UFSD Phase 1). Bei darüberliegenden Dateien bricht `ufs_fread` nach den letzten Direct Blocks ab.
 
+> Superseded: every released UFSD (1.0.0 onwards) implements the
+> single-indirect block, so the limit is 16 + blksize/4 blocks --
+> 4.06 MB at BLKSIZE=4096. See `docs/endpoints/uss/get.md`.
+
 **Response-Headers:**
 - `ETag` — für conditional GET (Zukunft, Phase 1: optional)
 - `Content-Type: text/plain; charset=UTF-8` (text) oder `application/octet-stream` (binary)
@@ -357,6 +361,11 @@ ufs_fclose(&fp)
 **Binary-Modus:** Raw bytes direkt, keine Konvertierung
 
 **Maximale Dateigröße:** 64 KB. Schreiben über 64 KB → UFSD_RC_NOSPACE (44) → HTTP 507.
+
+> Superseded: the limit is 4.06 MB at BLKSIZE=4096 (single-indirect
+> blocks, in every released UFSD), and `UFSD_RC_NOSPACE` is answered 500,
+> not 507 (`ufsd_rc_to_http()` in `src/ussapi.c`). See
+> `docs/endpoints/uss/put.md`.
 
 **Response:**
 - HTTP 201 Created (neue Datei)

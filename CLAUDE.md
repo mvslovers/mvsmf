@@ -2,27 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-
 ## Project Overview
 
 mvsMF is a z/OSMF REST API implementation for MVS 3.8j, built as a CGI module for Mike Rayborn's HTTPD server. It enables modern clients (Zowe Explorer, Zowe CLI, JetBrains IDEs) to interact with classic MVS systems via standard z/OSMF REST endpoints.
 
-## C Standard Override
+## C standard and platform
 
-**This project uses `-std=gnu99`**, overriding the root CLAUDE.md's strict C89 rule.
-It is mbt 3's default, so `mbt.toml` does not spell it out. Under mbt 2 the
-build set no `-std` and cc370 compiled gnu89; the move to mbt 3 (#396) changed
-code generation in four objects (register choice and smaller stack frames from
-C99 block scoping), not their external symbols.
-
-Implications:
-- `//` line comments are allowed
-- Mixed declarations and statements are allowed
-- `snprintf`, `stdbool.h`, designated initializers are available
-- VLAs are still forbidden (stack constraints)
-- All variable declarations should still prefer top-of-block for readability
-
-Cross-compiled for MVS/370 with the **cc370** toolchain (a GCC 3.4.6 fork: `cc370`/`as370`/`ar370`/`ld370`). The whole build runs **on the host**; MVS is only touched by `mbt deploy` and `mbt test --mvs`. All other platform constraints from the root CLAUDE.md still apply (24-bit addressing, EBCDIC, no POSIX, memory efficiency, etc.).
+mvsMF compiles as **gnu99**, mbt 3's default, so `mbt.toml` does not spell it
+out (under mbt 2 it was gnu89; the switch in #396 changed code generation in
+four objects, not their external symbols). Prefer top-of-block declarations for
+readability. Every platform constraint of the root `CLAUDE.md` applies, with
+one override: the codepage, below.
 
 ## Codepage Override (CRITICAL)
 
@@ -43,100 +33,33 @@ deliberately.
 | Jobs (`jobsapi.c`) | **CP037** | `httpx->xlate_cp037` |
 | HTTPD server default | **CP037** | `http_xlate_init()` fallback |
 
-### Where the tables live
-
-**Not in this repo.** There is no `src/xlate.c` and no local table — both were
-removed in `edad0e5` (#114/#115) and dropped from the link list in `13acfbf`.
-The tables live in **libhttpd** and are reached through the httpx vector:
-`httpx->xlate_cp037`, `xlate_1047`, `xlate_legacy` (`HTTPCP *`, each with an
-`atoe` and an `etoa` member — see `.mbt/deps/httpd/include/httpxlat.h`).
-
-`httpx` is not a variable you declare — `include/router.h:31` defines it as
-`#define httpx http_get_httpx(session->httpd)`, so it resolves wherever a
-`session` is in scope. mvsMF never calls `http_xlate_init()` and never selects a
-codepage globally: **selection is per call site**, by naming the field.
-
-```c
-/* USS payload, EBCDIC -> ASCII on the way out */
-http_xlate((unsigned char *)buf, n, httpx->xlate_1047->etoa);
-
-/* dataset payload, ASCII -> EBCDIC on the way in */
-http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
-```
-
-### Who translates what
-
-- **`http_printf()` translates for you.** It goes through `http_printv()`, which
-  applies `http_etoa()` with the *server-default* table. Response headers and
-  JSON bodies built with `http_printf` need no explicit call — and must not be
-  pre-translated, or they get converted twice.
-- **`send_all()` does not translate.** It sends the buffer raw and expects the
-  caller to have produced ASCII already. (Neither does the `http_send()` under
-  it — which nothing outside `common.c` may call, see **Sending** below.)
-- **Raw bytes are always yours.** Every explicit `http_xlate()` in this repo sits
-  on payload crossing a boundary — outbound before `send_all()` (`dsapi.c:236`,
-  `ussapi.c:741`), inbound after reading a body or a chunk header
-  (`dsapi.c:1528`, `ussapi.c:847`), or before writing a record to a data set
-  (`dsapi.c:754`). None of them wrap a `http_printf()`.
-
 So the rule is: **payload bytes are yours to translate, formatted output is
-httpd's.**
+httpd's** -- `http_printf()` translates, `send_all()` does not. Where the
+tables live, who translates what, and how a codepage is changed (an httpd-side
+change): `internals/codepage.md`.
 
-### Changing a codepage
+## Read when relevant
 
-A codepage change is an **httpd-side change**, not a local edit — there is no
-local table to edit. The order is: change the table in httpd → cut/refresh the
-httpd release → `mbt deps --update` in mvsMF (updates `mbt.lock`) → rebuild and
-`mbt deploy`. Editing anything in mvsMF alone cannot change a codepage.
+| Before you … | read |
+|---|---|
+| translate a payload, or change a codepage | `internals/codepage.md` |
+| work on `ussapi.c` or an issue labelled `uss-phase1` | `internals/uss-spec.md` (the design), `internals/uss-handlers.md` (patterns, error mapping) |
+| work on `consapi.c` | `internals/console.md` |
+| touch `etag.c` or an `If-Match` / `If-None-Match` path | `internals/etag.md` |
+| change who may do what (data sets, jobs, the listing) | `internals/authorization.md` |
+| pick or change an HTTP status, touch the 401 challenge, measure on `zxp` | `internals/zosmf-conformance.md` |
+| touch `send_all()`, `sendall.c` or `abort_response()` | `internals/sending.md` |
+| use or extend `/zosmf/test` (`fn=textsum`, `fn=storage`, a new `fn=`) | `internals/test-endpoint.md`, `internals/storage-probe.md` |
+| cut a release or touch `[smp]` | `~/repos/mvs/.workspace/context/smp.md` (mvsMF's FMID row is there) |
+| debug the running HTTPD/mvsMF live | `~/repos/mvs/.workspace/context/httpd-debug.md` |
 
 ## Development Workflow
 
 1. Every bug fix or feature requires a **GitHub Issue**. If none exists, create one first.
-2. **Plan and analyze first** (use the strongest reasoning model available); implementation can follow with a faster model.
-3. Develop each fix/feature on a **feature branch**.
-4. When done, merge via **Pull Request** and close the issue with a short comment.
-5. **Never reference AI or Claude** in commit messages, comments, PR descriptions, or anywhere else in the project.
+2. Develop each fix/feature on a **feature branch**.
+3. When done, merge via **Pull Request** and close the issue with a short comment.
 
-## Custom Commands
-
-### /fix-issue \<number\>
-
-Autonomous workflow for resolving a GitHub issue end-to-end:
-
-1. **Read the issue** — `gh issue view <number> --repo mvslovers/mvsmf`
-2. **Check for spec** — If the issue has label `uss-phase1`, read `internals/uss-spec.md` first
-3. **Create a feature branch** — `git checkout -b issue-<number>-<short-description>`
-4. **Analyze** — Identify affected files, understand the existing patterns in nearby code
-5. **Implement** — Write code following the conventions in this CLAUDE.md
-6. **Verify syntax** — Run `mbt compiledb` and check clangd diagnostics (no errors)
-7. **Update tests** — Add/update tests in `tests/` matching the change
-8. **Update docs** — If touching an endpoint handler, update `docs/endpoints/`
-9. **Commit** — Descriptive message, no AI references. Reference the issue: `Fixes #<number>`
-10. **Push and create PR** — `gh pr create --title "..." --body "Fixes #<number>"`
-11. **Summary** — Report what was done, what to verify on the live MVS system
-
-If any step fails, stop and report the issue rather than guessing.
-
-### /sync-docs
-
-Synchronize endpoint documentation with current implementation:
-
-1. Scan all `add_route()` calls in `src/mvsmf.c`
-2. For each route, check if matching doc exists in `docs/endpoints/`
-3. Report missing or outdated documentation
-4. Optionally generate stubs for undocumented endpoints
-
-## Specifications
-
-### USS/UFS Feature Pack
-
-The authoritative specification for all USS-related work is `internals/uss-spec.md`. **Read it before working on any issue labeled `uss-phase1`.** It contains:
-
-- Gap analysis: z/OSMF USS API vs. libufs capabilities
-- Architecture decisions (router wildcard, session lifecycle, MBT integration)
-- UFSD error code → HTTP status mapping (complete table)
-- Encoding rules and I/O patterns
-- Implementation plan with task dependencies
+`/fix-issue <number>` and `/sync-docs` are defined in `.claude/commands/`.
 
 ## Build System (mbt 3)
 
@@ -161,17 +84,12 @@ mbt clean          # remove build/ and dist/
 mbt distclean      # clean + remove all of .mbt/ (incl. staged deps)
 ```
 
-The build chain is: C source → `.o` via cc370 on the host → `as370` for the
-hand-written assembler → `ld370` link, with the C runtime and dependencies
-resolved by **autocall** from `.a` archives.
-
 The build id `?fn=version` reports is `MBT_COMMIT` from mbt's generated
 `<buildstamp.h>`: the short HEAD, with `-dirty` when a tracked file differed
 from it at build time.
 
-The Makefile's own targets went with it: `run-mvs` / `stop-mvs` and
-`deploy-desktop` are to come back as mbt commands (`mbt/init.lua`); until then
-`tools/deploy-desktop.sh` is called directly.
+The Desktop is uploaded with `mbt run deploy-desktop` (`mbt/init.lua`, which
+calls `tools/deploy-desktop.sh`).
 
 ### Deploy and Activation
 
@@ -195,24 +113,11 @@ several `HTTPD.LINKLIB*` data sets exist on a given stand and only one is in
 use. Find the ACTIVE `STC` via `GET /zosmf/restjobs/jobs?owner=*&prefix=HTTPD*`,
 then read its JESJCL (file id 3) for `XXSTEPLIB DD DISP=SHR,DSN=…`.
 
-### Dependencies (from mbt.toml)
+### Dependencies
 
-```toml
-[dependencies]
-"mvslovers/crypto370" = ">=1.0.0"
-"mvslovers/httpd" = ">=4.2.0"
-"mvslovers/ufsd" = ">=1.4.0"
-
-[plugins]
-"mvslovers/mbt-stc" = "^0.1"
-```
-
-`mbt deps` resolves these from GitHub Releases, stages each under
-`.mbt/deps/<repo>/` (`include/` + `lib/`), and writes **`mbt.lock`** (commit it).
-It never moves a pin on its own; `mbt deps --update` re-resolves.
-The build wires them in automatically. **libc370** is the cc370 sysroot
-(`-lc`), not a declared dependency. To build against an unreleased dependency,
-use a gitignored `.mbt/deps.local.toml` `[override]`.
+Declared in `mbt.toml`: crypto370, httpd and ufsd, plus the plugin
+`mvslovers/mbt-stc`. To build against an unreleased dependency, use a
+gitignored `.mbt/deps.local.toml` `[override]`.
 
 ### Configuration
 
@@ -248,46 +153,9 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **mvsmf.c**: Entry point. Registers all routes and middleware, initializes the router and HTTPD session. `identity_middleware` reads the client identity httpd already resolved (Basic/token) via the HTTPX auth export (`http_get_acee`) and sets the task ACEE — no per-request RACF login.
 - **router.c**: HTTP routing framework. Pattern-based URL matching with `{param-name}` path parameters, percent-decoding, middleware chain execution.
 - **dsapi.c**: Dataset REST API handlers — list, read, write, create, delete for sequential datasets and PDS members. Largest file by complexity.
-- **etag.c**: The ETag stamp and `If-Match` parsing behind the optimistic
-  locking on data sets and members (#152), and the same predicate answering
-  `If-None-Match` on the read side (#263 — a match means 412 on a write, 304 on
-  a read, wildcard included; there is no inverted variant).
-  It also carries the USS side (#264 — `X-IBM-Return-Etag` and `If-Match` on
-  `/restfiles/fs/{*filepath}` — and #271, which brought `If-None-Match` there
-  too; the 304 response itself is `send_not_modified()` in `common.c`, hoisted
-  out of `dsapi.c` when USS became its second caller).
-  Deliberately free of MVS services so
-  it unit-tests on the host (`TSTETAG`); the reading lives with the knowledge
-  it needs — `dataset_etag()` in `dsapi.c` next to the DCB handling,
-  `uss_etag()` in `ussapi.c` next to the UFS handling. Three rules that are
-  load-bearing and all fail silently if broken: the stamp is computed over the
-  **stored bytes**, never over the bytes sent (those depend on
-  `X-IBM-Data-Type`, and on USS also on the IBM-1047 translation); the hash
-  pass takes the **same bound** the send path uses, i.e.
-  `get_fb_record_count()` for a sequential data set and `-1` for a member; and
-  the ETag a PUT returns comes from **re-reading the closed resource**, never
-  from hashing the request body — the write and read paths normalize in
-  opposite directions, so a body-derived stamp makes every second save fail its
-  own precondition.
-
-  The two resource kinds fold content in differently and must not be mixed:
-  `etag_update()` includes each record's length (data sets — the same bytes
-  re-split are a different resource), `etag_update_raw()` does not (USS — a
-  byte stream, where the read buffer size is an artefact and must not reach the
-  value). On USS the precondition also runs *before* the truncating `"w"` open,
-  which is why a directory is probed with `ufs_stat()` and falls through to the
-  write path rather than being reported as a stale 412 — adding `If-Match` must
-  not change how a non-file path is answered. That answer is the **400 ISDIR**
-  the row below promises — since #269, and it stays `ufs_stat()` here on
-  purpose: the write path may read its diagnosis off `ufs_last_rc()`, but a
-  stale value in *this* check would skip a precondition silently, which is the
-  one failure the feature exists to prevent.
-
-  The **read** side needs no such probe and must not grow one: a failed hash
-  there already means "no ETag, let the open below diagnose it", so a directory
-  reaches the same 400 ISDIR it would without the header, and a missing file
-  the same 404. That is what keeps `If-None-Match: *` — which is a 304 for any
-  file that exists — from turning either of them into a 304.
+- **etag.c**: The ETag stamp and `If-Match` / `If-None-Match` handling for data
+  sets, members and USS files (#152, #263, #264, #271). Three rules there fail
+  silently if broken -- read `internals/etag.md` before touching it.
 - **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).
@@ -313,56 +181,6 @@ All endpoints are under `/zosmf/`:
 
 Endpoint documentation lives in `docs/endpoints/` (with a curl & Zowe cookbook in `docs/examples.md`).
 
-### Authorization — explicit for data sets, absent for jobs, none on the listing
-
-**Data set operations authorize explicitly (#228, closed).** `require_access()`
-(`dsapi.c:87`) calls `http_check_auth()` with the caller's own ACEE at ten call
-sites, ahead of the first catalog or VTOC access, so a refusal cannot be told
-from "does not exist". Member operations authorize on the **library** — RACF has
-no member granularity — and a rename checks both names. A denial answers the
-reference's `500` / category 4 body (#315); it no longer reaches the S913 that
-OPEN used to raise and the router's ESTAE turned into a generic 500.
-
-**Two gaps remain, both deliberate and both ticketed:**
-
-- **Create (POST) is still implicit** (#329). `__dsalcf()` is SVC 99, not an
-  OPEN, so it fell outside #228's site list. RAKF *does* refuse it (measured)
-  and the reference's dynalloc `500` is the right answer — see
-  `docs/endpoints/datasets/authorization.md` and **do not add an authorization
-  body there**. What is open is that the decision runs under whatever ACEE sits
-  in `ASXBSENV`, which is the last ambient dependency in the data set API.
-- **`jobsapi.c` authorizes nothing at all** (#345). `owner` defaults to the
-  caller but a client can widen it with `owner=*`, and the by-jobid paths —
-  spool-content read and purge included — never consult an owner. RAKF has no
-  JESSPOOL class, so there is nothing to delegate to; the policy has to be
-  invented. Mirror of `mvslovers/ftpd#90`.
-
-The `racf_set_acee()` pair in `mvsmf.c` stays as the **second** net, on purpose
-(`httpd/docs/identity-redesign.md` §3.1 item 5). It is address-space-wide and
-cannot be made correct while workers run concurrently — that is httpd#176 — so
-it is redundancy behind the explicit checks, never the thing to rely on. For
-create it is currently the *only* net. For jobs there is no net at all — RAKF
-does not protect JES spool, so no ACEE, ambient or explicit, decides anything
-on those paths; that is why #345 is a policy to invent and not a check to add.
-
-**`GET /zosmf/restfiles/ds?dslevel=` is not gated at all, and that is a
-decision, not an oversight (#229, closed).** The listing path (`__listds` +
-`__locate`/`__dscbdv`) reads the catalog and the VTOC and opens nothing, so no
-OPEN check is reached: every authenticated user can enumerate every data set,
-with DSORG/RECFM/LRECL/volume. It stays that way because **real z/OSMF does the
-same** — measured on the reference system, a PDSE that answers a member read
-with `500 / "Authorization failed - You may not use this protected data set"`
-lists with full attributes to that same userid. z/OS does not gate
-`LISTCAT LEVEL()` per entry either. Gating it would make mvsMF stricter than the
-thing it clones, and cost one RACHECK per entry on the request path.
-
-Member listing is **not** in the same position: `__listpd()` and the streaming
-directory read open the PDS with BPAM, so they do go through OPEN.
-
-If that ever gets revisited, the constraint from #229 holds: a refusal must not
-be distinguishable from "does not exist", or the gate becomes the enumeration
-oracle it was meant to close.
-
 ### HTTP Status Codes — the z/OSMF contract is a closed list
 
 z/OSMF's "Error handling" section does not merely say "4nn/5nn means error"; it
@@ -382,66 +200,17 @@ nicer answer, and even when httpd happily puts it on the wire.
 condition.** Where the documented example and the reference implementation
 disagree, follow the implementation — that is what clients are written against,
 and it can now be measured (see **Checking behaviour against a real z/OSMF**).
-Two codes turn on this:
 
-- **204 belongs to the bodiless replies** — deletes, rename, the USS utilities —
-  and mvsMF emits it there (`dsapi.c:2943`, `dsapi.c:2992`, `ussapi.c:1374`).
-  The list also describes it for "no data sets or files match the filter
-  criteria, or the specified partitioned data set has no members", but real
-  z/OSMF answers **200 with an empty `items` array** in every one of those
-  cases, including a partitioned data set with zero members. Empty listings stay
-  200 (#266, measured, closed won't-do).
-- **206 went the same way, after briefly going the other.** #249/PR#265 adopted
-  it for a listing truncated by `X-IBM-Max-Items`, on the documented wording —
-  and #274 took it back out: real z/OSMF answers **200 with `moreRows: true`**
-  there and emits no 206 on the files service at all, not even for a
-  record-range read. Truncation is carried in `moreRows` and nowhere else, so
-  **mvsMF emits no 206 anywhere**. Do not cite #249; it was measured wrong.
+- Empty listings stay **200** with an empty `items` array (#266), and mvsMF
+  emits **no 206 anywhere**: truncation is carried in `moreRows` (#274).
+- **409, 414 and 507 are not in the list**: "already exists" / "not empty" are
+  400, "no space" / "no inodes" 500 (#102).
+- **There are no sanctioned exceptions** (#250): a distinction worth keeping
+  goes into the error report's `reason` and `message`.
+- **Check `httpstat()` in the httpd you are actually running** before sending a
+  status this codebase does not already use.
 
-  The removal also deleted work rather than only adjusting it: the status was
-  the sole reason `memberListHandler` and `ussListHandler` measured the page
-  before the header went out, so both second walks went with it. What is left
-  of that shape is load-bearing — `member_scan()` walks one match *past* the
-  page and emits only up to it, because a walk bounded at the page returns the
-  limit whether or not anything follows, and a directory holding exactly as
-  many members as the limit would then report `moreRows: true`. That failure is
-  silent and its test is the equal-to-the-count case in `curl-datasets.sh`.
-
-Two further consequences that keep getting rediscovered:
-
-- **409 Conflict, 414 URI Too Long and 507 Insufficient Storage are not in the
-  list.** httpd gained all three in httpd#28/PR#56, and a live probe confirms a
-  CGI-set 414 reaches the client unchanged — but adopting them is still wrong.
-  "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
-  **500**. This was tracked as #102 and closed as won't-do; do not re-open the
-  reasoning from the httpd side alone.
-- **There are no sanctioned exceptions, and two were tried.** 410 Gone for
-  purged spool output (#187) and 403 for a read-only file system both went in as
-  "a case z/OSMF has no code for", and both came back out in #250. The reason to
-  know this is the argument that produced them, because it is a good one and it
-  will come again: mvsMF can detect states the reference cannot, so no reference
-  behaviour exists to copy. What settled it is that the reference stays inside
-  its own list even where a better code exists — a missing job answers **400**,
-  not 404, measured. A distinction worth keeping goes in the error report's
-  `reason` and `message`, where it costs no conformance; `REASON_SPOOL_GONE` is
-  the worked example.
-- **206, 412 and 429 reach the wire now — but only because httpd was re-cut and
-  redeployed** (206 is emittable, and unused since #274; the entry is about what
-  httpd can send, not about what mvsMF sends). They were added to
-  `src/httpstat.c` by httpd#181/PR#183 (commit
-  `623f6a6`), which landed *after* the original `v4.0.0-dev` artifact; that tag
-  has since been re-cut and the STC redeployed, and 412 was measured going out
-  correctly (#152). The mechanism is the part to remember: `http_resp()`
-  resolves through the httpx vector into the **running** httpd, so the live
-  server's build decides, not the staged `.a` — `mbt deps` alone can never
-  change which statuses are emittable, because `libhttpd.a` carries no status
-  table at all. An absent code is answered 500, and no longer silently: an
-  unknown one WTOs `HTTPD054E`, which is how a 505 going out as 500 was finally
-  noticed. **Check `httpstat()` in the httpd you are actually running** before
-  sending a status this codebase does not already use. The cheap probe is
-  `printf 'GET / HTTP/9.9\r\n\r\n' | nc <host> <port>` — the same commit fixed
-  httpd's own 505, so a `505` reply proves the build is current and a `500`
-  proves it is not.
+Reasoning and history: `internals/zosmf-conformance.md`.
 
 `sendErrorResponse()` (`common.c`) does not branch on status — it builds the
 JSON error report and hands the code to `sendJSONResponse()` — so a wrong code
@@ -453,35 +222,9 @@ Every 401 carries `WWW-Authenticate: Basic realm="<SMF ID>"`, **except** when th
 request came from a browser `fetch`/XHR. `send_auth_challenge()` (`common.c`)
 owns the rule; `is_browser_fetch()` next to it owns the exception.
 
-The reference sends the challenge on every endpoint — measured, and *not*
-dropped for a client identifying itself with `X-CSRF-ZOSMF-HEADER`, so there is
-no API-client exemption to copy. RFC 9110 §11.6.1 requires it too.
-
-The exception is not cosmetic and not a guess. Measured with
-`tests/probe-401-dialog.py`: a same-origin `fetch` or XHR that receives a 401
-carrying this header makes the browser open its native credential dialog **and
-withhold the response until a human dismisses it** — 6080 ms and 4805 ms in the
-run that settled it. The Desktop's own `mvsmf:session-expired` handling never
-runs, and once the dialog is satisfied the browser caches those Basic
-credentials and replays them on every same-origin request, outliving the token
-logout that #161 exists to make meaningful. Re-run the probe before doubting
-this; it needs no MVS.
-
-Three things that look like tidying and are not:
-
-- **`X-CSRF-ZOSMF-HEADER` is deliberately not a suppression signal**, even
-  though the Desktop sends it. Zowe and the SDKs send it too, and they must keep
-  getting exactly what the reference sends. httpd suppresses on it
-  (`httppc.c`, httpd#119/#120) — the two layers differ on purpose.
-- **`Sec-Fetch-Mode: navigate` still gets the challenge.** That is somebody
-  typing the URL, where the browser's own prompt is the useful answer.
-- **The realm is the SMF ID, not a constant.** A browser caches Basic
-  credentials under (origin, realm), and httpd answers on the same origin with
-  the realm it derives in `httprlm()` (httpd#191). A different string there is a
-  second protection space and a second dialog; a constant is what httpd#191
-  removed, because it made every system on the network share one. The logic is
-  duplicated in `auth_realm()` because `httprlm()` lives in the server binary
-  and the CGI-side `httpd.a` carries only the `cgistart` stub.
+The reference sends it on every endpoint; the browser exception is measured
+(`tests/probe-401-dialog.py`), and three things near it look like tidying and
+are not. Read `internals/zosmf-conformance.md` before changing either.
 
 ### Checking behaviour against a real z/OSMF (`zxp`) — READ-ONLY
 
@@ -501,25 +244,8 @@ test data set", and no carrying a permission over from a previous question. Say
 exactly what will be created, where, and how it gets cleaned up; then wait for
 an answer. A permission granted for one probe covers that probe only.
 
-Zowe CLI does not print the HTTP status on success and the profile is HTTPS, so
-`tests/trace-zowe.sh` cannot see inside it. To read the exact status line, load
-the profile through the SDK and use `client.response.statusCode`:
-`ProfileInfo.readProfilesFromDisk()` → `mergeArgsForProfile(attrs,
-{getSecureVals: true})` → `ProfileInfo.createSession()` pulls the credentials
-from the OS credential store without ever printing them.
-
-Two things met on the way: a member `pattern=` longer than 8 characters is
-rejected `400 {"category":1,"rc":4,"reason":13,"message":"pattern"}` — that is
-the member-name limit, not an empty result. And z/OSMF emits `moreRows` **only
-when true** — mvsMF followed suit in #279, on all three listings and the USS
-stat reply, so a complete listing now carries no `moreRows` key at all.
-
-`totalRows` is the piece still missing, and it is narrower than it looks: the
-reference emits it on the **file** list (`totalRows: 39` for `/`), and on a
-complete data set or member list it emits neither `totalRows` nor `moreRows` —
-measured, keys `["JSONversion","items","returnedRows"]`. mvsMF matches that
-today by accident rather than by decision; the open TODOs sit at `dsapi.c:1284`
-and `dsapi.c:2145` and are about `X-IBM-Attributes` `,total`.
+How to read the exact status line through the Zowe SDK, and what was found
+there: `internals/zosmf-conformance.md`.
 
 ### Operator Messages (WTO) — the catalog is closed
 
@@ -618,41 +344,9 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
 See [internals/storage-probe.md](internals/storage-probe.md).
 
-`fn=textsum` and `fn=textdump` watch MVSMF's own loaded code (#425): the
-load point plus one FNV-1a sum per 4 K block, and up to 256 bytes at an offset.
-MVSMF is RENT, so two samples of one build at one load point must agree; a
-block that changed was overwritten. On a stand whose STEPLIB is not APF the
-module sits in key-8 storage and a stray store lands there silently; APF does
-not fully protect either, because a store from a key-0 path (MODESET for
-`fn=cmd`, the ACEE handling) reaches the key-0 copy too. Only compare samples
-at one load point: relocated address constants differ between loads. A
-different load point or `cde` address proves a reload; the same ones do not
-prove the same copy. **MVS deletes MVSMF whenever its use count drops to 0**
-(measured on dev1 by walking HTTPD's job pack queue through `/.dm` while idle:
-no MVSMF CDE, and its CDE cell and storage taken by HTTPDM). httpd holds no
-LOAD of its own, so every request after an idle gap fetches a fresh copy,
-usually into the same free block and CDE cell. A damaged copy survives only
-while requests overlap, and `textsum` -- itself a request -- sees only damage
-that is present while it runs. `textdump`'s `off` is from the load point, which is also
-the link map's module offset; from an `MVSMF913I` `EP+X'n'` it is file370's
-`entry=` plus `n`. Both are gated to the CDE extent of this copy of MVSMF, as
-`MVSMF914I` is.
-
-**The endpoint has no per-function gate any more, and must not grow one back
-(#343).** `fn=abend`, `fn=jesabend` and `fn=denyopen` were gated on
-`MVSMF_ABEND_TEST` in the server environment from the days when a CGI abend
-cost the address space its storage permanently (httpd#154). That is measured
-gone — httpd#175 plus mvslovers/libc370#126 — and the gate was guarding the
-weakest function here while `fn=cmd`, which issues operator commands through
-SVC 34 in supervisor state, never had one. `&hold=` went with it: it was the
-only knob that degraded *other* requests, and #287, which it was built for, is
-closed. The boundary that means something is the route: building with
-`-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, which covers
-`fn=cmd` too. Default is ON — `fn=version` is how a deploy is verified.
-
-`tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
-caught, the server keeps serving, and it costs no storage. It deliberately
-faults the worker several times.
+The endpoint has **no per-function gate and must not grow one back** (#343);
+building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered.
+`fn=textsum` / `fn=textdump` and the gate history: `internals/test-endpoint.md`.
 
 ### Known Platform Bugs
 
@@ -681,29 +375,8 @@ project: on a non-blocking socket **the application waits — 100 attempts of
 On a *blocking* socket libc370 waits instead and the application must not — see
 libc370#120 / ftpd#104. One layer per socket, never two.
 
-Three things this depends on that fail silently if broken. The ECB handed to
-`cthread_timed_wait()` is zeroed on the waiting frame **every** time; an
-already-posted ECB that outlives one wait makes every later wait return
-instantly, which is the busy spin again. The reason `send_all()` marks the
-client `CSTATE_DONE` on failure is not tidiness — without it the handler's
-error path comes straight back through `sendErrorResponse()` and pays the whole
-10 s budget again for a peer that is already gone (httpd#203). And it must
-clear `keepalive` in the same breath: `CSTATE_DONE` is *normal completion*, so
-httpd walks `DONE → REPORT → RESET` and `httprese()` reuses the socket if the
-flag is still set — appending the next response to a body that is short of the
-Content-Length it announced. A hang traded for a corrupt stream is not a fix.
-Both flags are cleared by `abort_response()` (`common.c`), together with
-`chunked`: left set, httpd's `httpdone()` closes a chunked body with a clean
-`0\r\n\r\n`, and a read error mid-body reaches the client as a complete-looking
-200 (#421 — every data set GET is chunked). httpd's own send path already
-clears `chunked` when a send fails; the read-error callers in `dsapi.c` had
-nothing that did.
-
-The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
-the real one on the host; its four MVS/httpd services are injected through
-`SEND_OPS`. Until the Hercules X'75' fix (`mvslovers/hyperion` `1a599b0d`) a
-full send buffer froze the emulated CPU rather than returning `EWOULDBLOCK`,
-which is the only reason this never fired before 2026-08-18.
+What it depends on that fails silently if broken (the ECB, `CSTATE_DONE`,
+`keepalive`, `chunked`): `internals/sending.md`.
 
 ### Conventions
 
@@ -712,221 +385,12 @@ which is the only reason this never fired before 2026-08-18.
 - Manual memory management — watch for malloc/free pairing and cleanup paths.
 - Tab indentation, 4-space width, LF line endings (see `.editorconfig`).
 
-## USS/UFS Endpoints
-
-> **Spec:** `internals/uss-spec.md` — the authoritative architecture and design document.
-> **Status:** Phase 1 complete (Issues #77–#89). chtag utility implemented (#106).
-
-### Architecture
-
-- All USS handlers live in `ussapi.c` / `ussapi.h`
-- UFS session lifecycle: HTTPD-managed via `http_get_ufs()` — no `ufsnew()`/`ufsfree()` in mvsMF
-- ESTAE recovery for UFS: handled by HTTPD's worker ESTAE (not mvsMF)
-- Route pattern `{*filepath}` captures entire remaining path including `/` characters
-- PUT to /fs/ dispatches by Content-Type: application/json → USS utilities handler, else → file write
-- chtag utility: `list` returns "untagged" stub, `set`/`remove` are accepted no-ops
-- libufs/ufsd dependency is managed via mbt (mbt.toml)
-
-### Handler Naming Convention and ASM Labels
-
-- `ussListHandler`    — GET    /zosmf/restfiles/fs?path=         — asm("UAPI0001")
-- `ussGetHandler`     — GET    /zosmf/restfiles/fs/{*filepath}   — asm("UAPI0002")
-- `ussPutHandler`     — PUT    /zosmf/restfiles/fs/{*filepath}   — asm("UAPI0003")
-- `ussCreateHandler`  — POST   /zosmf/restfiles/fs/{*filepath}   — asm("UAPI0004")
-- `ussDeleteHandler`  — DELETE /zosmf/restfiles/fs/{*filepath}   — asm("UAPI0005")
-
-### Encoding Rules (CRITICAL)
-
-> Read **Codepage Override** above first. USS is **IBM-1047**, not CP037 —
-> `httpx->xlate_1047`. Using the dataset table here corrupts `[ ] ^ ! ¬` silently.
-
-- UFSD stores RAW BYTES — no encoding transformation
-- Convention: files stored in EBCDIC (so MVS programs can read them)
-- ussPutHandler (text mode): ASCII→EBCDIC via `http_xlate(..., cp->atoe)` BEFORE ufs_fwrite()
-- ussGetHandler (text mode): EBCDIC→ASCII via `http_xlate(..., cp->etoa)` AFTER ufs_fread()
-- `cp` comes from `uss_data_type()`: `xlate_1047` by default, `xlate_cp037` for
-  `X-IBM-Data-Type: text;fileEncoding=IBM-037` (#393)
-- Binary mode: NO conversion, pass bytes through
-- X-IBM-Data-Type is parsed by `parse_data_type()` (`src/datatype.c`, shared
-  with the data set API): "text" (default) or "binary", any case, parameters
-  allowed; "record" is answered 400 like the reference
-
-### UFS Session Pattern (use in EVERY handler)
-
-Use `uss_get_ufs()` which calls `http_get_ufs()` (HTTPD-managed, lazy init per connection) and sets the session owner via `ufs_setuser()` from the ACEE:
-
-```c
-int ussXxxHandler(Session *session) {
-    UFS *ufs = uss_get_ufs(session);
-    if (!ufs) return -1;  // 503 already sent
-
-    /* ... handler logic ... */
-
-    // NO ufsfree — HTTPD manages the UFS session lifecycle
-    return rc;
-}
-```
-
-### Error Code Mapping (UFSD_RC_* → HTTP)
-
-Use the `ufsd_rc_to_http()`, `ufsd_rc_to_category()`, and `ufsd_rc_message()` mapping functions
-in `ussapi.c`. ALWAYS call `sendErrorResponse()` with the mapped values.
-
-**Note:** the table below is correct as it stands — see **HTTP Status Codes**
-above. EXIST/NOTEMPTY map to 400 and NOSPACE/NOINODES to 500 not because httpd
-lacks 409/507 (it has both), but because the z/OSMF status list does not contain
-them. Same for NAMETOOLONG → 400, and since #248 every handler agrees with it:
-the 414s that used to sit in `ussGetHandler` and `ussPutHandler` are gone, as is
-the 501 for an unsupported USS utility (now 400 — the service offers one
-utility, so naming another is an incorrect parameter).
-
-**201 for a created resource is correct** (`dsapi.c:2597`, `ussapi.c:960`),
-even though it is absent from the enumerated list. Measured against a real
-z/OSMF: `POST /zosmf/restfiles/ds/<new PDS>` answers **201** with an empty body.
-The list bounds which codes are permitted, it does not mandate one per
-condition — see **Checking behaviour against a real z/OSMF**.
-
-**`UFSD_RC_ROFS → 400` since #250.** It used to be 403, the last row outside the
-list. It could not be settled by measurement — a read-only file system is a UFSD
-condition and the reference has no equivalent state to provoke — so it was
-decided together with the 410 that used to come back for purged spool output,
-and both followed the list rather than becoming sanctioned exceptions. Category
-4 still separates it. The row is unreachable in practice: UFSD has no read-only
-mount, so nothing produces this rc today.
-
-| UFSD RC | Constant | HTTP | Category | Description |
-|---------|----------|------|----------|-------------|
-| 0  | UFSD_RC_OK       | 200 | —  | Success |
-| 28 | UFSD_RC_NOFILE   | 404 | 6  | Not found |
-| 32 | UFSD_RC_EXIST    | 400 | 4  | Already exists |
-| 36 | UFSD_RC_NOTDIR   | 400 | 2  | Not a directory |
-| 40 | UFSD_RC_ISDIR    | 400 | 2  | Is a directory |
-| 44 | UFSD_RC_NOSPACE  | 500 | 8  | No space left |
-| 48 | UFSD_RC_NOINODES | 500 | 8  | No inodes available |
-| 52 | UFSD_RC_IO       | 500 | 10 | I/O error |
-| 56 | UFSD_RC_BADFD    | 500 | 10 | Bad file descriptor |
-| 60 | UFSD_RC_NOTEMPTY | 400 | 4  | Directory not empty |
-| 64 | UFSD_RC_NAMETOOLONG | 400 | 2 | Path name too long |
-| 68 | UFSD_RC_ROFS     | 400 | 4  | Read-only file system |
-
-### I/O Pattern for File Read
-
-`send_all()` does not translate — convert the payload before handing it over,
-and never reach past it to `http_send()` (see **Sending**).
-`uss_data_type()` derives the mode and the table from the `X-IBM-Data-Type`
-header, and answers the request itself (unsupported encoding, `record`) when
-it returns non-zero.
-
-```c
-char          buf[4096];
-UINT32        n;
-int           data_type;
-const HTTPCP *cp = NULL;
-
-if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
-    return rc < 0 ? rc : 0;     /* already answered */
-}
-
-while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-    if (data_type == DATA_TYPE_TEXT) {
-        /* EBCDIC -> ASCII: IBM-1047 unless fileEncoding said CP037 */
-        http_xlate((unsigned char *)buf, n, cp->etoa);
-    }
-    if (send_all(session, (const UCHAR *)buf, (int)n) < 0) {
-        break;  /* real handlers goto their cleanup label */
-    }
-}
-```
-
-### I/O Pattern for File Write
-
-```c
-char         *body = NULL;
-size_t        body_len = 0;
-int           data_type;
-const HTTPCP *cp = NULL;
-
-/* Before the body is read and before the truncating "w" open */
-if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
-    return rc < 0 ? rc : 0;
-}
-
-// Supports Content-Length and Transfer-Encoding: chunked
-if (read_request_content(session, &body, &body_len) < 0) {
-    return sendErrorResponse(session, 400, ...);
-}
-
-if (data_type == DATA_TYPE_TEXT) {
-    /* ASCII -> EBCDIC: IBM-1047 unless fileEncoding said CP037 */
-    http_xlate((unsigned char *)body, (int)body_len, cp->atoe);
-}
-
-UFSFILE *fp = ufs_fopen(ufs, filepath, "w");
-if (!fp) { /* handle error */ }
-ufs_fwrite(body, 1, (UINT32)body_len, fp);
-ufs_fclose(&fp);
-free(body);
-```
-
-### Recursive Delete Pattern
-
-```c
-static int recursive_delete(UFS *ufs, const char *path) {
-    UFSDDESC *dd = ufs_diropen(ufs, path, NULL);
-    if (!dd) return -1;
-
-    UFSDLIST *entry;
-    while ((entry = ufs_dirread(dd)) != NULL) {
-        if (strcmp(entry->name, ".") == 0 ||
-            strcmp(entry->name, "..") == 0) continue;
-
-        char fullpath[UFS_PATH_MAX];
-        snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->name);
-
-        if (entry->attr[0] == 'd') {
-            recursive_delete(ufs, fullpath);
-        } else {
-            ufs_remove(ufs, fullpath);
-        }
-    }
-    ufs_dirclose(&dd);
-    return ufs_rmdir(ufs, path);
-}
-```
-
-### File Size Limit
-
-- Max file size: 64 KB (UFSD Phase 1 — direct blocks only)
-- ufs_fwrite beyond 64K → UFSD_RC_NOSPACE → HTTP 500
-
 ### Off-Limits
 
 - `receive_raw_data()` — DO NOT MODIFY (MVS TCP/IP bug workaround)
 - Router core logic — modify ONLY for {*} wildcard support in is_pattern_match() and extract_path_vars()
 
-### Testing Requirements (when implemented)
-
-- Every handler needs matching curl test in tests/curl-uss.sh
-- Every handler needs matching Zowe CLI test in tests/zowe-uss.sh
-- Error paths MUST be tested (UFSD not running → 503, non-existent → 404, etc.)
-
-## Console Services (z/OSMF restconsoles)
-
-> **Docs:** `docs/endpoints/console/` (issue-command, collect, detections, hardcopy-log).
-> **Status:** all four endpoints implemented (Issues #142–#145).
-
-### Architecture
-
-- All handlers live in `consapi.c` / `consapi.h`.
-- **Data source is the Master Trace Table (MTT)**, read via libc370 `clibmtt`
-  (`cmtt_new()` snapshot → `cmtt_get_array()`). MVS 3.8j has no EMCS consoles,
-  no OPERLOG, and the active SYSLOG on the JES2 spool is **not browsable**
-  (records=0) — the MTT is the in-memory tail of the hardcopy log.
-- Commands are issued with **SVC 34 (MGCR)** under the caller's ACEE.
-- Console error body is `{return-code, reason-code, reason}` (different from
-  restfiles' `category`/`rc`/`message`) — use `send_console_error()`.
-
-### RENT constraint (CRITICAL)
+## RENT constraint (CRITICAL)
 
 MVSMF is link-edited **RENT** (read-only static storage). Writing to any
 writable `static`/global data ABENDs S0C4. Keep all mutable state on the stack
@@ -934,50 +398,22 @@ or in `__getm`'d storage. The console cursors/detections live in a `__getm`'d
 key/value store (`ntstore.c`) anchored in the httpd per-CGI context
 (`mvsmfctx.c` → `http_cgictx_get`), never in statics.
 
-### Handler ASM labels
+## USS/UFS Endpoints
 
-```
-consoleIssueHandler    PUT  /restconsoles/consoles/{name}                   asm("CAPI0001")
-consoleCollectHandler  GET  /restconsoles/consoles/{name}/solmsgs/{key}     asm("CAPI0002")
-consoleDetectHandler   GET  /restconsoles/consoles/{name}/detections/{key}  asm("CAPI0003")
-consoleLogHandler      GET  /restconsoles/v1/log                            asm("CAPI0004")
-```
+All handlers live in `ussapi.c`. USS payloads are **IBM-1047** (see **Codepage
+Override**). Every handler gets its UFS session from `uss_get_ufs()` and never
+frees it -- HTTPD manages the lifecycle -- and maps UFSD return codes through
+`ufsd_rc_to_http()` / `ufsd_rc_to_category()` / `ufsd_rc_message()` into
+`sendErrorResponse()`. Patterns, ASM labels and the full mapping table:
+`internals/uss-handlers.md`.
 
-### Notes
+## Console Services
 
-- MTT lines carry only `hh.mm.ss` (no date); the hardcopy log reconstructs the
-  date by walking newest→oldest and rolling back one day at each midnight crossing.
-- `mktime()` on 3.8j does **not** re-apply the TZ offset — keep the window anchor
-  and the per-entry timestamps in the same (local-wall-clock) frame.
-- The Zowe `zos-logs` SDK reads `resp.totalitems` (lower-case) — match it.
-- Reading the real SYSLOG spool is a separate libc370/clibjes2 task (`jesprint`
-  breaks on the SYSLOG block validation; see libc370#4).
+All handlers live in `consapi.c`; data source is the Master Trace Table. Details:
+`internals/console.md`.
 
-## SMP4 FMID — one per release
+## SMP4 FMID
 
-The id is the release: `T` + three product letters + the three version digits.
-One id per release, **spent exactly once**, and each release's SYSMOD deletes
-its predecessor:
-
-```toml
-[smp]
-prefix = "TZMF"   # mbt 3 derives both: 1.4.0 is TZMF140, deleting TZMF130
-```
-
-**No version component may ever exceed 9** — a 7-character id has no room for
-a second digit. At patch 9 cut the next minor, at minor 9 the next major;
-mvsmf 1.2.10 cannot be expressed and must not be released.
-
-`TZMF110` is 1.1.0, released 2026-09-14 -- the first level, so it carried no
-`delete`. `TZMF120` is 1.2.0, released 2026-10-13, deleting `TZMF110`: the
-libc370 2.0 port moved the minor, so 1.1.1 was never cut and `TZMF111` is
-unspent and unassigned. `TZMF130` is 1.3.0, released 2026-10-15, deleting
-`TZMF120` (libc370 2.12.1, #430). `main` is 1.4.0-dev, so the next is
-**`TZMF140`**, deleting `TZMF130`. A patch release (1.3.1) needs an explicit `fmid` and
-`delete` in `mbt.toml` until mbt builds PTFs. 1.0.0 and 1.0.1 shipped with no
-`[distribution]`, so nothing below `TZMF110` was ever assigned.
-
-Never re-spend an id, and never install a test package under the real one: a
-test needs a throwaway id **and** throwaway module names, because SMP keys
-element ownership on `MOD(name)`, not on the target library. See the root
-`CLAUDE.md` for the full rule and the measurements behind it.
+`[smp] prefix = "TZMF"` in `mbt.toml`; mbt 3 derives the id and the delete from
+the version (1.4.0 is `TZMF140`, deleting `TZMF130`). Rules, spent ids and
+mvsMF's install history: `~/repos/mvs/.workspace/context/smp.md`.

@@ -1,0 +1,131 @@
+# Conformance with z/OSMF: status codes, the 401 challenge, the reference system
+
+Moved verbatim from `CLAUDE.md` on 2026-10-19; `CLAUDE.md` keeps the rules every session needs and points here.
+
+Read before choosing or changing an HTTP status, touching `send_auth_challenge()`, or measuring against the reference z/OSMF.
+
+## HTTP status codes -- the decisions behind the closed list
+
+The list itself and the short rules stay in `CLAUDE.md`. This is the reasoning and history.
+
+Two codes turn on this:
+
+- **204 belongs to the bodiless replies** — deletes, rename, the USS utilities —
+  and mvsMF emits it there (`dsapi.c:2943`, `dsapi.c:2992`, `ussapi.c:1374`).
+  The list also describes it for "no data sets or files match the filter
+  criteria, or the specified partitioned data set has no members", but real
+  z/OSMF answers **200 with an empty `items` array** in every one of those
+  cases, including a partitioned data set with zero members. Empty listings stay
+  200 (#266, measured, closed won't-do).
+- **206 went the same way, after briefly going the other.** #249/PR#265 adopted
+  it for a listing truncated by `X-IBM-Max-Items`, on the documented wording —
+  and #274 took it back out: real z/OSMF answers **200 with `moreRows: true`**
+  there and emits no 206 on the files service at all, not even for a
+  record-range read. Truncation is carried in `moreRows` and nowhere else, so
+  **mvsMF emits no 206 anywhere**. Do not cite #249; it was measured wrong.
+
+  The removal also deleted work rather than only adjusting it: the status was
+  the sole reason `memberListHandler` and `ussListHandler` measured the page
+  before the header went out, so both second walks went with it. What is left
+  of that shape is load-bearing — `member_scan()` walks one match *past* the
+  page and emits only up to it, because a walk bounded at the page returns the
+  limit whether or not anything follows, and a directory holding exactly as
+  many members as the limit would then report `moreRows: true`. That failure is
+  silent and its test is the equal-to-the-count case in `curl-datasets.sh`.
+
+Two further consequences that keep getting rediscovered:
+
+- **409 Conflict, 414 URI Too Long and 507 Insufficient Storage are not in the
+  list.** httpd gained all three in httpd#28/PR#56, and a live probe confirms a
+  CGI-set 414 reaches the client unchanged — but adopting them is still wrong.
+  "Already exists" / "not empty" stay **400**, "no space" / "no inodes" stay
+  **500**. This was tracked as #102 and closed as won't-do; do not re-open the
+  reasoning from the httpd side alone.
+- **There are no sanctioned exceptions, and two were tried.** 410 Gone for
+  purged spool output (#187) and 403 for a read-only file system both went in as
+  "a case z/OSMF has no code for", and both came back out in #250. The reason to
+  know this is the argument that produced them, because it is a good one and it
+  will come again: mvsMF can detect states the reference cannot, so no reference
+  behaviour exists to copy. What settled it is that the reference stays inside
+  its own list even where a better code exists — a missing job answers **400**,
+  not 404, measured. A distinction worth keeping goes in the error report's
+  `reason` and `message`, where it costs no conformance; `REASON_SPOOL_GONE` is
+  the worked example.
+- **206, 412 and 429 reach the wire now — but only because httpd was re-cut and
+  redeployed** (206 is emittable, and unused since #274; the entry is about what
+  httpd can send, not about what mvsMF sends). They were added to
+  `src/httpstat.c` by httpd#181/PR#183 (commit
+  `623f6a6`), which landed *after* the original `v4.0.0-dev` artifact; that tag
+  has since been re-cut and the STC redeployed, and 412 was measured going out
+  correctly (#152). The mechanism is the part to remember: `http_resp()`
+  resolves through the httpx vector into the **running** httpd, so the live
+  server's build decides, not the staged `.a` — `mbt deps` alone can never
+  change which statuses are emittable, because `libhttpd.a` carries no status
+  table at all. An absent code is answered 500, and no longer silently: an
+  unknown one WTOs `HTTPD054E`, which is how a 505 going out as 500 was finally
+  noticed. **Check `httpstat()` in the httpd you are actually running** before
+  sending a status this codebase does not already use. The cheap probe is
+  `printf 'GET / HTTP/9.9\r\n\r\n' | nc <host> <port>` — the same commit fixed
+  httpd's own 505, so a `505` reply proves the build is current and a `500`
+  proves it is not.
+
+
+### The 401 challenge — the one deviation, and why it is not negotiable
+
+Every 401 carries `WWW-Authenticate: Basic realm="<SMF ID>"`, **except** when the
+request came from a browser `fetch`/XHR. `send_auth_challenge()` (`common.c`)
+owns the rule; `is_browser_fetch()` next to it owns the exception.
+
+The reference sends the challenge on every endpoint — measured, and *not*
+dropped for a client identifying itself with `X-CSRF-ZOSMF-HEADER`, so there is
+no API-client exemption to copy. RFC 9110 §11.6.1 requires it too.
+
+The exception is not cosmetic and not a guess. Measured with
+`tests/probe-401-dialog.py`: a same-origin `fetch` or XHR that receives a 401
+carrying this header makes the browser open its native credential dialog **and
+withhold the response until a human dismisses it** — 6080 ms and 4805 ms in the
+run that settled it. The Desktop's own `mvsmf:session-expired` handling never
+runs, and once the dialog is satisfied the browser caches those Basic
+credentials and replays them on every same-origin request, outliving the token
+logout that #161 exists to make meaningful. Re-run the probe before doubting
+this; it needs no MVS.
+
+Three things that look like tidying and are not:
+
+- **`X-CSRF-ZOSMF-HEADER` is deliberately not a suppression signal**, even
+  though the Desktop sends it. Zowe and the SDKs send it too, and they must keep
+  getting exactly what the reference sends. httpd suppresses on it
+  (`httppc.c`, httpd#119/#120) — the two layers differ on purpose.
+- **`Sec-Fetch-Mode: navigate` still gets the challenge.** That is somebody
+  typing the URL, where the browser's own prompt is the useful answer.
+- **The realm is the SMF ID, not a constant.** A browser caches Basic
+  credentials under (origin, realm), and httpd answers on the same origin with
+  the realm it derives in `httprlm()` (httpd#191). A different string there is a
+  second protection space and a second dialog; a constant is what httpd#191
+  removed, because it made every system on the network share one. The logic is
+  duplicated in `auth_realm()` because `httprlm()` lives in the server binary
+  and the CGI-side `httpd.a` carries only the `cgistart` stub.
+
+## Checking behaviour against a real z/OSMF (`zxp`) -- technique and findings
+
+The read-only rule stays in `CLAUDE.md`.
+
+Zowe CLI does not print the HTTP status on success and the profile is HTTPS, so
+`tests/trace-zowe.sh` cannot see inside it. To read the exact status line, load
+the profile through the SDK and use `client.response.statusCode`:
+`ProfileInfo.readProfilesFromDisk()` → `mergeArgsForProfile(attrs,
+{getSecureVals: true})` → `ProfileInfo.createSession()` pulls the credentials
+from the OS credential store without ever printing them.
+
+Two things met on the way: a member `pattern=` longer than 8 characters is
+rejected `400 {"category":1,"rc":4,"reason":13,"message":"pattern"}` — that is
+the member-name limit, not an empty result. And z/OSMF emits `moreRows` **only
+when true** — mvsMF followed suit in #279, on all three listings and the USS
+stat reply, so a complete listing now carries no `moreRows` key at all.
+
+`totalRows` is the piece still missing, and it is narrower than it looks: the
+reference emits it on the **file** list (`totalRows: 39` for `/`), and on a
+complete data set or member list it emits neither `totalRows` nor `moreRows` —
+measured, keys `["JSONversion","items","returnedRows"]`. mvsMF matches that
+today by accident rather than by decision; the open TODOs sit at `dsapi.c:1284`
+and `dsapi.c:2145` and are about `X-IBM-Attributes` `,total`.

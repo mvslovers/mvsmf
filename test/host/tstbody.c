@@ -217,10 +217,19 @@ test_too_large(void)
 	CHECK(e.calls == 0, "and allocates nothing");
 
 	env_init(&e, big, BIG);
+#ifdef __MVS__
+	/* No region holds 16 MB below the line: the request is made and the
+	   storage refuses it, which is the point of the length check. */
+	CHECK_EQ(read_body(&e, &ops, "16777215", 0, &content, &size),
+		REQBODY_NOMEM, "16 MB - 1 is attempted, and 24-bit storage refuses");
+	CHECK(e.calls == 1 && e.nomems == 1,
+		"the storage decides, not a limit below 16 MB");
+#else
 	CHECK_EQ(read_body(&e, &ops, "16777215", 0, &content, &size),
 		REQBODY_BAD, "16 MB - 1 is attempted, and the client sent less");
 	CHECK(e.allocs == 1 && e.largest == 16777216UL,
 		"the storage decides, not a limit below 16 MB");
+#endif
 	done(&e, content);
 	CHECK_EQ(e.live, 0L, "nothing leaked");
 }

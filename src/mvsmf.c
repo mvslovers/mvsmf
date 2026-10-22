@@ -183,8 +183,9 @@ int main(int argc, char **argv)
 	   the DD (fopen("DD:ddname")), with __listvl() resolving the volser to a
 	   device if UNIT turns out to be required.  DELETE and rename are not:
 	   remove() and rename() reach a data set through the catalog only, and
-	   there is no volume-addressed SCRATCH/RENAME in libc370 to call instead
-	   -- mvslovers/libc370#143.  Routing those through IDCAMS would
+	   libc370 had no volume-addressed SCRATCH/RENAME to call instead
+	   (mvslovers/libc370#143); since 2.24.0 it has: __scratch(), __renamev(),
+	   __delmemv(), __renmemv().  Routing those through IDCAMS would
 	   reintroduce the SYSDSN ENQ escalation of #342.
 
 	   The catalog-based diagnosis in dsapi.c (why_open_failed(),

@@ -68,26 +68,34 @@ every console message mvsMF can write.
   mvsMF is a separate load module with its own statically linked runtime, so
   relinking the server does nothing for mvsMF and the other way round: both
   sides want to be current.
-- **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — see below
+- **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — only when
+  `$DSNPRFX` is not `SYS1`, see below
 - JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`
 
 #### The two JES2 DDs
 
-mvsMF reads the JES2 checkpoint and spool through libc370's `jesopen()`, which
-opens them **by ddname**. As a CGI module dispatched into httpd's task by the
-LINK SVC, mvsMF has no allocations of its own — the two DDs have to be in the
-**host server's** STC procedure:
+mvsMF reads the JES2 checkpoint and spool through libc370's `jesopen()`. As a
+CGI module dispatched into httpd's task by the LINK SVC, mvsMF has no
+allocations of its own. Since libc370 2.24.0, which mvsMF 1.4.0 is built
+against, `jesopen()` needs no DD statements: without `HASPCKPT` and
+`HASPACE1` in the step it allocates `SYS1.HASPCKPT` itself (through the
+catalog, else on the online volume whose VTOC has it) and `SYS1.HASPACE` on
+the spool volume the checkpoint names. The job endpoints therefore work on a
+host server whose procedure carries neither DD.
+
+A DD in the host server's STC procedure still takes precedence, and it is
+still **required when JES2 runs with another `$DSNPRFX`**, because the
+allocation only looks for the `SYS1` names:
 
 ```jcl
 //HASPCKPT DD  DISP=SHR,DSN=SYS1.HASPCKPT
 //HASPACE1 DD  DISP=SHR,DSN=SYS1.HASPACE
 ```
 
-Substitute your own names if `$DSNPRFX` is not `SYS1`. Without them **every**
-job endpoint answers HTTP 500 (`REASON_INCORRECT_JES_VSAM_HANDLE`) and writes
-two console lines per request — and nothing on either side of the boundary
-points at the cause, which is what made mvslovers/httpd#256 expensive to
-diagnose. The data set services are unaffected.
+Substitute your own names. When neither the DDs nor the `SYS1` data sets are
+there, **every** job endpoint answers HTTP 500
+(`REASON_INCORRECT_JES_VSAM_HANDLE`); the console message libc370 writes
+names both possible causes. The data set services are unaffected.
 
 #### The `SYZJ201` usermod
 

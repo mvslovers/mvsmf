@@ -11,8 +11,8 @@ GET
 > **There is no `-({volume-serial})` form.** That route was withdrawn in #336:
 > it accepted the volume operand and discarded it, so a request naming the
 > wrong volume was answered as if it had named the right one. Such a URL is
-> answered 404. Restoring it needs a volume-addressed SCRATCH/RENAME in
-> libc370 (mvslovers/libc370#143) for the delete and rename paths.
+> answered 404. Restoring it is #336. The volume-addressed SCRATCH/RENAME it
+> needs for the delete and rename paths has been in libc370 since 2.24.0.
 
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset
@@ -109,6 +109,9 @@ diagnosis (404, or 500 on an I/O error), which is the more specific answer.
       (`category` 16, `rc` 121, see [encoding.md](encoding.md))
     - The member exists but cannot be opened (I/O error)
     - Memory allocation failed
+    - A failed open could not be diagnosed for lack of storage (`MVSMF006E`
+      naming `THE MEMBER LIST`); the answer is not a 404, because nothing
+      established that the member is missing (issue #360)
 
 A failed open used to be reported as 500 whatever the cause, so a member that
 was simply not there looked like a broken server (issue #191). The two cases are

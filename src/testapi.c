@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <ext/array.h>
 #include <mvs/dscb.h>
 #include <mvs/ecb.h>
@@ -20,6 +21,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "testapi.h"
+#include "blkptrk.h"          /* blocks_per_track -- fn=dscb (#439) */
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
 #include "mvsmfmsg.h"
 #include "zosmferr.h"          /* CATEGORY_SERVICE, REASON_SERVER_ERROR */
@@ -440,16 +442,20 @@ int testHandler(Session *session) {
         (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_FILTER");
     DSLIST **dslist = NULL;
     unsigned i, count;
+    int nomem;
 
     if (!level)
       level = "SYS1";
 
     dslist = __listds(level, "NONVSAM VOLUME", filter);
+    /* NULL with ENOMEM is a storage shortage, not an empty level (#360) */
+    nomem = (!dslist && errno == ENOMEM);
 
     rc = http_printf(
         session->httpc,
-        "{ \"fn\": \"listds\", \"level\": \"%s\", \"filter\": \"%s\",\n", level,
-        filter ? filter : "(null)");
+        "{ \"fn\": \"listds\", \"level\": \"%s\", \"filter\": \"%s\","
+        " \"nomem\": %d,\n", level,
+        filter ? filter : "(null)", nomem);
     if (rc < 0)
       goto quit;
 
@@ -543,15 +549,44 @@ int testHandler(Session *session) {
             (unsigned)d1->scal3[2];
     }
 
-    rc = http_printf(
-        session->httpc,
-        "{ \"fn\": \"dscb\", \"dsn\": \"%s\", \"locate_rc\": %d,"
-        " \"dscb_rc\": %d, \"volser\": \"%.6s\","
-        " \"lrecl\": %d, \"blksize\": %d, \"extents\": %d,"
-        " \"spacu\": \"%s\", \"secondary\": %u }\n",
-        dsn, loc_rc, dscb_rc, vol, dscb_rc == 0 ? d1->lrecl : 0,
-        dscb_rc == 0 ? d1->blksz : 0, dscb_rc == 0 ? d1->noepv : 0,
-        (dscb_rc == 0 && (d1->scal1 & 0xC0) == CYL) ? "CYL" : "TRK", sec);
+    /* The device geometry of the volume (format-4 DSCB) and the last-block
+     * pointer DS1LSTAR, with the blocks per track dsapi.c's record-count
+     * estimate derives from them (#439): what a test needs to compare the
+     * estimate with what the access method really wrote. */
+    {
+      DSCB dscb4;
+      unsigned tt = 0;
+      unsigned r = 0;
+      unsigned bpt = 0;
+      int d4_rc = -1;
+
+      memset(&dscb4, 0, sizeof(dscb4));
+      if (dscb_rc == 0) {
+        d4_rc = __dscbv(vol, &dscb4);
+        tt = ((unsigned)d1->lstar[0] << 8) | (unsigned)d1->lstar[1];
+        r = d1->lstar[2];
+      }
+      if (d4_rc == 0)
+        bpt = blocks_per_track(dscb4.dscb4.devtk, dscb4.dscb4.devov,
+                               dscb4.dscb4.devk, dscb4.dscb4.devfg,
+                               d1->blksz);
+
+      rc = http_printf(
+          session->httpc,
+          "{ \"fn\": \"dscb\", \"dsn\": \"%s\", \"locate_rc\": %d,"
+          " \"dscb_rc\": %d, \"volser\": \"%.6s\","
+          " \"lrecl\": %d, \"blksize\": %d, \"extents\": %d,"
+          " \"spacu\": \"%s\", \"secondary\": %u,"
+          " \"lstar_tt\": %u, \"lstar_r\": %u, \"dscb4_rc\": %d,"
+          " \"devtk\": %u, \"devov\": %u, \"devk\": %u, \"devfg\": %u,"
+          " \"dstrk\": %u, \"blocks_per_track\": %u }\n",
+          dsn, loc_rc, dscb_rc, vol, dscb_rc == 0 ? d1->lrecl : 0,
+          dscb_rc == 0 ? d1->blksz : 0, dscb_rc == 0 ? d1->noepv : 0,
+          (dscb_rc == 0 && (d1->scal1 & 0xC0) == CYL) ? "CYL" : "TRK", sec,
+          tt, r, d4_rc, (unsigned)dscb4.dscb4.devtk,
+          (unsigned)dscb4.dscb4.devov, (unsigned)dscb4.dscb4.devk,
+          (unsigned)dscb4.dscb4.devfg, (unsigned)dscb4.dscb4.dstrk, bpt);
+    }
 
     /* --- fn=syslog (stepped probe) -------------------------------- */
     /* Bisect via &step=N.  Each step that returns normally flushes its

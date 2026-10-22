@@ -11,6 +11,41 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
 
 ## [Unreleased]
 
+Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1.
+
+### Fixed
+
+- **The end-of-data estimate for FB data sets is right on a 3380** (#439).
+  Binary and record-mode reads of an FB data set are capped at the number of
+  records the VTOC says it holds, so a read stops at the last record instead
+  of running into the unused rest of the last block. libc370 2.24.0 corrected
+  the layout of the format-4 DSCB, which makes that estimate usable on every
+  device -- and the byte-overhead formula it used is wrong on a 3380, which
+  counts 32-byte cells: it put 15 blocks of 3120 bytes on a track where 13
+  fit, so a data set of 26 blocks was counted as 28. The estimate now follows
+  the device (bytes on a 3350, cells on a 3380) and is dropped for a device it
+  does not know, where the read simply runs to the end of the data set.
+- **A storage shortage while listing or diagnosing a failed open is no longer
+  reported as "nothing there"** (#360). `__listds()` and `__listpd()` return
+  NULL both for an empty result and for a failed allocation. The data set
+  list answered an empty 200 for the second, and a failed open answered 404
+  "member not found". Both now answer 500 and write `MVSMF006E` naming the
+  list; an empty level is still a 200 with no items.
+- **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
+  the server procedure** (libc370 2.24.0). They are still honoured, and still
+  needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
+
+### Changed
+
+- Internal: the local `__tzget()` declaration is gone (#375) and the console
+  log's time arithmetic uses `timegm()` instead of `mktime()`, which libc370
+  may move to local time. No change in output.
+- The test endpoint's `fn=dscb` also returns the volume's device geometry and
+  the computed blocks per track, and `fn=listds` reports a storage shortage
+  as `"nomem": true`.
+- The `TSTBODY` unit test expects a 16 MB request body to be refused on MVS,
+  where the 24-bit address space cannot hold it.
+
 ## [1.3.0] - 2026-10-15
 
 The release that stops every request from costing the server storage for

@@ -1354,12 +1354,12 @@ int consoleLogHandler(Session *session)
 	if (tz_min < -720) tz_min += 1440;
 
 	/* ---- anchor: timestamp (ms) overrides time; default now ----
-	 * On 3.8j mktime() does NOT re-apply the TZ offset, so every entry's esecs
-	 * (and the emitted timestamps) are the LOCAL wall clock numerically. Keep
-	 * the anchor in that same frame: "now" via mktime(localtime(now)), and
+	 * timegm() applies no TZ offset, so every entry's esecs (and the emitted
+	 * timestamps) are the LOCAL wall clock numerically. Keep the anchor in
+	 * that same frame: "now" via timegm(localtime(now)), and
 	 * time/timestamp anchors taken as-is -- the client got its timestamps from
 	 * this same field, so they round-trip without a TZ correction. */
-	{ struct tm tmp = base; now_f = mktime(&tmp); }
+	{ struct tm tmp = base; now_f = timegm(&tmp); }
 	anchor = now_f;
 	if (qts && *qts) {
 		int l = (int)strlen(qts), k;
@@ -1385,7 +1385,7 @@ int consoleLogHandler(Session *session)
 		memset(&it, 0, sizeof(it));
 		it.tm_year = yy - 1900; it.tm_mon = mo - 1; it.tm_mday = dd;
 		it.tm_hour = hh; it.tm_min = mm; it.tm_sec = ss; it.tm_isdst = -1;
-		anchor = mktime(&it);          /* same (local wall clock) frame as esecs */
+		anchor = timegm(&it);          /* same (local wall clock) frame as esecs */
 	}
 
 	/* future-time error applies only to an explicitly supplied anchor; the
@@ -1444,7 +1444,7 @@ int consoleLogHandler(Session *session)
 		etm.tm_min   = (sod % 3600) / 60;
 		etm.tm_sec   = sod % 60;
 		etm.tm_isdst = -1;
-		esecs[i] = mktime(&etm);
+		esecs[i] = timegm(&etm);
 	}
 
 	/* ---- build the response ---- */

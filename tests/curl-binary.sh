@@ -29,6 +29,7 @@ fi
 # Test dataset names
 TEST_SEQ="${MVSMF_USER}.CURL.TESTBIN"
 TEST_PDS="${MVSMF_USER}.CURL.TESTBPDS"
+TEST_BLK="${MVSMF_USER}.CURL.TESTBBLK"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
@@ -83,6 +84,7 @@ assert_http_status() {
 cleanup_datasets() {
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -153,6 +155,70 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
 assert_http_status "204" "$HTTP_CODE" "delete sequential dataset"
+
+# -----------------------------------------------------------------
+# Blocks per track (issue #439): a data set of more than one track
+# -----------------------------------------------------------------
+
+echo ""
+echo "--- Blocks per track agree with the last-block pointer (issue #439) ---"
+
+# What the binary read caps at is lstar_tt * blocks_per_track + lstar_r, the
+# record count's source. The data set must run over a track boundary: with
+# lstar_tt = 0 the product drops blocks_per_track and any value passes. 26
+# blocks of BLKSIZE 3120 take 2 tracks on a 3380 (13 blocks per track) and 6
+# on a 3350 (5 per track).
+# Fails with the byte-overhead formula on a 3380: it gives 15 blocks per
+# track, the pointer (TT 1, R 13) is read as 1 * 15 + 13 = 28 blocks, 26 were
+# written. Passes with the cell formula: 1 * 13 + 13 = 26.
+BLOCKS_BYTES=81120	# 26 blocks of 39 records of 80 bytes = 338 x binary80.bin
+BLOCKS_FILE=$(mktemp)
+mvsmf_on_exit 'rm -f "$BLOCKS_FILE"'
+i=0
+while [ "$i" -lt $((BLOCKS_BYTES / 240)) ]; do
+	cat "$BINARY_FILE"
+	i=$((i + 1))
+done > "$BLOCKS_FILE"
+
+BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":3,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}")
+assert_http_status "201" "$HTTP_CODE" "create the multi-track sequential dataset"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/octet-stream" \
+	-H "X-IBM-Data-Type: binary" \
+	--data-binary @"$BLOCKS_FILE" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}")
+assert_http_status "204" "$HTTP_CODE" "upload 26 blocks to the multi-track dataset"
+
+DSCB_JSON=$(curl -s -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_BLK}")
+BPT=$(echo "$DSCB_JSON" | jq -r '.blocks_per_track // empty')
+if [ -z "$BPT" ] || [ "$BPT" = "0" ]; then
+	skip "blocks per track: device not known to the estimate (devfg=$(echo "$DSCB_JSON" | jq -r '.devfg // "?"'))"
+else
+	LSTAR_TT=$(echo "$DSCB_JSON" | jq -r '.lstar_tt')
+	LSTAR_R=$(echo "$DSCB_JSON" | jq -r '.lstar_r')
+	WRITTEN=$(( ($(wc -c < "$BLOCKS_FILE" | tr -d ' ') / 80 + 38) / 39 ))
+	GOT=$(( LSTAR_TT * BPT + LSTAR_R ))
+	if [ "$LSTAR_TT" -lt 1 ]; then
+		fail "blocks per track ${BPT}: the data set stayed on one track" "lstar_tt=${LSTAR_TT}, the check proves nothing"
+	elif [ "$GOT" = "$WRITTEN" ]; then
+		pass "blocks per track ${BPT}: ${GOT} blocks over ${LSTAR_TT}+1 tracks, as written"
+	else
+		fail "blocks per track ${BPT}: last-block pointer names ${GOT} blocks" "expected ${WRITTEN}, lstar_tt=${LSTAR_TT} lstar_r=${LSTAR_R}"
+	fi
+fi
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}")
+assert_http_status "204" "$HTTP_CODE" "delete the multi-track dataset"
 
 # -----------------------------------------------------------------
 # PDS member: binary round-trip

@@ -60,6 +60,7 @@
 #define ERR_MSG_RENAME_TARGET_EXISTS	"Rename target already exists"
 #define ERR_MSG_RENAME_FAILED		"Rename operation failed"
 #define ERR_MSG_PATTERN_TOO_LONG	"Member pattern is too long"
+#define ERR_MSG_LIST_NOMEM		"Storage for the list could not be obtained"
 #define ERR_MSG_ETAG_MISMATCH		"The resource was modified since the supplied ETag was created"
 
 #endif // DSAPI_ERR_H

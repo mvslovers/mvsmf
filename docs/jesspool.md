@@ -385,12 +385,39 @@ after `S RAKFPROF`.
 - The loader holds 2000 records without a range check; every owner profile costs
   several lines (example F: three per block).
 - **Jobs of the same owner share a profile.** There is no profile per job.
-- **Submit** answers with the submitting user as the owner of the new job,
-  and the new job is the caller's own: the caller can poll it right away.
+- **Submit** answers with the submitting user as the owner of the new job.
+  That holds for the answer to the submit request only. JES2 writes the owner
+  during conversion, and until then the job has none: a status, file list,
+  spool read or purge of it, sent by the same caller, is answered 404 like a
+  hidden job (rule 12: a job without an owner is nobody's). A caller who polls
+  right after a submit may therefore see 404 for a while. This is intended: the
+  services do not guess an owner they were not told.
 - **Console output:** the operator messages of mvsMF name a job only after the
   caller has been cleared for it, or when the caller submitted it, and job
   names and ids in them are sanitized. The console service reads the Master
-  Trace Table and is a separate surface, see [console](endpoints/console/).
+  Trace Table and is a separate surface, see the next section.
+
+## What the policy does not cover
+
+JESSPOOL decides the job services only: list, status, files, records and purge
+under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
+`fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
+
+- **Console services** (`/zosmf/restconsoles`). Any authenticated user can issue
+  an operator command, including `$P` or `$C` for the job of somebody else,
+  and read the Master Trace Table, whose message texts name jobs (for example
+  `$HASP395 jobname ENDED`) and carry job numbers, whatever their owner.
+  `consapi.c` makes no authorization call. See [Issue Command](endpoints/console/issue-command.md) and
+  [#347](https://github.com/mvslovers/mvsmf/issues/347).
+- **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way. The
+  endpoint is registered in the default build. A build with
+  `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and it answers
+  404.
+
+On a system where not every userid is trusted at the operator console, register
+only the prefixes you want in the HTTPD parmlib member instead of `/zosmf/*`,
+and build with `-DMVSMF_NO_TEST_ENDPOINT`. A JESSPOOL profile does not keep a
+user from reaching a job through these two.
 
 ## Check it
 
@@ -411,6 +438,7 @@ system with RAKF 2.0.0 and an administrator as the test user: it writes
 |---------|-------|
 | `S RAKFPROF` ends with `ABEND S000 U0400` | A profile line with an id has no line without an id for the same entity. The old tables stay in effect |
 | `PERMIT: No universal access record found` | The profile has no `RDEFINE` yet: define it first |
+| HTTP 404 right after a submit, later 200 | JES2 has not written the owner yet: a job without an owner is nobody's. Poll again |
 | HTTP 404 for a job that exists | The job is hidden: it belongs to another owner and no JESSPOOL profile gives you READ. Or the job id is not written in upper case |
 | `owner=*` lists only your own jobs | No READ on the entity `..` (only a `*` profile covers it) |
 | `owner=X` gives `[]` | No READ on the entity `X..`, or `X` is a pattern, longer than 8 characters or has a character outside `A-Z 0-9 $ # @` |

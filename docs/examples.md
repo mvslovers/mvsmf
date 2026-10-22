@@ -225,6 +225,10 @@ curl -s -u $USER:$PASS "$BASE/zosmf/restjobs/jobs?owner=*&prefix=TESTJOB*"
 zowe jobs list jobs --owner "*" --prefix "TESTJOB*"
 ```
 
+`owner=*` lists the jobs of other users only if the RAKF class `JESSPOOL` allows
+it (READ on the profile `..`); otherwise it lists your own jobs. `owner=ABC` is
+the exact user id `ABC`, not a prefix. See [Job spool authorization](jesspool.md).
+
 ### Submit a job (inline JCL)
 `PUT /zosmf/restjobs/jobs` (Content-Type `text/plain`)
 

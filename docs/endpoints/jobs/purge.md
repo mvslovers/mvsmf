@@ -10,7 +10,7 @@ DELETE
 
 ## Path Parameters
 - `job-name`: Name of the job to be deleted
-- `jobid`: ID of the job to be deleted (e.g. JOB00123)
+- `jobid`: ID of the job to be deleted (e.g. JOB00123), in upper case: it is compared whole and case-sensitively
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON object with the following properties:
@@ -49,6 +49,16 @@ needs UPDATE on the RACF class JESSPOOL, resource `<owner>.<jobname>.<jobid>`:
 | no profile, `NONE` | HTTP 404, identical to a job that does not exist |
 | `READ` | HTTP 500, category 4, "Authorization failed - You may not purge this job." |
 | `UPDATE` or better | the job is purged |
+
+The answer for READ without UPDATE is the refusal of the data set services
+(HTTP 500, not 403, which is not a z/OSMF status):
+
+```
+{"rc":8,"category":4,"reason":0,"message":"LMOPEN error",
+ "details":["Authorization failed - You may not purge this job."]}
+```
+
+Before mvsMF 1.4.0 any authenticated user could purge the job of any owner.
 
 The job that is purged is the one that was looked up and checked, not the
 strings of the request. The job id is compared whole; no wildcard matches. See

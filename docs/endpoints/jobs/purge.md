@@ -35,10 +35,24 @@ answer 404 the same way `GET /jobs/{name}/{id}` does.
 `owner` therefore comes back empty for a job purged in the seconds before JES2
 writes `JCTUSEID` — the same window the submit response used to expose (#210).
 Submit closes it by answering from the userid whose `USER=` it put on the job
-card; **this endpoint deliberately does not.** The purge handler authorizes
-nothing (#345), so the caller is frequently not the owner, and filling the
-field from the caller's identity would report a userid that never submitted the
-job. An empty owner is the honest answer here.
+card; **this endpoint deliberately does not**: the caller may purge a job of
+another owner, and filling the field from the caller's identity would report a
+userid that never submitted the job. An empty owner is the honest answer here.
+
+## Authorization
+
+A job of the caller's own userid is always purgeable. A job of another owner
+needs UPDATE on the RACF class JESSPOOL, resource `<owner>.<jobname>.<jobid>`:
+
+| Access of the caller | Answer |
+|----------------------|--------|
+| no profile, `NONE` | HTTP 404, identical to a job that does not exist |
+| `READ` | HTTP 500, category 4, "Authorization failed - You may not purge this job." |
+| `UPDATE` or better | the job is purged |
+
+The job that is purged is the one that was looked up and checked, not the
+strings of the request. The job id is compared whole; no wildcard matches. See
+[Job spool authorization](../../jesspool.md).
 
 ## Error Responses
 - HTTP 400 (Bad Request)
@@ -48,11 +62,14 @@ job. An empty owner is the honest answer here.
       a z/OSMF status, and the refusal is about what was asked for rather than
       about who asked.
 - HTTP 404 (Not Found)
-    - Job not found. This also covers a jobid JES2 rejects as malformed —
-      on 3.8j anything outside `JOB00001`–`JOB09999`, e.g. `JOB99999`, or a
+    - Job not found, or a foreign job the caller may not see (no profile or
+      `NONE`): the two answers are identical. This also covers a jobid JES2
+      rejects as malformed — on 3.8j anything outside `JOB00001`–`JOB09999`, e.g. `JOB99999`, or a
       non-conforming string. `jescanj()` reports those as `CANJ_SYNTX`, which
       used to surface as 500 (issue #190).
 - HTTP 500 (Internal Server Error)
+    - A foreign job the caller may read but not purge (READ without UPDATE),
+      category 4, the shape of the data set authorization denial.
     - JES2 system error
     - VSAM error
 
@@ -60,7 +77,7 @@ job. An empty owner is the honest answer here.
 - Cannot purge the currently running HTTPD server
 - Cannot purge active STCs (Started Tasks)
 - Cannot purge active TSO users
-- Job must exist and be accessible
+- Job must exist and be purgeable by the caller (own job, or UPDATE on its JESSPOOL profile)
 - No support for job correlator IDs
 
 ## Examples

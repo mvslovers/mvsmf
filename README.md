@@ -23,18 +23,21 @@ builds on.
 See **[docs/endpoints/](docs/endpoints/README.md)** for the full endpoint
 reference and **[docs/examples.md](docs/examples.md)** for copy‑paste curl & Zowe
 CLI examples for every endpoint. **[docs/messages.md](docs/messages.md)** lists
-every console message mvsMF can write.
+every console message mvsMF can write, and **[docs/jesspool.md](docs/jesspool.md)**
+explains who may see, read and purge which job.
 
 ## Installation
 
 > **Security note — what is authorized, and what is only authenticated.**
 > Every endpoint requires a valid userid. The data set services check that
-> userid against RACF/RAKF before every open; `restjobs` and `restconsoles` do
-> not — for them, authentication is the *only* gate there is. On jobs that means
-> a client can widen `owner=` to `*` and read or purge another user's spool
-> output ([#345](https://github.com/mvslovers/mvsmf/issues/345); MVS 3.8j
-> security products have no JESSPOOL class to delegate that to). On consoles it
-> means more: any user who can log in can issue **any** operator command through
+> userid against RACF/RAKF before every open. `restjobs` decides per job: a
+> job of the caller's own userid is always allowed, a job of another owner
+> needs a profile in the RAKF class `JESSPOOL` (READ to list and read, UPDATE
+> to purge), and without profiles nobody sees the jobs of others, see
+> [docs/jesspool.md](docs/jesspool.md) and
+> [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles` does
+> not authorize: for it, authentication is the *only* gate there is. On
+> consoles that means more: any user who can log in can issue **any** operator command through
 > `PUT /zosmf/restconsoles/consoles/{name}` — it goes out by SVC 34 from console
 > 0, the master console, with the text unfiltered — and can read the whole
 > Master Trace Table through `GET /zosmf/restconsoles/v1/log`. The diagnostic

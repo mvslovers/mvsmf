@@ -19,7 +19,8 @@ local LUA_ORDER = { "auth", "info-cookie" }
 -- Shell suites a full run leaves out: they are run by name, on purpose.
 --   curl-diag     faults a worker on purpose, several times
 --   curl-nospace  fills a volume to find its capacity
-local NOT_BY_DEFAULT = { ["curl-diag"] = true, ["curl-nospace"] = true }
+--   curl-jesspool rewrites SYS1.SECURE.CNTL(PROFILES) and reloads RAKF
+local NOT_BY_DEFAULT = { ["curl-diag"] = true, ["curl-nospace"] = true, ["curl-jesspool"] = true }
 
 local function basename(p)
   return (p:match("([^/]+)%.sh$"))

@@ -20,6 +20,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "testapi.h"
+#include "jobauth.h"
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
 #include "mvsmfmsg.h"
 #include "zosmferr.h"          /* CATEGORY_SERVICE, REASON_SERVER_ERROR */
@@ -564,6 +565,10 @@ int testHandler(Session *session) {
     JES *jes = NULL;
     JESJOB **jobs = NULL;
     unsigned jc = 0;
+    JOBAUTH ja;
+
+    /* the probes below show job data: the spool policy applies (#440) */
+    jobauth_init(session, &ja);
 
     http_printf(session->httpc, "syslog probe step=%d: START\r\n", step);
 
@@ -577,14 +582,23 @@ int testHandler(Session *session) {
     if (step >= 2 && jes) {
       jobs = jesjob(jes, "SYSLOG", FILTER_JOBNAME, 1);
       jc = jobs ? array_count(&jobs) : 0;
-      http_printf(session->httpc, "step2 jesjob -> %s count=%u\r\n",
-                  jobs ? "OK" : "NULL", jc);
+      {
+        unsigned ji, shown = 0;
+        for (ji = 0; ji < jc; ji++) {
+          if (jobs[ji] && jobauth_job(&ja, JWN_OP_READ, jobs[ji]) == JWN_ALLOW)
+            shown++;
+        }
+        http_printf(session->httpc, "step2 jesjob -> %s count=%u\r\n",
+                    jobs ? "OK" : "NULL", shown);
+      }
     }
 
     if (step >= 3 && jobs) {
       unsigned ji;
       for (ji = 0; ji < jc; ji++) {
         JESJOB *job = jobs[ji];
+        if (!job || jobauth_job(&ja, JWN_OP_READ, job) != JWN_ALLOW)
+          continue;
         http_printf(session->httpc, "step3 entry %u jobid=%-8.8s jesdd=%s\r\n",
                     ji, job ? (char *)job->jobid : "(null)",
                     (job && job->jesdd) ? "set" : "NULL");
@@ -596,7 +610,8 @@ int testHandler(Session *session) {
       for (ji = 0; ji < jc; ji++) {
         JESJOB *job = jobs[ji];
         unsigned dc;
-        if (!job || !job->jesdd)
+        if (!job || !job->jesdd ||
+            jobauth_job(&ja, JWN_OP_READ, job) != JWN_ALLOW)
           continue;
         dc = array_count(&job->jesdd);
         for (di = 0; di < dc; di++) {
@@ -615,7 +630,8 @@ int testHandler(Session *session) {
       for (ji = 0; ji < jc; ji++) {
         JESJOB *job = jobs[ji];
         unsigned dc;
-        if (!job || !job->jesdd)
+        if (!job || !job->jesdd ||
+            jobauth_job(&ja, JWN_OP_READ, job) != JWN_ALLOW)
           continue;
         dc = array_count(&job->jesdd);
         for (di = 0; di < dc; di++) {
@@ -1058,8 +1074,9 @@ int testHandler(Session *session) {
     JES *jes = NULL;
     JESJOB **jobs = NULL;
     unsigned jc = 0;
-    unsigned ji;
+    unsigned ji, shown = 0;
     int first = 1;
+    JOBAUTH ja;
 
     if (!jn || !*jn) {
       rc = http_printf(session->httpc,
@@ -1075,12 +1092,17 @@ int testHandler(Session *session) {
     }
     session_register_jes(session, jes);
 
+    jobauth_init(session, &ja);
     jobs = jesjob(jes, jn, FILTER_JOBNAME, 0);
     jc = jobs ? array_count(&jobs) : 0;
+    for (ji = 0; ji < jc; ji++) {
+      if (jobs[ji] && jobauth_job(&ja, JWN_OP_READ, jobs[ji]) == JWN_ALLOW)
+        shown++;
+    }
 
     if ((rc = http_printf(session->httpc,
                           "{ \"fn\": \"job\", \"jobname\": \"%s\","
-                          " \"count\": %u, \"items\": [\n", jn, jc)) < 0)
+                          " \"count\": %u, \"items\": [\n", jn, shown)) < 0)
       goto quit_job;
 
     for (ji = 0; ji < jc; ji++) {
@@ -1090,7 +1112,7 @@ int testHandler(Session *session) {
       unsigned char jtflg;
       char retcode[16];
 
-      if (!job)
+      if (!job || jobauth_job(&ja, JWN_OP_READ, job) != JWN_ALLOW)
         continue;
 
       comp  = job->completion;
@@ -1181,6 +1203,7 @@ int testHandler(Session *session) {
     unsigned count = 0;
     unsigned ii;
     int first = 1;
+    JOBAUTH ja;
 
     if (!jn || !*jn || !ji || !*ji) {
       rc = http_printf(session->httpc, "{ \"fn\": \"spool\","
@@ -1213,10 +1236,12 @@ int testHandler(Session *session) {
 
     /* dd=1: without the DD list there is no PDDB to take the first MTTR
      * from, and every dsid looks absent. */
+    jobauth_init(session, &ja);
     jobs = jesjob(jes, jn, FILTER_JOBNAME, 1);
     count = jobs ? array_count(&jobs) : 0;
     for (ii = 0; ii < count; ii++) {
-      if (jobs[ii] && strcmp((char *)jobs[ii]->jobid, ji) == 0) {
+      if (jobs[ii] && strcmp((char *)jobs[ii]->jobid, ji) == 0 &&
+          jobauth_job(&ja, JWN_OP_READ, jobs[ii]) == JWN_ALLOW) {
         job = jobs[ii];
         break;
       }

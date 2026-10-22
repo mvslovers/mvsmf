@@ -50,11 +50,20 @@ and a jobid, not who submitted them, and the caller is under no obligation to
 be the owner. [Submit](submit.md) is the one place that can fill the field in
 early, because it put the `USER=` on the card itself (#210).
 
+## Authorization
+
+A job of the caller's own userid is always readable. A job of another owner is
+readable with READ on the RACF class JESSPOOL, resource
+`<owner>.<jobname>.<jobid>`; without it the answer is the same 404 a job that
+does not exist gets. The job id is compared whole, no wildcard matches. See
+[Job spool authorization](../../jesspool.md).
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing required parameters (jobname/jobid)
 - HTTP 404 (Not Found)
-    - Job not found
+    - Job not found, **or a foreign job the caller may not read**: the two
+      answers are identical (see [Job spool authorization](../../jesspool.md))
 
 ## Limitations
 

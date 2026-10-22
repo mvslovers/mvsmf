@@ -11,6 +11,22 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
 
 ## [Unreleased]
 
+### Security
+
+- **The job services decide per job who may see, read and purge it** (#440).
+  Until now any authenticated user could list the jobs of every owner, read
+  their spool output and purge them. A job of the caller's own userid is
+  always allowed. A job of another owner needs a profile in the RAKF class
+  `JESSPOOL` (resource `<owner>.<jobname>.<jobid>`): READ lists and reads,
+  UPDATE or better also purges; without a profile, or with NONE, the job is
+  hidden behind the same 404 a missing job gets, and a READ-only purge answers
+  500 (category 4). `owner=*` needs READ on `..`, another user id needs READ
+  on `<userid>..`; the owner filter is an exact user id or `*`, no longer a
+  prefix. A job id is compared whole. Job names, ids and owners are sanitized
+  before they reach a response or an operator message. **Without JESSPOOL
+  profiles every user, an administrator included, sees only their own jobs:
+  define the profiles before upgrading, see `docs/jesspool.md`.**
+
 ## [1.3.0] - 2026-10-15
 
 The release that stops every request from costing the server storage for

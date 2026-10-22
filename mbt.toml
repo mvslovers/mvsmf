@@ -188,6 +188,16 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJCARD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTJWN: #440 — who may see, read and purge which job on the JES2 spool. An
+# own job is always allowed; a foreign one follows RACF class JESSPOOL (no
+# profile and NONE hide it, READ lists and reads, UPDATE also purges); a name
+# part outside A-Z 0-9 $ # @ or longer than 8 hides it; the owner filter is an
+# exact userid or "*". RACF is a stub that compares eight characters like RAKF.
+# Portable C (`mbt test`); the TU #includes src/jwn.c so it drives the real
+# policy jobsapi.c asks — do not list jwn.c here.
+[test.TSTJWN]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # ── SMP4 distribution ────────────────────────────────────
 # `mbt package` renders the install package from this; `mbt dist` alone
 # re-renders it. ufsd is the reference implementation -- this block follows it

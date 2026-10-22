@@ -110,7 +110,9 @@ On mvsdev a deploy or an MVS test run needs a slot from the MBT session.
 
 **Confirm the STEPLIB from the running STC, never from the data set list** —
 several `HTTPD.LINKLIB*` data sets exist on a given stand and only one is in
-use. Find the ACTIVE `STC` via `GET /zosmf/restjobs/jobs?owner=*&prefix=HTTPD*`,
+use. Find the ACTIVE `STC` via `GET /zosmf/restjobs/jobs?owner=*&prefix=HTTPD*`
+(a started task is a job of another owner: the caller needs READ on it in the
+class JESSPOOL, `docs/jesspool.md`, or the list is empty),
 then read its JESJCL (file id 3) for `XXSTEPLIB DD DISP=SHR,DSN=…`.
 
 ### Dependencies
@@ -156,7 +158,7 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **etag.c**: The ETag stamp and `If-Match` / `If-None-Match` handling for data
   sets, members and USS files (#152, #263, #264, #271). Three rules there fail
   silently if broken -- read `internals/etag.md` before touching it.
-- **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces.
+- **jobsapi.c**: Jobs REST API handlers — submit JCL, list/status/purge jobs, read spool files. Uses JES2 interfaces. Every job that is shown or purged goes through `jobauth.c` / `jwn.c` (class JESSPOOL, #440; `internals/authorization.md`).
 - **ussapi.c**: USS file REST API handlers — list, read, write, create, delete for UNIX files/directories via libufs/UFSD. Includes chtag utility stub.
 - **consapi.c**: Console services handlers — issue command (SVC 34/MGCR), collect response, detect unsolicited keyword, hardcopy log. Reads console data from the Master Trace Table (libc370 `clibmtt`).
 - **ntstore.c**: Small persistent key/value store (LRU + TTL) used by the console cursors/detections; lives in the httpd per-CGI context.
@@ -288,12 +290,12 @@ Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, 
 Test suites live in `tests/` and `mbt/lua/`, and run through mbt:
 
 ```bash
-mbt run rest-tests                        # everything but curl-diag and curl-nospace
+mbt run rest-tests                        # everything but curl-diag, curl-nospace and curl-jesspool
 mbt run rest-tests -- curl-jobs zowe      # one suite, a group (lua, curl, zowe, all)
 mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each suite
 ```
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh` and `curl-nospace.sh` by name only
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh`, `curl-nospace.sh` and `curl-jesspool.sh` by name only (`curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)` and needs a throwaway system, a RAKF administrator and the second userid)
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
 - **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`

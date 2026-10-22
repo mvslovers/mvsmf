@@ -23,6 +23,9 @@
 /** @brief Error message for STC purge attempt */
 #define ERR_MSG_STC_PURGE "Cannot purge a started task"
 
+/** @brief Detail of the refusal to purge a job the caller may read but not purge (#440) */
+#define ERR_MSG_JOB_PURGE_DENIED "Authorization failed - You may not purge this job."
+
 /** @brief Error message for incorrect JES VSAM handle */
 #define ERR_MSG_INCORRECT_JES_VSAM_HANDLE "Unable to open JES2 checkpoint and spool datasets"
 

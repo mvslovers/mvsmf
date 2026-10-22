@@ -29,7 +29,7 @@ client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|rele
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
 **#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
-SVC 34, verified against the JQE hold bit). Any of it widens #345. #418 is the 404 itself: a known path with an unregistered method should
+SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
 **#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
 `ufs_ferror()` check after its read loop, so a failed read ends as a clean 200
@@ -101,12 +101,11 @@ reject half in PR #358, #210 in PR #359, and #362 and #357 in PR #364.*
 
 **State of play, 2026-10-15** (one mvsMF session from here on; the second one
 handed its list over). In hand, in this order:
-- **#345** waits on two **maintainer decisions**: the FACILITY profile names, and
-  how a job without an owner is treated. The reference is measured (comment
-  6162968561 on #345): listing, status and file list of a foreign job are open,
-  only the spool content is refused (500 / category 6 / rc 12 / reason 1).
-- **#417** (cancel) together with #345 or right after it -- it widens the same
-  gap.
+- **#345 is superseded by #440** (the JESSPOOL model, as in FTPD 1.3.0;
+  `docs/jesspool.md`): implemented on `issue-440-jesspool`, in review. Close #345
+  with it.
+- **#417** (cancel) right after #440 -- it widens the same gap and takes the
+  purge rule (UPDATE on the JESSPOOL entity).
 - **#418** waits on a read-only zxp measurement (404 or 405 for a known path
   with an unregistered method).
 - **#423**: the hard part is provoking a mid-file UFSD read error.
@@ -133,7 +132,7 @@ the next case).
 | 7 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 10 | #345 | `type:research` | **two maintainer decisions**: FACILITY profile names, ownerless jobs (reference measured 2026-10-14) |
+| 10 | #345 | superseded by #440 | done with #440 (in review); #417 cancel follows |
 | 11 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
 | 12 | #291 | reclassified — hygiene, not stability | nothing |
 | 13 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
@@ -335,6 +334,11 @@ The cheap unblocked step is a measurement, and it decides whether the fix exists
 at all: what does RACHECK answer for a name with no catalog entry and no DSCB?
 
 ### 10 · #345 — restjobs has no authorization model
+
+**Superseded by #440** (the JESSPOOL model as FTPD 1.3.0 has it): own jobs
+always, foreign jobs by RACHECK in class JESSPOOL, hidden = 404, READ lists and
+reads, UPDATE purges. The text below is the history. Still open from it:
+`fn=mtt` and the console API read the Master Trace Table, a separate surface.
 
 `grep -c 'http_check_auth\|require_access' src/jobsapi.c` → **0**, against 25 in
 `dsapi.c`. `owner=*` switches the default off, and the four by-jobid paths —

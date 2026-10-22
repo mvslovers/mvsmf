@@ -74,11 +74,20 @@ Once the first record has been written to the socket the response is committed t
 that goes wrong after that is reported to the operator as `MVSMF202W`, not turned into an error
 body — the records already sent are valid.
 
+## Authorization
+
+A job of the caller's own userid is always readable. A job of another owner is
+readable with READ on the RACF class JESSPOOL, resource
+`<owner>.<jobname>.<jobid>`; without it the answer is the same 404 a job that
+does not exist gets. The job id is compared whole, no wildcard matches. See
+[Job spool authorization](../../jesspool.md).
+
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Invalid DDID parameter
 - HTTP 404 (Not Found)
-    - Job not found
+    - Job not found, **or a foreign job the caller may not read**: the two
+      answers are identical (see [Job spool authorization](../../jesspool.md))
     - The spool data set was purged by JES2 and the checkpoint entry is stale —
       distinguished by `reason: 10` (`REASON_SPOOL_GONE`)
 - HTTP 500 (Internal Server Error)

@@ -6,7 +6,10 @@ Issues an MVS operator command and returns the captured command response. Part o
 >
 > The request needs an authenticated userid and nothing else. There is no
 > per-command policy, no console authority level and no RACF check — `consapi.c`
-> makes no authorization call at all. The command goes out by SVC 34 with the
+> makes no authorization call at all. Measured on MVS/CE with RAKF: a userid in
+> group `USER` without operations authority (RAKF refuses it a protected data
+> set) ran `D T`, `D A,L` and `S RAKFUSER` through this endpoint, and none was
+> refused. The command goes out by SVC 34 with the
 > MCS console field left zero, which is **console 0**: no console entered it, so
 > no `UCMAUTH` authority group applies and nothing is filtered. `$P JES2`,
 > `V xxx,OFFLINE` and `P`/`S` of any started task are all reachable by any user
@@ -167,7 +170,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > unavailable," not "not issued."
 
 ## Implementation (MVS 3.8j)
-mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** under the authenticated user's ACEE (so RAKF evaluates command authority for that user); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
+mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
 
 ### One command at a time (#214)
 

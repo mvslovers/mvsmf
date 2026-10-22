@@ -21,7 +21,7 @@ check(unsigned bpt, unsigned want, unsigned blksz, const char *dev)
 {
 	char msg[80];
 
-	sprintf(msg, "%s blksz %u: %u blocks per track", dev, blksz, want);
+	snprintf(msg, sizeof(msg), "%s blksz %u: %u blocks per track", dev, blksz, want);
 	CHECK_EQ(bpt, want, msg);
 }
 

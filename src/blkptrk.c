@@ -13,7 +13,8 @@ unsigned
 blocks_per_track(unsigned devtk, unsigned devov, unsigned devk,
 		 unsigned devfg, unsigned blksz)
 {
-	unsigned overhead, cells;
+	unsigned overhead;
+	unsigned cells;
 
 	if (blksz == 0) return 0;
 

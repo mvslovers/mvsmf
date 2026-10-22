@@ -319,11 +319,15 @@ static long
 get_fb_record_count(const char *dsname)
 {
 	LOCWORK locwork;
-	DSCB dscb1, dscb4;
+	DSCB dscb1;
+	DSCB dscb4;
 	char dsn44[44];
-	unsigned short blksz, lrecl;
-	unsigned bpt, recs_per_block;
-	unsigned tt, r;
+	unsigned short blksz;
+	unsigned short lrecl;
+	unsigned bpt;
+	unsigned recs_per_block;
+	unsigned tt;
+	unsigned r;
 	long total_blocks;
 	int rc;
 

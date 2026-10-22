@@ -555,7 +555,9 @@ int testHandler(Session *session) {
      * estimate with what the access method really wrote. */
     {
       DSCB dscb4;
-      unsigned tt = 0, r = 0, bpt = 0;
+      unsigned tt = 0;
+      unsigned r = 0;
+      unsigned bpt = 0;
       int d4_rc = -1;
 
       memset(&dscb4, 0, sizeof(dscb4));

@@ -295,7 +295,7 @@ mbt run rest-tests -- curl-jobs zowe      # one suite, a group (lua, curl, zowe,
 mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each suite
 ```
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh`, `curl-nospace.sh` and `curl-jesspool.sh` by name only (`curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)` and needs a throwaway system, a RAKF administrator and the second userid)
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh`, `curl-nospace.sh` and `curl-jesspool.sh` by name only (`curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
 - **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`

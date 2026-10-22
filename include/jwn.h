@@ -31,7 +31,10 @@
 #define JWN_COMPMAX     8       /* longest component                    */
 #define JWN_ENTMAX      26      /* 8 + '.' + 8 + '.' + 8               */
 #define JWN_ENTSZ       (JWN_ENTMAX + 1)
-#define JWN_KEYLEN      8       /* RAKF compares 8 characters           */
+/* The cache key is the first 8 characters of the entity, which is right only
+** because RAKF cuts an entity at 8 characters before it matches a profile.
+** Should RAKF ever compare more, this must grow with it. */
+#define JWN_KEYLEN      8
 #define JWN_PRTSZ       (JWN_COMPMAX + 1)
 #define JWN_CACHEMAX    16      /* cache keys per request               */
 

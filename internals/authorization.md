@@ -51,6 +51,11 @@ profiles and examples: `docs/jesspool.md`. What a maintainer must keep:
   in `jobsapi.c`): `*` needs READ on the entity `..`, a foreign user id `X`
   needs READ on `X..`, anything else is an empty list. Each job of the list is
   checked in addition.
+- **The per-request cache keys on 8 characters** (`JWN_KEYLEN`): RAKF cuts the
+  entity at 8 characters before it matches a profile, so what the cache treats
+  as the same question RAKF treats as the same too. If RAKF ever compares more,
+  the key must grow with it, or one answer is reused for jobs it was not given
+  for.
 - **Job fields are sanitized** (`jwn_printable()`) before they reach a response
   body, an error text or an operator message. mvsMF adds no WTO for this; the
   existing ones carry sanitized names.

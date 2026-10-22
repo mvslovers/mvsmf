@@ -1362,7 +1362,9 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 
 		job_found++;
 		if (job_found > 1) {
-			// TODO (mig): create a new error message in jobsapi_msg.h
+			/* fail closed: found_job holds the first match, which was never
+			   judged.  *decision is already JWN_HIDE. */
+			found_job = NULL;
 			goto quit;
 		}
 
@@ -1399,6 +1401,28 @@ quit:
 	return found_job;
 }
 
+/* The request's own words, made safe to put between the quotes of a JSON
+   string: sendErrorResponse() does not escape its message.  A quote, a
+   backslash or a control character (below 0x40 in EBCDIC) becomes '?', and
+   the copy is cut at 64 characters. */
+#define NOT_FOUND_ECHO_SZ 65
+
+__asm__("\n&FUNC    SETC 'echo_request_field'");
+static void
+echo_request_field(char *out, int sz, const char *in)
+{
+	int n = 0;
+
+	if (in) {
+		for (; *in && n < sz - 1; in++, n++) {
+			unsigned char c = (unsigned char)*in;
+
+			out[n] = (c < 0x40 || c == '"' || c == '\\') ? '?' : (char)c;
+		}
+	}
+	out[n] = '\0';
+}
+
 /* The one answer for a job that is not there, is not the caller's to see, or
    never existed.  Everything a client could use to tell those apart -- the
    status, the text, the order of the work -- is in this one function, and the
@@ -1408,8 +1432,12 @@ static void
 send_job_not_found(Session *session, const char *jobname, const char *jobid)
 {
 	char msg[MAX_ERR_MSG_LENGTH] = {0};
+	char name_p[NOT_FOUND_ECHO_SZ];
+	char id_p[NOT_FOUND_ECHO_SZ];
 
-	snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
+	echo_request_field(name_p, sizeof(name_p), jobname);
+	echo_request_field(id_p, sizeof(id_p), jobid);
+	snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, name_p, id_p);
 	sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
 					RC_WARNING, REASON_JOB_NOT_FOUND, msg, NULL, 0);
 }

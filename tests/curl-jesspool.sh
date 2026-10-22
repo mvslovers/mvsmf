@@ -19,16 +19,19 @@
 #
 # It CHANGES the system under test: it writes SYS1.SECURE.CNTL(PROFILES), runs
 # the RAKF procedure RAKFPROF to load it, and puts the member back the way it
-# found it. Use a throwaway container, never a real system. It refuses to run
-# when PROFILES already has JESSPOOL lines, and needs RAKF 2.0.0 (the class
-# JESSPOOL does not exist before).
+# found it. Use a throwaway container, never a real system. It does nothing
+# unless MVSMF_JESSPOOL_WRITE_PROFILES=yes is set in the environment: that is
+# the owner of the container saying so. It also refuses to run when PROFILES
+# already has JESSPOOL lines, but that check alone does not tell a container
+# from a real system. It needs RAKF 2.0.0 (the class JESSPOOL does not exist
+# before).
 #
 # Prerequisites:
 #   - Run through mbt, which hands over the target's connection
 #     (tests/lib/conn.sh); curl and jq must be installed
 #
 # Usage:
-#   mbt run rest-tests -- curl-jesspool
+#   MVSMF_JESSPOOL_WRITE_PROFILES=yes mbt run rest-tests -- curl-jesspool
 # =========================================================================
 
 set -uo pipefail
@@ -48,6 +51,10 @@ fail() {
 }
 skip() { SKIPPED=$((SKIPPED + 1)); TOTAL=$((TOTAL + 1)); echo "  SKIP: $1"; }
 
+if [ "${MVSMF_JESSPOOL_WRITE_PROFILES:-}" != yes ]; then
+	skip "jesspool: rewrites SYS1.SECURE.CNTL(PROFILES); set MVSMF_JESSPOOL_WRITE_PROFILES=yes for a throwaway container"
+	exit 0
+fi
 if [ -z "${MVSMF_CURLRC2:-}" ]; then
 	skip "jesspool: needs a further user test2 in the mbt target"
 	exit 0
@@ -258,6 +265,15 @@ wait_output U JW440B "$UJ_ID" || fail "setup: JW440B/${UJ_ID} did not reach OUTP
 # =========================================================================
 OPATH="/zosmf/restjobs/jobs/JW440A/${OJ_ID}"
 UPATH="/zosmf/restjobs/jobs/JW440B/${UJ_ID}"
+
+# The 404 text repeats the request's job name and id: a quote, a backslash or
+# a control character in them must not break the JSON of the answer.
+req U GET "/zosmf/restjobs/jobs/A%22B%5CC%01/JOB%22X"
+if [ "$HTTP_STATUS" = 404 ] && [ "$(echo "$BODY" | jq -r '.message' 2>/dev/null)" = "Job 'A?B?C?(JOB?X)' not found" ]; then
+	pass "a hostile job name and id come back escaped in the 404 (valid JSON)"
+else
+	fail "a hostile job name and id come back escaped in the 404" "HTTP $HTTP_STATUS $(echo "$BODY" | head -c 200)"
+fi
 
 # A job the caller may not see: every way in answers 404, like a missing job.
 hidden_for_U() {   # fixture label

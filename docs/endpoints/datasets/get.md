@@ -49,9 +49,6 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
       (`category` 16, `rc` 121, see [encoding.md](encoding.md))
     - The dataset exists but cannot be opened (I/O error)
     - Memory allocation failed
-    - A failed open could not be diagnosed for lack of storage (`MVSMF006E`
-      naming `THE MEMBER LIST`); the answer is not a 404, because nothing
-      established that the data set is missing (issue #360)
 
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400

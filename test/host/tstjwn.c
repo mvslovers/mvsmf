@@ -403,7 +403,7 @@ test_cache(void)
 	jwn_cache_init(&cache);
 	s.calls = 0;
 	for (i = 0; i < JWN_CACHEMAX + 4; i++) {
-		sprintf(jn, "OWN%02d", i);
+		snprintf(jn, sizeof(jn), "OWN%02d", i);
 		decide(&c, JWN_OP_LIST, jn, "JOB", "JOB1", &r);
 		CHECK_EQ(r.decision, JWN_HIDE, "an unprotected owner is hidden");
 	}
@@ -538,7 +538,7 @@ test_story(void)
 		s.prof = p;
 		s.nprof = 3;
 		ctx_set(&c, &s, t[i].user, NULL);
-		sprintf(msg, "%s on %s's job, op %d", t[i].user, t[i].owner,
+		snprintf(msg, sizeof(msg), "%s on %s's job, op %d", t[i].user, t[i].owner,
 			t[i].op);
 		CHECK_EQ(decide(&c, t[i].op, t[i].owner, "JOB", "JOB00001", &r),
 			 t[i].want, msg);

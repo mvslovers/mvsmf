@@ -31,6 +31,6 @@ int jobauth_job(JOBAUTH *ja, int op, const JESJOB *job)	asm("JOBAJOB");
 
 /* 1 if the caller has at least READ on the owner probe "<userid>.." (".." for
  * all owners), 0 otherwise.  userid "" asks for all owners. */
-int jobauth_probe(JOBAUTH *ja, const char *userid)	asm("JOBAPROB");
+int jobauth_probe(const JOBAUTH *ja, const char *userid)	asm("JOBAPROB");
 
 #endif /* JOBAUTH_H */

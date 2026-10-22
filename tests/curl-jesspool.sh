@@ -171,6 +171,7 @@ fx_lines() {
 	A) printf '%s\n' '*||READ' ;;
 	D) printf '%s\n' '*||NONE' '*|ADMIN|UPDATE' ;;
 	W) printf '%s\n' '*||NONE' "${OWNER}.*||UPDATE" "${OTHER}.*||UPDATE" ;;
+	*) echo "fx_lines: unknown fixture '$1'" >&2; return 1 ;;
 	esac
 }
 

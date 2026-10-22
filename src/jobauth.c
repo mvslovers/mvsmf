@@ -69,7 +69,7 @@ jobauth_job(JOBAUTH *ja, int op, const JESJOB *job)
 }
 
 int
-jobauth_probe(JOBAUTH *ja, const char *userid)
+jobauth_probe(const JOBAUTH *ja, const char *userid)
 {
 	char probe[JWN_ENTSZ];
 	JWN_RES res;

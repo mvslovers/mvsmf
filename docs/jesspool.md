@@ -414,10 +414,11 @@ under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
   `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and it answers
   404.
 
-On a system where not every userid is trusted at the operator console, register
-only the prefixes you want in the HTTPD parmlib member instead of `/zosmf/*`,
-and build with `-DMVSMF_NO_TEST_ENDPOINT`. A JESSPOOL profile does not keep a
-user from reaching a job through these two.
+A JESSPOOL profile does not keep a user from reaching a job through these two.
+To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
+services, a `RES=FACILITY:MVSMF.ACCESS` check on the catch-all route decides who
+may use mvsMF at all, not who may use the console services alone; see
+[Register the routes](installation.md#4-register-the-routes).
 
 ## Check it
 

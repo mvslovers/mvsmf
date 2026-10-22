@@ -53,14 +53,21 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1.
   their spool output and purge them. A job of the caller's own userid is
   always allowed. A job of another owner needs a profile in the RAKF class
   `JESSPOOL` (resource `<owner>.<jobname>.<jobid>`): READ lists and reads,
-  UPDATE or better also purges; without a profile, or with NONE, the job is
-  hidden behind the same 404 a missing job gets, and a READ-only purge answers
-  500 (category 4). `owner=*` needs READ on `..`, another user id needs READ
-  on `<userid>..`; the owner filter is an exact user id or `*`, no longer a
-  prefix. A job id is compared whole. Job names, ids and owners are sanitized
-  before they reach a response or an operator message. **Without JESSPOOL
-  profiles every user, an administrator included, sees only their own jobs:
-  define the profiles before upgrading, see `docs/jesspool.md`.**
+  UPDATE or better also purges. Without a profile, or with NONE, the job is
+  hidden behind the same 404 a missing job gets. A purge with READ only
+  answers 500, category 4. The class needs RAKF 2.0.0 or later. A job id is
+  compared whole. Job names, ids and owners are sanitized before they reach a
+  response or an operator message.
+- **The owner filter of the job list only narrows.** `owner=*` needs READ on
+  the entity `..`; without it the list holds the caller's own jobs. Another
+  user id `X` needs READ on `X..`; without it the list is empty (HTTP 200,
+  `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
+  longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
+  list. An empty `owner=` means the caller's own jobs.
+- **Upgrade: define the profiles first.** Without JESSPOOL profiles every
+  user, an administrator included, sees only their own jobs, and a started
+  task found with `owner=*` is gone from the list. Rules, commands and examples:
+  `docs/jesspool.md`.
 
 ## [1.3.0] - 2026-10-15
 

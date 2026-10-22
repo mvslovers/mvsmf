@@ -37,10 +37,10 @@ explains who may see, read and purge which job.
 > [docs/jesspool.md](docs/jesspool.md) and
 > [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles` does
 > not authorize: for it, authentication is the *only* gate there is. On
-> consoles that means more: any user who can log in can issue **any** operator command through
-> `PUT /zosmf/restconsoles/consoles/{name}` — it goes out by SVC 34 from console
-> 0, the master console, with the text unfiltered — and can read the whole
-> Master Trace Table through `GET /zosmf/restconsoles/v1/log`. The diagnostic
+> consoles that means more: any user who can log in can issue **any** operator
+> command through `PUT /zosmf/restconsoles/consoles/{name}` — it goes out by
+> SVC 34 from console 0, the master console, with the text unfiltered — and can
+> read the whole Master Trace Table through `GET /zosmf/restconsoles/v1/log`. The diagnostic
 > endpoint `/zosmf/test?fn=cmd` is the same power through a second door and is
 > compiled in by default. There is no per-command policy yet
 > ([#347](https://github.com/mvslovers/mvsmf/issues/347)).

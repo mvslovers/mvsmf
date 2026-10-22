@@ -14,6 +14,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 | | |
 |---|---|
 | **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
+| **RAKF 2.0.0 or later** | Only to see jobs of other users: the class `JESSPOOL` that decides this is in the class table of RAKF 2.0.0 and later. Without the class every user sees only their own jobs. See [Job spool authorization](jesspool.md). |
 | **UFSD** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. |
 | **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See [The `SYZJ201` usermod](https://github.com/mvslovers/mvsmf/blob/main/README.md#the-syzj201-usermod) in the project README. |
 
@@ -72,7 +73,10 @@ If that line is not in the job log, nothing was copied.
 
 mvsMF does authorized work: every authenticated request switches the task's
 identity (ACEE handling in key 0), and the console API issues operator commands
-(SVC 34). It does not authorize anything itself. It is never a job step
+(SVC 34). It does not authorize anything itself: who may use a data set is
+decided by RACF under the caller's identity, and who may see, read and purge
+which job by the RAKF class `JESSPOOL` (see
+[Job spool authorization](jesspool.md)). It is never a job step
 program; HTTPD LINKs it per request, so it runs with **HTTPD's** authorization,
 and what it needs is an authorized task, not an authorized library.
 
@@ -202,6 +206,14 @@ while the member is being replaced can find no module, and a copy that lands
 in a new extent may not be visible to the running server. Neither has been
 measured; stopping first avoids both. Upgrading HTTPD in the same window needs
 only the one stop and start. Then check the level as in step 5.
+
+**Upgrading from 1.3.0 to 1.4.0: define the JESSPOOL profiles first.** 1.4.0
+decides for every job who may see, read and purge it. Without a profile in the
+RAKF class `JESSPOOL` every user, an administrator included, sees only their own
+jobs, and `owner=*` lists only those. If a client or a tool relied on seeing the
+jobs of others, for example a started task found with `owner=*`, create the
+profiles before you start the new level. The rules, the commands and examples
+are in [Job spool authorization](jesspool.md).
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same

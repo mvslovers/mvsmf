@@ -31,10 +31,12 @@ kind = "application"
 # 2.12.1: the C runtime termination frees its 128-byte CRT block; up to
 # 2.12.0 every run of the module lost it in subpool 0, so each request
 # shrank HTTPD's free storage for good (mvslovers/libc370#546, #430).
+# 2.25.1: the level this project is built against after the 2.13.0 to
+# 2.25.1 review (mvslovers/mvsmf#442).
 # cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
-# macros in maclib370; 1.6.1 is current.
-cc370 = "1.6.1"
-libc370 = "2.12.1"
+# macros in maclib370; 1.6.3 is current.
+cc370 = "1.6.3"
+libc370 = "2.25.1"
 mbt = "3.0"
 
 [dependencies]
@@ -110,6 +112,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 # #includes src/reclines.c so it drives the real state machine the four write
 # loops in dsapi.c use — do not list reclines.c here.
 [test.TSTRECL]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTBLKT: #439 — blocks per track from the format-4 DSCB, byte devices and the
+# 3380's cell arithmetic. Portable C (`mbt test`); the TU #includes
+# src/blkptrk.c so it drives the real function dsapi.c calls — do not list
+# blkptrk.c here.
+[test.TSTBLKT]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave

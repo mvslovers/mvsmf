@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <mvs/jes2.h>
 #include <ibm/jes2/pddb.h>
@@ -64,10 +65,6 @@
 
 /* an ISO 8601 instant with a millisecond fraction: 2018-11-03T09:05:18.010Z */
 #define EXEC_TIME_STR_SIZE	(24 + 1)
-
-/* libc370 ships __tzget() (src/clib/@@tzget.c) but declares it in no header;
-   httpd carries the same local declaration in src/httpjes2.c. */
-extern int __tzget(void);
 
 //
 // private functions prototypes

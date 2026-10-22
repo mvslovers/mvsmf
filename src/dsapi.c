@@ -17,6 +17,7 @@
 #include "dsapi_err.h"
 #include "mvsmfmsg.h"
 #include "common.h"
+#include "blkptrk.h"
 #include "datatype.h"
 #include "etag.h"
 #include "httpcgi.h"
@@ -192,13 +193,10 @@ model_alloc(const char *dsname, unsigned *pri_trks, unsigned *sec_trks)
 		return -1;
 	}
 
-	/* tracks per cylinder, read the same way the listing reads it: __dscbv()
-	   returns data only, so dstrk sits at work[20] rather than at its struct
-	   offset. 30 is the 3350 fallback the listing uses when the volume DSCB
-	   cannot be read. */
+	/* tracks per cylinder, as the listing reads it. 30 is the 3350 fallback
+	   the listing uses when the volume DSCB cannot be read. */
 	if (__dscbv(vol, &dscb4buf) == 0) {
-		tpc = ((unsigned char)dscb4buf.work[20] << 8)
-		    |  (unsigned char)dscb4buf.work[21];
+		tpc = dscb4buf.dscb4.dstrk;
 	}
 	if (tpc == 0) tpc = 30;
 
@@ -323,8 +321,8 @@ get_fb_record_count(const char *dsname)
 	LOCWORK locwork;
 	DSCB dscb1, dscb4;
 	char dsn44[44];
-	unsigned short blksz, lrecl, devtk, devov, devk;
-	unsigned overhead, bpt, recs_per_block;
+	unsigned short blksz, lrecl;
+	unsigned bpt, recs_per_block;
 	unsigned tt, r;
 	long total_blocks;
 	int rc;
@@ -355,15 +353,10 @@ get_fb_record_count(const char *dsname)
 	rc = __dscbv(locwork.volser, &dscb4);
 	if (rc != 0) return -1;
 
-	devtk = dscb4.dscb4.devtk;
-	devov = dscb4.dscb4.devov;
-	devk  = dscb4.dscb4.devk;
-
-	/* blocks_per_track = floor((devtk - overhead) / (overhead + blksz))
-	   where overhead = devov - devk for non-keyed records */
-	overhead = devov - devk;
-	if (overhead + blksz == 0) return -1;
-	bpt = (devtk - overhead) / (overhead + blksz);
+	/* blocks per track depends on the device: bytes on a 3350, cells on a
+	   3380 (see blkptrk.h); 0 = a device this does not know */
+	bpt = blocks_per_track(dscb4.dscb4.devtk, dscb4.dscb4.devov,
+			       dscb4.dscb4.devk, dscb4.dscb4.devfg, blksz);
 	if (bpt == 0) return -1;
 
 	/* DS1LSTAR: TT = relative track (0-based), R = block on track (1-based) */
@@ -682,6 +675,7 @@ is_pds(const char *dsname)
 #define OPEN_FAIL_NODSN   1     /* the data set is not cataloged          */
 #define OPEN_FAIL_NOMEM   2     /* the data set has no such member        */
 #define OPEN_FAIL_NOTPDS  3     /* a member was asked of a non-PDS        */
+#define OPEN_FAIL_NOSTOR  4     /* no storage to tell: the object is there */
 
 /* Is the data set in the catalog? __locate() wants a blank-padded 44-byte
    name, which is the only reason this is a function and not a call. */
@@ -734,8 +728,14 @@ diagnose_open_failure(const char *dsname, const char *member)
         return OPEN_FAIL_NOTPDS;
     }
 
+    /* NULL is an empty result (errno 0) or a storage shortage (ENOMEM): the
+       first is a member that is not there, the second says nothing about it */
     pdslist = __listpd(dsname, member);
     if (!pdslist) {
+        if (errno == ENOMEM) {
+            wtof(MSG_STORAGE_FAILED, ALLOC_MEMBER_LIST);
+            return OPEN_FAIL_NOSTOR;
+        }
         return OPEN_FAIL_NOMEM;
     }
     __freepd(&pdslist);
@@ -759,6 +759,10 @@ send_open_failure(Session *session, const char *dsname, const char *member,
         return sendErrorResponse(session, HTTP_STATUS_NOT_FOUND,
             CATEGORY_SERVICE, RC_ERROR, REASON_MEMBER_NOT_FOUND,
             ERR_MSG_MEMBER_NOT_FOUND, NULL, 0);
+    case OPEN_FAIL_NOSTOR:
+        return sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+            CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+            ERR_MSG_LIST_NOMEM, NULL, 0);
     case OPEN_FAIL_NOTPDS:
         /* mirror of the "dataset is a PDS, use the member endpoint" 400 */
         return handle_error(session, ERR_INVALID_PARAM,
@@ -1411,6 +1415,18 @@ int datasetListHandler(Session *session)
 	extract_level_prefix(dslevel, level_buf, sizeof(level_buf), &filter);
 	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
 
+	/* NULL with errno ENOMEM is a storage shortage, not an empty level: an
+	   empty items array would tell the client the catalog has nothing there
+	   (#360). errno is only meaningful on NULL, and the exact-name lookup
+	   below would overwrite it, so it is read here. */
+	if (!dslist && errno == ENOMEM) {
+		wtof(MSG_STORAGE_FAILED, ALLOC_DATASET_LIST);
+		rc = sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+			CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
+			ERR_MSG_LIST_NOMEM, NULL, 0);
+		goto quit;
+	}
+
 	/* z/OSMF prefix semantics: a bare multi-qualifier dslevel like
 	** "A.B" must return the exact dataset AND anything below it.
 	** LISTC LEVEL('A.B') returns entries cataloged *under* A.B
@@ -1472,13 +1488,8 @@ int datasetListHandler(Session *session)
 						unsigned short tpc = 0;
 						memset(&dscb4buf, 0, sizeof(dscb4buf));
 						dscbrc = __dscbv(vol, &dscb4buf);
-						/* workaround: struct dscb4 includes key[44]
-						** but __dscbv() returns data-only (96 bytes).
-						** dstrk is at data offset 20, not struct
-						** offset 64. Read directly from work area. */
 						if (dscbrc == 0)
-							tpc = ((unsigned char)dscb4buf.work[20] << 8)
-							    |  (unsigned char)dscb4buf.work[21];
+							tpc = dscb4buf.dscb4.dstrk;
 						if (tpc == 0) tpc = 30;
 						switch (tpc) {
 						case 30: strcpy(ds->dev, "3350"); break;

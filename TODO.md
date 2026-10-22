@@ -88,11 +88,12 @@ page and the stand rollout already do it that way. Docs only.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.
-**#360's `__listpd()` half is unblocked since
-the libc370 2.0 port (PR #379)**: 2.0.0 ships the NULL + `ENOMEM` contract, so
-`diagnose_open_failure()` now answers a shortage or an unreadable directory with
-404 — see the 2026-10-01 comment on #360 (proposal: `__walkpd()`). The
-`__listds()` half still waits on `libc370#157`. #361 is new (2026-09-06) and moved
+**#360 is handled in the libc370 2.25.1 move (#442)**: the `ENOMEM` contract
+(2.0.0) is read in `datasetListHandler()` and `diagnose_open_failure()`, so a
+shortage is a 500 with `MVSMF006E`, no longer an empty 200 or a 404. The
+`__listds()` half never needed `libc370#157` for that: NULL with `ENOMEM` was
+already there. The unreachable path is untested on MVS (`fn=listds` reports it
+as `"nomem"`). #360 stays open until a shortage has been provoked on MVS. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is
 empty again** — #406 landed in PR #409 and #371 in PR #403, both on
 2026-10-13, and before them #336's
@@ -109,7 +110,8 @@ handed its list over). In hand, in this order:
 - **#418** waits on a read-only zxp measurement (404 or 405 for a known path
   with an unregistered method).
 - **#423**: the hard part is provoking a mid-file UFSD read error.
-- **#424** is blocked on `libc370#529`.
+- **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
+- **#443** is new (2026-10-22, found in #442): the listing's `dev` names a 3380 volume "3390".
 
 Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, which runs
 on all four M38 stands since 2026-10-15),
@@ -135,7 +137,7 @@ the next case).
 | 11 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
 | 12 | #291 | reclassified — hygiene, not stability | nothing |
 | 13 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
-| 14 | #336 | routes withdrawn; now a feature request | `libc370#143` for half of it |
+| 14 | #336 | routes withdrawn; now a feature request | nothing: `libc370#143` is in libc370 2.24.0 (`__scratch()`/`__renamev()`) |
 
 ---
 

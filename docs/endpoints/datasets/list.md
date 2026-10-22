@@ -78,6 +78,13 @@ list (issue #232).
 Entries skipped by `start` are not charged against `X-IBM-Max-Items`, and
 `moreRows` counts only what is still fetchable from `start` onwards.
 
+## Error Responses
+- HTTP 500 (Internal Server Error)
+    - Storage for the catalog list could not be obtained (`category` 7, `rc` 16).
+      The operator sees `MVSMF006E` naming `THE DATA SET LIST`. Until issue #360
+      this answered 200 with an empty `items` array, which reads as "nothing
+      cataloged under that level". An empty level is still 200 with no items.
+
 ## Limitations
 - Only NONVSAM datasets are listed
 - `*` and `**` wildcards are treated identically (both match any number of qualifiers)

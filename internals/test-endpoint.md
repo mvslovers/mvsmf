@@ -40,3 +40,19 @@ closed. The boundary that means something is the route: building with
 `tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
 caught, the server keeps serving, and it costs no storage. It deliberately
 faults the worker several times.
+
+## `fn=dscb` and `fn=listds`: probes behind the libc370 2.25 move (#442)
+
+`fn=dscb&dsn=...` reads the data set's format-1 DSCB and the format-4 DSCB of
+its volume. Besides the extent and DS1LSTAR fields it returns the geometry
+`dsapi.c` computes with: `devtk`, `devov`, `devk`, `devfg`, `dstrk`
+(tracks per cylinder), `dscb4_rc` (the `__dscbv()` return code) and
+`blocks_per_track` for the data set's block size, from the same
+`blocks_per_track()` (`blkptrk.c`) that `get_fb_record_count()` calls. That is
+how a new device type is checked against a real volume before its formula is
+trusted: create an FB data set on it, write a known number of records, and
+compare `lstar_tt`/`lstar_r` with `blocks_per_track`.
+
+`fn=listds` adds `"nomem"`: `true` when `__listds()` returned NULL with
+`errno` ENOMEM (a storage shortage), `false` for a plain empty result. The
+list handlers tell the two apart the same way (#360).

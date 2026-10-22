@@ -147,6 +147,29 @@ else
 fi
 
 echo ""
+echo "--- Blocks per track agree with the last-block pointer (issue #439) ---"
+
+# What the binary read caps at is lstar_tt * blocks_per_track + lstar_r, the
+# record count's source. After a known upload the pointer must name exactly
+# the blocks that were written, on whatever device the volume is.
+DSCB_JSON=$(curl -s -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}")
+BPT=$(echo "$DSCB_JSON" | jq -r '.blocks_per_track // empty')
+if [ -z "$BPT" ] || [ "$BPT" = "0" ]; then
+	skip "blocks per track: device not known to the estimate (devfg=$(echo "$DSCB_JSON" | jq -r '.devfg // "?"'))"
+else
+	LSTAR_TT=$(echo "$DSCB_JSON" | jq -r '.lstar_tt')
+	LSTAR_R=$(echo "$DSCB_JSON" | jq -r '.lstar_r')
+	WRITTEN=$(( ($(wc -c < "$BINARY_FILE" | tr -d ' ') / 80 + 38) / 39 ))
+	GOT=$(( LSTAR_TT * BPT + LSTAR_R ))
+	if [ "$GOT" = "$WRITTEN" ]; then
+		pass "blocks per track ${BPT}: ${GOT} blocks, as written"
+	else
+		fail "blocks per track ${BPT}: last-block pointer names ${GOT} blocks" "expected ${WRITTEN}"
+	fi
+fi
+
+echo ""
 echo "--- Delete Sequential Dataset ---"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \

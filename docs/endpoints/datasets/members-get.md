@@ -109,6 +109,9 @@ diagnosis (404, or 500 on an I/O error), which is the more specific answer.
       (`category` 16, `rc` 121, see [encoding.md](encoding.md))
     - The member exists but cannot be opened (I/O error)
     - Memory allocation failed
+    - A failed open could not be diagnosed for lack of storage (`MVSMF006E`
+      naming `THE MEMBER LIST`); the answer is not a 404, because nothing
+      established that the member is missing (issue #360)
 
 A failed open used to be reported as 500 whatever the cause, so a member that
 was simply not there looked like a broken server (issue #191). The two cases are

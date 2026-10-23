@@ -65,11 +65,11 @@ UPDATE). The owner comes first because RAKF compares only the first **8**
 characters of an entity: with the owner first, a profile `OWNER.*` is a rule
 about a user. A job without an owner has the entity `.<jobname>.<jobid>`.
 
-| Access to the entity | list, status, spool files, records | purge |
+| Access to the entity | list, status, spool files, records | purge or cancel |
 |----------------------|------------------------------------|-------|
 | no profile covers it, or `NONE` | the job is hidden | hidden |
-| `READ` | listed and read | refused: HTTP 500, category 4, "Authorization failed - You may not purge this job." |
-| `UPDATE`, `CONTROL`, `ALTER` | listed and read | the job is purged |
+| `READ` | listed and read | refused: HTTP 500, category 4, "Authorization failed - You may not purge this job." ("... cancel this job." for a cancel) |
+| `UPDATE`, `CONTROL`, `ALTER` | listed and read | the job is purged or cancelled |
 
 The refusal of a purge with READ has the shape of every refusal of this API,
 the one of the data set services (HTTP 500, not 403, which is not a z/OSMF
@@ -82,7 +82,8 @@ status):
 
 A [cancel](endpoints/jobs/cancel.md) (`PUT` with `{"request":"cancel"}`) is judged
 by the same rule as a purge: UPDATE for the job of another owner, and with READ
-only the same refusal with "You may not cancel this job."
+only the same refusal with "You may not cancel this job." Wherever this page says
+"purge" and speaks of UPDATE, a cancel is meant as well.
 
 A hidden job is answered with the same 404 as a job that does not exist (the
 text names the job name and job id of the request), so the reply does not tell
@@ -434,8 +435,8 @@ may use mvsMF at all, not who may use the console services alone; see
 1. Log in as an ordinary user: `GET /zosmf/restjobs/jobs?owner=*` lists only
    your own jobs, and the status of another user's job answers 404.
 2. Log in as a member of the group that a profile permits: the listing shows
-   the foreign jobs, the spool files can be read; a purge answers HTTP 500
-   with READ and HTTP 200 with UPDATE.
+   the foreign jobs, the spool files can be read; a purge or a cancel answers
+   HTTP 500 with READ and HTTP 200 with UPDATE.
 3. After every `S RAKFPROF` read the console.
 
 The automated check is `mbt run rest-tests -- curl-jesspool` (a throwaway
@@ -452,6 +453,6 @@ system with RAKF 2.0.0 and an administrator as the test user: it writes
 | HTTP 404 for a job that exists | The job is hidden: it belongs to another owner and no JESSPOOL profile gives you READ. Or the job id is not written in upper case |
 | `owner=*` lists only your own jobs | No READ on the entity `..` (only a `*` profile covers it) |
 | `owner=X` gives `[]` | No READ on the entity `X..`, or `X` is a pattern, longer than 8 characters or has a character outside `A-Z 0-9 $ # @` |
-| a purge answers HTTP 500, category 4 | READ without UPDATE on the job |
+| a purge or a cancel answers HTTP 500, category 4 | READ without UPDATE on the job |
 | an administrator sees only their own jobs | Administrators have no special right in the class JESSPOOL: add a line for their group (examples D and E) |
 | the started task `HTTPD` is not in the list | It is a job of another owner: it needs a profile like any other |

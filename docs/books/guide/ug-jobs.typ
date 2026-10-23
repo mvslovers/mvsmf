@@ -106,7 +106,10 @@ card and the class from the operand #cmd("CLASS="). Then it:
   The job always runs as the user of the request\;
 - replaces #cmd("NOTIFY=&SYSUID") with #cmd("NOTIFY=") and the user ID of the
   request. Any other #cmd("NOTIFY") stays as it is\;
-- adds a comma to the end of the last card of the JOB statement\;
+- makes the last card of the JOB statement continue onto the added card. A
+  card that ends in column 70 or earlier gets a comma at its end. A card that
+  ends in column 71 has no room for a comma, so mvsMF moves the last operand of
+  that card onto a card of its own (see below)\;
 - inserts one more card behind the JOB statement. The card carries
   #cmd("NOTIFY=$MVSMF,") (only if the JOB statement has no #cmd("NOTIFY")), then
   #cmd("USER=") with the user ID and #cmd("PASSWORD=") with the password of the
@@ -129,12 +132,44 @@ file #cmd("JESJCL") of every job that you submitted through mvsMF as a file that
 holds a password, and do not copy it to a place that others read. The sessions
 of this chapter read no #cmd("JESJCL").]
 
+A comma is data only up to column 71, because column 72 is the continuation
+column. The last card of the JOB statement is treated by its length, without
+the blanks at its end, as in a record of 80 columns:
+
+- It ends with a comma: mvsMF leaves it as it is\;
+- it ends in column 70 or earlier: mvsMF appends the comma\;
+- it ends in column 71: mvsMF moves the last operand of the card, the text
+  behind the last comma that is outside quotes and parentheses, onto a
+  continuation card of its own. That card comes before the card that mvsMF adds.
+  The comma in front of the moved operand now ends the original card.
+
+This applies to the last card of the statement only, and to both ways of
+submitting the JCL, in the body and as a data set. The JCL reaches JES2 with the
+same operands in the same order, but not byte for byte: the line break has
+moved. A card of 71 columns such as
+
+#screen(```
+//MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1)
+```)
+
+reaches JES2 as
+
+#screen(```
+//MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,
+//         MSGLEVEL=(1,1),
+//         NOTIFY=$MVSMF,USER=userid,PASSWORD=password   BY MVSMF
+```)
+
 The statement must have room for the changes. mvsMF refuses the request in
 these cases (@ug-jobs-submit-fail):
 
-- The last card of the JOB statement has 70 or more characters, not counting
-  the blanks at its end, and does not end with a comma. There is no room for the
-  comma;
+- The last card of the JOB statement has data behind column 71 (a sequence
+  number in columns 73 to 80 counts, blanks do not) and does not end with a
+  comma\;
+- the last card ends in column 71 and has no comma outside quotes and
+  parentheses to cut at, for example a single long quoted operand\;
+- the operand that mvsMF would move is longer than 59 characters, so it does not
+  fit on a continuation card of its own\;
 - a card with #cmd("NOTIFY=&SYSUID") is 72 characters or longer after mvsMF has
   put the user ID in;
 - the card that mvsMF adds does not fit even with the short comment. It fits for
@@ -164,8 +199,8 @@ The cases of the submit request are:
     [No JOB statement],
       [400], [#cmd("No valid JOB card found in submitted JCL"), or
         #cmd("No valid JOB card found in dataset") when the JCL comes from a data set],
-    [The JOB statement has no room for the added card],
-      [400], [#cmd("JOB card too long: no room left for the NOTIFY, USER and PASSWORD operands mvsMF adds")],
+    [The JOB statement cannot be continued onto the added card],
+      [400], [#cmd("JOB card cannot be continued: no room for the comma that joins it to the NOTIFY, USER and PASSWORD operands mvsMF adds")],
     [JSON without a usable #cmd("file") field],
       [400], [#cmd("Missing or invalid 'file' field in request body")],
     [A #cmd("file") value that is not of the form #cmd("//'name'")],

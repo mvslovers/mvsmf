@@ -396,7 +396,7 @@ The job routes use these reasons, mostly with category 6:
     [9], [JES2 is busy.],
     [10], [The spool data is gone.],
     [11], [The spool could not be read.],
-    [12], [The JOB card is too long.],
+    [12], [The JOB card cannot be continued onto the card mvsMF adds.],
   )
 ] <ref-conv-jobreasons>
 

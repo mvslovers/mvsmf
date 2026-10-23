@@ -116,6 +116,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTMTSN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTCOLPL: #475 — a collect poll that cannot allocate its response buffer
+# answered an empty block, which a polling client takes for finished. Portable
+# C (`mbt test`); the TU #includes src/collpoll.c with a malloc that can fail and
+# a fake correlator, so it drives the real poll consoleCollectHandler calls —
+# do not list collpoll.c here.
+[test.TSTCOLPL]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
 # #includes src/reclines.c so it drives the real state machine the four write

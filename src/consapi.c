@@ -18,6 +18,7 @@
 #include "ntstore.h"
 #include "mvsmfctx.h"
 #include "mttsnap.h"
+#include "collpoll.h"
 
 /*
  * z/OSMF Console services -- Issue command (endpoint 1).
@@ -1104,7 +1105,6 @@ int consoleCollectHandler(Session *session)
 	NT_STORE *store;
 	SOL_CURSOR cur;
 	unsigned curlen = 0;
-	unsigned total = 0;
 	char *resp;
 	int rc, r;
 
@@ -1120,12 +1120,6 @@ int consoleCollectHandler(Session *session)
 		return send_collect(session, "");
 	}
 
-	resp = malloc(RESP_CAP);
-	if (!resp) {
-		return send_collect(session, "");
-	}
-	resp[0] = '\0';
-
 	/* return only the lines beyond what we already delivered, then advance.
 	 *
 	 * cur.echo_secs pins the block to the one this key was handed out for
@@ -1135,18 +1129,17 @@ int consoleCollectHandler(Session *session)
 	 * mis-anchor (watched going 10 -> 5). The entry is rewritten either way, so
 	 * a polling client keeps it alive against the store's LRU and TTL.
 	 *
-	 * A snapshot that could not be taken is not a block of 0 lines (#407): it
-	 * answers 500, like the hardcopy log, and the cursor is rewritten as it
+	 * A poll that could not be made -- no storage for the response buffer
+	 * (#475), or no snapshot of the table (#407) -- is not a block of 0 lines:
+	 * it answers 500, like the hardcopy log, and the cursor is rewritten as it
 	 * was -- not advanced, and kept alive for the retry. An empty 200 would
 	 * tell the client the block is finished. No WTO: a client polling through
 	 * a shortage would write one line per poll into the table it is reading. */
-	r = correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total,
-	                   cur.echo_secs, (int *)0);
-	if (r != MTT_SNAP_FAILED && total > cur.delivered) cur.delivered = total;
+	r = collect_poll(session, correlate_once, cur.cmd, cur.echo_secs, RESP_CAP,
+	                 &cur.delivered, &resp);
 	nt_set(store, name, &cur, sizeof(cur));
 
-	if (r == MTT_SNAP_FAILED) {
-		free(resp);
+	if (r != 0) {
 		return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 		    8, 1, "An error occurred during the retrieval of the command "
 		    "response.");

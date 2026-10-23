@@ -52,10 +52,20 @@ for. mvsMF derives it instead:
 
 | | with `like`, field absent |
 |---|---|
-| `primary` | the model's total allocated tracks, in `TRK` |
+| `primary` | the model's total allocated tracks over **all** its extents, in `TRK` |
 | `secondary` | the model's secondary quantity, converted to tracks |
 | `alcunit` | forced to `TRK`, because the two above are track counts |
 | `dirblk` | `20` when the **target** is partitioned — see below |
+
+**If the model's extents cannot be read, no space is derived.** A model with
+more than three extents keeps the rest in a further DSCB on its volume (the
+format-3 DSCB, see `sizex` in [list.md](list.md)); where that chain cannot be
+read, mvsMF does not guess from a partial sum. The create still goes ahead and
+answers **201**, with the space you sent: your `primary`, `secondary` and
+`alcunit`, or, for what you left out, a `primary` of 1 track, a `secondary` of
+`0` and `TRK`. The new data set can therefore be far smaller than its model.
+Send `primary` (and `secondary`) yourself when the model's size matters, and
+check the result with the [list](list.md) call (`sizex`).
 
 Supplying `primary` yourself leaves your `alcunit` alone — and in that case the
 secondary is only derived when the unit in force is `TRK`. Under `CYL` or `BLK`

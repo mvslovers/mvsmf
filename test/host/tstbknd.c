@@ -22,7 +22,7 @@ static char msg[160];
 static void
 check_kind(const char *version, int want)
 {
-	sprintf(msg, "build_is_dev(\"%s\") is %d", version ? version : "NULL", want);
+	snprintf(msg, sizeof(msg), "build_is_dev(\"%s\") is %d", version ? version : "NULL", want);
 	CHECK_EQ(build_is_dev(version), want, msg);
 }
 

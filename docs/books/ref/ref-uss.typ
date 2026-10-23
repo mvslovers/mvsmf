@@ -146,9 +146,14 @@ The data type is checked before the file is opened. A path that does not exist
 gives 404, and a path that is a directory gives 400 with the message
 #cmd("Is a directory") (@ref-uss-errors).
 
-#note[*A defect* (mvsmf\#423): the read loop does not test whether UFSD failed
-while it read. A read that fails after the headers went out ends as a normal
-200 with the bytes read so far. The client cannot tell it from a short file.]
+When a read fails after the headers went out, mvsMF writes #cmd("MVSMF301E")
+(@ref-uss-msgs) and closes the connection in the middle of the body. It sends no
+final chunk and no error report. The bytes read before the failure were sent
+already. A client sees a failed transfer: curl exits with 18 (#cmd("transfer
+closed with outstanding read data remaining")). The loop ends as a failure when
+UFSD reports an error on the file, and also when it ends without UFSD having
+reported the end of the file. A failed open is answered with an error report as in
+@ref-uss-errors, because the headers are not out yet.
 
 == Write a File <ref-uss-write>
 
@@ -428,6 +433,9 @@ return code of UFSD:
 When the open of a read or a write fails and UFSD reports no code, mvsMF
 answers as for 28. The create request has no such rule.
 
+The table is for a request that fails before the answer starts. A read that
+fails after the headers went out has no status to change (@ref-uss-read).
+
 The status codes follow the closed list of z/OSMF. "Exists" and "not empty" are
 therefore 400, and "no space" and "no inodes" are 500.
 
@@ -459,3 +467,19 @@ Reading a file and listing a directory are not checked. UFSD does not test the
 mode bits and the owner of a file or directory, and the fields #cmd("mode"),
 #cmd("user") and #cmd("group") of a listing report what the file system stores.
 A new file belongs to the user and the group of the request.
+
+== Operator Messages <ref-uss-msgs>
+
+#idx("messages", "file services")#idx("MVSMF301E")
+The file services write one message to the console. The text is in
+@apx-messages.
+
+#tab(caption: [Message of the file services])[
+  #table(columns: (1.0in, 1fr),
+    [Message], [When],
+    [#cmd("MVSMF301E")], [A read of a file failed after the answer had started\; the body is short.],
+  )
+]
+
+A fault of the client (a missing file, a refusal, a directory read as a file)
+writes no message.

@@ -149,11 +149,36 @@ The header #cmd("X-IBM-Data-Type: binary") sends the bytes of the file as
 they are, with the content type #cmd("application/octet-stream"). A client that
 stores files of any kind needs it.
 
-#note[*A defect* (mvsmf\#423): when UFSD fails while mvsMF reads the file, mvsMF
-does not notice. The request ends as a normal #cmd("200") with a file that is
-too short.]
-
 A path that is a directory answers 400 with the message #cmd("Is a directory").
+
+=== A Read That Fails Part-Way <ug-uss-readfail>
+
+#idx("file", "read failure")#idx("MVSMF301E")#idx("curl", "exit 18")
+mvsMF sends the status line and the headers before it reads the first block of
+the file. When UFSD fails after that, for example because it was stopped, the
+status cannot change any more. mvsMF closes the connection in the middle of the
+body, without the last chunk. The client sees a failed transfer and never a
+#cmd("200") that ends cleanly and looks complete. curl exits with 18 and the
+message #cmd("transfer closed with outstanding read data remaining"). There is
+no error report, because the body has begun already.
+
+The bytes that mvsMF read before the failure have been sent, and a client that
+writes the body to a file keeps them. Do not use that file. Read the file
+again when UFSD runs again.
+
+The operator gets the message #cmd("MVSMF301E") on the console. The session
+looks for it in the hardcopy log (@ug-console) after UFSD was stopped in the
+middle of a download:
+
+#screen(raw(read("../ex/ug-uss/u-readfail-log.txt"), block: true))
+
+The text names the absolute path of the file and the return code of the failed
+read. The code #cmd("-1") means that the request to UFSD itself failed, as it
+does when UFSD is not running. The other codes are those of UFSD (@ug-uss-errors
+shows the ones that reach a client). A read that fails before the first byte of
+the body, because the file cannot be opened, answers with an error report as
+any other error does. The _mvsMF Reference_ lists the message in the appendix
+“Messages”.
 
 == IBM-1047 and IBM-037 <ug-uss-codepage>
 

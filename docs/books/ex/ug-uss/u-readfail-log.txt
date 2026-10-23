@@ -1,0 +1,4 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restconsoles/v1/log?timeRange=10m" \
+  | grep -o 'MVSMF301E[^"]*' | tail -1
+MVSMF301E I/O ERROR READING /tmp/mvsmf-demo/readfail.txt RC=-1

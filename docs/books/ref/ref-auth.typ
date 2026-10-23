@@ -50,10 +50,10 @@ MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN", block: true))
 
 On a route with #cmd("AUTH=TOKEN") HTTPD answers a request without a credential
-itself, with the bare 401 of @ref-conv-401. On a route with #cmd("AUTH=NONE")
+itself, with the plain 401 of @ref-conv-401 (a text body, no challenge). On a route with #cmd("AUTH=NONE")
 HTTPD passes the request on with or without a credential.
 
-mvsMF then runs one middleware for every request. It takes the credential that
+mvsMF then runs its authentication middleware for every request. It takes the credential that
 HTTPD resolved and makes it the identity of the task, so that the data set,
 file and job operations run under the user. The middleware lets
 #cmd("/zosmf/services/authenticate") through without a credential. For any other
@@ -176,7 +176,9 @@ header can appear twice in the response, with the same value.
       #cmd("WWW-Authenticate") of @ref-conv-401 (not for a web page script).],
     [500], [The credential is good, but HTTPD could not give it a session of its
       own. Causes: RACF refused the second logon, the credential store is full,
-      or the client already holds as many sessions as HTTPD allows.],
+      or the client already holds 16 sessions of the same user ID, password and
+      address and none of them has been idle for 60 seconds. When one of them
+      has, HTTPD ends the one used least recently and makes room.],
     [#cmd("{\"returnCode\":4,\"reasonCode\":40,\"message\":\"The request failed because an internal error occurred.\"}")],
   )
 ]

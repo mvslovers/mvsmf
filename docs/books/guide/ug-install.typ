@@ -27,9 +27,9 @@ The installation needs these parts on the system:
       #cmd("http_new_session") that HTTPD 4.2.0 introduced. There is no test
       for the entry at run time, so the floor is yours to check. The banner
       #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start).],
-    [UFSD 1.4.0 or later], [Only the UFS file service needs it (@ug-uss). The
-      data set, job and console services do not depend on it. mvsMF is built
-      against UFSD 1.4.0.],
+    [UFSD], [Only the UFS file service needs it (@ug-uss). The data set, job and
+      console services do not depend on it. mvsMF is built against UFSD 1.4.0.
+      The installation instructions of mvsMF name no minimum level of UFSD.],
     [RAKF], [Every request runs under the identity of the caller, which HTTPD
       resolves from the user ID and the password or the token. The job access
       described in @ug-install-upgrade needs RAKF 2.0.0 or later.],

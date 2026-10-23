@@ -68,7 +68,7 @@ The three specific lines come before the line with the wild card.
       #cmd("FACILITY") (@ref-httpd-opts). A user without the access gets the
       plain text 403 of HTTPD, and mvsMF does not run.],
     [#cmd("/zosmf/*")], [#cmd("TOKEN")], [Every other path of mvsMF. A request
-      without a valid credential gets a bare 401 from HTTPD, before mvsMF runs.],
+      without a valid credential gets a plain 401 from HTTPD (a text body, no challenge), before mvsMF runs.],
   )
 ]
 
@@ -210,7 +210,7 @@ other path of mvsMF, whatever the line in the member says.]
     [#cmd("FORM")], [HTTPD answers with the login page.],
     [#cmd("BASIC")], [401 with #cmd("WWW-Authenticate: Basic"), so that a
       browser asks for the user ID and password.],
-    [#cmd("TOKEN")], [A bare 401 without a challenge. This is the mode for API
+    [#cmd("TOKEN")], [A plain 401 with a text body and without a challenge. This is the mode for API
       clients and the mode of the sample line for #cmd("/zosmf/*").],
   )
 ]
@@ -372,7 +372,8 @@ the two data sets by name when the statements are missing.]
 
 #idx("HTTPD908E")#idx("503")
 When HTTPD cannot run the module, it answers 503 with a plain-text body
-#cmd("External program MVSMF reason") and writes
+#cmd("External program MVSMF reason") (HTTPD sends the status line and the
+headers only when the module has not begun an answer) and writes
 #cmd("HTTPD908E EXTERNAL PROGRAM MVSMF reason") to the console.
 
 #tab(caption: [The reasons of HTTPD908E])[
@@ -387,7 +388,9 @@ When HTTPD cannot run the module, it answers 503 with a plain-text body
     [#cmd("was dispatched without a program name")], [The route has no program.],
     [#cmd("could not be started, ESTAE create failed")], [HTTPD could not set up
       its recovery for the call.],
-    [#cmd("returned rc n")], [The module ended with a return code other than 0.],
+    [#cmd("returned rc n")], [The module returned a negative return code of its own, n.
+      The launcher of a CGI module sets a negative return code of #cmd("main") to 0, so mvsMF does not
+      cause this row.],
     [#cmd("failed with Snnn ABEND")], [A system abend that mvsMF did not
       handle itself.],
     [#cmd("failed with Unnnn ABEND")], [A user abend, for instance #cmd("U0801")

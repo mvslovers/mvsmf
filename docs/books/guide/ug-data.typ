@@ -229,8 +229,8 @@ translation. This session writes six bytes into the data set
 #screen(raw(read("../ex/ug-data/d-put-bin.txt"), block: true))
 
 mvsMF cuts the bytes into records of the record length. The last record, which is
-not full, is filled with X'00' to the full length, except in a data set of
-record format U. The six bytes are one record of 80 bytes. The read in binary
+not full, is filled with X'00' to the full length, except in a sequential data
+set of record format U. A member is always filled. The six bytes are one record of 80 bytes. The read in binary
 mode returns the records one after another, as they are stored:
 
 #screen(raw(read("../ex/ug-data/d-get-bin.txt"), block: true))

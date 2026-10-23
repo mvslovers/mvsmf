@@ -185,17 +185,17 @@ The answer has the usual fields and two more. #cmd("status") is #cmd("detected")
 and #cmd("msg") is the message text of the newest line that matched, without the
 time and the originator. When the text does not show up in time,
 #cmd("status") is #cmd("timeout") and #cmd("msg") is empty. The wait is
-#cmd("unsol-detect-timeout") seconds, 20 when the field is missing. A value
-outside 1 to 60 also gives 20. The wait starts after the wait for the answer of
-the command, so the request can take 20 seconds and more. Keep the time-out of
+#cmd("unsol-detect-timeout") ticks of the clock, each of about 1.05 seconds, 20
+when the field is missing. So the default is about 21 seconds. A value outside 1 to 60 also gives 20. The wait starts after the wait for the answer of
+the command, so the request can take about 21 seconds and more. Keep the time-out of
 the client above that.
 
 The other form does not wait for the text. Without #cmd("unsol-detect-sync") the
 answer comes back after the wait for the answer of the command. It has the usual
 fields and the fields #cmd("detection-key"), #cmd("detection-url") and
 #cmd("detection-uri"). The client asks later with a #cmd("GET") on the path
-#cmd("detections"). The field #cmd("detect-time") sets the window in seconds, 30
-when it is missing. This session arms a detection for #cmd("FTPD099I"), the
+#cmd("detections"). The field #cmd("detect-time") sets the window in ticks of
+about 1.05 seconds, 30 when it is missing. This session arms a detection for #cmd("FTPD099I"), the
 message that ends the stop of FTPD, and asks eight seconds later. The first
 answer holds only the first message of the stop (compare @ug-console-late). Set
 #cmd("DKEY") to the #cmd("detection-key"):
@@ -299,7 +299,7 @@ table afterwards. The answer you get can be wrong in ways that the status
   not come in time. mvsMF did not find the echo, for example because the command
   has more than 100 characters. The echo had left the table. An empty
   #cmd("cmd-response") does not tell which.
-- *The answer can be too long.* The text is capped at 32768 bytes, and lines
+- *The answer can be too long.* The text is capped at 32767 bytes, and lines
   that do not fit are left out without a sign. mvsMF reads at most 256
   characters of each line of the table, and 24 of them are the flags, the time
   and the originator. A single line of the answer therefore holds at most 232
@@ -324,7 +324,7 @@ table afterwards. The answer you get can be wrong in ways that the status
 == When a Request Fails <ug-console-fail>
 
 #idx("429")#idx("503")
-Besides the errors of the body (@ug-console-issue), four failures matter for a
+Besides the errors of the body (@ug-console-issue), five failures matter for a
 client that issues commands:
 
 #tab(caption: [Failures that decide whether a client may send the request again])[
@@ -340,7 +340,11 @@ client that issues commands:
        again blindly: a second #cmd("S"), #cmd("V") or #cmd("$P") does it a
        second time.],
     [#cmd("500")], [#cmd("14")],
-      [mvsMF had no storage for the answer. The command *was* issued.],
+      [mvsMF had no storage for the answer, or could not copy the table that
+       holds it. The command *was* issued. Do not send it again blindly.],
+    [#cmd("500")], [#cmd("1")],
+      [A collect or a poll of a detection could not copy the table. Nothing is
+       lost: mvsMF keeps the key or the armed detection, so ask again.],
   )
 ]
 

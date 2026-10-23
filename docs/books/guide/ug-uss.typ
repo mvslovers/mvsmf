@@ -113,9 +113,8 @@ directory, without the entries #cmd(".") and #cmd(".."):
   )
 ]
 
-The entries come sorted by name, by the byte values of the EBCDIC names: lower
-case letters sort before upper case letters, and digits come last. A directory
-without entries answers #cmd("200") with an empty array.
+The entries come in the order in which the directory holds them. mvsMF does not
+sort them. A directory without entries answers #cmd("200") with an empty array.
 
 The header #cmd("X-IBM-Max-Items") limits the number of entries. Without it the
 limit is 1000. The value 0 means no limit. A listing that the limit cuts is still

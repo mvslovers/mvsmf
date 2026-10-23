@@ -4,7 +4,7 @@ Date: Fri, 23 Oct 2026 07:57:57 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive
-Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict; expires=Thu, 01 Jan 1970 00:00:00 GMT
+Set-Cookie: LtpaToken2=deleted; Path=/; HttpOnly; SameSite=Strict; expires=Thu, 01 Jan 1970 00:00:00 GMT
 Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff

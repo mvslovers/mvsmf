@@ -909,8 +909,8 @@ test_submit_dataset_name_too_long() {
 	split_response "$resp"
 	assert_http_status "400" "$HTTP_STATUS" "submit dataset name without //'...'"
 
-	# 44 + 8 is legal: it must get past the name check (404, not 400, as the
-	# data set does not exist)
+	# a name with a member within both limits gets past the name check: 404,
+	# not 400, as the data set does not exist
 	name=$(printf 'A%.0s' $(seq 1 36))
 	resp=$(do_curl PUT \
 		-H "Content-Type: application/json" \

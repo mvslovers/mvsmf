@@ -28,9 +28,7 @@ struct slot {
 static int
 canary_intact(const struct slot *s)
 {
-	int ii;
-
-	for (ii = 0; ii < NCANARY; ii++) {
+	for (int ii = 0; ii < NCANARY; ii++) {
 		if ((unsigned char)s->canary[ii] != CANARY) return 0;
 	}
 	return 1;
@@ -83,10 +81,10 @@ check_name(const char *what, const char *text, int want_rc)
 int
 main(void)
 {
-	char dsn[DSNAME_MAX + 8];
+	char dsn[128];
 	char text[160];
 
-	CHECK_EQ((int)SUBDSN_SIZE, 55, "buffer holds 44 + ( + 8 + ) + NUL");
+	CHECK_EQ(SUBDSN_SIZE, 55, "buffer holds 44 + ( + 8 + ) + NUL");
 
 	check_name("plain name", "SYS1.PROCLIB(X)", 0);
 	check_name("one character", "A", 0);

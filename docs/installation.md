@@ -4,7 +4,8 @@ mvsMF is delivered as an **SMP Release 4** install package — the SMP that ship
 with MVS 3.8j, not SMP/E. `mbt package` builds it; a release attaches it.
 
 FMID **`TZMF140`** (mvsMF 1.4.0). Each release spends one id and **deletes its
-predecessor**, so an upgrade needs nothing beyond the package.
+predecessor**, so an upgrade from the release just before needs nothing beyond
+the package. From any older level, see [Upgrading](#upgrading).
 
 ## What you need first
 

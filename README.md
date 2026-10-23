@@ -47,7 +47,7 @@ explains who may see, read and purge which job.
 > — it goes out by SVC 34 from console 0, the master console, with the text
 > unfiltered — and read the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
-> diagnostic endpoint `/zosmf/test?fn=cmd` is the same power through a second
+> diagnostic endpoint `/zosmf/test` can issue commands too, through a second
 > door that the profile does not cover, and it is compiled in by default.
 >
 > On a system where not every userid is trusted at the operator console, build

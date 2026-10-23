@@ -26,8 +26,8 @@ Issues an MVS operator command and returns the captured command response. Part o
 > **Without the profile nothing is gated** — SAF treats an unprotected resource
 > as permitted — and HTTPD only warns at startup (`HTTPD425W NO PROFILE FOR
 > FACILITY:MVSMF.CONSOLE`). The route listed after `/zosmf/*` is never reached,
-> silently. And `/zosmf/test?fn=cmd` is a second door to the same SVC 34 that
-> this route does not cover; build with `-DMVSMF_NO_TEST_ENDPOINT` to close it.
+> silently. And the diagnostic endpoint `/zosmf/test` is a second door to the
+> same SVC 34 that this route does not cover; build with `-DMVSMF_NO_TEST_ENDPOINT` to close it.
 >
 > The same gate applies to collect, detect and the hardcopy log
 > (`/zosmf/restconsoles/*`). Tracked as

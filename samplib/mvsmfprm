@@ -21,7 +21,7 @@
 *                                to get the z/OSMF-shaped 401 body, so
 *                                httpd must not gate it
 *
-* The third route is the console service, which is gated, not public:
+* The third route is the console service, which has a profile check of its own:
 *
 *   /zosmf/restconsoles/*        issues operator commands and checks
 *                                nobody's authority itself, so httpd

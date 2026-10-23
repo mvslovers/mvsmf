@@ -184,15 +184,15 @@ reload the profiles (`S RAKFPROF` on RAKF 2):
 
 ```
 FACILITYMVSMF.CONSOLE                                       NONE
-FACILITYMVSMF.CONSOLE                               ADMIN   READ
+FACILITYMVSMF.CONSOLE                               MVSCONS READ
 ```
 
-The second line lets the group `ADMIN` in; a line with a user id in the group
-column grants one person (measured on RAKF 2). READ is the only level that
-matters. `ADMIN` is only an example: READ means every operator command, from
-console 0 and without a `UCMAUTH` filter, so grant it to a group of its own
-that holds just the people who may do that, not to a group that exists for
-other reasons.
+The second line lets the group `MVSCONS` in, a name chosen for this example; a
+line with a user id in the group column grants one person (measured on RAKF 2).
+READ is the only level that matters, and it means every operator command, from
+console 0 and without a `UCMAUTH` filter: nothing narrows it per command. Use a
+group of its own that holds just the people who may do that, not a broad one
+such as `ADMIN` that exists for other reasons.
 
 Three things to know:
 
@@ -204,9 +204,10 @@ Three things to know:
   `mbt target console` send `P`, `S` and `D` commands through this service.
   Without READ they get the `403`; mbt warns and falls back to the target's
   Hercules console if it has one, and stops with "not delivered" if it has not.
-- **`/zosmf/test` is not covered** ([#460](https://github.com/mvslovers/mvsmf/issues/460)). The diagnostic endpoint is a second door to
-  operator commands (`fn=cmd`) and to the Master Trace Table (`fn=mtt`), and it
-  sits under `/zosmf/*`, which carries no profile. A build with
+- **`/zosmf/test` is not covered**
+  ([#460](https://github.com/mvslovers/mvsmf/issues/460)). The diagnostic
+  endpoint has no authorization check of its own and sits under `/zosmf/*`,
+  which carries no profile, so it is a second door past this one. A build with
   `-DMVSMF_NO_TEST_ENDPOINT` closes it; the default build keeps it, because
   `fn=version` is how a deploy is confirmed.
 

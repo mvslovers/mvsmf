@@ -4,7 +4,7 @@
 #   MVSMF_URL=http://localhost:8080 MVSMF_ADMIN=... MVSMF_ADMIN_PASS=... \
 #       sh capture/rakf.sh STEP
 #
-# STEP is one of: access adduser connect protect audit ops admin pair clean
+# STEP is one of: access adduser connect protect audit auditupd auditread ops admin pair clean
 #
 # Needs, on the system under test:
 #
@@ -145,7 +145,7 @@ JCL
 
 audit)
 	rakfjob JPAUDIT r-audit <<'JCL'
-//JPAUDIT  JOB (ACCT),'JESSPOOL AUDIT',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//JPAUDIT  JOB (ACCT),'AUDIT',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
 //TSO      EXEC PGM=IKJEFT01,REGION=4096K
 //SYSPRINT DD SYSOUT=*
 //SYSTSPRT DD SYSOUT=*
@@ -159,9 +159,37 @@ JCL
 	profiles r-audit '^JESSPOOL'
 	;;
 
+auditupd)
+	rakfjob JPAUPD r-auditupd <<'JCL'
+//JPAUPD   JOB (ACCT),'AUDIT UPDATE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+PE * CL(JESSPOOL) ID(AUDIT) ACCESS(UPDATE)
+/*
+//RAKFPROF EXEC RAKFPROF
+JCL
+	profiles r-auditupd '^JESSPOOL'
+	;;
+
+auditread)
+	rakfjob JPAREAD r-auditread <<'JCL'
+//JPAREAD  JOB (ACCT),'AUDIT READ',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+PE * CL(JESSPOOL) ID(AUDIT) ACCESS(READ)
+/*
+//RAKFPROF EXEC RAKFPROF
+JCL
+	profiles r-auditread '^JESSPOOL'
+	;;
+
 ops)
 	rakfjob JPOPS r-ops <<'JCL'
-//JPOPS    JOB (ACCT),'JESSPOOL OPS',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//JPOPS    JOB (ACCT),'OPS',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
 //TSO      EXEC PGM=IKJEFT01,REGION=4096K
 //SYSPRINT DD SYSOUT=*
 //SYSTSPRT DD SYSOUT=*
@@ -177,7 +205,7 @@ JCL
 
 admin)
 	rakfjob JPADMIN r-admin <<'JCL'
-//JPADMIN  JOB (ACCT),'JESSPOOL ADMIN',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//JPADMIN  JOB (ACCT),'ADMIN',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
 //TSO      EXEC PGM=IKJEFT01,REGION=4096K
 //SYSPRINT DD SYSOUT=*
 //SYSTSPRT DD SYSOUT=*
@@ -192,7 +220,7 @@ JCL
 
 pair)
 	rakfjob JPPAIR r-pair <<'JCL'
-//JPPAIR   JOB (ACCT),'JESSPOOL PAIR',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//JPPAIR   JOB (ACCT),'PAIR',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
 //TSO      EXEC PGM=IKJEFT01,REGION=4096K
 //SYSPRINT DD SYSOUT=*
 //SYSTSPRT DD SYSOUT=*
@@ -231,7 +259,7 @@ JCL
 	;;
 
 *)
-	echo "usage: rakf.sh access|adduser|connect|protect|audit|ops|admin|pair|clean" >&2
+	echo "usage: rakf.sh access|adduser|connect|protect|audit|auditupd|auditread|ops|admin|pair|clean" >&2
 	exit 1
 	;;
 esac

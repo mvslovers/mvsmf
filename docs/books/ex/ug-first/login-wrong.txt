@@ -1,6 +1,6 @@
 $ curl -si -X POST -u "$MVSMF_USER:wrong-password" "$MVSMF_URL/zosmf/services/authenticate"
 HTTP/1.1 401 Unauthorized
-Date: Fri, 23 Oct 2026 07:43:35 GMT
+Date: Fri, 23 Oct 2026 07:57:57 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive

@@ -3,7 +3,7 @@ $ curl -si -X POST -u "$MVSMF_USER2:$MVSMF_PASS2" \
   -d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"primary":1,"alcunit":"TRK"}' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.SECDEMO.DENIED"
 HTTP/1.1 500 Internal Server Error
-Date: Fri, 23 Oct 2026 07:48:44 GMT
+Date: Fri, 23 Oct 2026 07:54:45 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
@@ -13,6 +13,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=ItYcjG2zw7lNH2amogzc3Wdg77c5HLpzIdN1S1EDcQ4=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=KTakhdxToIwepMzQlQJ8FdeD44fUDs5ELa0tCKLrb6Y=; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":900,"category":8,"reason":7,"message":"Dynamic allocation Error"}

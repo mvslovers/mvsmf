@@ -101,7 +101,7 @@ ROUTES=(
 	"test wildcard|GET|/zosmf/test/wildcard/x"
 )
 
-# The path variants of a route: path variants, in the order they are asked.
+# The path variants of a route, in the order they are asked.
 variants() {   # PATH
 	local p="$1" q="" lit
 	case "$p" in *\?*) q="?${p#*\?}"; p="${p%%\?*}" ;; esac
@@ -109,7 +109,6 @@ variants() {   # PATH
 	/zosmf/test*)         lit="test" ;;
 	/zosmf/restconsoles*) lit="restconsoles" ;;
 	esac
-	# one character of the literal segment, written as %XX and as %25XX
 	printf '%s\n' \
 		"${p/$lit/${lit%?}%$(printf '%02X' "'${lit: -1}")}${q}" \
 		"${p/$lit/${lit%?}%25$(printf '%02X' "'${lit: -1}")}${q}" \

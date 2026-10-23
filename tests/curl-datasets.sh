@@ -282,6 +282,19 @@ CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (exact name)"
 assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
 
+# dev is named from the volume's track capacity (devtk of its format-4 DSCB,
+# #443), not from tracks per cylinder: a 3380 and a 3390 both have 15.
+DEVTK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}" | jq -r '.devtk')
+case "$DEVTK" in
+13165) WANT_DEV="3330" ;;
+19254) WANT_DEV="3350" ;;
+36000) WANT_DEV="3375" ;;
+47968) WANT_DEV="3380" ;;
+58786) WANT_DEV="3390" ;;
+*) WANT_DEV="????" ;;
+esac
+assert_json_field "$CONTENT" '.items[0].dev' "$WANT_DEV" "dev follows devtk $DEVTK"
+
 # --- List datasets (exact two-level name, issue #61) ---
 echo ""
 echo "--- List Datasets (exact two-level name) ---"

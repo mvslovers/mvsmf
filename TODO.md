@@ -117,7 +117,6 @@ handed its list over). In hand, in this order:
 - **#418** (405 for a known path with an unregistered method, no `Allow`; measured
   on zxp 2026-10-23) is implemented on `issue-418-router-405`, in review.
 - **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
-- **#443** is new (2026-10-22, found in #442): the listing's `dev` names a 3380 volume "3390".
 
 Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, which runs
 on all four M38 stands since 2026-10-15),

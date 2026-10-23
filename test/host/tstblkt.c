@@ -8,6 +8,7 @@
  * This test drives the REAL function: src/blkptrk.c is #included below.
  */
 #include <stdio.h>
+#include <string.h>
 
 #include <mbtcheck.h>
 
@@ -49,6 +50,18 @@ main(void)
 		 "track shorter than the overhead does not wrap around");
 	CHECK_EQ(blocks_per_track(19254u, 82u, 267u, 0x08u, 800u), 0u,
 		 "devk above devov does not wrap around");
+
+	/* #443: the device type comes from devtk, not from tracks per cylinder
+	   (a 3380 and a 3390 both have 15) */
+	CHECK(strcmp(device_name(19254u), "3350") == 0, "MVSRES devtk 19254 is a 3350");
+	CHECK(strcmp(device_name(47968u), "3380") == 0, "PUB000 devtk 47968 is a 3380");
+	CHECK(strcmp(device_name(58786u), "3390") == 0, "PUB001 devtk 58786 is a 3390");
+	CHECK(strcmp(device_name(36000u), "3375") == 0, "devtk 36000 is a 3375");
+	CHECK(strcmp(device_name(13165u), "3330") == 0, "devtk 13165 is a 3330");
+	CHECK(strcmp(device_name(56664u), DEVICE_UNKNOWN) == 0,
+	      "56664 is the usable bytes of a 3390 track, not its DS4DEVTK");
+	CHECK(strcmp(device_name(0u), DEVICE_UNKNOWN) == 0, "devtk 0 (DSCB unreadable) is unknown");
+	CHECK(strcmp(device_name(13030u), DEVICE_UNKNOWN) == 0, "an unlisted capacity is unknown, not a 3390");
 
 	return mbt_test_summary("TSTBLKT");
 }

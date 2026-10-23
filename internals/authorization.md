@@ -123,11 +123,13 @@ at the top; a new console route must call it too.
 - **Upgrade behaviour, not an error:** until the profile is defined and READ is
   granted, these endpoints refuse **every** user, administrators included.
 - **The httpd route stays a first layer.** The shipped route `MOD=MVSMF
-  /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before
-  `/zosmf/*` in `samplib/mvsmfprm` (httpd's `samplib/httpprm0` gets it with
-  httpd#338, still open when this was written; keep both in step), refuses a user without READ with a plain-text `403` before mvsMF is
-  reached. It is optional now: the handler check is the authoritative one, it
-  does not depend on route order, and it does not fail open without the profile
+  /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE` is listed before
+  `/zosmf/*` in `samplib/mvsmfprm`. It requires READ: a user without it gets a
+  plain-text `403` from HTTPD before mvsMF is reached. httpd's
+  `samplib/httpprm0` has the line since httpd#338, merged after the v4.3.0
+  release (the v4.3.0 sample has three lines); keep both in step. The route is
+  optional now: the handler check is the authoritative one, it does
+  not depend on route order, and it does not fail open without the profile
   (the route only warns with `HTTPD425W NO PROFILE FOR
   FACILITY:MVSMF.CONSOLE`). Do not add a route for `/zosmf/test`.
 - `mbt` sends `P`/`S`/`D` through the console service; the user in the target
@@ -144,4 +146,21 @@ at the top; a new console route must call it too.
   removed again; every route and its path variants; by name only, rewrites
   `PROFILES`, needs `MVSMF_CONSGATE_WRITE_PROFILES=yes` and a throwaway
   system).
+
+**The route as a first layer, measured (#459).** On MVS/CE with RAKF and
+httpd 4.3.0, 2026-10-23:
+
+- A user without READ gets `403`, plain text, from httpd (measured with a token
+  session). That is outside the closed status list of `zosmf-conformance.md`
+  and not a z/OSMF-shaped body; mvsMF is not reached.
+- READ for a group line and for a user-id line (user id in the group column)
+  both work. The user without READ still passes every other `/zosmf/` route.
+- Route order decides for the route. Listed after `/zosmf/*` it is never
+  consulted, and the start-up log shows no difference but the order of the
+  `HTTPD036I` lines.
+- Without the profile the route only warns `HTTPD425W NO PROFILE FOR
+  FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/* NOT GATED` and permits the
+  access: the route alone is fail-open until the profile exists.
+- The path `restconsoles//consoles` is refused with `403` as well.
+
 **Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).

@@ -196,9 +196,10 @@ a resource check rather than widening the prefix:
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-These four lines are in `MVSMF.SAMPLIB(MVSMFPRM)`; the httpd release that
-contains [httpd#338](https://github.com/mvslovers/httpd/pull/338) ships the same
-four in its own `samplib(HTTPPRM0)`. Keep the two in step.
+These four lines are in `MVSMF.SAMPLIB(MVSMFPRM)`. httpd's own
+`samplib(HTTPPRM0)` has the same four since
+[httpd#338](https://github.com/mvslovers/httpd/pull/338), merged after the httpd
+4.3.0 release; the 4.3.0 sample still has three. Keep the two in step.
 
 For development, `mbt deploy` (see *Building* below) uploads and RECEIVEs the
 load module directly into `MVSMF.DEV.LINKLIB` — no SMP, and no install package.

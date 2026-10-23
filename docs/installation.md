@@ -179,8 +179,9 @@ It permits only when RAKF answers "permitted". A user without READ, and
 "Authorization failed") from mvsMF on every `/zosmf/restconsoles/...` URL
 (command, response, detection and log) and on every `/zosmf/test` request,
 including `fn=version`. A request that carries no resolved user gets `401`. The
-rest of the API is not affected. The route line of step 4 additionally makes
-HTTPD answer `403` for the console URLs before mvsMF is reached.
+rest of the API is not affected. The route line of step 4 additionally requires
+READ in HTTPD: a user without it gets `403` from HTTPD on
+`/zosmf/restconsoles/...`, before mvsMF is reached.
 
 **This is the upgrade behaviour, not an error:** after installing this version,
 console and `/zosmf/test` refuse everybody until you have defined the profile

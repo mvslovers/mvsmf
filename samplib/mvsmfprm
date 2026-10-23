@@ -2,8 +2,9 @@
 * MVSMF -- route definitions for the httpd parmlib member (DD:HTTPPRM)
 *
 * Add these four lines to the member your HTTPD started task names on
-* its //HTTPPRM DD. The httpd release that contains httpd#338 ships the
-* same four in its own samplib(HTTPPRM0); keep the two in step.
+* its //HTTPPRM DD. httpd's own samplib(HTTPPRM0) has the same four since
+* httpd#338, merged after the httpd 4.3.0 release (the 4.3.0 sample has
+* three); keep the two in step.
 *
 * ORDER MATTERS -- FIRST MATCH WINS. The three specific routes must come
 * before the /zosmf/* catch-all, or the catch-all swallows them.

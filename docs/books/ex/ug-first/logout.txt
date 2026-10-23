@@ -1,0 +1,2 @@
+$ curl -si -X DELETE -b cookies.txt "$MVSMF_URL/zosmf/services/authenticate"
+PENDING CAPTURE

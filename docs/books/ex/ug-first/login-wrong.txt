@@ -1,0 +1,2 @@
+$ curl -si -X POST -u "$MVSMF_USER:wrong-password" "$MVSMF_URL/zosmf/services/authenticate"
+PENDING CAPTURE

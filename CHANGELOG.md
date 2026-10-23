@@ -215,28 +215,25 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
   longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
   list. An empty `owner=` means the caller's own jobs.
-- **The console service has a route and a RAKF profile of its own** (#347). The
-  shipped route configuration gains `MOD=MVSMF /zosmf/restconsoles/*
-  AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*`. A user
-  without READ on `FACILITY MVSMF.CONSOLE` gets `403` from httpd on
-  `/zosmf/restconsoles/...` (command, response, detection, hardcopy log); a
-  user with READ can issue any operator command, as before. mvsMF itself still
-  performs no check and there is still no per-command policy. **This is not
-  yet a gate on every way to the console:**
-  - The diagnostic endpoint `/zosmf/test` is not covered
-    ([#460](https://github.com/mvslovers/mvsmf/issues/460)) and has no
-    authorization check of its own; a build with `-DMVSMF_NO_TEST_ENDPOINT`
-    closes it.
-  - The protection rests on the route order in the httpd parmlib member (the
-    console route must stand before `/zosmf/*`) and on the profile: without the
-    profile httpd permits everyone and only warns (`HTTPD425W`), and with the
-    route listed after `/zosmf/*` nothing is routed to it and nothing warns.
-  - mvsMF makes no check of its own, so nothing in mvsMF catches either case
-    ([#347](https://github.com/mvslovers/mvsmf/issues/347) stays open).
+- **The console service and `/zosmf/test` refuse every user until you define
+  a profile and grant READ** (#347, #460). mvsMF now checks READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` itself, as the first step of every console
+  request (command, response, detection, hardcopy log) and of every
+  `/zosmf/test` request, `fn=version` included. The check is fail-closed: it
+  permits only when RAKF says "permitted". A user without READ, and everybody
+  while the profile is not defined, gets `500` with category 4
+  (Authorization); a request with no resolved user gets `401`. **This is the
+  upgrade behaviour, not an error.** A user with READ can issue any operator
+  command, as before; there is still no per-command policy. The shipped route
+  configuration gains `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN
+  RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*`, as an additional first
+  layer (`403` from httpd for a user without READ); the check in mvsMF does not
+  depend on it.
 
-  **Upgrade: add the route to the httpd parmlib member and define the
-  profile.** The user that runs `mbt run restart` needs READ too.
-  Rules and the profile lines: `docs/installation.md`.
+  **Upgrade: define the profile and grant READ to those who may use it.** The
+  user that runs `mbt run restart`, and whoever checks the build id with
+  `?fn=version`, needs READ too. Rules and the profile lines:
+  `docs/installation.md`.
 
 ## [1.3.0] - 2026-10-15
 

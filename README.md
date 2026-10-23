@@ -36,19 +36,19 @@ explains who may see, read and purge which job.
 > to purge), and without profiles nobody sees the jobs of others, see
 > [docs/jesspool.md](docs/jesspool.md) and
 > [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles`
-> is authorized by an httpd route, not by mvsMF: the shipped route
-> `/zosmf/restconsoles/*` requires READ on the RAKF resource
-> `FACILITY MVSMF.CONSOLE`, and a user without it gets `403`. **Define that
-> profile** — without it the route is open to every login and httpd only warns
-> (`HTTPD425W`), see
+> and `/zosmf/test` are gated by mvsMF itself: both need READ on the RAKF
+> resource `FACILITY MVSMF.CONSOLE`, and a user without it gets `500`
+> (Authorization). **Define that profile and grant READ — until you do, both
+> refuse every user**, administrators included; that is the upgrade behaviour
+> of this version, see
 > [Who may use the console service](docs/installation.md#who-may-use-the-console-service)
 > ([#347](https://github.com/mvslovers/mvsmf/issues/347)). READ on that resource
 > allows **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
 > — it goes out by SVC 34 from console 0, the master console, with the text
 > unfiltered — and reading the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
-> diagnostic endpoint `/zosmf/test` can issue commands too, through a second
-> door that the profile does not cover, and it is compiled in by default.
+> diagnostic endpoint `/zosmf/test` can issue commands too and is compiled in
+> by default.
 >
 > On a system where not every userid is trusted at the operator console, build
 > with `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
@@ -179,7 +179,8 @@ MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 
 **Order matters — first match wins**, so the three specific routes must
 precede the catch-all. The console route needs READ on the RAKF resource
-`FACILITY MVSMF.CONSOLE`; without that profile nothing is gated, see
+`FACILITY MVSMF.CONSOLE`, and so does mvsMF's own check in the handler (without
+the profile both refuse everybody), see
 [Who may use the console service](docs/installation.md#who-may-use-the-console-service).
 `AUTH=NONE` on the first two is not a hole: both endpoints resolve the
 caller themselves and answer 401 without a credential. `/zosmf/info` is

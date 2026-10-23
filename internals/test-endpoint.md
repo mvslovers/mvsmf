@@ -37,6 +37,16 @@ closed. The boundary that means something is the route: building with
 `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, which covers
 `fn=cmd` too. Default is ON — `fn=version` is how a deploy is verified.
 
+**Who may call it is a separate question, answered once for the whole
+endpoint (#460).** `testHandler` and `testWildcardHandler` start with
+`console_authorize()`, before `fn` is read: READ on `FACILITY MVSMF.CONSOLE`,
+the profile of the console service, fail-closed (no profile, no READ, no ACEE:
+refused; `internals/authorization.md`). That covers `fn=version` and the help
+text, and a new `fn=` needs nothing added. It is a gate on the endpoint, not on
+a function, so it is no exception to the rule above: do not add a second check
+inside a `fn=` branch. Consequence for a deploy: the user who confirms the build
+id with `fn=version` needs READ on the profile.
+
 `tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
 caught, the server keeps serving, and it costs no storage. It deliberately
 faults the worker several times.

@@ -42,11 +42,11 @@ check_path(const char *delivered, const char *want)
 	buf[sizeof(buf) - 1] = '\0';
 
 	rc = request_path_copy(delivered, buf, sizeof(buf));
-	sprintf(msg, "request_path_copy(\"%s\") returns 0", delivered);
+	snprintf(msg, sizeof(msg), "request_path_copy(\"%s\") returns 0", delivered);
 	CHECK_EQ(rc, 0, msg);
 
-	sprintf(msg, "request_path_copy(\"%s\") yields \"%s\", not \"%s\"",
-		delivered, want, buf);
+	snprintf(msg, sizeof(msg), "request_path_copy(\"%s\") yields \"%s\", not \"%s\"",
+		delivered, buf, want);
 	CHECK(strcmp(buf, want) == 0, msg);
 }
 

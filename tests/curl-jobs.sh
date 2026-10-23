@@ -2,7 +2,7 @@
 # =========================================================================
 # mvsMF Jobs REST API - curl test suite
 #
-# Tests all 6 job endpoints:
+# Tests all job endpoints:
 #   1. PUT  /zosmf/restjobs/jobs              (submit inline JCL)
 #   2. PUT  /zosmf/restjobs/jobs              (submit from dataset)
 #   3. GET  /zosmf/restjobs/jobs              (list jobs)
@@ -11,6 +11,7 @@
 #   6. GET  /zosmf/restjobs/jobs/{name}/{id}/files/{ddid}/records (records)
 #   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge, also of a job whose
 #      output a device holds)
+#   8. PUT  /zosmf/restjobs/jobs/{name}/{id}  (cancel)
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -2085,6 +2086,243 @@ test_purge_started_task() {
 	assert_json_field "$BODY" '.reason' "5" "purge STC: reason 5 (REASON_STC_PURGE)"
 }
 
+# Submits a job that JES2 holds before execution (TYPRUN=HOLD): it can be
+# cancelled without a long-running step, and without racing a job that is about
+# to finish. Sets CANCEL_JOBNAME / CANCEL_JOBID, empty on failure.
+submit_held_job() {
+	local name="$1" jcl resp
+	CANCEL_JOBNAME=""
+	CANCEL_JOBID=""
+
+	jcl=$(printf '%s\n%s\n' \
+		"//${name} JOB CLASS=A,MSGCLASS=H,TYPRUN=HOLD" \
+		'//STEP1    EXEC PGM=IEFBR14')
+
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		-H "X-IBM-Intrdr-Mode: TEXT" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit a held job (${name})"
+	CANCEL_JOBNAME=$(echo "$BODY" | jq -r '.jobname // empty')
+	CANCEL_JOBID=$(echo "$BODY" | jq -r '.jobid // empty')
+}
+
+cancel_request() {
+	local jn="$1" ji="$2" body="$3"
+	do_curl PUT -H "Content-Type: application/json" --data "$body" \
+		"${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}"
+}
+
+test_cancel_job() {
+	echo ""
+	echo "--- Cancel Job (issue #417) ---"
+
+	submit_held_job CANCEL1
+	if [ -z "$CANCEL_JOBNAME" ] || [ -z "$CANCEL_JOBID" ]; then
+		skip "cancel job (no submitted job)"
+		return
+	fi
+	local jn="$CANCEL_JOBNAME" ji="$CANCEL_JOBID" resp
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	# a held job waits on the execution queue, which is what ACTIVE means here
+	assert_json_field "$BODY" '.status' "ACTIVE" "the held job waits for execution"
+
+	resp=$(cancel_request "$jn" "$ji" '{"request":"cancel","version":"2.0"}')
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "cancel job"
+	assert_json_field "$BODY" '.jobname' "$jn" "cancel jobname matches"
+	assert_json_field "$BODY" '.jobid' "$ji" "cancel jobid matches"
+	assert_json_field "$BODY" '.["original-jobid"]' "$ji" "cancel original-jobid matches"
+	assert_json_field "$BODY" '.owner' "$MVSMF_USER_UC" "cancel owner is the submitter"
+	assert_json_field "$BODY" '.status' "0" "cancel status is 0"
+	assert_json_field "$BODY" '.message' "Request was successful." "cancel message is not the purge-pending text"
+
+	# the point of a cancel as against a purge: the job stays
+	wait_for_output "$jn" "$ji" || true
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "the cancelled job is still known"
+	assert_json_field "$BODY" '.status' "OUTPUT" "the cancelled job is on the output queue"
+
+	# nothing is running any more: a second cancel has nothing to stop
+	resp=$(cancel_request "$jn" "$ji" '{"request":"cancel"}')
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "cancel of a job on the output queue is refused"
+	assert_json_field "$BODY" '.reason' "14" "cancel of a finished job: reason 14 (REASON_JOB_ON_OUTPUT_QUEUE)"
+
+	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "purge the cancelled job"
+}
+
+test_cancel_running_job() {
+	echo ""
+	echo "--- Cancel Job: a job that is executing (issue #417) ---"
+
+	# The case a client needs: a job that does not end. Assemble and run a
+	# branch-to-self; ASMFCG is the assemble-and-go procedure of the stock
+	# system. JES2 ends the job with S222 and leaves its output on the spool,
+	# which is what separates a cancel from a purge.
+	local jcl
+	jcl=$(printf '%s\n' \
+		"//CANCEL3  JOB (1),'SPIN',CLASS=A,MSGCLASS=H" \
+		'//ASM      EXEC ASMFCG' \
+		'//ASM.SYSIN DD *' \
+		'SPIN     CSECT' \
+		'         USING SPIN,15' \
+		'LOOP     B     LOOP' \
+		'         END' \
+		'/*')
+
+	local resp
+	resp=$(do_curl PUT -H "Content-Type: text/plain" -H "X-IBM-Intrdr-Mode: TEXT" \
+		--data-binary "$jcl" "${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "submit a job that does not end"
+
+	local jn ji
+	jn=$(echo "$BODY" | jq -r '.jobname // empty')
+	ji=$(echo "$BODY" | jq -r '.jobid // empty')
+	if [ -z "$jn" ] || [ -z "$ji" ]; then
+		skip "cancel a running job (no submitted job)"
+		return
+	fi
+
+	# the go step has started once it owns a spool file; a system without
+	# ASMFCG ends in a JCL error instead and never gets there
+	local attempt=0 running=0 status
+	while [ $attempt -lt 60 ]; do
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files")
+		split_response "$resp"
+		if echo "$BODY" | jq -e 'any(.[]?; .stepname == "GO")' >/dev/null 2>&1; then
+			running=1
+			break
+		fi
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		status=$(echo "$BODY" | jq -r '.status // empty')
+		if [ "$status" = "OUTPUT" ]; then
+			break
+		fi
+		sleep 1
+		attempt=$((attempt + 1))
+	done
+
+	if [ "$running" -ne 1 ]; then
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+		skip "cancel a running job (the job never reached its go step; is ASMFCG available?)"
+		return
+	fi
+
+	resp=$(cancel_request "$jn" "$ji" '{"request":"cancel","version":"2.0"}')
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "cancel an executing job"
+	assert_json_field "$BODY" '.status' "0" "cancel of an executing job: status 0"
+
+	wait_for_output "$jn" "$ji" || true
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_json_field "$BODY" '.status' "OUTPUT" "the cancelled job has ended"
+	assert_json_field "$BODY" '.retcode' "ABEND S222" "JES2 ended it with S222 (job cancelled)"
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "the output of the cancelled job is listed"
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "JESMSGLG")] | length')" '.' "1" "its job log is still on the spool"
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_cancel_request_errors() {
+	echo ""
+	echo "--- Cancel Job: the body decides (issue #417) ---"
+
+	submit_held_job CANCEL2
+	if [ -z "$CANCEL_JOBNAME" ] || [ -z "$CANCEL_JOBID" ]; then
+		skip "cancel request errors (no submitted job)"
+		return
+	fi
+	local jn="$CANCEL_JOBNAME" ji="$CANCEL_JOBID" resp
+
+	# every one of these must leave the job exactly where it is
+	local body
+	for body in '{"request":"hold"}' '{"request":"release"}'; do
+		resp=$(cancel_request "$jn" "$ji" "$body")
+		split_response "$resp"
+		assert_http_status "400" "$HTTP_STATUS" "${body} is not implemented"
+		assert_json_field "$BODY" '.reason' "15" "${body}: reason 15 (REASON_JOB_REQUEST_NOT_IMPLEMENTED)"
+	done
+
+	for body in '{"request":"purge"}' '{"request":"CANCEL"}' '{"request":null}'; do
+		resp=$(cancel_request "$jn" "$ji" "$body")
+		split_response "$resp"
+		assert_http_status "400" "$HTTP_STATUS" "${body} is an unknown request"
+		assert_json_field "$BODY" '.reason' "4" "${body}: reason 4 (REASON_INVALID_REQUEST)"
+	done
+
+	for body in '{}' '{"version":"2.0"}' 'request=cancel' '{"request":"cancel"' '[]'; do
+		resp=$(cancel_request "$jn" "$ji" "$body")
+		split_response "$resp"
+		assert_http_status "400" "$HTTP_STATUS" "${body} carries no request"
+		assert_json_field "$BODY" '.reason' "4" "${body}: reason 4 (REASON_INVALID_REQUEST)"
+	done
+
+	resp=$(do_curl PUT "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" -H "Content-Length: 0")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "an empty body carries no request"
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_json_field "$BODY" '.status' "ACTIVE" "the refused requests left the job waiting"
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_cancel_not_found() {
+	echo ""
+	echo "--- Cancel Job: not found (issue #417) ---"
+
+	# the same three shapes as the purge: an absent job, a jobid JES2 rejects
+	# as malformed (CANJ_SYNTX), and a string that is no jobid at all
+	local jid resp
+	for jid in JOB09999 JOB99999 NOTAJOBID; do
+		resp=$(cancel_request NOSUCHJB "$jid" '{"request":"cancel"}')
+		split_response "$resp"
+
+		assert_http_status "404" "$HTTP_STATUS" "cancel job not found (${jid})"
+		assert_json_field "$BODY" '.reason' "2" "cancel not found: reason 2 (${jid})"
+	done
+}
+
+test_cancel_started_task() {
+	echo ""
+	echo "--- Cancel Job: a started task is refused (issue #417) ---"
+
+	# Aimed at the live server and safe for the reason the purge test gives:
+	# the refusal is JES2's (CANJ_ICAN), mvsMF only maps it to a status.
+	local resp jobid
+	jobid=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs?owner=*&prefix=HTTPD*" \
+		| sed '$d' \
+		| jq -r 'map(select(.status == "ACTIVE")) | .[0].jobid // empty' 2>/dev/null)
+
+	if [ -z "$jobid" ]; then
+		skip "cancel a started task (no ACTIVE HTTPD STC to aim at)"
+		return
+	fi
+
+	resp=$(cancel_request HTTPD "$jobid" '{"request":"cancel"}')
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "cancel a started task is refused (${jobid})"
+	assert_json_field "$BODY" '.reason' "13" "cancel STC: reason 13 (REASON_STC_CANCEL)"
+}
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -2161,6 +2399,13 @@ test_purge_job
 test_purge_not_found
 test_purge_held_output
 test_purge_started_task
+
+# Cancel tests (each submits and removes a job of its own)
+test_cancel_job
+test_cancel_running_job
+test_cancel_request_errors
+test_cancel_not_found
+test_cancel_started_task
 
 # Optional cleanup
 if [ "$DO_CLEANUP" -eq 1 ] && [ "$SETUP_DONE" -eq 1 ]; then

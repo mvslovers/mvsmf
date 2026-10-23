@@ -221,6 +221,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJCARD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTJREQ: #417 — the body of PUT on a job decides what is done to it: cancel,
+# hold and release (not implemented yet), anything else, or no request at all.
+# A truncated body must never be read as a cancel. Portable C (`mbt test`); the
+# TU #includes src/jobreq.c so it drives the real parser jobsapi.c calls — do
+# not list jobreq.c here.
+[test.TSTJREQ]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTSUBDS: #477 — the data set name in the "file" member of a job submit was
 # copied into a 45-byte stack buffer with a length from the request, so
 # //'<45 characters>' overflowed it. The TU #includes src/subdsn.c so it drives

@@ -26,6 +26,20 @@
 /** @brief Detail of the refusal to purge a job the caller may read but not purge (#440) */
 #define ERR_MSG_JOB_PURGE_DENIED "Authorization failed - You may not purge this job."
 
+/** @brief Detail of the refusal to cancel a job the caller may read but not cancel (#417) */
+#define ERR_MSG_JOB_CANCEL_DENIED "Authorization failed - You may not cancel this job."
+
+/** @brief Error message for cancelling a started task or a TSO user */
+#define ERR_MSG_STC_CANCEL "Cannot cancel a started task or a TSO user"
+
+/** @brief Error message for cancelling a job that has already finished */
+#define ERR_MSG_JOB_ON_OUTPUT_QUEUE "Job '%s(%s)' is on the output queue and is not running"
+
+/** @brief Error messages for the body of PUT on a job (#417) */
+#define ERR_MSG_JOB_REQUEST_MISSING "Request does not contain a valid job update request"
+#define ERR_MSG_JOB_REQUEST_UNKNOWN "Update request is not 'cancel', 'hold' or 'release'"
+#define ERR_MSG_JOB_REQUEST_NOT_IMPLEMENTED "Update request '%s' is not implemented"
+
 /** @brief Purge feedback `message` when JES2 accepted the purge but the job is still on the queue (#426) */
 #define MSG_PURGE_PENDING "Purge requested. JES2 keeps the job marked for purge until the output it holds is released."
 
@@ -56,6 +70,10 @@
 #define REASON_SPOOL_GONE 10          /**< Spool dataset purged by JES2 */
 #define REASON_SPOOL_READ 11          /**< Spool read failed or truncated */
 #define REASON_JOBCARD_TOO_LONG 12    /**< JOB card leaves no room for the injected operands */
+
+#define REASON_STC_CANCEL 13          /**< Cannot cancel a started task or TSO user */
+#define REASON_JOB_ON_OUTPUT_QUEUE 14 /**< Cancel of a job that is not running */
+#define REASON_JOB_REQUEST_NOT_IMPLEMENTED 15 /**< hold / release (#424) */
 
 /** @brief Error message for JES2 busy */
 #define ERR_MSG_JES_BUSY "JES2 subsystem is busy, please retry"

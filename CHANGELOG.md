@@ -154,6 +154,18 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   connection, as every console answer does. See
   `docs/endpoints/console/issue-command.md`.
 
+### Added
+
+- **A job can be cancelled** (#417). `PUT /zosmf/restjobs/jobs/{name}/{id}`
+  with `{"request":"cancel"}` stops the job the way the operator command `$C`
+  does and leaves its output on the spool, which is what separates it from a
+  purge. It answered 404 before, because the route did not exist; Zowe CLI's
+  `zowe zos-jobs cancel job` now works. A cancel is judged by the purge rule:
+  UPDATE on the JESSPOOL entity for a job of another owner. A started task or
+  TSO user, and a job that has already finished, answer 400. `hold` and
+  `release` are recognised and answer 400 "not implemented". See
+  `docs/endpoints/jobs/cancel.md`.
+
 ### Changed
 
 - **The installation guide says to stop HTTPD around an upgrade** (#434). The

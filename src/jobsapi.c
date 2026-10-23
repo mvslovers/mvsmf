@@ -20,6 +20,7 @@
 #include "jclines.h"
 #include "jobauth.h"
 #include "jobcard.h"
+#include "jobreq.h"
 #include "subdsn.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
@@ -90,6 +91,7 @@ static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, co
                                        JESJOB ***out_joblist, int op, const char *submitter,
                                        int *decision);
 static void send_job_not_found(Session *session, const char *jobname, const char *jobid);
+static int cancel_job(Session *session, int purge);
 static int  job_still_queued(Session *session, const char *jobname, const char *jobid);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
@@ -356,6 +358,77 @@ jobStatusHandler(Session *session)
 int
 jobPurgeHandler(Session *session)
 {
+	return cancel_job(session, 1);
+}
+
+/* PUT /zosmf/restjobs/jobs/{job-name}/{jobid}: one route for every update of
+   a job, told apart by the "request" member of the body (#417).  Only cancel
+   is done; hold and release (#424) answer 400 until libc370 can do them.
+
+   The body is read before anything is answered, whatever the outcome: a PUT
+   body left on a keepalive socket would be taken for the next request. */
+int
+jobCancelHandler(Session *session)
+{
+	int rc;
+	int request = JOBREQ_NONE;
+	char *body = NULL;
+	size_t body_len = 0;
+
+	rc = read_request_content(session, &body, &body_len);
+	if (rc == REQBODY_NOMEM || rc == REQBODY_TOO_LARGE) {
+		send_body_error(session, rc);
+		goto quit;
+	}
+	if (rc == REQBODY_OK && body) {
+		/* the wire is ASCII; the parser compares character literals */
+		http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
+		request = jobreq_parse(body);
+	}
+
+	switch (request) {
+	case JOBREQ_CANCEL:
+		cancel_job(session, 0);
+		break;
+	case JOBREQ_HOLD:
+	case JOBREQ_RELEASE: {
+		char msg[MAX_ERR_MSG_LENGTH] = {0};
+
+		snprintf(msg, sizeof(msg), ERR_MSG_JOB_REQUEST_NOT_IMPLEMENTED,
+				 request == JOBREQ_HOLD ? "hold" : "release");
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_JOB_REQUEST_NOT_IMPLEMENTED,
+						msg, NULL, 0);
+		break;
+	}
+	case JOBREQ_UNKNOWN:
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_INVALID_REQUEST,
+						ERR_MSG_JOB_REQUEST_UNKNOWN, NULL, 0);
+		break;
+	default:
+		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+						RC_ERROR, REASON_INVALID_REQUEST,
+						ERR_MSG_JOB_REQUEST_MISSING, NULL, 0);
+		break;
+	}
+
+quit:
+	if (body) {
+		free(body);
+	}
+
+	return 0;
+}
+
+/* The work of DELETE (purge = 1: the job and its output go) and of PUT cancel
+   (purge = 0: the job is stopped, its output stays on the spool).  Lookup,
+   authorization and the JESCANJ mapping are one piece of code on purpose: a
+   cancel is judged by the purge rule, so the two cannot drift apart. */
+__asm__("\n&FUNC    SETC 'cancel_job'");
+static int
+cancel_job(Session *session, int purge)
+{
 	int rc = 0;
 
 	const char *jobname = getPathParam(session, "job-name");
@@ -393,11 +466,13 @@ jobPurgeHandler(Session *session)
 		goto quit;
 	}
 
-	/* A job the caller may read but not purge is visible by definition, so
-	   saying so leaks nothing.  500 with category 4 is the shape of every
-	   refusal in this API: 403 is not in z/OSMF's list of statuses. */
+	/* A job the caller may read but not purge (or cancel: the same rule, #417)
+	   is visible by definition, so saying so leaks nothing.  500 with
+	   category 4 is the shape of every refusal in this API: 403 is not in
+	   z/OSMF's list of statuses. */
 	if (decision != JWN_ALLOW) {
-		send_not_authorized(session, ERR_MSG_JOB_PURGE_DENIED);
+		send_not_authorized(session, purge ? ERR_MSG_JOB_PURGE_DENIED
+										   : ERR_MSG_JOB_CANCEL_DENIED);
 		goto quit;
 	}
 
@@ -411,15 +486,16 @@ jobPurgeHandler(Session *session)
 	jwn_printable(name, sizeof(name), (const char *) job->jobname);
 	jwn_printable(id, sizeof(id), (const char *) job->jobid);
 
-	rc = jescanj(cancel_name, cancel_id, 1);
+	rc = jescanj(cancel_name, cancel_id, purge);
 
 	switch (rc) {
 	case CANJ_OK:
 		/* CANJ_OK says JES2 took the request, not that the job is gone: output
 		   a device has selected (PUNCH1 waiting for SETUP) leaves it marked
 		   for purge on the queue until that output is released (#426).  Look
-		   again before claiming the spool is free. */
-		pending = job_still_queued(session, cancel_name, cancel_id);
+		   again before claiming the spool is free.  A cancel keeps the output
+		   on the spool by design, so there is nothing to wait for (#417). */
+		pending = purge && job_still_queued(session, cancel_name, cancel_id);
 
 		rc = startJsonObject(builder);
 
@@ -447,6 +523,12 @@ jobPurgeHandler(Session *session)
 		send_job_not_found(session, jobname, jobid);
 		break;
 	case CANJ_ICAN:
+		if (!purge) {
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+								RC_WARNING, REASON_STC_CANCEL, ERR_MSG_STC_CANCEL,
+								NULL, 0);
+			break;
+		}
 		/* Refusing to purge a started task. This answered 403 until #250; that
 		   is not a z/OSMF status, and the refusal is about what was asked for
 		   rather than about who asked, so 400 is the honest code. REASON_STC_PURGE
@@ -455,6 +537,20 @@ jobPurgeHandler(Session *session)
 							RC_WARNING, REASON_STC_PURGE, ERR_MSG_STC_PURGE,
 							NULL, 0);
 		break;
+	case CANJ_OUTP:
+		/* a cancel of a job that has finished: nothing is running to stop,
+		   and the output is already where it stays. A purge never got this
+		   answer before #417 and still takes the default below. */
+		if (!purge) {
+			char msg[MAX_ERR_MSG_LENGTH] = {0};
+
+			snprintf(msg, sizeof(msg), ERR_MSG_JOB_ON_OUTPUT_QUEUE, name, id);
+			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
+								RC_WARNING, REASON_JOB_ON_OUTPUT_QUEUE, msg,
+								NULL, 0);
+			break;
+		}
+		/* fall through */
 	default:
 		wtof(MSG_JESCANJ_RC, rc);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,

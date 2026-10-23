@@ -3192,6 +3192,66 @@ curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/d
 [ -n "$WLEN_JOB" ] && curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restjobs/jobs/WRONGLEN/${WLEN_JOB}" 2>/dev/null
 
+# --- Size and fill of a data set with more than three extents (issue #370) ---
+# The listing used to add up the three extents of the format-1 DSCB and stop;
+# extents 4-16 are in the format-3 DSCB. With one track for the primary and one
+# for every secondary, a data set's size in tracks IS its extent count, so the
+# listing can be checked against itself: sizex must equal extx, and used (the
+# last used track against sizex) can no longer pass 100.
+echo ""
+echo "--- List Datasets (more than three extents, issue #370) ---"
+
+EXT_DSN="${MVSMF_USER}.CURL.EXTENTS"
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${EXT_DSN}" 2>/dev/null || true
+
+BODY='{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":6160,"alcunit":"TRK","primary":1,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${EXT_DSN}")
+assert_http_status "201" "$HTTP_CODE" "extents: create the one-track data set"
+
+# 1500 records of 80 bytes: about 6.5 tracks of three 6160-byte blocks, so five
+# or six secondary extents of one track each
+HTTP_CODE=$(seq 1 1500 | awk '{ printf "EXTENT FIXTURE RECORD %05d\n", $1 }' \
+	| curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/octet-stream" \
+	--data-binary @- \
+	"${BASE_URL}/zosmf/restfiles/ds/${EXT_DSN}")
+assert_http_status "204" "$HTTP_CODE" "extents: write enough records to take secondary extents"
+
+BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds?dslevel=${EXT_DSN}")
+HTTP_CODE=$(echo "$BODY" | tail -1)
+CONTENT=$(echo "$BODY" | sed '$d')
+assert_http_status "200" "$HTTP_CODE" "extents: list the data set"
+
+EXT_X=$(echo "$CONTENT" | jq -r '.items[0].extx // empty' 2>/dev/null) || EXT_X=""
+EXT_SIZEX=$(echo "$CONTENT" | jq -r '.items[0].sizex // empty' 2>/dev/null) || EXT_SIZEX=""
+EXT_USED=$(echo "$CONTENT" | jq -r '.items[0].used // empty' 2>/dev/null) || EXT_USED=""
+
+if [ -z "$EXT_X" ] || [ "$EXT_X" -lt 4 ] 2>/dev/null; then
+	# the fixture is made through the API under test, so this is red (#304)
+	fail "extents: the fixture reaches more than three extents" "extx='${EXT_X}', sizex='${EXT_SIZEX}'"
+else
+	pass "extents: the fixture reaches more than three extents (extx=${EXT_X})"
+	if [ "$EXT_SIZEX" = "$EXT_X" ]; then
+		pass "extents: sizex counts the extents past the third (sizex=${EXT_SIZEX}, extx=${EXT_X})"
+	else
+		fail "extents: sizex counts the extents past the third" \
+			"sizex='${EXT_SIZEX}', extx='${EXT_X}': one track per extent, so they must agree"
+	fi
+	if [ "$EXT_USED" -ge 1 ] && [ "$EXT_USED" -le 100 ] 2>/dev/null; then
+		pass "extents: used is a percentage (used=${EXT_USED})"
+	else
+		fail "extents: used is a percentage" "used='${EXT_USED}', expected 1..100"
+	fi
+fi
+
+curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${EXT_DSN}" 2>/dev/null || true
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

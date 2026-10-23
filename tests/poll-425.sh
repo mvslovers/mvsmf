@@ -30,7 +30,8 @@
 #   --timeout  give up on a job after this many seconds (default 240)
 #
 # Results go to ./poll-425-LABEL-STAMP/. The exit status is 0 when every poll
-# answered 200 and no block changed, no MVSMF901E/913I/914I/007W was logged.
+# answered 200, no block changed, every textsum sample was answered and no
+# MVSMF901E/913I/914I/007W was logged.
 # =========================================================================
 
 set -u
@@ -199,4 +200,4 @@ say "console: $NHITS line(s) MVSMF901E/913I/914I/007W in $LOGITEMS log items (MT
 say "next: P HTTPD from the operator console; socket thread and every worker must stop, no SA03."
 
 [ "$TOTAL_BAD" -eq 0 ] && [ "$NDIFF" -eq 0 ] && [ "$NHITS" -eq 0 ] &&
-	[ "$NOT_OUTPUT" -eq 0 ] && [ "$SUBMIT_FAIL" -eq 0 ]
+	[ "$NOT_OUTPUT" -eq 0 ] && [ "$SUBMIT_FAIL" -eq 0 ] && [ "$NMISS" -eq 0 ]

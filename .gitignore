@@ -103,3 +103,4 @@ soak-triage-*.txt
 mtt-ring-*.json
 herc-at-fail-*.log
 worker-watch-*.txt
+poll-425-*/

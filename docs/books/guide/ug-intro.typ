@@ -41,7 +41,8 @@ mvsMF has six services. All paths begin with #cmd("/zosmf/"):
 Another path, #cmd("/zosmf/test"), is a diagnostic endpoint for the people who
 look after the system. It is not a service for users, and a release does not
 have it: only a development build, whose version ends in #cmd("-dev"),
-registers it. The _mvsMF Reference_ describes it in "The Diagnostic Endpoint".
+registers it. It needs the same permission as the console services. The _mvsMF
+Reference_ describes it in "The Diagnostic Endpoint".
 
 The _mvsMF Reference_ lists every request of these services with its parameters,
 headers, answers and status codes. This book shows how to do the work and
@@ -192,10 +193,11 @@ book explains the subject:
       you upgrade.], [@ug-jobs-change, @ug-security-jesspool],
     [The sample route lines of HTTPD have a route of its own for
       #cmd("/zosmf/restconsoles/*"). It asks RAKF for READ access to the
-      resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"). Before, any
-      user who got in could issue any operator command. The route is above the
-      catch-all, and the profile must exist, or the route is not gated.
-      The diagnostic endpoint is not covered.],
+      resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"), and mvsMF asks
+      for the same permission itself in every console request and in the
+      diagnostic endpoint. Before, any user who got in could issue any operator
+      command. Until the profile is defined and READ is granted, every user is
+      refused, administrators too.],
       [@ug-security-console, @ug-install-upgrade],
     [A list of data sets that fails for lack of storage, and the check why a
       member could not be opened, answer the status 500. Before, the answer was

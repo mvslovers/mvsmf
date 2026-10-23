@@ -208,15 +208,15 @@ main(void)
 		in[0] = 'a'; in[1] = (char) c; in[2] = 'b'; in[3] = '\0';
 
 		memset(out, '?', sizeof(out));
-		sprintf(msg, "addJsonStringEsc: 0x%02X yields valid JSON", c);
+		snprintf(msg, sizeof(msg), "addJsonStringEsc: 0x%02X yields valid JSON", c);
 		CHECK(roundtrip_object(in, out, sizeof(out)), msg);
-		sprintf(msg, "addJsonStringEsc: 0x%02X survives the round trip", c);
+		snprintf(msg, sizeof(msg), "addJsonStringEsc: 0x%02X survives the round trip", c);
 		CHECK(strcmp(out, in) == 0, msg);
 
 		memset(out, '?', sizeof(out));
-		sprintf(msg, "addJsonArrayString: 0x%02X yields valid JSON", c);
+		snprintf(msg, sizeof(msg), "addJsonArrayString: 0x%02X yields valid JSON", c);
 		CHECK(roundtrip_array(in, out, sizeof(out)), msg);
-		sprintf(msg, "addJsonArrayString: 0x%02X survives the round trip", c);
+		snprintf(msg, sizeof(msg), "addJsonArrayString: 0x%02X survives the round trip", c);
 		CHECK(strcmp(out, in) == 0, msg);
 	}
 
@@ -229,9 +229,9 @@ main(void)
 
 		for (i = 0; i < sizeof(shorts) / sizeof(shorts[0]); i++) {
 			in[0] = shorts[i].ch; in[1] = '\0';
-			sprintf(expect, "%s", shorts[i].esc);
+			snprintf(expect, sizeof(expect), "%s", shorts[i].esc);
 			text = object_text(in);
-			sprintf(msg, "short form #%u is written as %s",
+			snprintf(msg, sizeof(msg), "short form #%u is written as %s",
 				(unsigned) i, shorts[i].esc);
 			CHECK(text != NULL && strncmp(text, "{\"k\":\"", 6) == 0 &&
 			      strncmp(text + 6, expect, 2) == 0 && text[8] == '"',

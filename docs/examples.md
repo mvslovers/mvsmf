@@ -449,6 +449,11 @@ zowe zos-console collect sync-responses E2E82A699B2B2001
 Each call returns only what arrived since the previous one, so poll until it
 comes back empty. That is the completion path for a truncated `cmd-response`.
 
+Only an empty `200` ends the polling. A `500` (return code 8, reason code 1)
+means this poll could not be made, not that the block is finished: the cursor
+is unchanged, so ask again with the same key. See
+[Collect Command Response](endpoints/console/collect.md#error-responses).
+
 ### Detect a keyword in unsolicited messages
 `GET /zosmf/restconsoles/consoles/{console-name}/detections/{detection-key}`
 

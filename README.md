@@ -15,7 +15,7 @@ builds on.
 
 - **Datasets** — list, read, write, create, delete (sequential and partitioned)
 - **PDS members** — list, read, write, delete
-- **Jobs** — submit (inline JCL or dataset), status, spool files, spool records, purge
+- **Jobs** — submit (inline JCL or dataset), status, spool files, spool records, cancel, purge
 - **USS files** — list, read, write, create, delete
 - **Console services** — issue operator commands, collect responses, detect
   unsolicited messages, read the hardcopy log
@@ -33,7 +33,7 @@ explains who may see, read and purge which job.
 > userid against RACF/RAKF before every open. `restjobs` decides per job: a
 > job of the caller's own userid is always allowed, a job of another owner
 > needs a profile in the RAKF class `JESSPOOL` (READ to list and read, UPDATE
-> to purge), and without profiles nobody sees the jobs of others, see
+> to cancel and purge), and without profiles nobody sees the jobs of others, see
 > [docs/jesspool.md](docs/jesspool.md) and
 > [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles` does
 > not authorize: for it, authentication is the *only* gate there is. On

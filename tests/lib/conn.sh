@@ -145,9 +145,10 @@ ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
 # 0 = development build, 1 = release. A request that returns no version at all
 # is neither: the suite stops (exit 1) instead of reading a failure as "release".
 mvsmf_dev_build() {   # INFO_URL, the /zosmf/info URL of the server under test
+	local info_url="$1"
 	local v
 	v=$(curl -s -f -K "$MVSMF_CURLRC" -H 'X-CSRF-ZOSMF-HEADER: 1' \
-		"$1" | jq -r '.zosmf_full_version // empty')
+		"$info_url" | jq -r '.zosmf_full_version // empty')
 	if [[ -z "$v" ]]; then
 		echo "ERROR: GET /zosmf/info returned no zosmf_full_version; cannot tell a development build from a release." >&2
 		exit 1

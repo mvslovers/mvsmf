@@ -3077,7 +3077,7 @@ DSCB_SEC() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" 
 DSCB_UNIT() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
 
 DEV_BUILD=0
-mvsmf_dev_build && DEV_BUILD=1
+mvsmf_dev_build "${BASE_URL}/zosmf/info" && DEV_BUILD=1
 
 if [[ "$DEV_BUILD" == 1 ]]; then
 	assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"

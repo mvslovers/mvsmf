@@ -29,7 +29,8 @@
 #   MVSMF_CURLRC2   the same for MVSMF_USER2, when the target has that user
 #   zowe            a function in front of the Zowe CLI, see below
 #   ZOWE_CONN       the connection options for every zowe call
-#   mvsmf_dev_build succeeds when the server is a development build, the only
+#   mvsmf_dev_build "${BASE_URL}/zosmf/info"
+#                   succeeds when the server is a development build, the only
 #                   kind that registers /zosmf/test (#508): the version GET
 #                   /zosmf/info reports ends in "-dev". A suite whose
 #                   assertions need an fn= probe asks first and skips. If the
@@ -143,10 +144,10 @@ ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
 
 # 0 = development build, 1 = release. A request that returns no version at all
 # is neither: the suite stops (exit 1) instead of reading a failure as "release".
-mvsmf_dev_build() {
+mvsmf_dev_build() {   # INFO_URL, the /zosmf/info URL of the server under test
 	local v
 	v=$(curl -s -f -K "$MVSMF_CURLRC" -H 'X-CSRF-ZOSMF-HEADER: 1' \
-		"${BASE_URL}/zosmf/info" | jq -r '.zosmf_full_version // empty')
+		"$1" | jq -r '.zosmf_full_version // empty')
 	if [[ -z "$v" ]]; then
 		echo "ERROR: GET /zosmf/info returned no zosmf_full_version; cannot tell a development build from a release." >&2
 		exit 1

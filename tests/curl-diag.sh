@@ -70,7 +70,7 @@ echo "========================================"
 
 # Only a development build registers /zosmf/test (#508); against a release
 # build every request below would be a 404 and the suite would say nothing.
-if ! mvsmf_dev_build; then
+if ! mvsmf_dev_build "${BASE_URL}/zosmf/info"; then
 	echo ""
 	echo "  SKIP: this is not a development build -- /zosmf/test is not registered"
 	exit 0

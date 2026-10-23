@@ -106,7 +106,7 @@ ROUTES=(
 
 # A release build does not register /zosmf/test (#508): there is nothing to
 # gate, and the routes would answer 404 instead of the refusal asked for.
-if ! mvsmf_dev_build; then
+if ! mvsmf_dev_build "${BASE_URL}/zosmf/info"; then
 	echo "  NOTE: not a development build, /zosmf/test is not registered -- its routes are left out"
 	KEEP=()
 	for r in "${ROUTES[@]}"; do

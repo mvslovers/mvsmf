@@ -131,6 +131,7 @@ now told apart by a catalog lookup and a filtered directory read.
   LRECL-sized chunks that cross record boundaries on variable-length data. A
   correct variable-length record mode is not available yet (#361).
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.
+- A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 
 ## Authorization
 

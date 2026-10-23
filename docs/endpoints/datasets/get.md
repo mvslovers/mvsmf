@@ -64,6 +64,7 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
   LRECL-sized chunks that cross record boundaries on variable-length data. A
   correct variable-length record mode is not available yet (#361).
 - Binary/record mode for PDS members reads until fread returns 0 (no DSCB-based limit)
+- A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 
 ## Authorization
 

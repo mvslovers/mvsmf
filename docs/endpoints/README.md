@@ -132,6 +132,60 @@ file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 | GET | [`/zosmf/restconsoles/consoles/{name}/detections/{key}`](console/detections.md) | Detect keyword in unsolicited messages |
 | GET | [`/zosmf/restconsoles/v1/log`](console/hardcopy-log.md) | Get messages from the hardcopy log |
 
+## Slow clients
+
+This applies to every download: a USS file, a data set, a PDS member and the
+records of a job spool file. These responses carry no `Content-Length`. An
+HTTP/1.1 client receives them as `Transfer-Encoding: chunked`; an HTTP/1.0
+client receives the body bare, and the end of the connection ends it.
+
+The server sends as long as the client takes data. When the client stops
+reading and its TCP receive window is closed, the server waits for the window
+to open. If it stays closed for about **10 seconds** in a row (100 tries of
+100 ms) and not one byte is accepted in that time, the server gives up and
+closes the connection. Any progress starts the count again, so this is neither
+a limit on the total time nor on the size of a download.
+
+What the client sees:
+
+- The status line was already sent, so the status is **200**, and there is no
+  error body. The connection ends in the middle of the body, and the closing
+  zero-length chunk (`0`, CRLF, CRLF) never arrives. A client that checks for it
+  reports an incomplete body — curl ends with **exit code 18**.
+- An HTTP/1.0 client, which has no closing chunk to look for, cannot tell the
+  cut-off from a complete file.
+- There is **no message on the operator console** when a chunked download is
+  cut off. An HTTP/1.0 download is cut off by the same rule and does leave
+  `MVSMF008W` (see [messages](../messages.md)); so does a response that carries
+  a `Content-Length`, such as every JSON reply, which then ends short of the
+  announced length.
+
+When it happens:
+
+- A client that does not read at all for more than about 10 seconds. In a
+  test, pauses of up to 9.5 seconds were survived and pauses of 11 seconds and
+  more were not.
+- A client that reads at a very low rate. What counts is the longest stretch
+  in which the client's TCP stack leaves the window closed, not the average
+  rate, so it cannot be predicted from the rate alone. In a test, a Linux
+  client with the default receive buffer reading 887 KB at 4 KB/s
+  (`curl --limit-rate 4k`) was cut off after about three minutes, at a
+  different byte count each time. The same client at the same rate with a
+  16 KB receive buffer received the whole file.
+
+What to do:
+
+- Do not throttle the transfer below what the client can keep up with, and do
+  not stop reading while the data is processed. Read the response to a file or
+  to memory first, then work on it.
+- For a client that has to read slowly, set a small receive buffer on its
+  socket (`SO_RCVBUF`), so that it announces window updates often.
+- Check that the download is complete. Use a client that reports an incomplete
+  chunked body. For a file, compare the number of bytes received with the
+  size from the listing.
+- Repeat the request. A download is a read and can be repeated safely, but it
+  starts from the beginning: file and data set reads accept no byte range.
+
 ## Common Headers
 
 | Header | Used By | Description |

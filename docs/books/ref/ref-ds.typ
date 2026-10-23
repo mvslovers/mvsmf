@@ -166,7 +166,7 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("blksz")], [The block size.],
     [#cmd("catnm")], [Always the empty string.],
     [#cmd("cdate")], [The creation date as #cmd("YYYY/MM/DD").],
-    [#cmd("dev")], [The device type, derived from the number of tracks per cylinder that the volume reports: 30 gives #cmd("3350"), 12 gives #cmd("3375"), 19 gives #cmd("3380"), any other number gives #cmd("3390"). A volume that does not report the number counts as 30.],
+    [#cmd("dev")], [The device type of the volume, named from the track capacity in the format-4 disk label (#cmd("DS4DEVTK")): 13165 gives #cmd("3330"), 19254 gives #cmd("3350"), 36000 gives #cmd("3375"), 47968 gives #cmd("3380"), 58786 gives #cmd("3390"). Any other capacity, and a volume whose label cannot be read, give #cmd("????"). mvsMF does not guess a device.],
     [#cmd("dsntp")], [#cmd("PDS") for organization #cmd("PO"), #cmd("BASIC") for #cmd("PS"), #cmd("UNKNOWN") for any other.],
     [#cmd("dsorg")], [The data set organization.],
     [#cmd("edate")], [Always #cmd("***None***").],
@@ -184,6 +184,15 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("vols")], [The volume serials.],
   )
 ]
+
+#idx("device type", "data set list")
+The tracks per cylinder do not identify a device: a 3380 and a 3390 both have
+15.
+
+*Change from mvsMF 1.3.0:* #cmd("dev") was derived from the tracks per cylinder,
+so a 3380 volume was listed as #cmd("3390"), and a number that was not known was
+answered #cmd("3390") too. Version 1.4.0 names the device from the track
+capacity, and answers #cmd("????") where it cannot.
 
 === Errors <ref-ds-list-err>
 

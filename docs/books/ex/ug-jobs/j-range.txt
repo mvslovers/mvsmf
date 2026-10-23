@@ -1,0 +1,4 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID/files/$DDID/records" |
+  sed -n '2,3p'
+PENDING CAPTURE

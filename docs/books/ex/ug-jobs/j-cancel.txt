@@ -1,0 +1,5 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"request":"cancel","version":"2.0"}' \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID"
+PENDING CAPTURE

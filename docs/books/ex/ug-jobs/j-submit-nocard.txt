@@ -1,0 +1,5 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: text/plain' \
+  --data-binary '//STEP1    EXEC PGM=IEFBR14' \
+  "$MVSMF_URL/zosmf/restjobs/jobs"
+PENDING CAPTURE

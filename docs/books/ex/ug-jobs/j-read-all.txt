@@ -1,0 +1,10 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID/files" |
+  grep -o '"ddname":"[A-Z0-9$#@]*","id":[0-9]*' |
+  grep -v JESJCL | sed 's/.*"id"://' |
+  while read id; do
+    echo "=== file $id"
+    curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+      "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID/files/$id/records"
+  done
+PENDING CAPTURE

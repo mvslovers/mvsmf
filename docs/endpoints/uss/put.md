@@ -12,7 +12,7 @@ PUT /zosmf/restfiles/fs/{filepath}
 
 | Parameter  | Description |
 |------------|-------------|
-| `filepath` | Absolute path to the file (wildcard capture, includes `/`) |
+| `filepath` | Absolute path to the file (wildcard capture, includes `/`); a literal `%` is sent as `%25` and a literal `+` as `%2B`, see [Names in the URL](../README.md#names-in-the-url-are-percent-encoded-once) |
 
 ### Headers
 

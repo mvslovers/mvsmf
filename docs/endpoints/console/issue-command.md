@@ -169,27 +169,28 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > for a state-changing command (`S`, `V`, `$P`). Treat it as "issued, result
 > unavailable," not "not issued."
 
-> **`P HTTPD` through this endpoint ends in `503 / 8 / 15` with a body.** The
-> command stops the server that is answering it, so the response capture is
-> abandoned and the report above is what comes back: status 503 and the
-> `{return-code, reason-code, reason}` body, in the same send as any other
-> answer. (Until [#398](https://github.com/mvslovers/mvsmf/issues/398) the
-> body was lost: the status line and headers went out, the body was refused
-> because the server was already quiescing, and the client saw a 503 with an
-> empty body.) A client reads it as "the command ran; the server is going
-> away" and does not send it again.
+> **`P HTTPD` through this endpoint normally ends in `503 / 8 / 15` with a
+> body.** The command stops the server that is answering it, so the response
+> capture is abandoned and the report above is what comes back: status 503 and
+> the `{return-code, reason-code, reason}` body. If the response is complete
+> before the server notices the command, the answer is the ordinary `200`.
+> (Until [#398](https://github.com/mvslovers/mvsmf/issues/398) the body was
+> lost: the status line and headers went out, the body was refused because the
+> server was already quiescing, and the client saw a 503 with an empty body.) A
+> client reads the 503 as "the command ran; the server is going away" and does
+> not send it again.
 >
 > **Ordering.** The answer carries `Connection: close`, so the connection is not
-> reused (measured; every answer of this endpoint is sent that way, a `D T`
-> included, so it is not an effect of the quiesce). A console command sent
-> after it is not answered `200`: where it reaches the handler before the address
-> space ends, it is refused `503 / 8 / 17` without being issued; in practice
-> httpd has usually stopped dispatching by then, and the request is accepted and
-> then reset with no answer (measured: a `D T` sent 35 ms after the answer to a
-> `P` was reset 0.9 s later, and never reached the handler). Either way the
-> command did not run. An `S HTTPD` has to wait until the started task is gone
-> (`D A,L`) and then be sent over another channel — this endpoint no longer
-> exists.
+> reused. That is httpd's rule for a request whose body the server did not read,
+> not an effect of the quiesce: the answers measured, a `D T` included, all
+> carry it. A console command sent while the server is stopping is never
+> answered `200` after the `P` has been answered. Measured in one run, a `P HTTPD`
+> and seven `D T` sent in parallel 20 to 300 ms later: the two earliest were
+> executed and answered `200`, three in the middle were refused `503 / 8 / 17`
+> with a body (not issued), and the two latest were issued and answered
+> `503 / 8 / 15`. Which one a request gets depends on when it arrives. A request
+> sent after the answer to the `P` is reset (curl exit 56) and never reaches
+> the handler; the command did not run.
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

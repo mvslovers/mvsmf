@@ -18,7 +18,7 @@ the RAKF class `JESSPOOL` every user sees only their own jobs. Read the first
 item below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
-4.2.0**, **ufsd 1.4.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
+4.2.0**, **ufsd 1.5.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
 (see 1.2.0).
 
 ### Read this first

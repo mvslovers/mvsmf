@@ -30,6 +30,15 @@ the release whose commands #cmd("RDEFINE"), #cmd("PERMIT") and #cmd("ADDUSER")
 the tasks below use. @ug-security-notcovered lists what the profiles do not
 govern.
 
+#note[*Do not edit #cmd("PROFILES") by hand; RAKF's maintainer recommends the
+commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
+#cmd("ADDSD"), then reload with #cmd("RAKFPROF"). The commands keep the file
+sorted, refuse a group line that has no universal line, and do not write a
+profile twice. A hand-edited file that is wrong aborts the reload and, on
+RAKF 2.0.0, keeps JES2 from starting at the next IPL. The section
+"Writing PROFILES by Hand" is a reference for reading an existing file and for
+repairing a broken one.]
+
 #note[*Read the console after every reload.* A profile is in effect only after
 the reload, and a broken table aborts the reload. @ug-security-jp-byhand says
 what happens then.]
@@ -1062,9 +1071,13 @@ access to #cmd("MIKE1..") comes from the profile #cmd("MIKE1.*").
 covers it, so #cmd("MIKE2") gets the own jobs with it. The profile
 #cmd("MIKE1.*") does not cover #cmd("MIKE10") (rule 9).
 
-=== Writing PROFILES by Hand and Recovering <ug-security-jp-byhand>
+=== Writing PROFILES by Hand: Reference Only <ug-security-jp-byhand>
 
 #idx("PROFILES member")#idx("RAKFPROF")#idx("U0400")#idx("U0300")
+#note[*Do not edit #cmd("PROFILES") by hand; RAKF's maintainer recommends the
+commands.* This section is for reading an existing file and for repairing a
+broken one.]
+
 The loader reads #cmd("SYS1.SECURE.CNTL(PROFILES)") when the procedure
 #cmd("RAKFPROF") runs. It holds 2000 records. The layout is the one of the
 lines above: the class in columns 1 to 8, the entity from column 9, the ID in

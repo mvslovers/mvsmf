@@ -528,30 +528,36 @@ send_op_pause(void *ctx)
 	(void)cthread_timed_wait((void *)&ecb, SEND_STALL_PAUSE, 0);
 }
 
-__asm__("\n&FUNC    SETC 'send_op_abort'");
+__asm__("\n&FUNC    SETC 'send_op_dead'");
 static int
-send_op_aborted(void *ctx)
+send_op_dead(void *ctx)
 {
 	Session *session = (Session *)ctx;
-	unsigned char flag;
 
 	// The client is finished or a failed send already marked it dead:
 	// nothing more can go out, so do not wait for it.
-	if (session->httpc->state >= CSTATE_DONE) {
-		return 1;
-	}
+	return session->httpc->state >= CSTATE_DONE;
+}
+
+__asm__("\n&FUNC    SETC 'send_op_stop'");
+static int
+send_op_stopping(void *ctx)
+{
+	Session *session = (Session *)ctx;
+	unsigned char flag;
 
 	// A stopping server must not sit out the stall budget -- shutdown waits
 	// for the workers, so every worker wait has to honor quiesce
 	// (httpd#122, #205). The macro is a volatile read and this function runs
 	// once per poll, so the byte the operator-command thread sets is picked
 	// up on the next turn -- never hoisted out of the send loop.
+	//
+	// Asked on a stalled send only (send_bytes()). Asked on entry as well,
+	// it refused every response of a quiescing server, including the error
+	// report a console `P HTTPD` answers itself with: the headers had gone
+	// out, the body never did (#398).
 	flag = http_get_flag(session->httpd);
-	if (flag & (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) {
-		return 1;
-	}
-
-	return 0;
+	return (flag & (HTTPD_FLAG_QUIESCE | HTTPD_FLAG_SHUTDOWN)) != 0;
 }
 
 __asm__("\n&FUNC    SETC 'send_op_gvup'");
@@ -567,7 +573,8 @@ send_op_giveup(void *ctx, int stall)
 static const SEND_OPS send_ops = {
 	send_op_send,
 	send_op_pause,
-	send_op_aborted,
+	send_op_dead,
+	send_op_stopping,
 	send_op_giveup
 };
 

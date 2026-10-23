@@ -154,7 +154,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
 | 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
-| 503 | 8 | 17 | Server quiescing; the command was **not** issued. |
+| 503 | 8 | 17 | Server quiescing; the command was **not** issued. Checked before the command goes out, whether or not another command is in progress. |
 
 > **`429 / 8 / 16` and `503 / 8 / 17` are safe to retry; `503 / 8 / 15` is not.**
 > The first two are refusals *before* SVC 34 — nothing executed. Only `8 / 15`
@@ -168,6 +168,24 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > blind retry **re-issues the command** — harmless for a display (`D T`) but not
 > for a state-changing command (`S`, `V`, `$P`). Treat it as "issued, result
 > unavailable," not "not issued."
+
+> **`P HTTPD` through this endpoint ends in `503 / 8 / 15` with a body.** The
+> command stops the server that is answering it, so the response capture is
+> abandoned and the report above is what comes back: status 503 and the
+> `{return-code, reason-code, reason}` body, in the same send as any other
+> answer. (Until [#398](https://github.com/mvslovers/mvsmf/issues/398) the
+> body was lost: the status line and headers went out, the body was refused
+> because the server was already quiescing, and the client saw a 503 with an
+> empty body.) A client reads it as "the command ran; the server is going
+> away" and does not send it again.
+>
+> **Ordering.** Between
+> the `P` and the end of the address space the server answers a further console
+> command `503 / 8 / 17` without issuing it; once the address space has ended
+> the connection is refused or reset. Both mean the command did not run, so an
+> `S HTTPD` has to wait until the started task is gone (`D A,L` shows it) and
+> then be sent over another channel — the console of the system, not this
+> endpoint, which no longer exists.
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

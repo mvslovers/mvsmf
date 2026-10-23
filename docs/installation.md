@@ -230,8 +230,10 @@ decides for every job who may see, read and purge it. Without a profile in the
 RAKF class `JESSPOOL` every user, an administrator included, sees only their own
 jobs, and `owner=*` lists only those. If a client or a tool relied on seeing the
 jobs of others, for example a started task found with `owner=*`, create the
-profiles before you start the new level. The rules, the commands and examples
-are in [Job spool authorization](jesspool.md).
+profiles before you start the new level. Create them with the RAKF commands
+`RDEFINE` and `PERMIT`, then reload with `S RAKFPROF`: **do not edit `PROFILES`
+by hand; RAKF's maintainer recommends the commands.** The rules, the commands
+and examples are in [Job spool authorization](jesspool.md).
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same

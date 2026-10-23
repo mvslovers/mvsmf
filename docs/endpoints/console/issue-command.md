@@ -179,7 +179,9 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > empty body.) A client reads it as "the command ran; the server is going
 > away" and does not send it again.
 >
-> **Ordering.** The answer carries `Connection: close`. A console command sent
+> **Ordering.** The answer carries `Connection: close`, so the connection is not
+> reused (measured; every answer of this endpoint is sent that way, a `D T`
+> included, so it is not an effect of the quiesce). A console command sent
 > after it is not answered `200`: where it reaches the handler before the address
 > space ends, it is refused `503 / 8 / 17` without being issued; in practice
 > httpd has usually stopped dispatching by then, and the request is accepted and

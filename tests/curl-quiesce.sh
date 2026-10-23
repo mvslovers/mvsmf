@@ -36,6 +36,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 CONSOLE_URL="${BASE_URL}/zosmf/restconsoles/consoles/defcn"
 
+HDR_FILE=$(mktemp)
+trap 'rm -f "$HDR_FILE"' EXIT
+
 PASSED=0
 FAILED=0
 TOTAL=0
@@ -55,7 +58,7 @@ echo "========================================"
 
 # put_cmd CMD -> BODY on stdout, "\nHTTP_CODE" last; curl's exit status is kept
 put_cmd() {
-	curl -s --max-time 30 -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
+	curl -s --max-time 30 -D "$HDR_FILE" -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
 		-X PUT -H 'Content-Type: application/json' \
 		-H 'X-CSRF-ZOSMF-HEADER: 1' \
 		-d "{\"cmd\":\"$1\"}" "$CONSOLE_URL"
@@ -76,6 +79,11 @@ elif ! printf '%s' "$BODY" | jq -e . >/dev/null 2>&1; then
 	fail "the body is JSON" "HTTP $CODE: $BODY"
 else
 	pass "the answer has a JSON body (HTTP $CODE)"
+	if tr -d '\r' < "$HDR_FILE" | grep -qi '^Connection: close$'; then
+		pass "the answer says Connection: close"
+	else
+		fail "the answer says Connection: close" "$(tr -d '\r' < "$HDR_FILE" | grep -i '^Connection:')"
+	fi
 	case "$CODE" in
 	200)
 		pass "the capture finished before the server began to quiesce"

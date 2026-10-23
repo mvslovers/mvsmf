@@ -9,7 +9,7 @@ GET
 `/zosmf/restjobs/jobs`
 
 ## Query Parameters
-- `owner` (optional): Filter by job owner. Use `*` for all owners. Default: current authenticated user.
+- `owner` (optional): Filter by job owner: one user id (whole, any case) or `*` for all owners. Default: current authenticated user. A foreign owner, and `*`, need the RACF class JESSPOOL, see [Authorization](#authorization). A pattern such as `ABC*` is not supported and matches nothing.
 - `prefix` (optional): Filter by job name prefix. Use `*` for all jobs.
 - `jobid` (optional): Filter by specific job ID.
 - `status` (optional): Filter by job status (`INPUT`, `ACTIVE`, `OUTPUT`). Use `*` for all. See [Status filter](#status-filter).
@@ -44,6 +44,18 @@ With `exec-data=Y`, two further fields follow `retcode`:
 ```
 
 See [Execution timestamps](#execution-timestamps).
+
+## Authorization
+
+The list holds the caller's own jobs and the foreign jobs the RACF class
+JESSPOOL lets the caller read (READ on `<owner>.<jobname>.<jobid>`). `owner=*`
+needs READ on `..`, another user id `X` needs READ on `X..`; without it the
+list is narrowed to the caller's own jobs (`*`) or empty (`X`). An empty list is
+HTTP 200 with `[]`. Jobs the caller may not read are never listed, and
+`max-jobs` counts only listed jobs. A job name, job id or owner outside
+`A-Z 0-9 $ # @` or longer than 8 characters is shown with `?` for the offending
+characters, or hidden if it is foreign. The rules and the profiles:
+[Job spool authorization](../../jesspool.md).
 
 ## Status filter
 
@@ -105,7 +117,7 @@ check to re-run.
 
 ## Limitations
 - Maximum 1000 jobs returned per request
-- Owner filter defaults to current user if not specified
+- Owner filter defaults to current user if not specified; it is an exact user id or `*`, never a prefix
 - See [status.md](status.md) for limitations on the `retcode` field
 
 ## Examples
@@ -115,7 +127,7 @@ check to re-run.
 # List own jobs
 curl http://mvs:1080/zosmf/restjobs/jobs
 
-# List all jobs
+# List all jobs the caller may read (own jobs without JESSPOOL profiles)
 curl "http://mvs:1080/zosmf/restjobs/jobs?owner=*"
 
 # List jobs with prefix filter

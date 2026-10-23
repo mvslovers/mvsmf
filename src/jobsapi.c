@@ -18,11 +18,13 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "jclines.h"
+#include "jobauth.h"
 #include "jobcard.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "mvsmfmsg.h"
 #include "json.h"
+#include "jwn.h"
 #include "router.h"
 #include "spoolln.h"
 
@@ -76,13 +78,17 @@ static int  do_print_sysout(Session *session, JESJOB *job, unsigned dsid);
 // needed by jobListHandler
 static void process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt,
                                      char *status, size_t status_size);
+static int  resolve_owner_filter(JOBAUTH *ja, const char *requested, char *out, size_t out_size);
 static unsigned get_max_jobs(Session *session);
 static int  want_exec_data(Session *session);
 static const char* format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen);
 static const char* job_status_str(const JESJOB *job);
-static int  process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
-                        const char *host, const char *scheme, int exec_data);
-static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist);
+static int  process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
+                        const char *status, const char *host, const char *scheme, int exec_data);
+static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid,
+                                       JESJOB ***out_joblist, int op, const char *submitter,
+                                       int *decision);
+static void send_job_not_found(Session *session, const char *jobname, const char *jobid);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
 static int open_intrdr(Session *session, VSFILE **intrdr);
@@ -132,21 +138,19 @@ jobListHandler(Session *session)
 	}
 
 	const char *host = getHeaderParam(session, "HOST");
-	const char *owner = getQueryParam(session, "owner");
+	const char *owner_req = getQueryParam(session, "owner");
 	const unsigned max_jobs = get_max_jobs(session);
-	UCHAR ownerid[64];
 	/* MVSMF is link-edited RENT, so the normalized status stays on the stack */
 	char status[STATUS_STR_SIZE];
+	/* what the owner filter resolves to: the caller, "*", or one userid */
+	char owner[JWN_PRTSZ];
+	JOBAUTH ja;
+	int show = 1;
 
-	if (owner == NULL) {
-		/* z/OSMF default: jobs owned by the caller, from the identity
-		 * httpd already resolved (mvslovers/httpd#99), not env vars. */
-		owner = (const char *)http_get_userid(session->httpc, ownerid, sizeof(ownerid));
-	}
-
-	if (owner && owner[0] == '*') {
-		owner = NULL;
-	}
+	/* z/OSMF default: jobs owned by the caller, from the identity httpd
+	 * already resolved (mvslovers/httpd#99), not env vars. */
+	jobauth_init(session, &ja);
+	show = resolve_owner_filter(&ja, owner_req, owner, sizeof(owner));
 
 	process_job_list_filters(session, &filter, &jesfilt, status, sizeof(status));
 
@@ -160,7 +164,7 @@ jobListHandler(Session *session)
 		goto quit;
 	}
 
-	joblist = jesjob(jes, filter, jesfilt, 0);
+	joblist = show ? jesjob(jes, filter, jesfilt, 0) : NULL;
 
 	startArray(builder);
 
@@ -175,7 +179,7 @@ jobListHandler(Session *session)
 	unsigned emitted = 0;
 	unsigned ii = 0;
 	for (ii = 0; ii < array_count(&joblist) && emitted < max_jobs; ii++) {
-		rc = process_job(builder, joblist[ii], owner,
+		rc = process_job(builder, joblist[ii], &ja, owner,
 						status[0] ? status : NULL, host, scheme, exec_data);
 		if (rc < 0) {
 			goto quit;
@@ -230,15 +234,10 @@ jobFilesHandler(Session *session)
 		goto quit;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+								JWN_OP_READ, NULL, NULL);
 	if (!job) {
-		char msg[MAX_ERR_MSG_LENGTH] = {0};
-		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-		if (rc >= 0) {
-			sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-							RC_WARNING, REASON_JOB_NOT_FOUND,
-							msg, NULL, 0);
-		}
+		send_job_not_found(session, jobname, jobid);
 		goto quit;
 	}
 
@@ -284,13 +283,10 @@ jobRecordsHandler(Session *session)
 		return rc;
 	}
 
-	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+								JWN_OP_READ, NULL, NULL);
 	if (!job) {
-		char msg[MAX_ERR_MSG_LENGTH] = {0};
-		rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-						RC_WARNING, REASON_JOB_NOT_FOUND,
-						msg, NULL, 0);
+		send_job_not_found(session, jobname, jobid);
 		goto quit;
 	}
 
@@ -366,7 +362,12 @@ jobPurgeHandler(Session *session)
 	JESJOB *job = NULL;
 	JESJOB **joblist = NULL;
 	JsonBuilder *builder = createJsonBuilder();
-	char owner[JOBNAME_STR_SIZE + 1] = {0};
+	char owner[JWN_PRTSZ] = {0};
+	char name[JWN_PRTSZ] = {0};
+	char id[JWN_PRTSZ] = {0};
+	char cancel_name[JWN_PRTSZ] = {0};
+	char cancel_id[JWN_PRTSZ] = {0};
+	int decision = JWN_HIDE;
 
 	if (!jobname || !jobid) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
@@ -382,29 +383,41 @@ jobPurgeHandler(Session *session)
 	     jescanj() alone cannot: a jobid JES2 rejects as malformed - anything
 	     outside JOB00001-JOB09999 on 3.8j, e.g. JOB99999 - comes back as
 	     CANJ_SYNTX, which used to fall through to a 500. */
-	job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
+	job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+								JWN_OP_PURGE, NULL, &decision);
 	if (!job) {
-		char msg[MAX_ERR_MSG_LENGTH] = {0};
-		snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-		sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-						RC_WARNING, REASON_JOB_NOT_FOUND,
-						msg, NULL, 0);
+		send_job_not_found(session, jobname, jobid);
 		goto quit;
 	}
 
-	/* copy it out now - the job the pointer describes is about to be purged */
-	snprintf(owner, sizeof(owner), "%.8s", (char *) job->owner);
+	/* A job the caller may read but not purge is visible by definition, so
+	   saying so leaks nothing.  500 with category 4 is the shape of every
+	   refusal in this API: 403 is not in z/OSMF's list of statuses. */
+	if (decision != JWN_ALLOW) {
+		send_not_authorized(session, ERR_MSG_JOB_PURGE_DENIED);
+		goto quit;
+	}
 
-	rc = jescanj(jobname, jobid, 1);
+	/* The purge names the job the lookup verified, not what the request
+	   spelled: the cancel is the same job the check was made on, whatever case
+	   or padding the path had.  Copy it out now - the job the pointer
+	   describes is about to be purged. */
+	snprintf(cancel_name, sizeof(cancel_name), "%.8s", (char *) job->jobname);
+	snprintf(cancel_id, sizeof(cancel_id), "%.8s", (char *) job->jobid);
+	jwn_printable(owner, sizeof(owner), (const char *) job->owner);
+	jwn_printable(name, sizeof(name), (const char *) job->jobname);
+	jwn_printable(id, sizeof(id), (const char *) job->jobid);
+
+	rc = jescanj(cancel_name, cancel_id, 1);
 
 	switch (rc) {
 	case CANJ_OK:
 		rc = startJsonObject(builder);
 
-		rc = addJsonString(builder, "jobid", jobid);
+		rc = addJsonString(builder, "jobid", id);
 		rc = addJsonString(builder, "message", "Request was successful.");
-		rc = addJsonString(builder, "original-jobid", jobid);
-		rc = addJsonString(builder, "jobname", jobname);
+		rc = addJsonString(builder, "original-jobid", id);
+		rc = addJsonString(builder, "jobname", name);
 		rc = addJsonString(builder, "owner", owner);
 		rc = addJsonNumber(builder, "status", 0);
 
@@ -421,13 +434,7 @@ jobPurgeHandler(Session *session)
 	case CANJ_SYNTX:
 		/* the lookup above found it, so this is a job that went away between
 		   the two calls - still "not found" from the client's side */
-		{
-			char msg[MAX_ERR_MSG_LENGTH] = {0};
-			snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-			sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-							RC_WARNING, REASON_JOB_NOT_FOUND,
-							msg, NULL, 0);
-		}
+		send_job_not_found(session, jobname, jobid);
 		break;
 	case CANJ_ICAN:
 		/* Refusing to purge a started task. This answered 403 until #250; that
@@ -763,8 +770,14 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	unsigned bad_dsid = 0;
 	const char *bad_why = NULL;
 	char msg[MAX_ERR_MSG_LENGTH] = {0};
+	char jobname_p[JWN_PRTSZ];
+	char jobid_p[JWN_PRTSZ];
 	SPOOL_CTX ctx;
 	JESPRST st;
+
+	/* the console log and the error text carry the job's own name: printable */
+	jwn_printable(jobname_p, sizeof(jobname_p), (const char *)job->jobname);
+	jwn_printable(jobid_p, sizeof(jobid_p), (const char *)job->jobid);
 
 	JES *jes = jesopen();
 	session_register_jes(session, jes);
@@ -857,8 +870,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	   a purged dataset that a client polls would flood the log. */
 	if (ctx.total) {
 		if (bad_why) {
-			wtof(MSG_SPOOL_WALK, (char *) job->jobname,
-				(char *) job->jobid, bad_dsid, bad_why);
+			wtof(MSG_SPOOL_WALK, jobname_p, jobid_p, bad_dsid, bad_why);
 		}
 		rc = 0;
 		goto quit;
@@ -870,7 +882,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 	   name it got wrong, now that the status no longer does (#250). */
 	if (status == HTTP_STATUS_NOT_FOUND) {
 		snprintf(msg, sizeof(msg), ERR_MSG_SPOOL_GONE,
-				(char *) job->jobname, (char *) job->jobid, bad_dsid);
+				jobname_p, jobid_p, bad_dsid);
 		rc = sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
 						RC_WARNING, REASON_SPOOL_GONE, msg, NULL, 0);
 		goto quit;
@@ -878,7 +890,7 @@ do_print_sysout(Session *session, JESJOB *job, unsigned dsid)
 
 	if (status != HTTP_STATUS_OK) {
 		snprintf(msg, sizeof(msg), ERR_MSG_SPOOL_READ,
-				(char *) job->jobname, (char *) job->jobid, bad_dsid, bad_why);
+				jobname_p, jobid_p, bad_dsid, bad_why);
 		rc = sendErrorResponse(session, status, CATEGORY_SERVICE,
 						RC_ERROR, REASON_SPOOL_READ, msg, NULL, 0);
 		goto quit;
@@ -938,6 +950,43 @@ process_job_list_filters(Session *session, const char **filter, JESFILT *jesfilt
 	}
 }
 
+/* What the owner= query parameter means for this caller (#440).  The owner is
+   an exact userid or "*", never a prefix: the old prefix compare answered
+   owner=IBM with every job of IBMUSER.  Returns 0 when nothing can match and
+   the spool need not be read at all, else 1 with `out` holding "*" or the one
+   userid the list is limited to.
+
+   What the caller may ask for is the one place the filter and the policy
+   meet: all owners need READ on the probe "..", a foreign userid READ on
+   "<userid>..".  "*" without that falls back to the caller's own jobs rather
+   than to an error, as FTPD's SITE JESOWNER does; a foreign userid without it
+   is an empty list, which cannot be told from a userid that owns nothing. */
+__asm__("\n&FUNC	SETC 'resolve_owner_filter'");
+static int
+resolve_owner_filter(JOBAUTH *ja, const char *requested, char *out, size_t out_size)
+{
+	int kind = jwn_narrows(ja->user, requested ? requested : "", out, (int)out_size);
+
+	switch (kind) {
+	case JWN_NR_RESET:
+	case JWN_NR_OWN:
+		break;
+	case JWN_NR_ALL:
+		if (jobauth_probe(ja, "")) {
+			return 1;
+		}
+		break;
+	case JWN_NR_OTHER:
+		return jobauth_probe(ja, out);
+	default:
+		out[0] = '\0';
+		return 0;
+	}
+
+	snprintf(out, out_size, "%s", ja->user);
+	return out[0] != '\0';
+}
+
 __asm__("\n&FUNC	SETC 'should_skip_job'");
 static int
 should_skip_job(const JESJOB *job, const char *owner, const char *status)
@@ -946,15 +995,10 @@ should_skip_job(const JESJOB *job, const char *owner, const char *status)
 		return 1;
 	}
 
- 	// skip job if owner is empty or does not match given owner
-	if (owner) {
-		if (job->owner[0] == '\0') {
-			return 1;  
-		}
-		if (strncmp((const char *)job->owner, owner,
-					MIN(strlen((const char *)job->owner), strlen(owner))) != 0) {
-			return 1;
-		}
+	/* skip the job unless its owner is the one asked for; an ownerless job
+	   matches only "*" */
+	if (owner && !jwn_match(owner, (const char *)job->owner)) {
+		return 1;
 	}
 
 	/* skip system log and batch initiator */
@@ -1085,8 +1129,8 @@ format_exec_time(const time64_t *t, int tzadjust, char *out, size_t outlen)
    max-jobs) and a negative value on error. */
 __asm__("\n&FUNC	SETC 'process_job'");
 static int
-process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *status,
-			const char *host, const char *scheme, int exec_data)
+process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
+			const char *status, const char *host, const char *scheme, int exec_data)
 {
 	int rc = 0;
 
@@ -1096,17 +1140,33 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	char class_str[CLASS_STR_SIZE];
 	char url_str[MAX_URL_LENGTH];
 	char files_url_str[MAX_URL_LENGTH];
+	char jobname_p[JWN_PRTSZ];
+	char jobid_p[JWN_PRTSZ];
+	char owner_p[JWN_PRTSZ];
 	const char *stat_str = job_status_str(job);
 
 	if (should_skip_job(job, owner, status)) {
 		return 0;
 	}
 
+	/* ja is NULL for a job the caller has already been cleared for (the
+	   status of one job); a list entry is cleared here, last, so RACF is
+	   asked only about jobs the other filters would have shown. */
+	if (ja && jobauth_job(ja, JWN_OP_LIST, job) != JWN_ALLOW) {
+		return 0;
+	}
+
+	/* everything a job reports about itself is printable before it is a
+	   byte of the response */
+	jwn_printable(jobname_p, sizeof(jobname_p), (const char *)job->jobname);
+	jwn_printable(jobid_p, sizeof(jobid_p), (const char *)job->jobid);
+	jwn_printable(owner_p, sizeof(owner_p), (const char *)job->owner);
+
 	// type is the first 3 characters of the jobid
-	rc = snprintf(type_str, sizeof(type_str), "%.3s", job->jobid);
+	rc = snprintf(type_str, sizeof(type_str), "%.3s", jobid_p);
 	
 	// for STCs and TSO users, class is the first 3 characters of the jobid
-	rc = snprintf(class_str, sizeof(class_str), "%.3s", job->jobid);
+	rc = snprintf(class_str, sizeof(class_str), "%.3s", jobid_p);
 	
 	// for standard jobs, class is the job class
 	if (isalnum(job->eclass)) {
@@ -1116,7 +1176,7 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	// url is the full url to the job
 	rc = snprintf(url_str, sizeof(url_str),
 					"%s://%s/zosmf/restjobs/jobs/%s/%s", scheme, host_str,
-					job->jobname, job->jobid);
+					jobname_p, jobid_p);
 	
 	// files_url is the full url to the job sysout files
 	rc = snprintf(files_url_str, sizeof(files_url_str), "%s/files", url_str);
@@ -1128,9 +1188,9 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	rc = startJsonObject(builder);
 
 	rc = addJsonString(builder, "subsystem", "JES2");
-	rc = addJsonString(builder, "jobname", (const char *)job->jobname);
-	rc = addJsonString(builder, "jobid", (const char *)job->jobid);
-	rc = addJsonString(builder, "owner", (const char *)job->owner);
+	rc = addJsonString(builder, "jobname", jobname_p);
+	rc = addJsonString(builder, "jobid", jobid_p);
+	rc = addJsonString(builder, "owner", owner_p);
 	rc = addJsonString(builder, "type", type_str);
 	rc = addJsonString(builder, "class", class_str);
 	rc = addJsonString(builder, "url", url_str);
@@ -1232,11 +1292,22 @@ process_job(JsonBuilder *builder, JESJOB *job, const char *owner, const char *st
 	return 1;
 }
 
+/* Resolves one job and clears the caller for it (#440).  A job the caller may
+   not see is not returned: hidden and non-existent are one outcome, so no
+   caller can answer them differently.  `op` is JWN_OP_READ or JWN_OP_PURGE.
+
+   The decision (JWN_ALLOW, or JWN_NOPURGE for a job that may be read but not
+   purged) is judged on the owner, name and id the job itself carries.
+   `submitter` is what jobSubmitHandler vouches for -- see
+   find_and_send_job_status(); every other caller passes NULL. */
 __asm__("\n&FUNC    SETC 'find_job_by_name_and_id'");
 static 
-JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid, JESJOB ***out_joblist)
+JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const char *jobid,
+                                JESJOB ***out_joblist, int op, const char *submitter,
+                                int *decision)
 {
 	int job_found = 0;
+	JOBAUTH ja;
 
 	JESJOB *found_job = NULL;
 	JESJOB **joblist = NULL;
@@ -1248,6 +1319,9 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 
 	if (out_joblist) {
 		*out_joblist = NULL;
+	}
+	if (decision) {
+		*decision = JWN_HIDE;
 	}
 
 	if (!jobname || !jobid) {
@@ -1280,13 +1354,41 @@ JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, const cha
 			continue;
 		}
 
+		/* the job id is exact: the checkpoint filter above is a lookup key,
+		   not a guarantee that nothing else comes back with it */
+		if (strcmp((const char *)job->jobid, jobid) != 0) {
+			continue;
+		}
+
 		job_found++;
 		if (job_found > 1) {
-			// TODO (mig): create a new error message in jobsapi_msg.h
+			/* fail closed: found_job holds the first match, which was never
+			   judged.  *decision is already JWN_HIDE. */
+			found_job = NULL;
 			goto quit;
 		}
 
 		found_job = job;
+	}
+
+	if (found_job) {
+		int verdict;
+
+		/* complete, never overwrite: once JES2 has written a userid it is the
+		   truth, including a USER= the submitter put on the card themselves */
+		if (submitter && submitter[0] && found_job->owner[0] == '\0') {
+			strncpy((char *)found_job->owner, submitter, sizeof(found_job->owner) - 1);
+			found_job->owner[sizeof(found_job->owner) - 1] = '\0';
+		}
+
+		jobauth_init(session, &ja);
+		verdict = jobauth_job(&ja, op, found_job);
+		if (verdict == JWN_HIDE) {
+			found_job = NULL;
+		}
+		if (decision) {
+			*decision = verdict;
+		}
 	}
 
 quit:
@@ -1297,6 +1399,47 @@ quit:
 	}
 
 	return found_job;
+}
+
+/* The request's own words, made safe to put between the quotes of a JSON
+   string: sendErrorResponse() does not escape its message.  A quote, a
+   backslash or a control character (below 0x40 in EBCDIC) becomes '?', and
+   the copy is cut at 64 characters. */
+#define NOT_FOUND_ECHO_SZ 65
+
+__asm__("\n&FUNC    SETC 'echo_request_field'");
+static void
+echo_request_field(char *out, int sz, const char *in)
+{
+	int n = 0;
+
+	if (in) {
+		for (; *in && n < sz - 1; in++, n++) {
+			unsigned char c = (unsigned char)*in;
+
+			out[n] = (c < 0x40 || c == '"' || c == '\\') ? '?' : (char)c;
+		}
+	}
+	out[n] = '\0';
+}
+
+/* The one answer for a job that is not there, is not the caller's to see, or
+   never existed.  Everything a client could use to tell those apart -- the
+   status, the text, the order of the work -- is in this one function, and the
+   text carries only what the request itself said. */
+__asm__("\n&FUNC    SETC 'send_job_not_found'");
+static void
+send_job_not_found(Session *session, const char *jobname, const char *jobid)
+{
+	char msg[MAX_ERR_MSG_LENGTH] = {0};
+	char name_p[NOT_FOUND_ECHO_SZ];
+	char id_p[NOT_FOUND_ECHO_SZ];
+
+	echo_request_field(name_p, sizeof(name_p), jobname);
+	echo_request_field(id_p, sizeof(id_p), jobid);
+	snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, name_p, id_p);
+	sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+					RC_WARNING, REASON_JOB_NOT_FOUND, msg, NULL, 0);
 }
 
 __asm__("\n&FUNC    SETC 'get_recfm_string'");
@@ -1340,10 +1483,18 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
 
 	char url_str[MAX_URL_LENGTH] = {0};
     char recfm_str[RECFM_STR_SIZE] = {0};
+	char jobname_p[JWN_PRTSZ];
+	char jobid_p[JWN_PRTSZ];
+	char ddname_p[JWN_PRTSZ];
+	char stepname_p[JWN_PRTSZ];
+	char procstep_p[JWN_PRTSZ];
 
     if (!job) {
 		return -1;
 	}
+
+	jwn_printable(jobname_p, sizeof(jobname_p), (const char *)job->jobname);
+	jwn_printable(jobid_p, sizeof(jobid_p), (const char *)job->jobid);
 
 	int ii = 0;
     for (ii = 0; ii < (int)array_count(&job->jesdd); ii++) {
@@ -1354,7 +1505,11 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
 
         rc = snprintf(url_str, sizeof(url_str),
                     "%s://%s/zosmf/restjobs/jobs/%s/%s/files/%d/records",
-                    scheme, host_str, job->jobname, job->jobid, dd->dsid);
+                    scheme, host_str, jobname_p, jobid_p, dd->dsid);
+
+        jwn_printable(ddname_p, sizeof(ddname_p), (const char *)dd->ddname);
+        jwn_printable(stepname_p, sizeof(stepname_p), (const char *)dd->stepname);
+        jwn_printable(procstep_p, sizeof(procstep_p), (const char *)dd->procstep);
 
         get_recfm_string(dd->recfm, recfm_str);
 
@@ -1365,14 +1520,14 @@ int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuild
         rc = addJsonString(builder, "subsystem", "JES2");
         rc = addJsonString(builder, "byte-count", 0);
         rc = addJsonNumber(builder, "lrecl", dd->lrecl);
-        rc = addJsonString(builder, "jobid", (char *) job->jobid);
-        rc = addJsonString(builder, "ddname", (char *) dd->ddname);
+        rc = addJsonString(builder, "jobid", jobid_p);
+        rc = addJsonString(builder, "ddname", ddname_p);
         rc = addJsonNumber(builder, "id", dd->dsid);
         rc = addJsonNumber(builder, "record-count", (int) dd->records);
         rc = addJsonString(builder, "class", (char[]){(char)dd->oclass, '\0'});
-        rc = addJsonString(builder, "jobname", (char *) job->jobname);
-        rc = addJsonString(builder, "stepname", dd->stepname[0] ? (char *)dd->stepname : "JES2");
-        rc = addJsonString(builder, "procstep", dd->procstep[0] ? (char *)dd->procstep : NULL);
+        rc = addJsonString(builder, "jobname", jobname_p);
+        rc = addJsonString(builder, "stepname", dd->stepname[0] ? stepname_p : "JES2");
+        rc = addJsonString(builder, "procstep", dd->procstep[0] ? procstep_p : NULL);
         
 		rc = endJsonObject(builder);
 
@@ -1719,7 +1874,14 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 		jobid[JOBID_STR_SIZE] = '\0';
 	}
 
-	wtof(MSG_JOB_SUBMITTED, jobname, jobid);
+	{
+		char jobname_p[JWN_PRTSZ];
+		char jobid_p[JWN_PRTSZ];
+
+		jwn_printable(jobname_p, sizeof(jobname_p), jobname);
+		jwn_printable(jobid_p, sizeof(jobid_p), jobid);
+		wtof(MSG_JOB_SUBMITTED, jobname_p, jobid_p);
+	}
 	rc = 0;
 
 quit:
@@ -1792,7 +1954,7 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
         return -1;
     }
 
-    rc = process_job(builder, job, NULL, NULL, host, getRequestScheme(session),
+    rc = process_job(builder, job, NULL, NULL, NULL, host, getRequestScheme(session),
                      want_exec_data(session));
     if (rc < 0) {
         freeJsonBuilder(builder);
@@ -1844,22 +2006,15 @@ find_and_send_job_status(Session *session, const char *jobname, const char *jobi
 	   	goto quit;
     }
 
-    job = find_job_by_name_and_id(session, jobname, jobid, &joblist);
+    /* the submitter completes an owner JES2 has not written yet, inside the
+       lookup and before the policy looks at the job: an ownerless job is
+       nobody's, so this is the one place that makes it the submitter's */
+    job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+                                  JWN_OP_READ, submitter, NULL);
     if (!job) {
-        char msg[MAX_ERR_MSG_LENGTH] = {0};
-        rc = snprintf(msg, sizeof(msg), ERR_MSG_JOB_NOT_FOUND, jobname, jobid);
-        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-                      RC_WARNING, REASON_JOB_NOT_FOUND,
-                      msg, NULL, 0);
+        send_job_not_found(session, jobname, jobid);
         rc = -1;
 		goto quit;
-    }
-
-    /* complete, never overwrite: once JES2 has written a userid it is the
-       truth, including a USER= the submitter put on the card themselves */
-    if (submitter && submitter[0] && job->owner[0] == '\0') {
-        strncpy((char *)job->owner, submitter, sizeof(job->owner) - 1);
-        job->owner[sizeof(job->owner) - 1] = '\0';
     }
 
     rc = send_job_status_response(session, job, host);
@@ -2502,7 +2657,14 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, char *content, size_t c
         jobid[JOBID_STR_SIZE] = '\0';
     }
 
-    wtof(MSG_JOB_SUBMITTED, jobname, jobid);
+    {
+        char jobname_p[JWN_PRTSZ];
+        char jobid_p[JWN_PRTSZ];
+
+        jwn_printable(jobname_p, sizeof(jobname_p), jobname);
+        jwn_printable(jobid_p, sizeof(jobid_p), jobid);
+        wtof(MSG_JOB_SUBMITTED, jobname_p, jobid_p);
+    }
     rc = 0;
 
 

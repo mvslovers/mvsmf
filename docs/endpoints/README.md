@@ -66,6 +66,9 @@ and outlive a token logout.
 
 ## Jobs (`/zosmf/restjobs/jobs`)
 
+Which jobs a caller sees, reads and purges is decided per job by RACF, see
+[Job spool authorization](../jesspool.md).
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | [`/zosmf/restjobs/jobs`](jobs/list.md) | List jobs |

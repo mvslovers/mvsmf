@@ -45,16 +45,32 @@ Format, `null` semantics and the missing `exec-submitted` are described under
 
 `owner` comes from `JCTUSEID`, which JES2 writes during conversion, so it is
 empty for the second or two between a job being read in and being converted.
-This endpoint reports that emptiness rather than guessing: it is told a jobname
-and a jobid, not who submitted them, and the caller is under no obligation to
-be the owner. [Submit](submit.md) is the one place that can fill the field in
-early, because it put the `USER=` on the card itself (#210).
+This endpoint does not guess: it is told a jobname and a jobid, not who
+submitted them, and the caller is under no obligation to be the owner.
+[Submit](submit.md) is the one place that can fill the field in early, because
+it put the `USER=` on the card itself (#210). See Authorization below for what
+that means for a status request on such a job.
+
+## Authorization
+
+A job of the caller's own userid is always readable. A job of another owner is
+readable with READ on the RACF class JESSPOOL, resource
+`<owner>.<jobname>.<jobid>`; without it the answer is the same 404 a job that
+does not exist gets. The job id is compared whole, no wildcard matches.
+
+A job that JES2 has not yet converted has no owner, and a job without an owner
+is nobody's. Only the answer to the submit request itself treats the submitter
+as the owner (it hands the submitter's userid to the lookup, and only when the
+owner is empty). A later status request carries no submitter: it is answered 404
+until JES2 has written the owner. That is intended, the lookup does not guess.
+See [Job spool authorization](../../jesspool.md).
 
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Missing required parameters (jobname/jobid)
 - HTTP 404 (Not Found)
-    - Job not found
+    - Job not found, **or a foreign job the caller may not read**: the two
+      answers are identical (see [Job spool authorization](../../jesspool.md))
 
 ## Limitations
 

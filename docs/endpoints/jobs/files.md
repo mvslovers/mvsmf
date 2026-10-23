@@ -34,9 +34,18 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 ]
 ```
 
+## Authorization
+
+A job of the caller's own userid is always readable. A job of another owner is
+readable with READ on the RACF class JESSPOOL, resource
+`<owner>.<jobname>.<jobid>`; without it the answer is the same 404 a job that
+does not exist gets. The job id is compared whole, no wildcard matches. See
+[Job spool authorization](../../jesspool.md).
+
 ## Error Responses
 - HTTP 404 (Not Found)
-    - Job not found
+    - Job not found, **or a foreign job the caller may not read**: the two
+      answers are identical (see [Job spool authorization](../../jesspool.md))
 - HTTP 500 (Internal Server Error)
     - JES2 system error
 

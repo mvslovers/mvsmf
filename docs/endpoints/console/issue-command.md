@@ -152,7 +152,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 413 | 1 | 12 | `Content-Length` of 16 MB or more; nothing is read and the connection is closed. Shares 1 / 12 with the 400 above: both are a body that cannot be used, and the status tells them apart. |
 | 429 | 8 | 16 | Another console command is in progress; the command was **not** issued. |
 | 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
-| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the baseline for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
+| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the anchor for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
 | 503 | 8 | 17 | Server quiescing; the command was **not** issued. Checked before the command goes out, whether or not another command is in progress. |
 
@@ -169,8 +169,8 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > so there is nothing to collect.
 > A single poll that cannot copy the table is skipped and the next one tried;
 > the error is answered only when no poll of the capture got a copy, when the
-> `unsol-key` baseline could not be taken (a baseline of 0 would report every
-> message already in the table as new), or when the last look of a synchronous
+> `unsol-key` anchor could not be taken (without one, every message already
+> in the table would be reported as new), or when the last look of a synchronous
 > `unsol-key` wait failed (`timeout` would claim the keyword did not appear).
 
 > **`503 / 8 / 15` is a post-issue outcome, not a pre-issue failure.** The command

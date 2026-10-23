@@ -302,8 +302,6 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 /* the same poll.  (session: array_count() routes through the httpd    */
 /* httpx vector, which needs session->httpd.)                          */
 /* ------------------------------------------------------------------ */
-static int mtt_secs_of_day(const char *dat, int len);
-
 /* Is this entry the ECHO of cmd_upper -- is its message text exactly the
  * command, rather than merely containing it?
  *
@@ -653,14 +651,14 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 }
 
 /* Unsolicited-keyword detection request, stored opaquely in the kv-store keyed
- * by the "D..." detection key. Detection fires when the number of MTT entries
- * matching the keyword grows past base_count (robust against pre-existing
- * occurrences; no per-entry timestamp comparison needed). anchor_hi is the TOD
- * high word at issue (each tick ~= 1.05 s) -> 64-bit-math-free window check. */
+ * by the "D..." detection key. Detection fires when an MTT entry matching the
+ * keyword is newer than base (a place in the table, not a count: the table is
+ * a wrapping window, #195; see mttsnap.h). anchor_hi is the TOD high word at
+ * issue (each tick ~= 1.05 s) -> 64-bit-math-free window check. */
 typedef struct sol_detection {
 	unsigned        anchor_hi;    /* tod_hi() at issue (~1.05 s ticks)    */
 	unsigned        detect_secs;  /* detect-time window (seconds)         */
-	unsigned        base_count;   /* matches present at issue             */
+	MTT_ANCHOR      base;         /* end of the table at issue            */
 	unsigned char   keylen;
 	char            key[126];     /* uppercased unsol-key                 */
 } SOL_DETECTION;
@@ -706,7 +704,8 @@ int consoleIssueHandler(Session *session)
 	char dkey[16] = {0};
 	char det_status[16] = {0};
 	char det_msg[200] = {0};
-	int has_unsol = 0, unsol_sync = 0, unsol_base = 0, detect_secs = 30;
+	int has_unsol = 0, unsol_sync = 0, detect_secs = 30;
+	MTT_ANCHOR unsol_base = { -1, 0 };
 
 	/* Content-Type must be application/json */
 	if (!ct || !strstr(ct, "application/json")) {
@@ -848,15 +847,14 @@ int consoleIssueHandler(Session *session)
 	/* issue under the authenticated user's ACEE (set by the identity middleware) */
 	issue_command(cmd_upper, (unsigned)cmdlen);
 
-	/* unsol-key: uppercase it and snapshot the baseline match count *before*
-	 * the awaited (unsolicited) message can arrive */
+	/* unsol-key: uppercase it and anchor on the end of the table *before* the
+	 * awaited (unsolicited) message can arrive */
 	if (has_unsol) {
 		int j;
 		for (j = 0; unsolkey[j] && j < (int)sizeof(unsol_upper) - 1; j++)
 			unsol_upper[j] = (char)toupper((unsigned char)unsolkey[j]);
 		unsol_upper[j] = '\0';
-		unsol_base = mtt_detect_count(session, unsol_upper, (char *)0, 0);
-		if (unsol_base < 0) {
+		if (mtt_detect_anchor(session, unsol_upper, &unsol_base) != 0) {
 			/* No baseline is not a baseline of 0 (#407): with 0, every message
 			 * already in the table counts as new and the first healthy poll
 			 * reports "detected" with an old line. The command has been
@@ -953,7 +951,7 @@ int consoleIssueHandler(Session *session)
 	/* unsolicited-keyword detection */
 	if (has_unsol && unsol_sync) {
 		/* block up to unsol-detect-timeout, polling the MTT for a new match.
-		 * NOTE: a tight poll (each mtt_detect_count re-snapshots the MTT); the
+		 * NOTE: a tight poll (each mtt_detect_since re-snapshots the MTT); the
 		 * async path is preferred for long waits. */
 		unsigned to = unsoltimeout[0] ? (unsigned)atoi(unsoltimeout) : 20;
 		unsigned start = tod_hi();
@@ -974,9 +972,9 @@ int consoleIssueHandler(Session *session)
 				rc = -1;
 				goto quit;
 			}
-			cnt = mtt_detect_count(session, unsol_upper, det_msg,
+			cnt = mtt_detect_since(session, unsol_upper, &unsol_base, det_msg,
 			                       sizeof(det_msg));
-			if (cnt > unsol_base) {
+			if (cnt > 0) {
 				strcpy(det_status, "detected");
 				break;
 			}
@@ -1016,7 +1014,7 @@ int consoleIssueHandler(Session *session)
 			memset(&det, 0, sizeof(det));
 			det.anchor_hi   = tod_hi();
 			det.detect_secs = (unsigned)detect_secs;
-			det.base_count  = (unsigned)unsol_base;
+			det.base        = unsol_base;
 			det.keylen      = (unsigned char)strlen(unsol_upper);
 			strncpy(det.key, unsol_upper, sizeof(det.key) - 1);
 			key_to_name(dkey, dname);
@@ -1178,7 +1176,7 @@ int consoleDetectHandler(Session *session)
 	}
 
 	msg[0] = '\0';
-	count = mtt_detect_count(session, det.key, msg, sizeof(msg));
+	count = mtt_detect_since(session, det.key, &det.base, msg, sizeof(msg));
 	if (count == MTT_SNAP_FAILED) {
 		/* Not "waiting" and not "expired" (#407): both say the keyword is not
 		 * there, and the table could not be looked at. A 500 lets the client
@@ -1188,7 +1186,7 @@ int consoleDetectHandler(Session *session)
 		    8, 1, "An error occurred during the retrieval of the detection "
 		    "result.");
 	}
-	if (count > (int)det.base_count) {
+	if (count > 0) {
 		status = "detected";
 	} else if (tod_hi() - det.anchor_hi > det.detect_secs) {
 		status = "expired";
@@ -1230,27 +1228,6 @@ static int ci_eq(const char *a, const char *b)
 		a++; b++;
 	}
 	return *a == *b;
-}
-
-/* seconds-of-day from the "hh.mm.ss" field of a formatted MTT line
- * (right after the 4-char flags field); -1 if it does not parse. */
-__asm__("\n&FUNC	SETC 'mtt_secs_of_day'");
-static int mtt_secs_of_day(const char *dat, int len)
-{
-	int i = 4, h = 0, nd = 0, m, s;
-
-	while (i < len && dat[i] == ' ') i++;
-	while (i < len && dat[i] >= '0' && dat[i] <= '9') {
-		h = h * 10 + (dat[i] - '0'); i++; nd++;
-	}
-	if (nd == 0 || nd > 2 || i + 5 >= len) return -1;     /* need ".mm.ss" */
-	if (dat[i] != '.' || dat[i + 3] != '.') return -1;
-	if (dat[i+1] < '0' || dat[i+1] > '9' || dat[i+2] < '0' || dat[i+2] > '9') return -1;
-	if (dat[i+4] < '0' || dat[i+4] > '9' || dat[i+5] < '0' || dat[i+5] > '9') return -1;
-	m = (dat[i+1] - '0') * 10 + (dat[i+2] - '0');
-	s = (dat[i+4] - '0') * 10 + (dat[i+5] - '0');
-	if (h > 23 || m > 59 || s > 59) return -1;
-	return h * 3600 + m * 60 + s;
 }
 
 /* parse "nnnu" (u in s/m/h, nnn 1-999) -> seconds; default 600; -1 bad. */

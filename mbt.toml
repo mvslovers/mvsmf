@@ -183,6 +183,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTETAG]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTJSON: #215 — addJsonStringEsc() and addJsonArrayString() escaped five
+# characters and let the rest of the control characters through raw, which makes
+# the whole response invalid JSON. Portable C (`mbt test`); the TU #includes
+# src/json.c so it drives the real builder — do not list json.c here.
+[test.TSTJSON]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTSEND: #298 — the send loop must never advance by the return value without
 # checking it. A 0 from http_send() means "socket send buffer full, retry", and
 # `pos += rc` on it spins a worker at 100% CPU forever. Portable C (`mbt test`);

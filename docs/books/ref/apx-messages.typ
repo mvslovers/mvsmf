@@ -54,7 +54,7 @@ There is no debug level and no other letter. The numbers are grouped by area:
       (@ref-msg-core).],
     [#cmd("MVSMF1xx")], [Data sets (@ref-msg-ds).],
     [#cmd("MVSMF2xx")], [Jobs (@ref-msg-jobs).],
-    [#cmd("MVSMF3xx")], [UNIX files. There is no message yet.],
+    [#cmd("MVSMF3xx")], [UNIX files (@ref-msg-uss).],
     [#cmd("MVSMF4xx")], [Console services. There is no message yet.],
     [#cmd("MVSMF9xx")], [Abend recovery and diagnostics (@ref-msg-recovery).],
   )
@@ -214,6 +214,27 @@ record that is too long, produces no console message.
     [#cmd("MVSMF207E")], [#cmd("JESCANJ RETURNED RC=%d")],
       [The purge of a job returned a code that this build does not know. The
        client gets status 500. Report the code.],
+  )
+]
+
+== UNIX Files: MVSMF3xx <ref-msg-uss>
+
+#idx("messages", "MVSMF3xx")#idx("MVSMF301E")
+
+#tab(caption: [Message MVSMF301E])[
+  #table(columns: (0.9in, 1.6in, 1fr),
+    [Id], [Text], [Meaning and action],
+    [#cmd("MVSMF301E")], [#cmd("I/O ERROR READING %s RC=%d")],
+      [The read of a UNIX file failed after the answer had started, so the file
+       was not delivered whole. #cmd("%s") is the absolute path of the file as
+       UFSD sees it, in the case the client sent. #cmd("%d") is the return code
+       of UFSD for the failed read, or 52 (I/O error) when the handle of the
+       file holds no code. The code #cmd("-1") means that the request to UFSD
+       itself failed, as it does when UFSD is stopped while the file is read.
+       The status 200 and the headers are on the wire already, so the client
+       sees the connection close in the middle of the body, without the last
+       chunk. The bytes that were read before are sent. Check UFSD and the
+       volume behind the file system. A new read of the file may succeed.],
   )
 ]
 

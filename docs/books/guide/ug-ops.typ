@@ -201,12 +201,14 @@ information, #cmd("W") warning, #cmd("E") error. The ranges are:
     [#cmd("MVSMF0xx")], [The router and the entry of the module.],
     [#cmd("MVSMF1xx")], [Data sets.],
     [#cmd("MVSMF2xx")], [Jobs and the JES2 interface.],
+    [#cmd("MVSMF3xx")], [UFS files.],
     [#cmd("MVSMF9xx")], [Recovery after an abend, and diagnostics.],
   )
 ]
 
-The ranges #cmd("MVSMF3xx") for the UFS files and #cmd("MVSMF4xx") for the
-console services hold no message in 1.4.0. A message of mvsMF is for what an
+The range #cmd("MVSMF4xx") for the console services holds no message in 1.4.0.
+The range #cmd("MVSMF3xx") holds one: #cmd("MVSMF301E"), a read of a UFS file
+that failed after the answer had started. A message of mvsMF is for what an
 operator can act on. What a client causes, for
 example a missing parameter or a data set that does not exist, goes into the
 answer to the client and nowhere else. The _mvsMF Reference_ lists every message
@@ -277,6 +279,11 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
       profile that gives them READ access to the others (@ug-security).],
     [A request for a UFS file fails with 503], [UFSD is not running, or HTTPD
       started without UFS (@ug-uss).],
+    [The download of a UFS file ends in the middle, and curl exits with 18;
+      #cmd("MVSMF301E") on the console], [UFSD failed while mvsMF read the file,
+      after the answer had started. The client got the bytes up to the failure
+      and no error report. Look at UFSD and at the volume of the file system,
+      then read the file again (@ug-uss-readfail).],
     [After an install the old behavior stays], [HTTPD has not been restarted, or the
       STEPLIB names another library first (@ug-ops-replace). With HTTPD 4.4.0 or
       later the running server also holds the module it loaded at the start.],

@@ -9,6 +9,7 @@ Fixtures used by `tests/curl-jobs.sh`, `tests/curl-datasets.sh` and by hand.
 | `abendjob.jcl` | `IEF450I ABEND S806` | `77806000` | `20` | `ABEND S806` |
 | `jclerror.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` (converter) | `00000004` | `00` | `JCL ERROR` |
 | `noprogmn.jcl` | `IEF452I JOB NOT RUN - JCL ERROR` (job select) | `00000000` | `80` | `JCL ERROR` |
+| `heldpun.jcl` | clean; punch output (`SYSOUT=(B,,ZMF1)`) that PUNCH1 selects and halts on, because its forms differ — the job stays on the queue | `77000000` | `00` | `CC 0000` |
 | `allocpds.jcl` | allocates the test PDS — **no suite uses it any more** | — | — | — |
 
 The five above are the regression set for the `retcode` decoding (#305, #332) —

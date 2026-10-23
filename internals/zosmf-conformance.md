@@ -70,6 +70,27 @@ Two further consequences that keep getting rediscovered:
   proves it is not.
 
 
+### Purge of a job whose output a device holds (#426)
+
+`jescanj(name, id, 1)` returns `CANJ_OK` when JES2 has *taken* the purge, which
+for a job with output a device has selected (`$DJ` shows `ON PUNCH1 ... PURGE`)
+means "marked": the job stays on the queue until the device releases the output
+(`$C PUNCH1`). Until #426 the handler answered `200 Request was successful.` on
+that, and a client read it as free spool.
+
+The answer is still **200 with `status: 0`**. The reference answers an
+asynchronous purge (`X-IBM-Job-Modify-Version` 1.0, the default) with 200 and
+`status: 0` whatever happens to the job afterwards, so a 200 is conformant for
+"requested", and the closed list has no 202. What changed is the `message`:
+`job_still_queued()` re-reads the job after `CANJ_OK` (up to five looks, 0.2 s
+apart; `jesjob()` reads the checkpoint, which trails JES2) and, when it is still
+listed, the text says the purge is only requested.
+
+Not measured: what zxp answers for a purge of such a job. That is a write on a
+real system and was not asked for; the reasoning above rests on the documented
+asynchronous answer. A synchronous mode (`X-IBM-Job-Modify-Version: 2.0`) is not
+implemented.
+
 ### The 401 challenge — the one deviation, and why it is not negotiable
 
 Every 401 carries `WWW-Authenticate: Basic realm="<SMF ID>"`, **except** when the

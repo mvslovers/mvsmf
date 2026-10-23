@@ -9,9 +9,39 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
-## [Unreleased]
+## [1.4.0] - unreleased
 
-Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1.
+The release that lets a site decide who may see, read and purge which job.
+FMID `TZMF140`, and its SYSMOD deletes `TZMF130`, so an upgrade from 1.3.0
+needs nothing beyond the package. It is **not a drop-in**: without profiles in
+the RAKF class `JESSPOOL` every user sees only their own jobs. Read the first
+item below before you install.
+
+Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
+4.2.0**, **ufsd 1.4.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
+(see 1.2.0).
+
+### Read this first
+
+- **Define the JESSPOOL profiles before you upgrade** (#440). Until 1.3.0 any
+  authenticated user could list, read and purge every job; from 1.4.0 a job of
+  another owner is hidden unless a profile of the class `JESSPOOL` allows it,
+  and an administrator is no exception. A client or tool that relied on seeing
+  other users' jobs, for example a started task found with `owner=*`, stops
+  finding them. The class needs RAKF 2.0.0 or later. See
+  `docs/jesspool.md`.
+- **The `owner` filter of the job list is exact.** `owner=ABC` no longer also
+  lists the jobs of `ABCD`, and a pattern such as `ABC*` gives an empty list.
+- **A job that was just submitted answers 404 to a status request until JES2
+  has written its owner.** The answer to the submit request itself is
+  unchanged. A client that polls the status right after submitting has to
+  accept a 404 for the first moments.
+- **Only an upgrade from 1.3.0 is the package and nothing else.** The SYSMOD
+  deletes `TZMF130`, not `TZMF120`. On a system still at 1.2.0 the install
+  copies nothing and ends RC 00; install 1.3.0 first. The installation guide
+  shows how to ask SMP which level owns the module.
+- **Stop HTTPD around the install job** (#434). The install replaces the
+  module the running server loads from; see `docs/installation.md`.
 
 ### Fixed
 
@@ -30,13 +60,33 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1.
   NULL both for an empty result and for a failed allocation. The data set
   list answered an empty 200 for the second, and a failed open answered 404
   "member not found". Both now answer 500 and write `MVSMF006E` naming the
-  list; an empty level is still a 200 with no items.
+  list; an empty level is still a 200 with no items. Only the open of a PDS
+  member can reach the 500: a sequential data set never looks at a member
+  list.
+- **A purge that JES2 only accepts no longer answers "Request was successful."**
+  (#426). When a device has selected the job's output (a punch waiting for its
+  forms, for example), JES2 marks the job for purge and keeps it on the queue
+  until that output is released; the request answered 200 as if the spool were
+  free. `DELETE /zosmf/restjobs/jobs/{name}/{id}` now looks at the queue again
+  after JES2 took the request. If the job is gone the answer is unchanged. If
+  it is still there the status stays 200, as the reference answers an
+  asynchronous purge, `status` stays 0, and `message` says that the purge is
+  requested and the job stays until its output is released. The look costs
+  nothing on a purge that completes and about a second when it does not.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
 
 ### Changed
 
+- **The installation guide says to stop HTTPD around an upgrade** (#434). The
+  install replaces the module the running server loads on every request.
+  Whether a request that arrives meanwhile fails has not been measured.
+- **The documented maximum size of a USS file is 4.06 MB, not 64 KB.** The
+  limit is UFSD's: 16 direct blocks and one single-indirect block, 4,259,840
+  bytes at the default block size of 4096. mvsMF sets no limit of its own on a
+  read. A write that exceeds the limit leaves the part that fit (see
+  `docs/endpoints/uss/put.md`).
 - Internal: the local `__tzget()` declaration is gone (#375) and the console
   log's time arithmetic uses `timegm()` instead of `mktime()`, which libc370
   may move to local time. No change in output.
@@ -64,10 +114,6 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1.
   `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
   longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
   list. An empty `owner=` means the caller's own jobs.
-- **Upgrade: define the profiles first.** Without JESSPOOL profiles every
-  user, an administrator included, sees only their own jobs, and a started
-  task found with `owner=*` is gone from the list. Rules, commands and examples:
-  `docs/jesspool.md`.
 
 ## [1.3.0] - 2026-10-15
 

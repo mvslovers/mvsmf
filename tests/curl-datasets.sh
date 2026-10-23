@@ -271,6 +271,18 @@ fi
 VOLUME=$(echo "$CONTENT" | jq -r --arg dsn "$TEST_SEQ" \
 	'.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || VOLUME=""
 
+# Device type for DS4DEVTK of a volume's format-4 DSCB (#443).
+dev_for_devtk() {
+	case "$1" in
+	13165) echo "3330" ;;
+	19254) echo "3350" ;;
+	36000) echo "3375" ;;
+	47968) echo "3380" ;;
+	58786) echo "3390" ;;
+	*) echo "????" ;;
+	esac
+}
+
 # --- List datasets (exact three-level name) ---
 echo ""
 echo "--- List Datasets (exact name) ---"
@@ -285,15 +297,36 @@ assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
 # dev is named from the volume's track capacity (devtk of its format-4 DSCB,
 # #443), not from tracks per cylinder: a 3380 and a 3390 both have 15.
 DEVTK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}" | jq -r '.devtk')
-case "$DEVTK" in
-13165) WANT_DEV="3330" ;;
-19254) WANT_DEV="3350" ;;
-36000) WANT_DEV="3375" ;;
-47968) WANT_DEV="3380" ;;
-58786) WANT_DEV="3390" ;;
-*) WANT_DEV="????" ;;
-esac
+WANT_DEV=$(dev_for_devtk "$DEVTK")
 assert_json_field "$CONTENT" '.items[0].dev' "$WANT_DEV" "dev follows devtk $DEVTK"
+
+# --- dev on every volume a listing touches (#443) ---
+# The check above sees only the volume the fixtures live on. A mixed listing
+# (data sets on several device types) has to name each volume's own device, so
+# every volume in the listing is compared with devtk read for one of its data sets.
+echo ""
+echo "--- List Datasets (dev per volume, issue #443) ---"
+
+DEV_VOLS=0
+for LVL in SYS1 HTTPD "${MVSMF_USER}"; do
+	LIST=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 0' \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LVL}")
+	for VOL in $(echo "$LIST" | jq -r '.items[]?.vol' 2>/dev/null | sort -u); do
+		DSN=$(echo "$LIST" | jq -r --arg v "$VOL" '[.items[] | select(.vol == $v)][0].dsname')
+		TK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${DSN}" | jq -r '.devtk // empty')
+		[ -n "$TK" ] && [ "$TK" != "0" ] || continue
+		WANT=$(dev_for_devtk "$TK")
+		BAD=$(echo "$LIST" | jq -r --arg v "$VOL" --arg w "$WANT" \
+			'[.items[] | select(.vol == $v and .dev != $w)] | length')
+		if [ "$BAD" = "0" ]; then
+			pass "dev per volume: ${LVL} on ${VOL} is ${WANT} (devtk ${TK})"
+		else
+			fail "dev per volume: ${LVL} on ${VOL}" "$BAD item(s) not ${WANT} (devtk ${TK})"
+		fi
+		DEV_VOLS=$((DEV_VOLS + 1))
+	done
+done
+[ "$DEV_VOLS" -gt 0 ] || skip "dev per volume: no volume with a readable format-4 DSCB"
 
 # --- List datasets (exact two-level name, issue #61) ---
 echo ""

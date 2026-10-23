@@ -201,7 +201,7 @@ Three things to know:
   `mbt target console` send `P`, `S` and `D` commands through this service.
   Without READ they get the `403`; mbt warns and falls back to the target's
   Hercules console if it has one, and stops with "not delivered" if it has not.
-- **`/zosmf/test` is not covered.** The diagnostic endpoint is a second door to
+- **`/zosmf/test` is not covered** ([#460](https://github.com/mvslovers/mvsmf/issues/460)). The diagnostic endpoint is a second door to
   operator commands (`fn=cmd`) and to the Master Trace Table (`fn=mtt`), and it
   sits under `/zosmf/*`, which carries no profile. A build with
   `-DMVSMF_NO_TEST_ENDPOINT` closes it; the default build keeps it, because

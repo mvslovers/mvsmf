@@ -180,7 +180,8 @@ MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 **Order matters — first match wins**, so the three specific routes must
 precede the catch-all. The console route needs READ on the RAKF resource
 `FACILITY MVSMF.CONSOLE`; without that profile nothing is gated, see
-[Who may use the console service](docs/installation.md#who-may-use-the-console-service). `AUTH=NONE` on them is not a hole: both endpoints resolve the
+[Who may use the console service](docs/installation.md#who-may-use-the-console-service).
+`AUTH=NONE` on the first two is not a hole: both endpoints resolve the
 caller themselves and answer 401 without a credential. `/zosmf/info` is
 authenticated like every other route (#324), and the token login has to reach
 its handler even when the login fails, to produce the z/OSMF-shaped 401 body.

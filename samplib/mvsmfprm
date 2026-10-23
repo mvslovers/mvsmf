@@ -35,7 +35,7 @@
 *
 * A route line with no AUTH= at all reads as AUTH=NONE (public) in
 * /.dsrv?target=MOD. That is a poor thing for an audit to find, which is
-* why all three say what they mean.
+* why all four say what they mean.
 * ------------------------------------------------------------------
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE

@@ -202,8 +202,8 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   permits everyone and only warns (`HTTPD425W`); with the route listed after
   `/zosmf/*` nothing is gated and nothing warns. The user that runs
   `mbt run restart` needs READ too. The diagnostic endpoint `/zosmf/test`
-  (`fn=cmd`, `fn=mtt`) is not covered; a build with `-DMVSMF_NO_TEST_ENDPOINT`
-  closes it. Rules and the profile lines: `docs/installation.md`.
+  (`fn=cmd`, `fn=mtt`) is not covered ([#460](https://github.com/mvslovers/mvsmf/issues/460));
+  a build with `-DMVSMF_NO_TEST_ENDPOINT` closes it. Rules and the profile lines: `docs/installation.md`.
 
 ## [1.3.0] - 2026-10-15
 

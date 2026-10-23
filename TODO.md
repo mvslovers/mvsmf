@@ -295,7 +295,7 @@ shipped httpd configuration (httpd#335) routes `/zosmf/restconsoles/*` ahead of
 READ gets 403 from httpd, one with READ runs the command. Docs:
 `docs/installation.md`, *Who may use the console service*. Two things stay open:
 a **per-command policy** (below, unchanged), and **`/zosmf/test`** — `fn=cmd`
-and `fn=mtt` sit under `/zosmf/*`, outside the profile, until a deployment builds
+and `fn=mtt` sit under `/zosmf/*`, outside the profile (#460), until a deployment builds
 with `-DMVSMF_NO_TEST_ENDPOINT` or httpd gets a second gated route for
 `/zosmf/test`. The text below is the analysis that led here and is still true of
 the command level.

@@ -117,7 +117,7 @@ Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
 - `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning
   and falls back to the Hercules console, or fails with "not delivered".
 
-**Not covered:** `/zosmf/test` (`fn=cmd`, `fn=mtt`) sits under `/zosmf/*`, so the
+**Not covered (#460):** `/zosmf/test` (`fn=cmd`, `fn=mtt`) sits under `/zosmf/*`, so the
 profile does not reach it. Only `-DMVSMF_NO_TEST_ENDPOINT` closes it, or a
 second httpd route with the same `RES=` (which would also gate `fn=version`).
 **Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).

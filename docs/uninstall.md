@@ -82,7 +82,7 @@ SMP-installed, so there is nothing below `TZMF110`.
 
 Both changes have to go, and in this order.
 
-**Take the routes out of the httpd parmlib member** (`//HTTPPRM`) — the three
+**Take the routes out of the httpd parmlib member** (`//HTTPPRM`) — the four
 `MOD=MVSMF` lines. A route pointing at a module that is gone answers
 `HTTPD908E EXTERNAL PROGRAM … could not be loaded`, and that message blames the
 STEPLIB whatever the real cause was.

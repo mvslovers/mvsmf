@@ -254,6 +254,15 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJWN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTAUTHD: #460 — the console service and /zosmf/test refuse every request
+# unless RACF answers rc 0 for READ on FACILITY MVSMF.CONSOLE. rc 4 (no
+# profile), rc 8, any other code and a request with no ACEE are all refusals;
+# RACF is not asked without an ACEE. Portable C (`mbt test`); the TU #includes
+# src/authdec.c so it drives the real decision consauth.c asks — do not list
+# authdec.c here.
+[test.TSTAUTHD]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # ── SMP4 distribution ────────────────────────────────────
 # `mbt package` renders the install package from this; `mbt dist` alone
 # re-renders it. ufsd is the reference implementation -- this block follows it

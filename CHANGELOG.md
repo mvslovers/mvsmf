@@ -45,6 +45,11 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **A data set name over 44 characters no longer overruns a buffer on job submit** (#477).
+  Submitting a job from a data set copied the name between `//'` and `'` into a
+  45-byte stack buffer using a length taken from the request. A longer name wrote past
+  it. It is now refused with the same 400 as a name that is not written
+  `//'DSN'`.
 - **Control characters in a JSON string are escaped** (#215). The JSON builder
   escaped the quote, the backslash, carriage return, line feed and tab, and
   wrote every other character below a space raw. One such byte -- console

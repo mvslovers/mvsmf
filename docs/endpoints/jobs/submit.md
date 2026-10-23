@@ -29,9 +29,12 @@ The request body is a JSON object referencing a dataset containing JCL:
 
 ```json
 {
-    "file": "'USER.JCL(MYJOB)'"
+    "file": "//'USER.JCL(MYJOB)'"
 }
 ```
+
+The name is written `//'DSN'` or `//'DSN(MEMBER)'`, as on z/OSMF. The data set
+name between the quotes is at most 44 characters.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and the job status as a JSON object (same format as the [status](status.md) endpoint).
@@ -57,6 +60,7 @@ a status poll issued inside that same window can still show an empty `owner`.
     - `JOB card too long: no room left for the NOTIFY, USER and PASSWORD operands mvsMF adds` (reason 12) — the submitted card's own operands leave under 72 columns for the ones mvsMF injects
     - Unsupported `Content-Type` (anything other than `application/json` or `text/plain`)
     - Missing `file` field in JSON body
+    - A `file` value that is not of the form `//'DSN'`, or whose data set name is longer than 44 characters (#477)
     - Failed to read request content: a malformed `Content-Length`, or a client that stopped sending
 - HTTP 413 (Request entity too large)
     - `Content-Length` of 16 MB or more -- more than 24-bit storage can hold. Nothing is read, and the connection is closed
@@ -111,7 +115,7 @@ curl -X PUT \
 ```bash
 curl -X PUT \
   -H "Content-Type: application/json" \
-  -d '{"file":"'\''USER.JCL(MYJOB)'\''"}' \
+  -d '{"file":"//'\''USER.JCL(MYJOB)'\''"}' \
   http://mvs:1080/zosmf/restjobs/jobs
 ```
 

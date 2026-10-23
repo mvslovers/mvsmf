@@ -221,6 +221,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJCARD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTSUBDS: #477 — the data set name in the "file" member of a job submit was
+# copied into a 45-byte stack buffer with a length from the request, so
+# //'<45 characters>' overflowed it. The TU #includes src/subdsn.c so it drives
+# the real function submit_file() calls — do not list subdsn.c here.
+[test.TSTSUBDS]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTJWN: #440 — who may see, read and purge which job on the JES2 spool. An
 # own job is always allowed; a foreign one follows RACF class JESSPOOL (no
 # profile and NONE hide it, READ lists and reads, UPDATE also purges); a name

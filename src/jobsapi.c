@@ -20,6 +20,7 @@
 #include "jclines.h"
 #include "jobauth.h"
 #include "jobcard.h"
+#include "subdsn.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "mvsmfmsg.h"
@@ -44,7 +45,7 @@
 #define RECFM_STR_SIZE   4 + 1
 #define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
-#define DSNAME_STR_SIZE  44     // the +1 for null termination will be added on initialization
+#define DSNAME_STR_SIZE  DSNAME_MAX // the +1 for null termination will be added on initialization
 
 /* process_jobcard() failure codes. Both are reported as 400, but with
    different messages: the two conditions were indistinguishable to the client
@@ -1746,12 +1747,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	memset(jobid, 0, JOBID_STR_SIZE + 1);
 
 	/* strip //'DSN' → DSN */
-	size_t len = strlen(filename);
-	if (len > 4 && filename[0] == '/' && filename[1] == '/' &&
-		filename[2] == '\'' && filename[len - 1] == '\'') {
-		strncpy(dsname, &filename[3], len - 4);
-		dsname[len - 4] = '\0';
-	} else {
+	if (submit_dsname(filename, dsname, sizeof(dsname)) != 0) {
 		char msg[MAX_ERR_MSG_LENGTH] = {0};
 		snprintf(msg, sizeof(msg), ERR_MSG_SUBMIT_FILE_OPEN, filename);
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,

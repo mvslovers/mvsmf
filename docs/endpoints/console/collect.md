@@ -2,7 +2,7 @@
 
 Retrieves the **new** response lines for a command issued earlier, since the previous collect. Part of the z/OSMF Console services (`/zosmf/restconsoles`).
 
-> **Authorization:** needs READ on `FACILITY MVSMF.CONSOLE`; without it (or while the profile is not defined) the answer is `500`, category 4. See [Issue Command](issue-command.md).
+> **Authorization:** needs READ on `FACILITY MVSMF.CONSOLE`; without it (or while the profile is not defined) the answer is `500`, category 4, in the `category`/`rc`/`message`/`details` form rather than the `return-code` form below; a request with no resolved user gets `401`. See [Issue Command](issue-command.md).
 
 ## HTTP Method
 GET

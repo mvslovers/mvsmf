@@ -87,6 +87,12 @@ Both changes have to go, and in this order.
 `HTTPD908E EXTERNAL PROGRAM … could not be loaded`, and that message blames the
 STEPLIB whatever the real cause was.
 
+**The profile `FACILITY MVSMF.CONSOLE` stays in `SYS1.SECURE.CNTL(PROFILES)`**
+after the uninstall. Nothing reads it any more. Remove it with
+`RDELETE MVSMF.CONSOLE CLASS(FACILITY)` (without `ID(...)` this deletes the
+universal line and every group line of the resource) and reload with
+`S RAKFPROF`.
+
 **Take `MVSMF.LINKLIB` out of the HTTPD procedure's STEPLIB concatenation.**
 A STEPLIB naming a data set that no longer exists stops the started task from
 starting at all.

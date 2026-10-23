@@ -2,7 +2,8 @@
 
 mvsMF 1.4.0 decides for every job whether the caller may list it, read its
 output and purge it. The jobs endpoints (`/zosmf/restjobs/jobs/...`) apply this,
-and so does the job lookup of the `/zosmf/test` endpoint. The RAKF class
+and so does the job lookup of the `/zosmf/test` endpoint, which in addition
+needs READ on `FACILITY MVSMF.CONSOLE` for every request. The RAKF class
 `JESSPOOL` holds the rules. They are the rules FTPD 1.3.0 applies to its JES
 mode, so one set of profiles governs both servers.
 
@@ -420,7 +421,9 @@ after `S RAKFPROF`.
 
 JESSPOOL decides the job services only: list, status, files, records and purge
 under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
-`fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
+`fn=syslog`) of `/zosmf/test`, after the check of `FACILITY MVSMF.CONSOLE` that
+every `/zosmf/test` request passes first. Two other surfaces reach jobs without
+it.
 
 - **Console services** (`/zosmf/restconsoles`). READ on the RAKF
   resource `FACILITY MVSMF.CONSOLE` allows issuing an operator command, including
@@ -439,7 +442,7 @@ A JESSPOOL profile does not keep a user from reaching a job through these two.
 To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
 services and `/zosmf/test`, READ on `FACILITY MVSMF.CONSOLE` decides who may use
 them; see
-[Who may use the console service](installation.md#who-may-use-the-console-service).
+[Who may use the console service](installation.md#who-may-use-the-console-service-and-zosmftest).
 
 ## Check it
 

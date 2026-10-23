@@ -11,11 +11,13 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
 
 ## [1.4.0] - unreleased
 
-The release that lets a site decide who may see, read and purge which job.
-FMID `TZMF140`, and its SYSMOD deletes `TZMF130`, so an upgrade from 1.3.0
-needs nothing beyond the package. It is **not a drop-in**: without profiles in
-the RAKF class `JESSPOOL` every user sees only their own jobs. Read the first
-item below before you install.
+The release that lets a site decide who may see, read and purge which job, and
+who may use the console service. FMID `TZMF140`, and its SYSMOD deletes
+`TZMF130`, so an upgrade from 1.3.0 needs nothing beyond the package. It is
+**not a drop-in**: without profiles in the RAKF class `JESSPOOL` every user sees
+only their own jobs, and until the RAKF profile `FACILITY MVSMF.CONSOLE` is
+defined and READ granted, the console service and `/zosmf/test` refuse every
+user. Read the first two items below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 4.2.0**, **ufsd 1.5.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
@@ -30,6 +32,15 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   other users' jobs, for example a started task found with `owner=*`, stops
   finding them. The class needs RAKF 2.0.0 or later. See
   `docs/jesspool.md`.
+- **Define the console profile before you upgrade** (#347, #460). From 1.4.0
+  mvsMF checks READ on the RAKF resource `FACILITY MVSMF.CONSOLE` itself for
+  every console request and every `/zosmf/test` request. Until the profile is
+  defined and READ is granted, **every user is refused**, administrators
+  included (`500`, category 4). Define the profile, grant READ to those who may
+  issue operator commands, and add the fourth route line to the HTTPD parmlib
+  member. The deploy user needs READ too: the operator commands that restart
+  HTTPD and the call that confirms the build id both go through this check.
+  See `docs/installation.md`, *Who may use the console service*.
 - **The `owner` filter of the job list is exact.** `owner=ABC` no longer also
   lists the jobs of `ABCD`, and a pattern such as `ABC*` gives an empty list.
 - **A job that was just submitted answers 404 to a status request until JES2
@@ -231,9 +242,8 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   depend on it.
 
   **Upgrade: define the profile and grant READ to those who may use it.** The
-  user that runs `mbt run restart`, and whoever checks the build id with
-  `?fn=version`, needs READ too. Rules and the profile lines:
-  `docs/installation.md`.
+  deploy user, and whoever checks the build id with `?fn=version`, needs READ
+  too. Rules and the profile commands: `docs/installation.md`.
 
 ## [1.3.0] - 2026-10-15
 

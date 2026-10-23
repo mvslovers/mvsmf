@@ -41,9 +41,9 @@ explains who may see, read and purge which job.
 > (Authorization). **Define that profile and grant READ — until you do, both
 > refuse every user**, administrators included; that is the upgrade behaviour
 > of this version, see
-> [Who may use the console service](docs/installation.md#who-may-use-the-console-service)
-> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). READ on that resource
-> allows **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
+> [Who may use the console service](docs/installation.md#who-may-use-the-console-service-and-zosmftest)
+> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). A user with READ can
+> issue **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
 > — it goes out by SVC 34 from console 0, the master console, with the text
 > unfiltered — and reading the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
@@ -181,7 +181,7 @@ MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 precede the catch-all. The console route needs READ on the RAKF resource
 `FACILITY MVSMF.CONSOLE`, and so does mvsMF's own check in the handler (without
 the profile both refuse everybody), see
-[Who may use the console service](docs/installation.md#who-may-use-the-console-service).
+[Who may use the console service](docs/installation.md#who-may-use-the-console-service-and-zosmftest).
 `AUTH=NONE` on the first two is not a hole: both endpoints resolve the
 caller themselves and answer 401 without a credential. `/zosmf/info` is
 authenticated like every other route (#324), and the token login has to reach
@@ -196,8 +196,9 @@ a resource check rather than widening the prefix:
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-These four lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
-`MVSMF.SAMPLIB(MVSMFPRM)`; keep them in step.
+These four lines are in `MVSMF.SAMPLIB(MVSMFPRM)`; the httpd release that
+contains [httpd#338](https://github.com/mvslovers/httpd/pull/338) ships the same
+four in its own `samplib(HTTPPRM0)`. Keep the two in step.
 
 For development, `mbt deploy` (see *Building* below) uploads and RECEIVEs the
 load module directly into `MVSMF.DEV.LINKLIB` — no SMP, and no install package.

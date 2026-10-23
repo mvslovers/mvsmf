@@ -22,7 +22,7 @@ For SYSIN datasets (e.g. `JESJCLIN`), the response contains exactly `record-coun
 
 The PDDB record count does **not** include those records; it equals the number of JCL statements, and the `JESJCL` line count. So printing one spent a slot of the cap that belonged to a card, and the listing was truncated by one card per in-stream DD. A `JESJCLIN` record that does not begin with `/` is therefore skipped, and counted neither toward the cap nor toward the output — a skip that counted would leave the displaced cards lost. The `//` null statement is a statement and is listed; the deletion line above starts with a letter and is covered by the same rule.
 
-The raw records behind this are readable with `GET /zosmf/test?fn=spool&jobname=…&jobid=…&dsid=1` — a read-only block dump including the record headers, which no response can show (the walk blank-trims each record and folds every byte below `0x40` to a blank before it reaches the wire).
+The raw records behind this are readable (for a user with READ on `FACILITY MVSMF.CONSOLE`, which every `/zosmf/test` request needs) with `GET /zosmf/test?fn=spool&jobname=…&jobid=…&dsid=1` — a read-only block dump including the record headers, which no response can show (the walk blank-trims each record and folds every byte below `0x40` to a blank before it reaches the wire).
 
 A spool file that exists but holds nothing returns 200 with an empty body.
 

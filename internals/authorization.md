@@ -124,15 +124,19 @@ at the top; a new console route must call it too.
   granted, these endpoints refuse **every** user, administrators included.
 - **The httpd route stays a first layer.** The shipped route `MOD=MVSMF
   /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before
-  `/zosmf/*` in `samplib/mvsmfprm` (and httpd's `samplib/httpprm0`; keep both in
-  step), refuses a user without READ with a plain-text `403` before mvsMF is
+  `/zosmf/*` in `samplib/mvsmfprm` (httpd's `samplib/httpprm0` gets it with
+  httpd#338, still open when this was written; keep both in step), refuses a user without READ with a plain-text `403` before mvsMF is
   reached. It is optional now: the handler check is the authoritative one, it
   does not depend on route order, and it does not fail open without the profile
   (the route only warns with `HTTPD425W NO PROFILE FOR
   FACILITY:MVSMF.CONSOLE`). Do not add a route for `/zosmf/test`.
 - `mbt` sends `P`/`S`/`D` through the console service; the user in the target
-  needs READ, or `mbt run restart` warns and falls back to the Hercules console,
-  or fails with "not delivered".
+  needs READ. The refusal is a `500`, and mbt's `consoleFailure()`
+  (`internal/mvsmf/client.go`) takes every `500` except `503/8/17` for "may
+  have been issued": `mbt run restart` stops with `console: "<cmd>" went out
+  through mvsmf and got no answer -- it may have run; not sent again` and does
+  not try the Hercules console. Teaching mbt this refusal (a `500` with
+  `"category":4` is certainly not issued) is a question for mbt, not for mvsMF.
 - Tests: `test/host/tstauthd.c` (the decision), `tests/curl-consgate.sh` (the
   matrix on MVS: no profile, READ for one user only, READ for both, profile
   removed again; every route and its path variants; by name only, rewrites

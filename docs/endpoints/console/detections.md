@@ -31,7 +31,7 @@ Console error body (`return-code`/`reason-code`/`reason`):
 | HTTP | return-code | reason-code | Cause |
 |------|-------------|-------------|-------|
 | 500 | 5 | 9 | Unknown / evicted `detection-key` (no armed detection found) |
-| 500 | 8 | 1 | The copy of the Master Trace Table could not be made (storage). The detection stays armed: ask again. Not `waiting` and not `expired` — both would say the keyword is not there, and the table could not be looked at. |
+| 500 | 8 | 1 | The copy of the Master Trace Table could not be made. The detection stays armed: ask again. Not `waiting` and not `expired` — both would say the keyword is not there, and the table could not be looked at. |
 
 Regex keywords (`unsolKeyReg=Y` at issue time) are rejected by [Issue Command](issue-command.md) with 400 / 1 / 25.
 

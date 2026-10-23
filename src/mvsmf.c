@@ -16,6 +16,8 @@
 #include "consapi.h"
 #include "authapi.h"
 #include "testapi.h"
+#include "buildkind.h"
+#include <buildstamp.h>
 #include "router.h"
 
 /* C stack size for this module, read by libc370's @@crt0/@@crt1 through the
@@ -132,16 +134,21 @@ int main(int argc, char **argv)
 	   whether a deployment has one is HERE, not inside its functions (#343).
 	   It carries fn=cmd (operator commands via SVC 34 in supervisor state),
 	   fn=abend and fn=denyopen; a runtime flag on some of those guarded the
-	   weakest of them while the strongest never had one. Building with
-	   -DMVSMF_NO_TEST_ENDPOINT leaves the routes unregistered, so the whole
-	   surface answers 404 and the code behind it is unreachable.
+	   weakest of them while the strongest never had one. Leaving the routes
+	   unregistered makes the whole surface answer 404 and the code behind it
+	   unreachable.
 
-	   The default is ON deliberately: fn=version is the documented way to
-	   confirm which build a deploy actually activated, and fn=storage is the
-	   storage instrument -- a hardened build gives both up knowingly. */
+	   Two things leave them out: building with -DMVSMF_NO_TEST_ENDPOINT, and
+	   a version that does not end in "-dev" (#508). mbt 3 has no release build
+	   of its own, so a tagged release is told apart by the version it stamps.
+	   The code is still in a release module, just never reached. A release
+	   deploy confirms its version with GET /zosmf/info (zosmf_full_version),
+	   not with fn=version. */
 #ifndef MVSMF_NO_TEST_ENDPOINT
-	add_route(&router, GET, "/zosmf/test", testHandler);
-	add_route(&router, GET, "/zosmf/test/wildcard/{*filepath}", testWildcardHandler);
+	if (build_is_dev(MBT_VERSION)) {
+		add_route(&router, GET, "/zosmf/test", testHandler);
+		add_route(&router, GET, "/zosmf/test/wildcard/{*filepath}", testWildcardHandler);
+	}
 #endif
 
 	add_route(&router, POST, "/zosmf/services/authenticate", authLoginHandler);

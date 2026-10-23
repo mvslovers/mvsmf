@@ -29,6 +29,10 @@
 #   MVSMF_CURLRC2   the same for MVSMF_USER2, when the target has that user
 #   zowe            a function in front of the Zowe CLI, see below
 #   ZOWE_CONN       the connection options for every zowe call
+#   mvsmf_dev_build succeeds when the server is a development build, the only
+#                   kind that registers /zosmf/test (#508): the version GET
+#                   /zosmf/info reports ends in "-dev". A suite whose
+#                   assertions need an fn= probe asks first and skips.
 #   mvsmf_on_exit   adds a command to the EXIT trap. Use it instead of `trap
 #                   ... EXIT`, which would replace the cleanup of this file.
 # =========================================================================
@@ -135,3 +139,10 @@ zowe() {
 # shellcheck disable=SC2034
 ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
 	--protocol "$MVSMF_PROTOCOL" --reject-unauthorized false)
+
+mvsmf_dev_build() {
+	local v
+	v=$(curl -s -K "$MVSMF_CURLRC" -H 'X-CSRF-ZOSMF-HEADER: 1' \
+		"${BASE_URL}/zosmf/info" | jq -r '.zosmf_full_version // empty')
+	case "$v" in *-dev) return 0 ;; *) return 1 ;; esac
+}

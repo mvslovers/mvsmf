@@ -3076,7 +3076,14 @@ assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is sti
 DSCB_SEC() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.secondary'; }
 DSCB_UNIT() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
 
-assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+DEV_BUILD=0
+mvsmf_dev_build && DEV_BUILD=1
+
+if [ "$DEV_BUILD" = 1 ]; then
+	assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+else
+	skip "like: derived allocation in tracks (needs ?fn=dscb, development builds only)"
+fi
 
 LIKE_CYL="${MVSMF_USER}.CURL.LIKECYL"
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}" || true
@@ -3084,21 +3091,25 @@ curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/d
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
 assert_http_status "201" "$HTTP_CODE" "like: create with an explicit primary in cylinders"
 
-CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
-CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
-MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")
+if [ "$DEV_BUILD" = 1 ]; then
+	CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
+	CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
+	MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")
 
-if [ "$CYL_UNIT" = "CYL" ]; then
-	pass "like: an explicit alcunit is honoured (CYL)"
-else
-	fail "like: an explicit alcunit is honoured (CYL)" "got spacu=${CYL_UNIT}"
-fi
+	if [ "$CYL_UNIT" = "CYL" ]; then
+		pass "like: an explicit alcunit is honoured (CYL)"
+	else
+		fail "like: an explicit alcunit is honoured (CYL)" "got spacu=${CYL_UNIT}"
+	fi
 
-# the derived, track-denominated secondary must not have been emitted as cylinders
-if [ "${CYL_SEC:-0}" = "0" ]; then
-	pass "like: no track-denominated secondary is emitted under CYL"
+	# the derived, track-denominated secondary must not have been emitted as cylinders
+	if [ "${CYL_SEC:-0}" = "0" ]; then
+		pass "like: no track-denominated secondary is emitted under CYL"
+	else
+		fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
+	fi
 else
-	fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
+	skip "like: alcunit and secondary under CYL (needs ?fn=dscb, development builds only)"
 fi
 
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}"

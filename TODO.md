@@ -296,7 +296,8 @@ READ, no ACEE: refused), the decision in `authdec.c`, host test
 `tstauthd.c`, MVS matrix `tests/curl-consgate.sh` (#460). The httpd route
 (httpd#335) stays as an extra first layer. Docs: `docs/installation.md`, *Who
 may use the console service and `/zosmf/test`*; `internals/authorization.md`.
-What stays open: a **per-command policy** (below, unchanged). The text below is
+The endpoint is not registered in a release build, and no function of it returns
+session data (#508). What stays open: a **per-command policy** (below, unchanged). The text below is
 the analysis that led here; its `grep` count is of the state before the check.
 
 `grep -c 'http_check_auth\|require_access\|racf' src/consapi.c` → **0**, against

@@ -430,13 +430,13 @@ under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
   handler and refuses everybody while it is not defined. See [Issue Command](endpoints/console/issue-command.md) and
   [#347](https://github.com/mvslovers/mvsmf/issues/347).
 - **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way, and
-  needs the same READ on `FACILITY MVSMF.CONSOLE` (the whole endpoint does). The
-  endpoint is registered in the default build. A build with
-  `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and it answers
-  404.
+  needs the same READ on `FACILITY MVSMF.CONSOLE` (the whole endpoint does). A
+  release does not register the endpoint and answers 404; a development build
+  (version ending in `-dev`) does, unless it was built with
+  `-DMVSMF_NO_TEST_ENDPOINT`.
 
 A JESSPOOL profile does not keep a user from reaching a job through these two.
-To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
+A release has no `/zosmf/test`. For the console
 services and `/zosmf/test`, READ on `FACILITY MVSMF.CONSOLE` decides who may use
 them; see
 [Who may use the console service](installation.md#who-may-use-the-console-service).

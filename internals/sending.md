@@ -20,7 +20,8 @@ Both flags are cleared by `abort_response()` (`common.c`), together with
 `0\r\n\r\n`, and a read error mid-body reaches the client as a complete-looking
 200 (#421 — every data set GET is chunked). httpd's own send path already
 clears `chunked` when a send fails; the read-error callers in `dsapi.c` had
-nothing that did.
+nothing that did. The USS file GET has the same caller shape since #423
+(`src/ussread.c`, `internals/uss-handlers.md`).
 
 The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
 the real one on the host; its four MVS/httpd services are injected through

@@ -135,9 +135,21 @@ with **400**, and so does mvsMF. It used to fall back to text.
 | 400    | `X-IBM-Data-Type: record` (`category` 1, `reason` 12) |
 | 404    | File not found |
 | 400    | Path name too long |
-| 500    | I/O error |
+| 500    | I/O error before the reply starts (the file cannot be opened) |
 | 500    | `fileEncoding` names a code page other than IBM-037 or IBM-1047 (`category` 16, `rc` 121) |
 | 503    | UFSD subsystem not available |
+
+## A read that fails mid-file
+
+The status line and headers are sent before the first block is read, so a read
+that fails part-way cannot be answered with an error status any more. mvsMF
+closes the connection in the middle of the body instead — without the final
+chunk — so the client sees a **failed transfer**, never a `200` that ends
+cleanly and looks complete. curl exits with 18 (`transfer closed with
+outstanding read data remaining`). The
+bytes that were read before the failure have already been sent; do not use a
+partial download. The operator gets `MVSMF301E` on the console
+([messages](../../messages.md)). Reading the file again may succeed.
 
 ## Max File Size
 

@@ -198,6 +198,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTSEND]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTUSSRD: #423 — a USS file GET whose read fails part-way must not end as a
+# complete reply. The read loop stopped on a failed read exactly as on the end of
+# the file, and nothing looked at ufs_ferror(), so the client got a clean 200
+# with a truncated file. Portable C (`mbt test`); the TU #includes src/ussread.c
+# so it drives the real loop ussGetHandler runs — do not list ussread.c here.
+[test.TSTUSSRD]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTBODY: #412 — a request body with a Content-Length is allocated once, at
 # its size; doubling asked a fragmented region for 128 KB to hold 72 KB. And a
 # failure the server caused drains the body, or TCP resets the answer away.

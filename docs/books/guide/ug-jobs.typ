@@ -243,8 +243,9 @@ The field #cmd("status") says where the job is in JES2. mvsMF reports one of
 #cmd("SETUP"), #cmd("RECEIVE"), #cmd("OUTPUT") (the job has ended and its output
 is on the spool), or #cmd("UNKNOWN").
 
-The field #cmd("retcode") has a value only for a job whose status is
-#cmd("OUTPUT"). It is #cmd("null") before. The value is a text:
+The field #cmd("retcode") has a value for a job that is on the output queue. It
+is #cmd("null") before. A job that is still #cmd("ACTIVE") and already on the
+output queue reports #cmd("ACTIVE") with a value. The value is a text:
 
 #tab(caption: [The values of the field retcode])[
   #table(columns: (1.3in, 1fr),
@@ -278,7 +279,9 @@ the same request as the first job:
 #screen(raw(read("../ex/ug-jobs/j-rc-abend.txt"), block: true))
 #screen(raw(read("../ex/ug-jobs/j-rc-jclerr.txt"), block: true))
 
-A job that JES2 does not know gets the answer 404 and an error report. The
+A job that was submitted a moment ago can get a 404 here, even for the user who
+submitted it, until JES2 has written the owner of the job. Ask again after a
+moment. A job that JES2 does not know gets the answer 404 and an error report. The
 answer is the same for a job the user may not see, so that it does not tell a
 user whether a job of somebody else exists (@ug-jobs-others):
 

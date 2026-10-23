@@ -90,9 +90,10 @@ this appendix. They are in the chapters of the routes (@ref-ds, @ref-uss,
        The request is not processed. This is an internal fault. Report it.],
     [#cmd("MVSMF005E")], [#cmd("%s MUST BE CALLED BY THE HTTPD SERVER")],
       [The module was started as a program, from TSO or in a batch job, and not
-       by HTTPD as a CGI module. The module also prints the same sentence to
-       standard output, for a caller that does not see the console, and ends
-       with return code 12. #cmd("%s") is the name that the program was called
+       by HTTPD as a CGI module. The module also prints a sentence of its own to
+       standard output ("This program %s must be called by the HTTPD web
+       server"), for a caller that does not see the console, and ends with
+       return code 12. #cmd("%s") is the name that the program was called
        by. Run the module only under HTTPD.],
     [#cmd("MVSMF006E")], [#cmd("STORAGE ALLOCATION FAILED FOR %s")],
       [A storage request failed. #cmd("%s") names what mvsMF wanted to

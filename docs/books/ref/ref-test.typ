@@ -51,8 +51,9 @@ endpoint is present. This is on purpose: the functions #cmd("version") and
 
 #idx("security", "diagnostic endpoint")
 The endpoint has no gate of its own. There is no setting that enables or
-disables a single function, and no authorization check in mvsMF for any
-function. Every user that HTTPD lets reach the route can call every function.
+disables a single function. The functions #cmd("syslog"), #cmd("job") and
+#cmd("spool") apply the spool policy of the job routes (see the jobs chapter),
+and no other function checks authorization in mvsMF. Every user that HTTPD lets reach the route can call every function.
 With the shipped route lines (@ref-httpd) that is every user with a valid
 credential, or every user that holds the permission of the #cmd("RES=") profile
 if the operator has put one on the route #cmd("/zosmf/*").
@@ -145,7 +146,7 @@ is sent, so the router can send its error report (@ref-conv-fixed).
 #idx("fn", "help")
 The answer is a JSON object with the field #cmd("fn") (#cmd("help")) and the
 field #cmd("usage"), an array of 19 sentences. Each sentence shows the form of
-one request. The list does not contain #cmd("jesabend"). A value of #cmd("fn")
+one request. The list does not contain #cmd("env"), #cmd("help") or #cmd("jesabend"). A value of #cmd("fn")
 that mvsMF does not know gives the same answer.
 
 === version <ref-test-version>

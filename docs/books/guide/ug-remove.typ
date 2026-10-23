@@ -131,8 +131,6 @@ The running server keeps its old configuration until the restart.
 If you added #cmd("MVSMF.LINKLIB") to the list of authorized libraries in
 #cmd("SYS1.PARMLIB(IEAAPF00)"), the entry may stay. It names a data set that
 does not exist. Remove it at the next IPL, because the member is read at IPL.
-A data set that a later job allocates under the same name on the same volume
-may inherit the authorization.
 
 == Scratching the Data Sets <ug-remove-delete>
 

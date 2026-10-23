@@ -179,7 +179,7 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("recfm")], [The record format, for example #cmd("FB").],
     [#cmd("sizex")], [The number of allocated tracks, whatever the value of #cmd("spacu") is. The sum covers every extent. The disk label holds three extents of a data set, and a data set with more has the rest in a further label on the volume, which mvsMF reads. If mvsMF cannot read it, the value is the string #cmd("?").],
     [#cmd("spacu")], [#cmd("CYLINDERS") or #cmd("TRACKS"), the unit of the allocation.],
-    [#cmd("used")], [The share of the allocated tracks that the data set uses, in percent. The count goes up to the track that holds the last block written, so a new data set that is empty already uses one track. The value is #cmd("?") whenever #cmd("sizex") is #cmd("?").],
+    [#cmd("used")], [The share of the allocated tracks that the data set uses, in percent. The count goes up to the track that holds the last block written, so a new data set that is empty already uses one track. The value is #cmd("?") whenever #cmd("sizex") is #cmd("?"), and 0 when no track is allocated.],
     [#cmd("vol")], [The volume serial.],
     [#cmd("vols")], [The volume serials.],
   )
@@ -229,8 +229,9 @@ object with one field:
 #tab(caption: [Item of the member list])[
   #table(columns: (1.35in, 1fr),
     [Field], [Value],
-    [#cmd("member")], [The member name. A character that is not printable is
-      written as a #cmd("\\uXXXX") escape.],
+    [#cmd("member")], [The member name. A character that is not printable, a
+      quotation mark and a backslash are written as a #cmd("\\uXXXX") escape that
+      names the ASCII value.],
   )
 ]
 
@@ -480,7 +481,7 @@ quantity that is still 0 or less becomes 1.
 
 If mvsMF cannot read the extents of the model, it derives no space. The
 request is not refused: the allocation uses the quantities and the unit of the
-body, and for a primary quantity that the body does not give, 1 track. The new
+body, and for a primary quantity that the body does not give, 1 in the unit in force. The new
 data set can then be much smaller than the model. A client that needs the size
 of the model sends #cmd("primary") and #cmd("secondary") itself.
 

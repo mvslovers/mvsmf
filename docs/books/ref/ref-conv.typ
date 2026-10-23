@@ -159,9 +159,13 @@ for an unknown method (@ref-conv-methods):
 
 mvsMF sends no CORS header. A response with a body carries
 #cmd("Content-Type") and #cmd("Content-Length"). A response that the handler
-sends without a body has #cmd("Content-Length: 0"). The 201 of a data set
-create is an exception: it declares #cmd("Content-Type: application/json") and
-no length. A 204 and a 304 carry neither header.
+sends without a body has #cmd("Content-Length: 0"). That is the case for the
+201 of a file or directory create and the 204 of a file or directory delete.
+Three kinds of reply are exceptions. The 201 of a data set create and the 204 of
+a data set or member write, delete and rename declare
+#cmd("Content-Type: application/json") and no length. The 204 of a USS file
+write and the 204 of the logout carry neither header. The 304 carries neither
+header.
 
 #idx("cookie", "LtpaToken2")
 When the request has an #cmd("Authorization") header and HTTPD holds a token for
@@ -179,7 +183,8 @@ header, for example one that sends the token in a cookie, gets no cookie.
 #idx("status code")
 z/OSMF names a closed list of status codes for its REST services: 200, 204,
 206, 304, 400, 401, 404, 405, 412, 413, 429, 500 and 503. mvsMF keeps within
-that list, with one exception, status 201 for the create of a data set.
+that list, with one exception, status 201 for the create of a data set, of a
+file or of a directory.
 @ref-conv-statustab shows where each code appears.
 
 #tab(caption: [Status codes that mvsMF sends])[
@@ -190,8 +195,7 @@ that list, with one exception, status 201 for the create of a data set.
       #cmd("moreRows").],
     [201], [Create of a data set (#cmd("POST /zosmf/restfiles/ds/{dataset-name}"))
       and create of a file or directory (#cmd("POST /zosmf/restfiles/fs/{*filepath}")).
-      It is outside the z/OSMF list. The data set create sends it because the
-      reference system answers 201 for that request.],
+      It is outside the z/OSMF list.],
     [204], [Success without a body: a write, a delete, and the logout.],
     [304], [A read whose ETag matches #cmd("If-None-Match"). The answer carries
       the ETag, also without #cmd("X-IBM-Return-Etag").],
@@ -471,8 +475,11 @@ The JSON builders differ in how they treat text. The function for a plain
 string copies it as it is, through a buffer of 256 bytes that holds the whole
 field, so a long text is cut. The function for an
 escaped string and the one for an array element escape the double quote, the
-backslash, the carriage return, the line feed and the tab, and no other
-control character (mvsmf\#215).
+backslash, the backspace, the form feed, the carriage return, the line feed and
+the tab with a short form (#cmd("\\b"), #cmd("\\f"), #cmd("\\r"),
+#cmd("\\n"), #cmd("\\t")). Every other byte below the blank becomes
+#cmd("\\u00XX"), XX being the byte as the program holds it, in EBCDIC, before
+the response is translated.
 
 == Limits <ref-conv-limits>
 
@@ -486,7 +493,7 @@ area are in its chapter.
     [Length of the path], [1023 characters. A longer path is cut off.],
     [Value of a path variable], [1023 characters.],
     [Routes], [100 can be registered. mvsMF registers 29.],
-    [Middleware], [10 can be registered. mvsMF registers one.],
+    [Middleware], [10 can be registered. mvsMF registers three (route matching, path variables and authentication).],
     [Files that one request has open at the same time], [4. A fifth is not
       tracked, so the recovery after an abend does not close it (message
       MVSMF903W).],

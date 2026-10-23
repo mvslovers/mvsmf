@@ -11,7 +11,7 @@ Files in UFS") shows the tasks with sessions. Authentication and the general
 conventions of requests and error reports are in @ref-auth and @ref-conv. The
 data set services have their own chapter, @ref-ds.
 
-The text describes mvsMF 1.4.0. The file services need UFSD 1.4.0 or later and
+The text describes mvsMF 1.4.0. The file services need UFSD (mvsMF is built against UFSD 1.4.0) and
 HTTPD 4.2.0 or later.
 
 == Endpoints <ref-uss-summary>
@@ -425,7 +425,8 @@ return code of UFSD:
   )
 ]
 
-When an open fails and UFSD reports no code, mvsMF answers as for 28.
+When the open of a read or a write fails and UFSD reports no code, mvsMF
+answers as for 28. The create request has no such rule.
 
 The status codes follow the closed list of z/OSMF. "Exists" and "not empty" are
 therefore 400, and "no space" and "no inodes" are 500.

@@ -229,6 +229,13 @@ open. In the last case the operator console gets the message #cmd("MVSMF201E")
 request with each quote, backslash and control character replaced by a question
 mark, cut at 64 characters.
 
+The status request does not know who submitted the job, so it cannot take the
+user ID of the caller as the owner, as the submit request does
+(@ref-jobs-submitresp). While JES2 has not yet written the owner of a job that
+was just submitted, the status request answers 404 even to the user who
+submitted it. A client that polls right after a submit has to accept a 404 for
+the first moments and ask again.
+
 == Output Files of a Job <ref-jobs-files>
 
 #idx("job", "files")#idx("spool")#idx("ddname")
@@ -285,8 +292,9 @@ object. mvsMF checks it after it has found the job:
 On success the answer is #cmd("200") with the content type #cmd("text/plain").
 Each record is a line: the record at its full length, converted from EBCDIC
 (CP037) to ASCII, followed by a carriage return and a line feed. For a file that
-is input data (a #cmd("SYSIN") data set), mvsMF stops at the number of records
-that JES2 counts for it. In the file #cmd("JESJCLIN") it skips the pointer
+is input data (a #cmd("SYSIN") data set) for which JES2 counts a number of
+records, mvsMF stops at that number. If JES2 counts none, the file is sent as
+it is. In the file #cmd("JESJCLIN") it skips the pointer
 records of JES2. mvsMF sends the headers
 with the first line. A file with no spool data, or no record, gives #cmd("200")
 and an empty body.
@@ -464,7 +472,8 @@ gets #cmd("MVSMF203I") for every submitted job.
 The operator console gets #cmd("MVSMF204E") when the internal reader cannot
 be opened, #cmd("MVSMF205E") when a write fails and #cmd("MVSMF206E") when the
 close fails. It gets #cmd("MVSMF006E") when no storage is left for the JCL
-lines, and #cmd("MVSMF106E") when reading the JCL data set ends in an I/O
+lines of a job that is sent in the request (for a data set source the answer
+is the same 500, but nothing is written to the console), and #cmd("MVSMF106E") when reading the JCL data set ends in an I/O
 error. No line has gone to the internal reader in the second case, and the
 request is refused. The failures of the write and of the close happen after the
 internal reader has taken cards. The code does not say whether JES2 keeps those

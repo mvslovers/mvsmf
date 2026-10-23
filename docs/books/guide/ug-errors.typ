@@ -6,7 +6,8 @@
 #idx("status codes", "errors")
 This chapter lists the answers a client meets most often when something does
 not work. Every error report quoted here was returned by a real mvsMF in a
-session of this book. The chapter gives the meaning in a few words and points
+session of this book, except the report of a JOB card that is too long, which
+the text takes from the source of mvsMF. The chapter gives the meaning in a few words and points
 to the chapter that explains the task. The _mvsMF Reference_ lists every status
 code and every error report in full.
 

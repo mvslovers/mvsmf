@@ -13,13 +13,14 @@ EXDIR=${EXDIR:-$(cd "$(dirname "$0")/.." && pwd)/ex}
 # ses FILE 'COMMAND'
 # Runs COMMAND with bash and writes ex/FILE: a line "$ COMMAND" as the reader
 # types it (variables unexpanded), then what the command printed, CR removed.
-# The value of a session cookie is replaced by <token>.
+# The value of a session cookie is replaced by <token>; the value "deleted" that
+# the logout sends is kept.
 ses() {
 	_f=$EXDIR/$1
 	mkdir -p "$(dirname "$_f")"
 	{
 		printf '$ %s\n' "$2"
-		bash -c "$2" 2>&1 | tr -d '\r' | sed 's/\(LtpaToken2=\)[^;]*/\1<token>/'
+		bash -c "$2" 2>&1 | tr -d '\r' | sed '/LtpaToken2=deleted/!s/\(LtpaToken2=\)[^;]*/\1<token>/'
 	} > "$_f"
 	echo "wrote $1" >&2
 }

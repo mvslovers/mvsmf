@@ -110,8 +110,8 @@ A job that arrives without #cmd("USER=") and #cmd("PASSWORD=") runs under the
 default user of the system, not under the person who submitted it.
 
 Define the profile first. When the resource has no profile at the start of
-HTTPD, HTTPD writes #cmd("HTTPD425W") and does not gate the route, so everyone
-who can log in gets through. A line with a malformed #cmd("RES=") gives
+HTTPD, HTTPD writes #cmd("HTTPD425W"). As long as no profile covers the
+resource, the route is not gated, and everyone who can log in gets through. A line with a malformed #cmd("RES=") gives
 #cmd("HTTPD412W"). On an #cmd("AUTH=NONE") route #cmd("RES=") is ignored
 (#cmd("HTTPD414W")).
 
@@ -560,9 +560,10 @@ a started task. The user of such a tool is a member of the group.
 === Check the Start Messages <ug-security-console-start>
 
 #idx("HTTPD425W")
-The route is gated only when the profile exists. Without a profile, HTTPD
-cannot tell a protected resource from an unprotected one, and it lets everyone
-through. It writes the message #cmd("HTTPD425W") when it registers the route.
+The route is gated only while a profile covers the resource. Without a profile,
+RAKF cannot tell a protected resource from an unprotected one, and it lets
+everyone through. HTTPD checks once at its start and writes the message
+#cmd("HTTPD425W") for a route whose resource has no profile.
 The following session reads the line from the log of the console service:
 
 #screen(raw(read("../ex/ug-security/g-warn.txt"), block: true))

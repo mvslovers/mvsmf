@@ -48,8 +48,9 @@ Common rules:
   (@ref-cons-issue). The collect and detection requests ignore it.
 - Every request needs a user ID that the HTTPD configuration lets in
   (@ref-auth). The issue request needs no #cmd("X-CSRF-ZOSMF-HEADER").
-- A method that a path does not have gets the router's #cmd("405"), and a path
-  that matches no route gets its #cmd("404") (@ref-conv).
+- A path that matches no route gets the router's #cmd("404"), also when the
+  method is a valid one that the path does not have. The router's #cmd("405")
+  is for a method that is none of GET, POST, PUT and DELETE (@ref-conv).
 - The console requests report errors in the form of @ref-cons-errors, not in the
   form of the data set and job requests.
 - The answers are JSON. No console request changes a data set, a job or a file.
@@ -101,10 +102,12 @@ double quotes. See @ref-cons-body-rules.
        detection in this request (@ref-cons-detect-sync). Any other value: arm a
        detection for a later request (@ref-cons-detect-async).],
     [#cmd("unsol-detect-timeout")], [no],
-      [Seconds to wait with #cmd("unsol-detect-sync"). Read with #cmd("atoi").
+      [Ticks of the clock (about 1.05 seconds each) to wait with
+       #cmd("unsol-detect-sync"). Read with #cmd("atoi").
        Default 20. A value of 0, a negative value, or a value above 60 gives 20.],
     [#cmd("detect-time")], [no],
-      [Seconds that an armed detection stays open. Default 30. A value of 0 or
+      [Ticks of the clock (about 1.05 seconds each) that an armed detection stays
+       open. Default 30. A value of 0 or
        less gives 30. At most 7 characters are read.],
     [#cmd("system")], [no],
       [Any non-empty value is refused (reason code 5). Routing to another system
@@ -149,7 +152,9 @@ Nothing is issued before the last check has passed.
 + It takes the console lock (@ref-cons-lock).
 + It issues the command.
 + With an #cmd("unsol-key"), it counts the table lines that contain the key (case
-  ignored). This is the baseline for the detection.
+  ignored). This is the baseline for the detection. When the copy of the table
+  cannot be taken, there is no baseline, and the request ends with #cmd("500"),
+  reason code 14 (the command was issued).
 + It builds the response key (@ref-cons-keys).
 + It reads the table until the answer has settled (@ref-cons-capture).
 + It releases the console lock.
@@ -210,7 +215,9 @@ After it has issued the command, mvsMF repeats this cycle:
 + If the server is quiescing or shutting down, stop with reason code 15
   (@ref-cons-errors).
 + Read the table and find the answer block (@ref-cons-block). Let #var("n") be
-  the number of lines of the block.
+  the number of lines of the block. A read that cannot take a copy of the table
+  does not count: the block, #var("n") and the count of stable reads stay as the
+  last good read left them.
 + If #var("n") is greater than 0 and equal to the #var("n") of the cycle before,
   count one stable read. Otherwise reset the count.
 + If the count is 3, stop.
@@ -218,7 +225,10 @@ After it has issued the command, mvsMF repeats this cycle:
   clock (about 1.05 seconds each, so 2.1 to 3.1 seconds), stop.
 + Wait 0.1 second and begin again.
 
-The answer is the block of the last read. With a block that does not change, the
+The answer is the block of the last good read. When no read of the whole wait
+got a copy of the table, the call ends with #cmd("500"), return code 8 and
+reason code 14: the command was issued, and the answer could not be read. With
+a block that does not change, the
 call lasts at least 0.3 seconds. With no block (#var("n") is 0 all the time), it
 lasts until the time limit. The cycle cannot tell a finished answer from a pause
 in the reply: a reply that stays the same for three reads ends the wait
@@ -362,6 +372,9 @@ How it works:
   returns the lines whose number is at least the number of lines delivered so far.
 + It sets the delivered count to the number of lines of the block, if that is
   larger, and stores the cursor again. A shorter block never lowers the count.
++ If the copy of the table cannot be taken, the answer is #cmd("500") with
+  return code 8 and reason code 1, not an empty answer. The cursor is stored as
+  it was, so it stays alive and the same key works at the next request.
 
 The request does not wait. It does not take the lock. It does not check the
 console name.
@@ -390,9 +403,12 @@ lines every 0.1 second. When the count is above the baseline, the answer has
 #cmd("status") #cmd("detected") and the newest matching line in #cmd("msg") (the
 text from column 24 on, leading blanks removed, trailing blanks removed; mvsMF
 reads the first 199 characters of the formatted line, so at most 175 characters
-remain). When the wait ends first, #cmd("status") is #cmd("timeout").
-The wait is the number of seconds of #cmd("unsol-detect-timeout"), counted in
-ticks of 1.05 seconds. When the server begins to shut down during the wait, the
+remain). When the wait ends first, #cmd("status") is #cmd("timeout"), unless
+the last look at the table could not take a copy of it. Then the answer is
+#cmd("500") with return code 8 and reason code 14, because the table did not
+show that the text is absent. The command was issued.
+The wait is the value of #cmd("unsol-detect-timeout"), counted in ticks of
+1.05 seconds. When the server begins to shut down during the wait, the
 answer is #cmd("503") with reason code 15, and the command has been issued.
 
 === Asynchronous <ref-cons-detect-async>
@@ -422,7 +438,9 @@ counts the matching lines now and answers with status #cmd("200") and two fields
 ]
 
 A key that is not found, or a store that is not available, gets
-#cmd("500") with return code 5 and reason code 9. Each read of a detection
+#cmd("500") with return code 5 and reason code 9. When the copy of the table
+cannot be taken, the answer is #cmd("500") with return code 8 and reason code 1,
+and not #cmd("waiting") or #cmd("expired"); the detection stays armed. Each read of a detection
 refreshes its entry in the store (@ref-cons-store). The request does not check
 the console name.
 
@@ -640,6 +658,20 @@ not the shape of the data set and job requests.
     [#cmd("500")], [8], [14], [issue],
       [Cannot get the command response. Cause: no storage for the response buffer. The command has
        been issued.],
+    [#cmd("500")], [8], [14], [issue],
+      [Command was issued; the Master Trace Table could not be copied, so the
+       response could not be read. Do not blindly retry -- retry re-issues the
+       command. Cause: no read of the capture got a copy of the table.],
+    [#cmd("500")], [8], [14], [issue],
+      [Command was issued; the Master Trace Table could not be copied, so
+       unsolicited-message detection was not armed. Do not blindly retry --
+       retry re-issues the command. Cause: no baseline of the #cmd("unsol-key")
+       could be counted.],
+    [#cmd("500")], [8], [14], [issue],
+      [Command was issued; the Master Trace Table could not be copied, so
+       unsolicited-message detection could not finish. Do not blindly retry --
+       retry re-issues the command. Cause: the last look of a synchronous wait
+       failed.],
     [#cmd("503")], [8], [15], [issue],
       [Command was issued; response capture abandoned (server quiescing). Do not
        blindly retry -- retry re-issues the command.],
@@ -648,6 +680,12 @@ not the shape of the data set and job requests.
        quiescing). Do not blindly retry -- retry re-issues the command.],
     [#cmd("500")], [5], [9], [detection],
       [Cannot find the result for the specified detection ID.],
+    [#cmd("500")], [8], [1], [collect],
+      [An error occurred during the retrieval of the command response. Cause: the
+       copy of the table could not be taken. The cursor is kept.],
+    [#cmd("500")], [8], [1], [detection],
+      [An error occurred during the retrieval of the detection result. Cause: the
+       copy of the table could not be taken. The detection stays armed.],
     [#cmd("400")], [1], [22], [log],
       [The parameter timeRange is invalid. Example: 10m.],
     [#cmd("400")], [1], [22], [log],

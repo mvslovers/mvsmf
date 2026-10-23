@@ -1,0 +1,10 @@
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T" | head -9
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 08:04:35 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Transfer-Encoding: chunked
+
+cmd probe: issuing 'D T' via SVC 34 (MGCR)

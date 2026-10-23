@@ -48,13 +48,13 @@ last:
     [#cmd("HTTPD004I")], [The identity of the started task. #cmd("HTTPD004W")
       means that the logon failed. HTTPD then runs with the identity it
       inherited.],
-    [#cmd("HTTPD036I")], [One message for each line #cmd("MOD="). You expect three
+    [#cmd("HTTPD036I")], [One message for each line #cmd("MOD="). You expect four
       for mvsMF (@ug-install-routes).],
     [#cmd("HTTPD001I")], [HTTPD is ready. Clients can connect.],
   )
 ]
 
-If one of the three #cmd("HTTPD036I") messages is missing, the request for its
+If one of the four #cmd("HTTPD036I") messages is missing, the request for its
 path does not reach mvsMF. The messages #cmd("HTTPD411E") to #cmd("HTTPD425W")
 come from the route lines. An unknown value after #cmd("AUTH=") ends the start
 (#cmd("HTTPD420E ... HTTPD WILL NOT START")).
@@ -215,7 +215,7 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
       The return code 12 means that the module did not run under HTTPD
       (#cmd("MVSMF005E")).],
     [A request for a path under #cmd("/zosmf/") is answered like a static file
-      and not by mvsMF], [No route matched. Check that the three
+      and not by mvsMF], [No route matched. Check that the four
       #cmd("HTTPD036I") messages appeared at the start, and that the path has
       lower case letters: the pattern #cmd("/zosmf/*") does not match
       #cmd("/ZOSMF/..."). Route lines are tested in order and the first match

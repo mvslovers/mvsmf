@@ -42,10 +42,11 @@ credential and reuses it for the next request from the same client address
 with the same user ID and password.
 
 The route lines of HTTPD decide whether a credential is required (@ref-httpd).
-The shipped configuration has three lines for mvsMF:
+The shipped configuration has four lines for mvsMF:
 
 #screen(raw("MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN", block: true))
 
 On a route with #cmd("AUTH=TOKEN") HTTPD answers a request without a credential

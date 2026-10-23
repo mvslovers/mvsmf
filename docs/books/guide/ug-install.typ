@@ -6,7 +6,7 @@
 mvsMF (mvsmf) is installed with SMP4 as the function SYSMOD #cmd("TZMF140"). The
 SYSMOD puts one load module, #cmd("MVSMF"), into the library
 #cmd("MVSMF.LINKLIB"). You then add that library to the STEPLIB of HTTPD
-(httpd), add three route lines to the configuration of HTTPD, and restart
+(httpd), add four route lines to the configuration of HTTPD, and restart
 HTTPD. This chapter takes you through these steps, shows how to check them, and
 describes the upgrade from mvsMF 1.3.0. The daily work is in @ug-ops and the
 removal in @ug-remove. The route lines and their options are listed in full in
@@ -273,28 +273,35 @@ message #cmd("HTTPD002I") then names the SVC. If neither way works, HTTPD writes
 #idx("HTTPPRM")#idx("route")
 HTTPD sends a request to mvsMF only when a route line in its configuration says
 so. The configuration is the member that the data definition #cmd("HTTPPRM") of
-the HTTPD procedure names. Add these three lines to it. The member
+the HTTPD procedure names. Add these four lines to it. The member
 #cmd("MVSMFPRM") of #cmd("MVSMF.SAMPLIB") has them too:
 
 ```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 ```
 
 The order matters. HTTPD uses the first line that matches the path of the
 request. Put the line with the wild card last. If it stands first, it takes the
-requests of the other two lines.
+requests of the other three lines.
 
 #idx("AUTH=")#idx("RES=")
 #cmd("AUTH=NONE") on the first two lines means that HTTPD does not gate these
 two routes. It is not a hole: mvsMF still answers a request to
 #cmd("/zosmf/info") without a credential with 401, and the login service has to
 reach its handler to answer a failed login in the form the clients expect.
-#cmd("AUTH=TOKEN") on the third line makes HTTPD answer 401 to a request with no
+#cmd("AUTH=TOKEN") on the last line makes HTTPD answer 401 to a request with no
 valid credential, before mvsMF runs.
 
-To let only some users into mvsMF, add a check of a RACF resource to the third
+The third line protects the console services, which issue operator commands.
+HTTPD lets a user through only if the user has READ access to the resource
+#cmd("MVSMF.CONSOLE"). Define the profile before you start HTTPD with this
+line (@ug-security-console). With no profile, HTTPD writes #cmd("HTTPD425W")
+and does not gate the route.
+
+To let only some users into mvsMF, add a check of a RACF resource to the last
 line:
 
 ```
@@ -313,7 +320,7 @@ mvsMF”.
 HTTPD holds the module in storage from its start. A change of the STEPLIB or of
 the route lines takes effect when you stop HTTPD and start it again
 (@ug-ops-start). After the start, the console shows one message
-#cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") for each of the three lines,
+#cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") for each of the four lines,
 and then #cmd("HTTPD001I").
 
 With curl, first send a request without a credential:
@@ -377,7 +384,7 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   library that holds a copy of #cmd("MVSMF"). An upgrade where the STEPLIB names
   another library ends with 0 in every step, and the old module keeps serving.
 + *Compare the route lines* in your member of HTTPD with #cmd("MVSMFPRM") of the
-  new #cmd("MVSMF.SAMPLIB"). This edition has verified the three lines of 1.4.0 only.
+  new #cmd("MVSMF.SAMPLIB"). A member of 1.3.0 has three lines. The line for #cmd("/zosmf/restconsoles/*") is new in 1.4.0 and must stand above the line with the wild card.
 + *Start HTTPD* and check the build as in @ug-install-verify.
 
 // COORDINATOR: capture needed: the output of the steps APPLY and ACCEPT of MVSMFINS and of the LIST of TZMF130 and TZMF140 on a system that holds 1.3.0 (return codes per step, HMA2461 after HMA2270, DELBY tombstone).

@@ -120,7 +120,7 @@ return code.
 The installation changed two things in the configuration of HTTPD
 (@ug-install-steplib, @ug-install-routes). Undo them in this order.
 
-+ Take the three #cmd("MOD=MVSMF") route lines out of the member that the
++ Take the four #cmd("MOD=MVSMF") route lines out of the member that the
   DD #cmd("HTTPPRM") of the HTTPD procedure names. A route that names a
   module HTTPD cannot load answers 503 and writes the message
   #cmd("HTTPD908E") with the text that the module could not be loaded. The

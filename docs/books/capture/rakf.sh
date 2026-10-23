@@ -4,7 +4,7 @@
 #   MVSMF_URL=http://localhost:8080 MVSMF_ADMIN=... MVSMF_ADMIN_PASS=... \
 #       sh capture/rakf.sh STEP
 #
-# STEP is one of: access adduser connect protect audit auditupd auditread ops admin pair clean
+# STEP is one of: access adduser connect protect audit auditupd auditread ops admin pair console consonly noconsole clean
 #
 # Needs, on the system under test:
 #
@@ -239,6 +239,54 @@ JCL
 	profiles r-pair '^JESSPOOL'
 	;;
 
+console)
+	rakfjob CONSOLE r-console <<'JCL'
+//CONSOLE  JOB (ACCT),'CONSOLE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTERM  DD SYSOUT=*
+//SYSIN    DD DUMMY
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+RDEF MVSMF.CONSOLE CL(FACILITY) UACC(NONE)
+PE MVSMF.CONSOLE CL(FACILITY) ID(CONSOPS) ACCESS(READ)
+CONNECT SMITH GROUP(CONSOPS)
+CONNECT IBMUSER GROUP(CONSOPS)
+/*
+//RAKFPROF EXEC RAKFPROF
+//RAKFUSER EXEC RAKFUSER
+JCL
+	profiles r-console '^FACILITYMVSMF.CONSOLE'
+	;;
+
+consonly)
+	rakfjob CONSONLY r-consonly <<'JCL'
+//CONSONLY JOB (ACCT),'CONSONLY',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTERM  DD SYSOUT=*
+//SYSIN    DD DUMMY
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+CONNECT BROWN GROUP(CONSOPS)
+/*
+//RAKFUSER EXEC RAKFUSER
+JCL
+	;;
+
+noconsole)
+	rakfjob NOCONS r-noconsole <<'JCL'
+//NOCONS   JOB (ACCT),'NOCONSOLE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+RDELETE MVSMF.CONSOLE CLASS(FACILITY)
+/*
+//RAKFPROF EXEC RAKFPROF
+JCL
+	;;
+
 clean)
 	hid_clean=$(cat <<'JCL'
 //RAKFCLN  JOB (ACCT),'CLEAN',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
@@ -259,7 +307,7 @@ JCL
 	;;
 
 *)
-	echo "usage: rakf.sh access|adduser|connect|protect|audit|auditupd|auditread|ops|admin|pair|clean" >&2
+	echo "usage: rakf.sh access|adduser|connect|protect|audit|auditupd|auditread|ops|admin|pair|console|consonly|noconsole|clean" >&2
 	exit 1
 	;;
 esac

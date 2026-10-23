@@ -1,10 +1,15 @@
-$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T" | head -9
-HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 08:04:35 GMT
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T"
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 23 Oct 2026 16:52:32 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive
 Content-Type: application/json
-Transfer-Encoding: chunked
+Content-Length: 124
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
-cmd probe: issuing 'D T' via SVC 34 (MGCR)
+{"rc":8,"category":4,"reason":0,"message":"LMOPEN error","details":["Authorization failed - You may not use this service."]}

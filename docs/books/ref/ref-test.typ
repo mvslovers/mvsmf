@@ -69,27 +69,30 @@ whatever the version.
 == Who May Use It <ref-test-access>
 
 #idx("security", "diagnostic endpoint")
-The endpoint has no gate of its own. There is no setting that enables or
+The first statement of the handler of both routes of the endpoint is the
+check of the permission #cmd("MVSMF.CONSOLE"). It runs before the handler
+reads the name of the function, so it covers every function, #cmd("version")
+and the help text included. The check is the one of the console services
+(@ref-cons-auth): mvsMF asks RAKF for READ access to the resource
+#cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"), and only the answer
+"permitted" lets the request go on. A missing profile, a refusal and any other
+answer of RAKF refuse it, and so does a request without a user. A caller that
+passes the check reaches every function. There is no setting that enables or
 disables a single function. The functions #cmd("syslog"), #cmd("job") and
-#cmd("spool") apply the spool policy of the job routes (see the jobs chapter),
-and no other function checks authorization in mvsMF. Every user that HTTPD lets reach the route can call every function.
-With the shipped route lines (@ref-httpd) that is every user with a valid
-credential, or every user that holds the permission of the #cmd("RES=") profile
-if the operator has put one on the route #cmd("/zosmf/*").
+#cmd("spool") apply, beyond the check, the spool policy of the job routes (see
+the jobs chapter).
+
+The check is the same for the endpoint and for the console services, and one
+profile covers both. The route lines of HTTPD do not name the endpoint: it lies
+under the catch-all line #cmd("/zosmf/*") (@ref-httpd). A user whom the
+catch-all lets in but who has no READ access to #cmd("MVSMF.CONSOLE") is
+refused by mvsMF with the error report of @ref-cons-auth. The check of the
+catch-all, #cmd("MVSMF.ACCESS") with the shipped route lines, still applies
+first.
 
 A release closes the endpoint, because it does not register it. To close it in
-a development build, restrict the route in HTTPD or build mvsMF with
+a development build for every user, build mvsMF with
 #cmd("-DMVSMF_NO_TEST_ENDPOINT").
-
-#note[*A defect* (mvsmf\#460): The console routes are gated by a route line of
-their own with #cmd("RES=FACILITY:MVSMF.CONSOLE") (@ref-httpd). The functions
-#cmd("cmd") and #cmd("mtt") of this endpoint do the work of the console routes,
-but their route is #cmd("/zosmf/test"), which the catch-all line
-#cmd("/zosmf/*") matches. HTTPD does not check the console profile for them.
-A user without access to the console routes can issue an operator command
-through #cmd("fn=cmd") and read the Master Trace Table through #cmd("fn=mtt").
-A build with #cmd("-DMVSMF_NO_TEST_ENDPOINT") does not register the routes and
-has no such path.]
 
 Several functions show data of the system and the caller beyond the user's
 own permissions:
@@ -356,11 +359,10 @@ command in the last 40 entries. It prints the line
 #cmd("MTT count=N after P poll(s), tail:") and the last 50 lines of the table.
 The last line is #cmd("DONE").
 
-Every user that reaches the route can issue any operator command with this
-function. mvsMF makes no check of its own, and the user ID of the caller is
-not used. The command runs with the authority of the address space, as for
-the console routes (@ref-cons). The console routes have a gate in HTTPD for
-this reason; this function does not (@ref-test-access).
+Every user with READ access to #cmd("MVSMF.CONSOLE") can issue any operator
+command with this function (@ref-test-access). The user ID of the caller is
+not used for the command. It runs with the authority of the address space, as
+for the console routes (@ref-cons).
 
 === job <ref-test-job>
 

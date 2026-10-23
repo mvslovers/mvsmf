@@ -460,12 +460,23 @@ The first line is the universal access and has no ID:
 == Protecting the Console Services <ug-security-console>
 
 #idx("console", "protection")#idx("MVSMF.CONSOLE")#idx("FACILITY class")#idx("route", "RES=")
-The console services issue operator commands. mvsMF makes no authorization
-check of its own for them, and the command runs under the identity of the
-caller. Any user who gets in can issue any command. HTTPD closes the gap: a
-route of its own for #cmd("/zosmf/restconsoles/*") asks RAKF for READ access to
-the resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"). The route
-lines are:
+The console services issue operator commands, and the command runs under the
+identity of the caller. Two checks protect them. Both ask RAKF for READ access
+to the resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"):
+
+- *mvsMF* makes the check in the handler of every request below
+  #cmd("/zosmf/restconsoles/") and of every request to the diagnostic endpoint
+  (@ug-security-console-test). The check is fail-closed: it permits a request
+  only when RAKF answers that the access is permitted. A user without READ gets
+  the answer 500 of mvsMF, and so does every user while the resource has no
+  profile (@ug-security-console-start).
+- *HTTPD* asks the same question one step earlier, through a route of its own
+  for #cmd("/zosmf/restconsoles/*") with #cmd("RES=FACILITY:MVSMF.CONSOLE"). A
+  user without READ gets the 403 of HTTPD, and mvsMF does not run
+  (@ug-security-console-refused).
+
+The check of mvsMF does not depend on the route lines. The route is the first
+layer in front of it. The route lines are:
 
 #screen(```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
@@ -522,18 +533,26 @@ universal access #cmd("NONE") is the line without an ID:
 
 #screen(raw(read("../ex/ug-security/r-console-prof.txt"), block: true))
 
-The profile takes effect at once. HTTPD asks RAKF on every request, so neither
-HTTPD nor mvsMF needs a restart after you define the profile or change a
-permission. Only a change of the route lines needs a restart of HTTPD. A change
+The profile takes effect at once. HTTPD and mvsMF ask RAKF on every request, so
+neither needs a restart after you define the profile or change a permission.
+Only a change of the route lines needs a restart of HTTPD. A change
 of the group of a user is different: a user whose credential HTTPD already holds
 keeps the groups of the logon, so the connection to #cmd("CONSOPS") does not
 reach that user until HTTPD has dropped the credential
 (@ug-security-connect).
 
+#note[*Change from mvsMF 1.3.0.* Version 1.3.0 made no check of its own for the
+console services. From 1.4.0 on, the console services and the diagnostic
+endpoint refuse every user, administrators included, until the profile is
+defined and READ is granted. This is the behaviour after an upgrade, not an
+error. Define the profile before you start the new version
+(@ug-install-upgrade).]
+
 === What a User without Access Sees <ug-security-console-refused>
 
 #idx("403")#idx("MVSMF.CONSOLE", "refusal")
-A user who has a valid password but no READ access to #cmd("MVSMF.CONSOLE")
+With the route line of @ug-security-console in place, a user who has a valid
+password but no READ access to #cmd("MVSMF.CONSOLE")
 gets HTTP 403 from HTTPD on every request below
 #cmd("/zosmf/restconsoles/"). The body is the plain text #cmd("403 Forbidden"),
 as for #cmd("MVSMF.ACCESS") (@ug-security-access-refused). mvsMF does not
@@ -555,23 +574,38 @@ A member of the group issues the same command:
 
 Tools that issue operator commands through the console service need the
 permission too. MBT uses it to issue commands, for example for the restart of
-a started task. The user of such a tool is a member of the group.
+a started task. The user of such a tool is a member of the group. A user
+without the permission is refused. When the refusal is the 500 of mvsMF
+(@ug-security-console-start), the restart of HTTPD with MBT is abandoned, and
+HTTPD keeps running.
 
 === Check the Start Messages <ug-security-console-start>
 
 #idx("HTTPD425W")
-The route is gated only while a profile covers the resource. Without a profile,
-RAKF cannot tell a protected resource from an unprotected one, and it lets
-everyone through. HTTPD checks once at its start and writes the message
-#cmd("HTTPD425W") for a route whose resource has no profile.
-The following session reads the line from the log of the console service:
-
-#screen(raw(read("../ex/ug-security/g-warn.txt"), block: true))
-
-With that message in the log the console services are open to every user who
-can log on:
+The route of HTTPD is gated only while a profile covers the resource. Without
+a profile, RAKF cannot tell a protected resource from an unprotected one, and it
+lets everyone through. HTTPD checks once at its start and writes the message
+#cmd("HTTPD425W") for a route whose resource has no profile. The message says
+that the route does not gate. It does not say that the console services are
+open: mvsMF takes "no profile" for "not permitted" and refuses every user. The
+two sessions below ran after HTTPD had been started without the profile. The
+user #cmd("JONES") has no permission. The user #cmd("SMITH") is a member of the
+group #cmd("CONSOPS"), which has READ once the profile exists:
 
 #screen(raw(read("../ex/ug-security/g-noprofile.txt"), block: true))
+
+#screen(raw(read("../ex/ug-security/g-noprofile-ops.txt"), block: true))
+
+The answer is the 500 with the category 4 that mvsMF gives to a user without
+READ. It is the same for "no profile" and for "no READ". The console services
+and the diagnostic endpoint stay closed until the profile is defined and READ
+is granted.
+
+The console service refuses its reader while the profile is missing, so the log
+cannot be read to find the message. Define the profile; the log then shows
+the line of the start:
+
+#screen(raw(read("../ex/ug-security/g-warn.txt"), block: true))
 
 The messages #cmd("HTTPD036I") list the routes in the order in which HTTPD
 registered them. After the start, check that the console route is above the
@@ -580,8 +614,12 @@ catch-all:
 #screen(raw(read("../ex/ug-security/g-routes-gated.txt"), block: true))
 
 If the console route is below the catch-all, HTTPD starts without a message,
-the profile exists, and the route is never reached. The console services are
-open to every user of mvsMF. The session below runs on a configuration with
+the profile exists, and the route is never reached: the catch-all takes the
+console requests, so its #cmd("AUTH=") and #cmd("RES=") apply to them and those
+of the console route do not. HTTPD then does not ask for
+#cmd("MVSMF.CONSOLE"), and a user without the permission does not get the 403.
+mvsMF still checks the profile itself, so the command is not issued. The user
+gets the 500 of mvsMF instead. The session below runs on a configuration with
 the lines in the wrong order. The user #cmd("JONES"), who has no permission for
 the console, issues a command:
 
@@ -604,18 +642,29 @@ The user #cmd("BROWN") has only the console permission:
 
 Give an operator who is to use mvsMF both permissions.
 
-#note[*A defect* (mvsmf\#460): The diagnostic endpoint #cmd("/zosmf/test") lies
-under the catch-all route, so the check of #cmd("MVSMF.CONSOLE") does not apply
-to it. Its functions #cmd("fn=cmd") and #cmd("fn=mtt") issue a command and
-read the Master Trace Table for any user that #cmd("MVSMF.ACCESS") lets in.
-Until the issue is fixed, the console gate is complete only for the routes
-below #cmd("/zosmf/restconsoles/").]
+=== The Diagnostic Endpoint <ug-security-console-test>
+
+#idx("/zosmf/test")#idx("diagnostic endpoint", "protection")
+The diagnostic endpoint #cmd("/zosmf/test") does the work of the console
+services with its functions #cmd("fn=cmd") and #cmd("fn=mtt"): they issue a
+command and read the Master Trace Table. Only a development build has the
+endpoint (@ug-security-notcovered). It lies under the catch-all route of HTTPD,
+which names no console resource. mvsMF therefore asks RAKF itself, as the first
+step of the handler of both routes of the endpoint and before it reads the name
+of the function. The resource is the same #cmd("MVSMF.CONSOLE"), and the check
+is as strict as for the console services. It covers every function,
+#cmd("fn=version") and the help text included. There is no second profile: a
+user who may use the console services may use the endpoint, and the other way
+round.
 
 The user #cmd("JONES") has no permission for the console and issues
 #cmd("D T") through the diagnostic endpoint:
 
 #screen(raw(read("../ex/ug-security/g-test.txt"), block: true))
 
+The answer is the 500 of mvsMF, and the command is not issued. A user who reads
+the build with #cmd("fn=version") on a development build needs the permission
+too.
 
 == Letting Users See the Jobs of Others: JESSPOOL <ug-security-jesspool>
 
@@ -1103,15 +1152,15 @@ surfaces reach the system without them:
 - *The test endpoint.* A release does not register #cmd("/zosmf/test"): the
   request answers 404. Only a build whose version ends in #cmd("-dev") registers
   it, and this entry is about such a build. #cmd("fn=cmd") issues an operator
-  command and #cmd("fn=mtt") reads the Master Trace Table. The check of
-  #cmd("MVSMF.ACCESS") is the only one that applies
-  (@ug-security-console-only).
+  command and #cmd("fn=mtt") reads the Master Trace Table. mvsMF asks for READ
+  access to #cmd("MVSMF.CONSOLE") before every function runs
+  (@ug-security-console-test).
   #cmd("fn=listds"), #cmd("fn=locate") and #cmd("fn=dscb") read the catalog
   and the VTOC with no data set check. The job probes
   #cmd("fn=job"), #cmd("fn=spool") and #cmd("fn=syslog") do follow the
   JESSPOOL rules. No function of the endpoint returns data that identifies a
   session. A function that did so was removed in mvsMF 1.4.0. In a development
-  build every user who passes the #cmd("MVSMF.ACCESS") check reaches the
+  build only a user with READ access to #cmd("MVSMF.CONSOLE") reaches the
   endpoint.
 - *USS files.* RAKF profiles do not protect the files of the UFS. mvsMF hands
   the user ID and the group of the caller to UFSD, and UFSD decides by the

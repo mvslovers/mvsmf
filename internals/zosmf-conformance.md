@@ -89,14 +89,17 @@ registered for, answers **405** with the usual error report (`category` 6,
 `rc` 4, `reason` 7, `message` `Http method <METHOD> is not supported by this
 URL`) and **no `Allow` header** -- the reference sends none, and 405 is in the
 closed list. A path no route matches stays 404. The check is in
-`handle_request()` (`src/router.c`), after the middleware chain, so an
-unauthenticated request is still a 401; `find_route()` is unchanged and
+`handle_request()` (`src/router.c`), after the middleware chain, so a request
+without a credential is still a 401, except on `/zosmf/services/authenticate`,
+which `identity_middleware` (`src/mvsmf.c`) lets through to its handler;
+`find_route()` is unchanged and
 `path_is_known()` asks only whether any pattern matches, regardless of method.
 
-Not covered, on purpose: methods `parseMethod()` does not know (`PATCH`, `HEAD`,
-`OPTIONS`) still get httpd's bare 405 before the middleware chain. The
-reference answers PATCH with 403 or 501 depending on the service, which is a
-different question and not part of #418.
+Not covered, on purpose: methods `parseMethod()` does not know. `PATCH` and
+`OPTIONS` never reach mvsMF: httpd answers them itself with a text/plain 405
+(`http_parse()`). `HEAD` reaches `handle_request()`, which answers a bare 405
+before the middleware chain. The reference answers PATCH with 403 or 501
+depending on the service, which is a different question and not part of #418.
 
 
 ### Purge of a job whose output a device holds (#426)

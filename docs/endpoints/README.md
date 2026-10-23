@@ -32,7 +32,15 @@ with a method that endpoint does not offer (for example `DELETE /zosmf/info`),
 answers `405` with the usual error report
 (`"message":"Http method DELETE is not supported by this URL"`). Like the
 reference z/OSMF, the response carries no `Allow` header. Authentication comes
-first: a request without credentials is a `401` either way.
+first: a request without credentials is a `401`. The one path mvsMF's
+authentication check lets through to its handler is
+`/zosmf/services/authenticate` (it is how a client logs in), so the method check
+applies there like anywhere else.
+
+Methods other than `GET`, `POST`, `PUT` and `DELETE` are not decided by the
+endpoint. HTTPD answers `PATCH`, `OPTIONS` and any other method it does not know
+itself with a `405` and the plain text `405 Method Not Allowed`. A `HEAD` request
+reaches mvsMF, which answers `405` with no body.
 
 ## `X-MVSMF-Client` — for browser clients only
 

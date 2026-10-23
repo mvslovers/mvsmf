@@ -123,6 +123,17 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
+- **`P HTTPD` through the console API now returns its answer** (#398). The
+  command stops the server that is answering it, so the request is answered
+  503 with `return-code` 8 and `reason-code` 15 ("issued, response capture
+  abandoned"). That answer left the server as a status line and headers
+  announcing a body that never followed, so a client got an empty 503 (curl:
+  exit 18) and could not tell whether the command had run. The body now
+  arrives. A console command sent while the server is stopping is refused
+  with 503 / 8 / 17 and not issued, or the connection is reset once the
+  server has stopped accepting. The answer to the `P` itself closes the
+  connection, as every console answer does. See
+  `docs/endpoints/console/issue-command.md`.
 
 ### Changed
 

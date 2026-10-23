@@ -14,9 +14,10 @@ of three** (#244 → #361 → #245, entry 4), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. **#398 is new (2026-10-10) and not ranked
+stand runs a server that old. ~~**#398 is new (2026-10-10) and not ranked
 either**: `P HTTPD` through the console API answers 503 with an empty body, so
-a client cannot tell whether the command ran.
+a client cannot tell whether the command ran.~~ Fixed: `send_bytes()` refused
+every send once the server quiesced, the 8/15 report's body included.
 **#405 is new (2026-10-13) and not ranked either**: run right after
 `curl-nospace`, `curl-datasets` hangs on its first sequential read, and the
 data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,

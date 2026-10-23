@@ -816,7 +816,12 @@ int consoleIssueHandler(Session *session)
 	 * by setting one JSON field. Documented in
 	 * docs/endpoints/console/issue-command.md. */
 	{
-		int lk = console_lock_acquire(session);
+		/* Asked before the lock, not only when the lock is busy: between a
+		 * `P HTTPD` and the end of the address space a free lock is no sign
+		 * that a command can still be answered, and one issued now (an
+		 * `S HTTPD` of a restart) is lost with the address space (#398). */
+		int lk = server_quiescing(session) ? CONS_LOCK_QUIESCED
+		                                   : console_lock_acquire(session);
 
 		if (lk == CONS_LOCK_QUIESCED) {
 			/* Distinct from the 8/15 pair below: there the command WAS issued

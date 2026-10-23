@@ -32,11 +32,11 @@ console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
 **#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
 SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method should
 perhaps be 405 — measure the reference first.
-**#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
-`ufs_ferror()` check after its read loop, so a failed read ends as a clean 200
-there too. #422 (merged) made `abort_response()` able to say so; it needs a
-first `MVSMF3xx` id; the hard part is
-provoking a mid-file UFSD read error at all.
+**#423** (USS file GET: no `ufs_ferror()` check after the read loop) is fixed in
+its PR: the loop is `src/ussread.c` (host test `TSTUSSRD`), the failure is
+`MVSMF301E` plus `abort_response()`. A mid-file UFSD read error *can* be
+provoked: a client that stops reading holds the handler in `send_all()`
+between two reads, and `P UFSD` then fails the next `ufs_fread()` (`RC=-1`).
 **#425 is new (2026-10-14) and not ranked either**: S0C7/S0C1 *at function
 entries* -- the loaded MVSMF code was overwritten (m38b dump: the 6-byte
 instruction executed at `find_and_send_job_status`'s entry is not the linked
@@ -117,7 +117,6 @@ handed its list over). In hand, in this order:
   purge rule (UPDATE on the JESSPOOL entity).
 - **#418** waits on a read-only zxp measurement (404 or 405 for a known path
   with an unregistered method).
-- **#423**: the hard part is provoking a mid-file UFSD read error.
 - **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
 - **#443** is new (2026-10-22, found in #442): the listing's `dev` names a 3380 volume "3390".
 

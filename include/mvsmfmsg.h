@@ -33,7 +33,7 @@
  *   MVSMF0xx   router, CGI entry, shared request handling
  *   MVSMF1xx   data sets      (restfiles/ds)
  *   MVSMF2xx   jobs           (restjobs)
- *   MVSMF3xx   USS            (restfiles/fs)   -- none yet
+ *   MVSMF3xx   USS            (restfiles/fs)
  *   MVSMF4xx   consoles       (restconsoles)   -- none yet
  *   MVSMF9xx   abend recovery and diagnostics
  *
@@ -132,6 +132,17 @@
 
 /** MVSMF207E JESCANJ returned a code this build does not know */
 #define MSG_JESCANJ_RC		"MVSMF207E JESCANJ RETURNED RC=%d"
+
+/*
+ * MVSMF3xx -- USS (restfiles/fs)
+ */
+
+/** MVSMF301E a USS file read failed after the reply had started; the body is
+ * short (#423). %s is the absolute path, %d the UFSD return code of the
+ * failed read. The status and headers are already on the wire, so the client
+ * is told by the connection dropping mid-body (abort_response()); this line
+ * is the only thing that says why. */
+#define MSG_USS_READ_ERROR	"MVSMF301E I/O ERROR READING %s RC=%d"
 
 /*
  * MVSMF9xx -- abend recovery and diagnostics

@@ -36,7 +36,7 @@ Ranges:
 | `MVSMF0xx` | router, CGI entry, shared request handling |
 | `MVSMF1xx` | data sets (`restfiles/ds`) |
 | `MVSMF2xx` | jobs (`restjobs`) |
-| `MVSMF3xx` | USS (`restfiles/fs`) — none yet |
+| `MVSMF3xx` | USS (`restfiles/fs`) |
 | `MVSMF4xx` | consoles (`restconsoles`) — none yet |
 | `MVSMF9xx` | abend recovery and diagnostics |
 
@@ -80,6 +80,12 @@ member not found, record too long) produce **no** console message.
 | `MVSMF205E` | `WRITE TO THE JES2 INTERNAL READER FAILED` | A `jesirput()` failed part-way. The job is incomplete and is not queued. |
 | `MVSMF206E` | `CLOSE OF THE JES2 INTERNAL READER FAILED` | `jesircls()` failed. The job may or may not have been queued — check the JES2 queue before resubmitting. |
 | `MVSMF207E` | `JESCANJ RETURNED RC=n` | A purge returned a code this build does not know. The client got a 500. Worth reporting with the `RC`. |
+
+## MVSMF3xx — USS
+
+| Id | Text | Meaning and action |
+|---|---|---|
+| `MVSMF301E` | `I/O ERROR READING path RC=n` | A USS file read failed after the reply had started, so the file was **not** delivered whole. `path` is the absolute path as UFSD sees it (not case-folded), `n` the UFSD return code of the failed read (`52` I/O error, also reported when a failed request carried no code of its own; `56` bad file descriptor; `-1` UFSD is not reachable — it was stopped while the file was being read). The `200` and the headers were already on the wire, so the client is told by the connection closing in the middle of the body — curl exits 18 (`transfer closed with outstanding read data remaining`) — never by a body that ends cleanly. Check UFSD and the volume behind the file system; the next read of the same file may succeed. Until #423 this ended as a complete-looking `200` with a truncated file and no message. |
 
 ## MVSMF9xx — abend recovery and diagnostics
 

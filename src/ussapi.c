@@ -11,6 +11,8 @@
 #include "common.h"
 #include "datatype.h"
 #include "etag.h"
+#include "mvsmfmsg.h"
+#include "ussread.h"
 #include "httpcgi.h"
 
 /* The reference refuses X-IBM-Data-Type: record on /restfiles/fs (measured,
@@ -644,6 +646,73 @@ quit:
 }
 
 //
+// The services uss_stream_file() (src/ussread.c) runs on. The context lives on
+// ussGetHandler's stack: MVSMF is RENT, so only the ops table may be static.
+//
+typedef struct uss_get_ctx {
+	Session      *session;
+	UFSFILE      *fp;
+	const HTTPCP *cp;
+} USS_GET_CTX;
+
+__asm__("\n&FUNC    SETC 'uget_read'");
+static unsigned
+uss_get_read(void *ctx, void *buf, unsigned len)
+{
+	return ufs_fread(buf, 1, len, ((USS_GET_CTX *)ctx)->fp);
+}
+
+__asm__("\n&FUNC    SETC 'uget_send'");
+static int
+uss_get_send(void *ctx, const unsigned char *buf, int len)
+{
+	return send_all(((USS_GET_CTX *)ctx)->session, buf, len);
+}
+
+__asm__("\n&FUNC    SETC 'uget_xlat'");
+static void
+uss_get_xlate(void *ctx, unsigned char *buf, unsigned len)
+{
+	USS_GET_CTX *c = (USS_GET_CTX *)ctx;
+	Session *session = c->session;   // the httpx macro reaches httpd through it
+
+	http_xlate(buf, len, c->cp->etoa);
+}
+
+__asm__("\n&FUNC    SETC 'uget_fail'");
+static int
+uss_get_failed(void *ctx)
+{
+	UFSFILE *fp = ((USS_GET_CTX *)ctx)->fp;
+
+	// A read that ends the loop is the end of the file only when libufs says
+	// so. ufs_ferror() returns the rc the failed request left on the handle,
+	// so a flag set with rc 0 would read as "no error"; a loop that ended
+	// anywhere but at the end of the file is a failure whatever the rc says.
+	if (!ufs_ferror(fp) && ufs_feof(fp)) {
+		return UFSD_RC_OK;
+	}
+
+	return (fp->error != UFSD_RC_OK) ? fp->error : UFSD_RC_IO;
+}
+
+// RENT: read-only, so it may be static. A writable static would S0C4.
+static const USS_READ_OPS uss_get_ops = {
+	uss_get_read,
+	uss_get_send,
+	uss_get_xlate,
+	uss_get_failed
+};
+
+// Binary mode: the same table without the translation.
+static const USS_READ_OPS uss_get_ops_binary = {
+	uss_get_read,
+	uss_get_send,
+	NULL,
+	uss_get_failed
+};
+
+//
 // ussGetHandler — GET /zosmf/restfiles/fs/{*filepath}
 //
 // Reads file content via ufs_fopen/ufs_fread in 4K chunks.
@@ -664,7 +733,8 @@ int ussGetHandler(Session *session)
 	UFS *ufs = NULL;
 	UFSFILE *fp = NULL;
 	char buf[USS_READ_BUFSZ];
-	UINT32 n;
+	USS_GET_CTX ctx;
+	int read_rc = 0;
 	char etag[ETAG_SIZE] = {0};
 	const char *etag_hdr = NULL;
 	const char *if_none_match;
@@ -764,17 +834,23 @@ int ussGetHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "\r\n")) < 0) goto quit;
 
 	// Stream file content in chunks
-	while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-		if (data_type == DATA_TYPE_TEXT) {
-			http_xlate((unsigned char *)buf, n, cp->etoa);
-		}
-		rc = send_all(session, (const UCHAR *)buf, (int)n);
-		if (rc < 0) {
-			goto quit;
-		}
-	}
+	ctx.session = session;
+	ctx.fp = fp;
+	ctx.cp = cp;
+	rc = uss_stream_file(&ctx,
+		(data_type == DATA_TYPE_TEXT) ? &uss_get_ops : &uss_get_ops_binary,
+		(unsigned char *)buf, sizeof(buf), &read_rc);
 
-	rc = 0;
+	// A read that failed ends the loop exactly as the end of the file does,
+	// and the 200 and the headers are long gone. The connection is all that
+	// is left to say the body is short: abort_response() clears chunked so
+	// httpd does not close it with a clean terminator (#423, as #421 for data
+	// sets). A failed send has already been through abort_response().
+	if (read_rc != 0) {
+		wtof(MSG_USS_READ_ERROR, abspath, read_rc);
+		abort_response(session);
+		rc = -1;
+	}
 
 quit:
 	if (fp) {

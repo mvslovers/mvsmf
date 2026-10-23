@@ -53,6 +53,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   hands its last operand to a continuation card of its own, so the same operands
   reach JES2 in the same order. A card that cannot be cut anywhere is still
   refused, with the new text `JOB card cannot be continued`.
+- **A record-mode read of a RECFM=V data set is refused instead of returning
+  wrong data** (#455). `X-IBM-Data-Type: record` on a V, VB or VBS data set or
+  member answered 200 with LRECL-sized chunks that ran across record
+  boundaries, each with a length prefix that matched no record. It now answers
+  `400` with `category` 6, `rc` 8, `reason` 12 and sends no data. RECFM=F and
+  FB, and text and binary reads of any data set, are unchanged. A correct
+  variable-length record mode is still to come (#361).
 - **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the
   job object now carries both, as z/OSMF does. MVS 3.8j has no sysplex and one
   JES2 member, so both hold the system id JES2 recorded for the job (the SMF

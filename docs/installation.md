@@ -178,7 +178,8 @@ It permits only when RAKF answers "permitted". A user without READ, and
 **every user while the profile is not defined**, get `500` (category 4,
 "Authorization failed") from mvsMF on every `/zosmf/restconsoles/...` URL
 (command, response, detection and log) and on every `/zosmf/test` request,
-including `fn=version`. A request that carries no resolved user gets `401`. The
+including `fn=version` in a development build (a release does not have the
+endpoint, see step 5). A request that carries no resolved user gets `401`. The
 rest of the API is not affected. The route line of step 4 additionally requires
 READ in HTTPD: a user without it gets `403` from HTTPD on
 `/zosmf/restconsoles/...`, before mvsMF is reached.
@@ -240,12 +241,14 @@ Three things to know:
   `mbt run restart -- HTTPD` prints `WARNING: P HTTPD went out but its answer
   was lost` (naming the HTTP 500 and "Authorization failed") and then `ERROR:
   restart: HTTPD is still active after P -- not started again`. The restart is
-  abandoned and HTTPD keeps running. The same holds for `?fn=version`, the call
-  that confirms a deploy: the user who checks the build id needs READ too.
+  abandoned and HTTPD keeps running. The same holds for `?fn=version` on a development build, the call that
+  confirms a deploy there: the user who checks the build id needs READ too.
+  A release deploy is checked with `GET /zosmf/info`, which needs no profile
+  (step 5).
 - **One profile for both.** There is no separate resource for `/zosmf/test`; a
   user who may use the console may use the test endpoint, and the other way
-  round. A build with `-DMVSMF_NO_TEST_ENDPOINT` still leaves `/zosmf/test`
-  unregistered, for systems that do not want the endpoint at all.
+  round. A release does not register `/zosmf/test` at all, and a build with
+  `-DMVSMF_NO_TEST_ENDPOINT` leaves it out of a development build too.
 
 ## 5. Restart httpd and verify
 
@@ -254,21 +257,36 @@ P HTTPD
 S HTTPD
 ```
 
-Then ask the server what it is actually running:
+Then ask the server what it is actually running. On a **release** (the
+package from a GitHub release, version `1.4.0` and the like):
+
+```
+curl -u USER:PASS 'http://your.host:port/zosmf/info'
+```
+
+The field `zosmf_full_version` is the release the live module was built as. A
+successful install that still reports the previous version means something else
+is shadowing it — see step 3. The call needs no profile; a release does not
+register `/zosmf/test`, and `GET /zosmf/test?fn=version` answers `404`. The
+release carries no git hash in its answer: the version is the identity of a
+tagged build.
+
+On a **development build** (version ending in `-dev`, deployed by `mbt deploy`)
+`/zosmf/test` exists, and its `fn=version` also names the git hash the module
+was built from:
 
 ```
 curl -u USER:PASS 'http://your.host:port/zosmf/test?fn=version'
 ```
 
-It answers the version and the git hash the live module was built from. A
-successful install that still reports the previous hash means something else is
-shadowing it — see step 3. The call needs READ on `FACILITY MVSMF.CONSOLE` (see
+That call needs READ on `FACILITY MVSMF.CONSOLE` (see
 [Who may use the console service and `/zosmf/test`](#who-may-use-the-console-service-and-zosmftest));
 before the profile is defined it answers `500`, category 4, and that is the
 check working.
 
-`GET /zosmf/info` is the ordinary reachability check once a credential is to
-hand, with no profile needed.
+A `-dev` version in `zosmf_full_version` on a system that should run a release
+means the module is a development build: it has the diagnostic endpoint. Install
+the release package.
 
 ## Upgrading
 
@@ -364,7 +382,7 @@ copy:
    curl -i 'http://your.host:port/zosmf/restjobs/jobs'      # expect 401
    ```
 
-4. **Restart and check the level** with `?fn=version` (step 5). Once it
+4. **Restart and check the level** with `GET /zosmf/info` (step 5). Once it
    reports the release you installed, retire the old library, so the copy
    cannot come back to the front of a concatenation later. A library of its own
    can simply be scratched.

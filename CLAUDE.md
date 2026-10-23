@@ -86,7 +86,9 @@ mbt distclean      # clean + remove all of .mbt/ (incl. staged deps)
 
 The build id `?fn=version` reports is `MBT_COMMIT` from mbt's generated
 `<buildstamp.h>`: the short HEAD, with `-dirty` when a tracked file differed
-from it at build time.
+from it at build time. `/zosmf/test` exists only in a development build (a
+version ending in `-dev`, #508); a release deploy is checked with
+`GET /zosmf/info`, field `zosmf_full_version`.
 
 The Desktop is uploaded with `mbt run deploy-desktop` (`mbt/init.lua`, which
 calls `tools/deploy-desktop.sh`).
@@ -103,7 +105,8 @@ compresses the library -- every replaced member leaves its old space dead,
 and mbt refuses a deploy that would not fit -- and restarts HTTPD. Then check:
 
 ```
-GET /zosmf/test?fn=version        # "build" must equal the HEAD you built
+GET /zosmf/test?fn=version        # "build" must equal the HEAD you built (dev builds)
+GET /zosmf/info                   # zosmf_full_version, the only check on a release
 ```
 
 On mvsdev a deploy or an MVS test run needs a slot from the MBT session.
@@ -354,7 +357,10 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 See [internals/storage-probe.md](internals/storage-probe.md).
 
 Every request needs READ on `FACILITY MVSMF.CONSOLE` (`console_authorize()` as the first statement of `testHandler` and `testWildcardHandler`, fail-closed, #460), so the user who checks the build id needs it too. The endpoint has **no per-function gate and must not grow one back** (#343);
-building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered.
+building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and
+so does any version that does not end in `-dev` (#508): a release answers 404.
+No function of it returns session data. Suites that need a probe ask
+`mvsmf_dev_build` (`tests/lib/conn.sh`) and skip on a release.
 `fn=textsum` / `fn=textdump` and the gate history: `internals/test-endpoint.md`.
 
 ### Known Platform Bugs

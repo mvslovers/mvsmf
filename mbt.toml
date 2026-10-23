@@ -174,6 +174,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTHOST]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTBKND: #508 — /zosmf/test is registered only when the stamped version ends
+# in "-dev", and everything else must fail closed. Portable C (`mbt test`); the
+# TU #includes src/buildkind.c so it drives the real function mvsmf.c calls — do
+# not list buildkind.c here.
+[test.TSTBKND]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
 # translation (IBM-1047 content was always read as CP037), and BINARY or
 # binary;param must not fall back to text. Portable C (`mbt test`); the TU

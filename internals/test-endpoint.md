@@ -35,7 +35,40 @@ SVC 34 in supervisor state, never had one. `&hold=` went with it: it was the
 only knob that degraded *other* requests, and #287, which it was built for, is
 closed. The boundary that means something is the route: building with
 `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, which covers
-`fn=cmd` too. Default is ON — `fn=version` is how a deploy is verified.
+`fn=cmd` too. The flag is off by default; what leaves the endpoint out of a
+release is the next paragraph.
+
+**A release does not register it (#508).** `mvsmf.c` registers the two routes
+only when `build_is_dev(MBT_VERSION)` (`buildkind.c`, host test `tstbknd.c`)
+says the stamped version ends in `-dev`. mbt 3 has no release build: `mbt
+package` is the same compile as `mbt build`, `[build] cflags` is global, a hook
+cannot change the build, and `<buildstamp.h>` carries the version, not a build
+kind. So the version is the only thing that tells a tag (`1.4.0`) from a
+development build (`1.4.0-dev`). The decision fails closed: a missing, odd or
+differently suffixed version counts as a release. A package built from a tag
+before this change contained the endpoint and all its functions; now it is
+unreachable in a release (`404`), and a `-dev` prerelease package still has it.
+
+**What this does not do:** the code stays in the release module, only
+unreachable. Leaving it out of the object needs mbt to emit a compile-time
+release flag (`MBT_RELEASE`) so `#if` can drop `testapi.c`; until then
+`-DMVSMF_NO_TEST_ENDPOINT` stays the only way to build it out. A `-dev` build on
+a production system has the endpoint -- DEV libraries have no business there
+(root `CLAUDE.md`).
+
+**Checking a release deploy** needs no endpoint: `GET /zosmf/info`, field
+`zosmf_full_version`. It is the version only, with no git hash; a tagged build
+is identified by its version. `fn=version`, `fn=storage`, `fn=textsum` and every
+other function exist on development builds only.
+
+**Tests that need the endpoint** run against a development build. `curl-diag`
+skips on a release, `curl-consgate` leaves its `/zosmf/test` rows out, and the
+`fn=dscb` assertions of `curl-datasets` skip, all by asking `mvsmf_dev_build`
+(`tests/lib/conn.sh`). The load and soak scripts (`poll-425.sh`, `load-452.sh`,
+`storage-classes.sh`, `soak-176.sh`, `loadtest-176.sh`) are probe-driven by
+design: run them on a development build. Some assertions that read a probe
+(`mtt_abend_count` in `curl-datasets`, the `fn=syslog` lookup in `curl-jobs`)
+have a fallback and weaken silently on a release rather than fail.
 
 **Who may call it is a separate question, answered once for the whole
 endpoint (#460).** `testHandler` and `testWildcardHandler` start with
@@ -46,6 +79,16 @@ text, and a new `fn=` needs nothing added. It is a gate on the endpoint, not on
 a function, so it is no exception to the rule above: do not add a second check
 inside a `fn=` branch. Consequence for a deploy: the user who confirms the build
 id with `fn=version` needs READ on the profile.
+
+**No function of the endpoint returns session data (#508).** Whatever
+identifies a session or authenticates a caller (a credential, a token value)
+must not be readable through `/zosmf/test`, with or without a flag: the
+endpoint's gate is READ on one FACILITY profile, which says who may issue
+operator commands, not who may see another layer's secrets. `fn=token` shows
+that the line can be drawn: it reports the token's length and how the caller
+authenticated, never the value. The one function that returned a credential
+was removed outright; a function that needs such a value to work belongs in
+the handler that uses it, not in a probe.
 
 `tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
 caught, the server keeps serving, and it costs no storage. It deliberately

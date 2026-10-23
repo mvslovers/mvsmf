@@ -22,10 +22,12 @@
  *
  * Free of project headers on purpose, apart from the MVS ones below:
  * test/host/tstmtsn.c supplies MTENTRY, CMTT, Session and the cmtt_* calls
- * itself and #includes src/mttsnap.c, so the real code runs on the host.
+ * itself and #includes src/mttsnap.c, so the real code runs on the host. It
+ * defines MTTSNAP_FAKES to keep the MVS headers out: `mbt test` builds with the
+ * host compiler (no __MVS__), `mbt build --all --tests` with cc370 (__MVS__).
  */
 
-#ifdef __MVS__
+#if defined(__MVS__) && !defined(MTTSNAP_FAKES)
 #include <mvs/mtt.h>
 #include "router.h"
 #endif
@@ -47,21 +49,22 @@
 #define MTT_ENTRY_MAX  256
 
 /* The length of an entry's data, clamped to 0..MTT_ENTRY_MAX (#176). */
-int mtt_len(const MTENTRY *e);
+int mtt_len(const MTENTRY *e)                               asm("MFMTTLEN");
 
 /* The length of s without trailing blanks. */
-int rstrip_len(const char *s, int len);
+int rstrip_len(const char *s, int len)                      asm("MFRSTRIP");
 
 /* Copy the table. On success returns 0 with *cmtt the handle to cmtt_free(),
  * *arr the entries and *n their number (0 for an empty table). On failure
  * returns MTT_SNAP_FAILED with nothing to free. */
-int mtt_snap_open(Session *session, CMTT **cmtt, MTENTRY ***arr, unsigned *n);
+int mtt_snap_open(Session *session, CMTT **cmtt, MTENTRY ***arr,
+                  unsigned *n)                                asm("MFMTTSNP");
 
 /* Count the entries whose upper-cased text contains keyword_upper; copy the
  * newest match's message text, right-stripped, into latest (empty if none).
  * Returns the count, or MTT_SNAP_FAILED when the snapshot could not be taken --
  * which is not a count of 0. */
 int mtt_detect_count(Session *session, const char *keyword_upper,
-                     char *latest, size_t lsz);
+                     char *latest, size_t lsz)             asm("MFMTTDET");
 
 #endif /* MTTSNAP_H */

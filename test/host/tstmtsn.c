@@ -40,6 +40,9 @@
 
 /* ---- fakes for what <mvs/mtt.h> and router.h provide on MVS ---------- */
 
+/* keep the real headers out also when cc370 builds this test (__MVS__) */
+#define MTTSNAP_FAKES
+
 typedef struct {
 	short mtentlen;
 	char  mtentdat[96];

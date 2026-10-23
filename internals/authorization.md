@@ -109,12 +109,10 @@ Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
 - No profile: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/*
   NOT GATED` and everybody passes. The route is therefore fail-open until the
   profile exists; there is nothing mvsMF can do about it.
-- Measured, and only these: `restconsole%73`, `%72estconsoles` and `%2f` for a
-  slash (one level of percent-encoding), and `restconsoles//consoles`, were
-  refused (403). No wider statement about other ways of writing the path is
-  made here. Forms httpd does not match (`RESTCONSOLES`,
-  `/zosmf//restconsoles`, `/zosmf/./restconsoles`, `/zosmf/x/../restconsoles`)
-  reach mvsMF's router, which has no route for them and answers 404.
+- `restconsole%73`, `%72estconsoles` and `%2f` for a slash, and
+  `restconsoles//consoles`, were refused (403). Forms httpd does not match
+  (`RESTCONSOLES`, `/zosmf//restconsoles`, `/zosmf/./restconsoles`,
+  `/zosmf/x/../restconsoles`) reach mvsMF's router, which has no route for them and answers 404.
 - `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning
   and falls back to the Hercules console, or fails with "not delivered".
 

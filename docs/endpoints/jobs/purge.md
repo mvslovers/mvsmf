@@ -32,7 +32,7 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 selected the job's output (a punch or printer waiting for its forms, for
 example) JES2 marks the job for purge and keeps it on the queue until that
 output is released. After JES2 took the request, mvsMF looks at the queue
-again, for up to about two seconds:
+again, for up to about a second:
 
 | What the queue shows | `message` |
 |----------------------|-----------|
@@ -42,7 +42,7 @@ again, for up to about two seconds:
 The status is `200` and `status` is `0` in both cases: the reference answers an
 asynchronous purge the same way, and a status outside the z/OSMF list is not an
 option. A client that must know the spool is free reads `message`, or lists the
-job again. The second answer is the only one that takes the extra seconds.
+job again. The second answer is the only one that takes the extra time.
 
 `job-correlator` is not emitted — MVS 3.8j has no job correlators.
 

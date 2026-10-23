@@ -72,7 +72,7 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   it is still there the status stays 200, as the reference answers an
   asynchronous purge, `status` stays 0, and `message` says that the purge is
   requested and the job stays until its output is released. The look costs
-  nothing on a purge that completes and about two seconds when it does not.
+  nothing on a purge that completes and about a second when it does not.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.

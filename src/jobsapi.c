@@ -1420,7 +1420,7 @@ static void purge_nap(void)
 /* 1 when the job is still on the queue after a purge JES2 accepted.  JES2
    works the request on its own task and the checkpoint jesjob() reads trails
    it, so a job that is going away may still be listed for a moment: look up
-   to PURGE_LOOKS times, PURGE_LOOKS-1 naps apart (about 2 s), and stop at the
+   to PURGE_LOOKS times, PURGE_LOOKS-1 naps apart (about a second), and stop at the
    first look that no longer finds it.  The caller was cleared to purge this
    job, so the same JWN_OP_PURGE verdict is what hides it here. */
 #define PURGE_LOOKS 5

@@ -329,9 +329,14 @@ Which requests get it depends on the route lines:
   #cmd("MVSMF.ACCESS") as well. A user ID without the access to the catch-all gets the
   403 on every path under #cmd("/zosmf/") that the other lines do not cover. A
   user ID without access to #cmd("MVSMF.CONSOLE") gets it only under
-  #cmd("/zosmf/restconsoles/").
+  #cmd("/zosmf/restconsoles/"). On the diagnostic endpoint
+  #cmd("/zosmf/test") the same user ID gets the 500 of mvsMF instead
+  (@ug-security-console-test).
 - A route line whose profile does not exist is not checked at all. HTTPD
-  reports that when it starts, and every user that got in passes.
+  reports that when it starts, and every user that got in passes. This holds
+  for the route of HTTPD. The console services and the diagnostic endpoint
+  refuse every user while the profile of #cmd("MVSMF.CONSOLE") does not exist,
+  because mvsMF checks it too (@ug-security-console-start).
 
 Ask the administrator for access to the profile that your 403 belongs to. A
 user ID that has access does not meet this 403. It meets the checks of the data

@@ -5,7 +5,7 @@
 #   MVSMF_URL=http://localhost:8080 MVSMF_USER=... MVSMF_PASS=... \
 #       MVSMF_USER2=... MVSMF_PASS2=... sh capture/gate.sh PHASE
 #
-# PHASE is one of: gated consonly test order noprofile.  The phases are run one after
+# PHASE is one of: gated consonly test order noprofile warn.  The phases are run one after
 # the other and HTTPD is restarted between them with the HTTPPRM member the
 # phase names (the script does not restart HTTPD, it does not edit the member).
 #
@@ -17,9 +17,14 @@
 #              listed before /zosmf/*, and the profile loaded (see rakf.sh console).
 #   consonly   (after gated, with MVSMF_USER3 and MVSMF_PASS3: a user who has READ on
 #              MVSMF.CONSOLE and none on MVSMF.ACCESS; rakf.sh consonly)
-#   test       (after gated) the diagnostic endpoint, which the route does not cover.
+#   test       (after gated) the diagnostic endpoint, asked by a user without READ.
 #   order      the same route listed AFTER /zosmf/*.
-#   noprofile  the route in the right place, the profile deleted (rakf.sh noconsole).
+#   noprofile  the route in the right place, the profile deleted (rakf.sh noconsole),
+#              HTTPD started after that. Both users are refused: mvsMF checks the
+#              profile itself.
+#   warn       (after noprofile) the profile defined again (rakf.sh console); the
+#              log of the console service is readable only now, and still holds
+#              the line of the start without the profile.
 #
 # The console name defcn is only a label in the returned addresses.
 
@@ -64,7 +69,7 @@ consonly)
 	ses ug-security/g-consonly-jobs.txt 'curl -si -u "$MVSMF_USER3:$MVSMF_PASS3" "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"'
 	;;
 test)
-	ses ug-security/g-test.txt 'curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T" | head -9'
+	ses ug-security/g-test.txt 'curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T"'
 	;;
 order)
 	issue MVSMF_USER2 MVSMF_PASS2 g-order.txt
@@ -72,10 +77,13 @@ order)
 	;;
 noprofile)
 	issue MVSMF_USER2 MVSMF_PASS2 g-noprofile.txt
+	issue MVSMF_USER MVSMF_PASS g-noprofile-ops.txt
+	;;
+warn)
 	ses ug-security/g-warn.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/restconsoles/v1/log?timeRange=10m" | grep -o "HTTPD425W[^\"]*" | tail -1'
 	;;
 *)
-	echo "usage: gate.sh gated|consonly|test|order|noprofile" >&2
+	echo "usage: gate.sh gated|consonly|test|order|noprofile|warn" >&2
 	exit 1
 	;;
 esac

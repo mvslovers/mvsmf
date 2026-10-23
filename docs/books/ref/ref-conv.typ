@@ -304,6 +304,9 @@ Some conditions have the same report in every area:
       [0], [#cmd("LMOPEN error"). #cmd("details") has one sentence:
       #cmd("Authorization failed - You may not use this protected data set."),
       and for the abend the same sentence followed by #cmd("Open 913 abend.")],
+    [Authorization refused: the console services, or the diagnostic endpoint], [500], [4], [8],
+      [0], [#cmd("LMOPEN error"). #cmd("details") has one sentence:
+      #cmd("Authorization failed - You may not use this service.") (@ref-cons-auth)],
     [Encoding not supported], [500], [16], [121], [-1037303780],
       [#cmd("iconv_open() failed."), and a sentence in #cmd("details") that
       names the encoding from #cmd("X-IBM-Data-Type")],

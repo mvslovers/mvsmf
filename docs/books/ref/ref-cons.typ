@@ -12,16 +12,11 @@ The console services clone the console REST interface of IBM z/OSMF. mvsMF
 implements the parts described here. Section @ref-cons-unsup lists what it does
 not.
 
-#note[*The console code of mvsMF makes no authorization check of its own.* Any
-caller that HTTPD lets in to the module can issue any operator command. The
-sample HTTPD configuration of mvsMF 1.4.0 puts the console routes behind the
-RAKF resource #cmd("FACILITY:MVSMF.CONSOLE") (@ref-httpd, @ref-auth). See
-"Protecting the Console Services" in the _mvsMF User's Guide_.]
-
-#note[*A defect* (mvsmf\#460): the diagnostic endpoint #cmd("/zosmf/test") with
-#cmd("fn=cmd") or #cmd("fn=mtt") lies under the catch-all route, not under the
-console route, so the console gate does not cover it (@ref-test). The issue is
-open.]
+#note[*Every console request needs READ access to #cmd("FACILITY:MVSMF.CONSOLE").*
+mvsMF asks RAKF itself, as the first statement of each of the four handlers
+(@ref-cons-auth). The sample HTTPD configuration of mvsMF 1.4.0 puts the
+console routes behind the same resource as a first layer (@ref-httpd,
+@ref-auth). See "Protecting the Console Services" in the _mvsMF User's Guide_.]
 
 == Requests <ref-cons-req>
 
@@ -54,6 +49,42 @@ Common rules:
 - The console requests report errors in the form of @ref-cons-errors, not in the
   form of the data set and job requests.
 - The answers are JSON. No console request changes a data set, a job or a file.
+
+== Authorization <ref-cons-auth>
+
+#idx("authorization", "console")#idx("MVSMF.CONSOLE")
+The first statement of the handler of each of the four requests is the
+permission check. It runs before the handler reads a header, a parameter or
+the body, so no check of @ref-cons-order, and no key, cursor or detection, is
+reached by a caller who fails it. The same check is the first statement of the
+handlers of the diagnostic endpoint (@ref-test-access).
+
+mvsMF asks RAKF for READ access to the resource #cmd("MVSMF.CONSOLE") in the
+class #cmd("FACILITY"), under the identity that HTTPD resolved for the request.
+It lets the request go on only when RAKF answers that the access is permitted.
+These cases are refused:
+
+- there is no profile for the resource;
+- the profile does not give the caller READ;
+- RAKF gives any other answer;
+- the request has no resolved identity. The answer is then the 401 of
+  @ref-auth.
+
+"No profile" counts as "not permitted". This is the difference to the route
+check of HTTPD, which lets everyone through while no profile covers the
+resource (@ref-httpd). A system that has not defined the profile therefore refuses the console
+services to every user, administrators included, until the profile is defined
+and READ is granted.
+
+A refusal has the shape of the authorization refusals of the data set
+services, not the console error shape of @ref-cons-errors: HTTP 500, category 4,
+rc 8, reason 0, the message #cmd("LMOPEN error"), and one detail,
+#cmd("Authorization failed - You may not use this service."). mvsMF writes no
+operator message for it.
+
+The route lines of HTTPD are a first layer in front of this check. A caller
+without READ access to the resource gets the plain-text 403 of HTTPD when
+the console route matches, and the 500 of mvsMF when it does not (@ref-httpd).
 
 == Issue a Command <ref-cons-issue>
 
@@ -135,6 +166,7 @@ Any other field of the body is ignored.
 
 mvsMF checks in this order and answers the first failure:
 
++ the permission for #cmd("MVSMF.CONSOLE") (@ref-cons-auth);
 + the #cmd("Content-Type") (reason code 6);
 + the length of the console name (reason code 14);
 + the body: storage, size, presence (reason codes 1, 12);
@@ -746,8 +778,9 @@ name, and with return code 8 it is a storage failure after the command was issue
 Reason codes 12, 1, 15 and 17 also occur more than once. Read the return code
 and the text with the reason code.
 
-The console error shape applies to errors of the console handlers. A user ID that
-mvsMF does not let in gets the #cmd("401") of @ref-auth. A route or method that
+The console error shape applies to errors of the console handlers. The refusal
+by the permission check has the shape of the data set services (@ref-cons-auth).
+A user ID that mvsMF does not let in gets the #cmd("401") of @ref-auth. A route or method that
 does not exist gets the router's reply (@ref-conv).
 
 == What Is Not Supported <ref-cons-unsup>

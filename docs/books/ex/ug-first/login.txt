@@ -1,0 +1,16 @@
+$ curl -si -c cookies.txt -X POST -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/services/authenticate"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:57:56 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+Content-Type: application/json
+Content-Length: 52
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"returnCode":0,"reasonCode":0,"message":"Success."}

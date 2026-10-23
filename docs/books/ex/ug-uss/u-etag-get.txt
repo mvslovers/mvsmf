@@ -1,0 +1,19 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Return-Etag: true' \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/hello.txt"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:45:17 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+Content-Type: text/plain
+ETag: A17FDAE30000001D
+Transfer-Encoding: chunked
+
+Hello from mvsMF
+Second line

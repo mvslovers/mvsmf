@@ -1,0 +1,4 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restfiles/ds/SYS1.SECURE.CNTL(USERS)" | grep '^JONES'
+JONES    AUDIT             N N
+JONES    MVSMFUSR          N N
+JONES    USER    *         N N

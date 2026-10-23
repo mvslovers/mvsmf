@@ -1,0 +1,15 @@
+$ printf 'HELLO FROM CURL\nSECOND LINE\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+HTTP/1.1 204 No Content
+Date: Fri, 23 Oct 2026 08:16:41 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+

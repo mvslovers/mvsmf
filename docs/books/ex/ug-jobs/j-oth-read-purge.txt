@@ -1,0 +1,16 @@
+$ curl -si -X DELETE -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM5/$VJOBID"
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 23 Oct 2026 07:55:51 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 122
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":4,"reason":0,"message":"LMOPEN error","details":["Authorization failed - You may not purge this job."]}

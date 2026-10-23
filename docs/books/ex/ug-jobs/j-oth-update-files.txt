@@ -1,0 +1,16 @@
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM5/$VJOBID/files"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:55:37 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 1140
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+[{"recfm":"F","records-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM5/JOB00060/files/1/records","subsystem":"JES2","byte-count":null,"lrecl":80,"jobid":"JOB00060","ddname":"JESJCLIN","id":1,"record-count":4,"class":"H","jobname":"MVSMFDM5","stepname":"JES2","procstep":null},{"recfm":"UM","records-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM5/JOB00060/files/2/records","subsystem":"JES2","byte-count":null,"lrecl":133,"jobid":"JOB00060","ddname":"JESMSGLG","id":2,"record-count":7,"class":"H","jobname":"MVSMFDM5","stepname":"JES2","procstep":null},{"recfm":"F","records-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM5/JOB00060/files/3/records","subsystem":"JES2","byte-count":null,"lrecl":90,"jobid":"JOB00060","ddname":"JESJCL","id":3,"record-count":4,"class":"H","jobname":"MVSMFDM5","stepname":"JES2","procstep":null},{"recfm":"VA","records-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM5/JOB00060/files/4/records","subsystem":"JES2","byte-count":null,"lrecl":133,"jobid":"JOB00060","ddname":"JESYSMSG","id":4,"record-count":19,"class":"H","jobname":"MVSMFDM5","stepname":"JES2","procstep":null}]

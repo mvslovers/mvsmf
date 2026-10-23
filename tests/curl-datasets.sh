@@ -3079,7 +3079,7 @@ DSCB_UNIT() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1"
 DEV_BUILD=0
 mvsmf_dev_build && DEV_BUILD=1
 
-if [ "$DEV_BUILD" = 1 ]; then
+if [[ "$DEV_BUILD" == 1 ]]; then
 	assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
 else
 	skip "like: derived allocation in tracks (needs ?fn=dscb, development builds only)"
@@ -3091,7 +3091,7 @@ curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/d
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
 assert_http_status "201" "$HTTP_CODE" "like: create with an explicit primary in cylinders"
 
-if [ "$DEV_BUILD" = 1 ]; then
+if [[ "$DEV_BUILD" == 1 ]]; then
 	CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
 	CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
 	MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")

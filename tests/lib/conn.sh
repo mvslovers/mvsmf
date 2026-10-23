@@ -32,7 +32,8 @@
 #   mvsmf_dev_build succeeds when the server is a development build, the only
 #                   kind that registers /zosmf/test (#508): the version GET
 #                   /zosmf/info reports ends in "-dev". A suite whose
-#                   assertions need an fn= probe asks first and skips.
+#                   assertions need an fn= probe asks first and skips. If the
+#                   version cannot be read at all, it stops the suite.
 #   mvsmf_on_exit   adds a command to the EXIT trap. Use it instead of `trap
 #                   ... EXIT`, which would replace the cleanup of this file.
 # =========================================================================
@@ -140,9 +141,15 @@ zowe() {
 ZOWE_CONN=(--host "$MVSMF_HOST" --port "$MVSMF_PORT"
 	--protocol "$MVSMF_PROTOCOL" --reject-unauthorized false)
 
+# 0 = development build, 1 = release. A request that returns no version at all
+# is neither: the suite stops (exit 1) instead of reading a failure as "release".
 mvsmf_dev_build() {
 	local v
-	v=$(curl -s -K "$MVSMF_CURLRC" -H 'X-CSRF-ZOSMF-HEADER: 1' \
+	v=$(curl -s -f -K "$MVSMF_CURLRC" -H 'X-CSRF-ZOSMF-HEADER: 1' \
 		"${BASE_URL}/zosmf/info" | jq -r '.zosmf_full_version // empty')
-	case "$v" in *-dev) return 0 ;; *) return 1 ;; esac
+	if [[ -z "$v" ]]; then
+		echo "ERROR: GET /zosmf/info returned no zosmf_full_version; cannot tell a development build from a release." >&2
+		exit 1
+	fi
+	[[ "$v" == *-dev ]]
 }

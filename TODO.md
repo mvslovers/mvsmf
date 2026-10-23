@@ -135,7 +135,7 @@ the next case).
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
 | 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
 | 6 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 7 | #347 | an authenticated user can stop the system | **who** is gated in review (fail-closed check in the handlers, `FACILITY MVSMF.CONSOLE`, console and `/zosmf/test`; #460); **which commands** stays a policy — measured, nothing to delegate to |
+| 7 | ~~#347~~ | fixed in PR #459 and PR #505, merged: **who** is gated (fail-closed check in the handlers, `FACILITY MVSMF.CONSOLE`, console and `/zosmf/test`; #460) | **which commands** stays a policy — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
 | 10 | #345 | superseded by #440 | done with #440 (in review); #417 cancel follows |
@@ -283,17 +283,18 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 7 · #347 — restconsoles authorizes nothing at all
+### 7 · ~~#347~~ — restconsoles authorizes nothing at all
 
 *an authenticated user can stop the system*
 
-**Status, 2026-10-23: the gate on *who* is in review.** Every console handler
+**Status, 2026-10-23: the gate on *who* is merged** (PR #459, PR #505; #347 and #460 are closed). Every console handler
 and both `/zosmf/test` handlers start with `console_authorize()`
 (`consauth.c`): READ on `FACILITY MVSMF.CONSOLE`, fail-closed (no profile, no
 READ, no ACEE: refused), the decision in `authdec.c`, host test
 `tstauthd.c`, MVS matrix `tests/curl-consgate.sh` (#460). The httpd route
-(httpd#335) stays as an extra first layer. Docs: `docs/installation.md`, *Who
-may use the console service and `/zosmf/test`*; `internals/authorization.md`.
+(httpd#335, merged as httpd#338) stays as an extra first layer. Docs:
+`docs/installation.md`, *Who may use the console service and `/zosmf/test`*;
+`internals/authorization.md`.
 What stays open: a **per-command policy** (below, unchanged). The text below is
 the analysis that led here; its `grep` count is of the state before the check.
 
@@ -816,11 +817,12 @@ Pointers only — the reasoning lives in the closing comments.
   failure goes nowhere. One convention, not three decisions. #267 also says how
   to find the rest of the class mechanically rather than by reading — see its
   entry under *Recently closed*.
-- **The authorization endgame** — #347, #329, #345, with `httpd#176` behind
+- **The authorization endgame** — ~~#347~~, #329, #345, with `httpd#176` behind
   them. #347 looked like the least blocked until its measurement came back
-  empty: there is no console authority to delegate to, so all three now wait on
-  policy that has to be invented here. #347 is the one to settle first — it
-  outranks the other two on impact by a wide margin.
+  empty: there is no console authority to delegate to, so the gate on *who* went
+  into the handlers and a RAKF resource instead (PR #459, PR #505, merged); which
+  *commands* a permitted user may issue is still a policy that would have to be
+  invented here.
 
 ## Cross-repo
 

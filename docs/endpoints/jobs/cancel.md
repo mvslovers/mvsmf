@@ -119,9 +119,6 @@ strings of the request. See [Job spool authorization](../../jesspool.md).
 - [Messages](../../messages.md): `MVSMF207E`.
 
 ## Limitations
-- A job that is waiting for an operator reply (for example an allocation
-  message) stays cancel-pending until that reply is given: JES2 has accepted the
-  cancel, but the job does not end by itself.
 - Cannot cancel started tasks or TSO users.
 - Hold and release are not implemented (#424).
 - No support for job correlator IDs.

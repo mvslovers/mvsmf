@@ -174,7 +174,7 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTLSFL]
 rent = false          # mbtcheck.h keeps file-static counters
 
-# TSTHOST: #260— a Host header with no name in front of the colon parsed as
+# TSTHOST: #260 — a Host header with no name in front of the colon parsed as
 # success with an empty string, so /zosmf/info's fallback never ran. Portable C
 # (`mbt test`); the TU #includes src/hostparse.c so it drives the real parser
 # infoapi.c calls — do not list hostparse.c here.

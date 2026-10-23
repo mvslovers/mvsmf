@@ -31,7 +31,7 @@ static char msg[120];
 static void
 check(const void *list, int err, int want, const char *what)
 {
-	sprintf(msg, "%s: outcome %d", what, want);
+	snprintf(msg, sizeof msg, "%s: outcome %d", what, want);
 	CHECK_EQ(list_outcome(list, err), want, msg);
 }
 

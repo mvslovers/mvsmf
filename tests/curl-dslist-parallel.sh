@@ -8,8 +8,8 @@
 # every request, so its system name is SYSyyddd.Thhmmss.RA000.<job>.TMP00001:
 # the same for two requests that start in the same second. One request's
 # close scratched the data set the other was about to open, and the other
-# abended S213-04 -- HTTP 500 and MVSMF901E, about 1 request in 100 at 4 in
-# parallel, never one at a time.
+# abended S213-04 -- HTTP 500 and MVSMF901E, between 1 request in 30 and 1 in
+# 55 at 4 in parallel (11 of 600, 14 of 400).
 #
 # This suite fires N requests, P at a time, and requires every one of them to
 # be answered 200 with the one entry the level names. A wrong answer counts as
@@ -25,7 +25,12 @@
 #
 # Usage:
 #   mbt run rest-tests -- curl-dslist-parallel
-#   mbt run rest-tests -- curl-dslist-parallel 800 8     N and P: requests, parallel
+#   DSLIST_REQUESTS=800 DSLIST_PARALLEL=8 mbt run rest-tests -- curl-dslist-parallel
+#
+# N and P come from DSLIST_REQUESTS (default 400) and DSLIST_PARALLEL (default
+# 4), not from arguments: mbt hands every argument after the suite names to
+# every shell suite, so a flag meant for another suite (--setup) must be
+# harmless here.
 # =========================================================================
 
 set -uo pipefail
@@ -33,12 +38,12 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/lib/conn.sh"
 
-REQUESTS="${1:-400}"
-PARALLEL="${2:-4}"
+REQUESTS="${DSLIST_REQUESTS:-400}"
+PARALLEL="${DSLIST_PARALLEL:-4}"
 LEVEL="SYS1.PARMLIB"
 
 case "$REQUESTS$PARALLEL" in
-	*[!0-9]*|"") echo "ERROR: N and P must be numbers" >&2; exit 1 ;;
+	*[!0-9]*|"") echo "ERROR: DSLIST_REQUESTS and DSLIST_PARALLEL must be numbers" >&2; exit 1 ;;
 esac
 
 OUT="${MVSMF_CONN_DIR}/dslist"

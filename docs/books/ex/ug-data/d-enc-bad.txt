@@ -2,7 +2,7 @@ $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   -H 'X-IBM-Data-Type: text;fileEncoding=IBM-273' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
 HTTP/1.1 500 Internal Server Error
-Date: Fri, 23 Oct 2026 07:45:07 GMT
+Date: Fri, 23 Oct 2026 08:16:45 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive
@@ -12,6 +12,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":121,"category":16,"reason":-1037303780,"message":"iconv_open() failed.","details":["Unsupported encoding in X-IBM-Data-Type 'text;fileEncoding=IBM-273': IBM-037 and IBM-1047 are supported."]}

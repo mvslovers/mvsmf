@@ -10,6 +10,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=HmBBZquTjLH9xvSqz1d+R2rPeacBg7XytUEBXCmynBM=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 []

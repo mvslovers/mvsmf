@@ -9,11 +9,11 @@ $ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
   done
 === file 2
                                                 J E S 2   J O B   L O G
- 2.45.52 JOB   41  $HASP373 MVSMFDM1 STARTED - INIT  1 - CLASS A - SYS MVSC
- 2.45.52 JOB   41  IEF403I MVSMFDM1 - STARTED - TIME=02.45.52
- 2.45.52 JOB   41  IEFACTRT STEP1   /IEBGENER/00:00:00.01/00:00:00.02/00000/MVSMFDM1
- 2.45.52 JOB   41  IEF404I MVSMFDM1 - ENDED - TIME=02.45.52
- 2.45.52 JOB   41  $HASP395 MVSMFDM1 ENDED
+ 3.15.35 JOB   77  $HASP373 MVSMFDM1 STARTED - INIT  1 - CLASS A - SYS MVSC
+ 3.15.35 JOB   77  IEF403I MVSMFDM1 - STARTED - TIME=03.15.35
+ 3.15.35 JOB   77  IEFACTRT STEP1   /IEBGENER/00:00:00.02/00:00:00.04/00000/MVSMFDM1
+ 3.15.35 JOB   77  IEF404I MVSMFDM1 - ENDED - TIME=03.15.35
+ 3.15.35 JOB   77  $HASP395 MVSMFDM1 ENDED
 === file 4
 IEF236I ALLOC. FOR MVSMFDM1 STEP1
 IEF237I JES2 ALLOCATED TO SYSPRINT
@@ -21,24 +21,24 @@ IEF237I JES2 ALLOCATED TO SYSUT1
 IEF237I JES2 ALLOCATED TO SYSUT2
 IEF237I DMY  ALLOCATED TO SYSIN
 IEF142I MVSMFDM1 STEP1 - STEP WAS EXECUTED - COND CODE 0000
-IEF285I   JES2.JOB00041.SO0102                         SYSOUT
-IEF285I   JES2.JOB00041.SI0101                         SYSIN
-IEF285I   JES2.JOB00041.SO0103                         SYSOUT
-IEF373I STEP /STEP1   / START 26296.0245
-IEF374I STEP /STEP1   / STOP  26296.0245 CPU    0MIN 00.01SEC SRB    0MIN 00.00SEC VIRT    36K SYS   192K
-**** JOB NAME: MVSMFDM1 JOBCARD READ 2026/296 02:45:52 370/148 VS2 R03.8 MVSC ******************************************************
+IEF285I   JES2.JOB00077.SO0102                         SYSOUT
+IEF285I   JES2.JOB00077.SI0101                         SYSIN
+IEF285I   JES2.JOB00077.SO0103                         SYSOUT
+IEF373I STEP /STEP1   / START 26296.0315
+IEF374I STEP /STEP1   / STOP  26296.0315 CPU    0MIN 00.02SEC SRB    0MIN 00.00SEC VIRT    36K SYS   192K
+**** JOB NAME: MVSMFDM1 JOBCARD READ 2026/296 03:15:35 370/148 VS2 R03.8 MVSC ******************************************************
 *                                                                                                                                  *
-*  STEP NUMBER:          1  USER CORE:         36K  START TIME:   02:45:52     CPU TIME:    00:00:00.01  ACTIVE TIME:  00:00:00.01 *
-*  STEP NAME:     STEP1     SYSTEM CORE:      192K  STOP TIME:    02:45:52     SRB TIME:    00:00:00.00  ALLOC TIME:   02:45:52    *
-*  PROGRAM NAME:  IEBGENER  REGION SIZE:      512K  ELAPSED TIME: 00:00:00.02  TCB TIME:    00:00:00.01  PROGRAM LOAD: 02:45:52    *
+*  STEP NUMBER:          1  USER CORE:         36K  START TIME:   03:15:35     CPU TIME:    00:00:00.02  ACTIVE TIME:  00:00:00.04 *
+*  STEP NAME:     STEP1     SYSTEM CORE:      192K  STOP TIME:    03:15:35     SRB TIME:    00:00:00.00  ALLOC TIME:   03:15:35    *
+*  PROGRAM NAME:  IEBGENER  REGION SIZE:      512K  ELAPSED TIME: 00:00:00.04  TCB TIME:    00:00:00.02  PROGRAM LOAD: 03:15:35    *
 *  CONDITION CODE:   00000  PERFORMANCE GROUP: 004                                                                                 *
 *                           JES2 CARDS:          0       SERVICE UNITS  PAGES IN/OUT  # SWAPS  PAGES SWAP IN/OUT  VIO PAGES IN/OUT *
-*                                                                   37      0 /    0        0           0 /    0          0 /    0 *
+*                                                                   42      0 /    0        0           0 /    0          0 /    0 *
 *                                                                                                                                  *
 *   ADDR/UNIT I/O COUNT  ADDR/UNIT I/O COUNT  ADDR/UNIT I/O COUNT  ADDR/UNIT I/O COUNT  ADDR/UNIT I/O COUNT  ADDR/UNIT I/O COUNT   *
 ************************************************************************************************************************************
-IEF375I  JOB /MVSMFDM1/ START 26296.0245
-IEF376I  JOB /MVSMFDM1/ STOP  26296.0245 CPU    0MIN 00.01SEC SRB    0MIN 00.00SEC
+IEF375I  JOB /MVSMFDM1/ START 26296.0315
+IEF376I  JOB /MVSMFDM1/ STOP  26296.0315 CPU    0MIN 00.02SEC SRB    0MIN 00.00SEC
 === file 101
 HELLO FROM A JOB THAT MVSMF SUBMITTED
 SECOND LINE OF THE INPUT

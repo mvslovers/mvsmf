@@ -13,6 +13,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"cmd-response":"$HASP100 FTPD     ON STCINRDR\r$HASP373 FTPD     STARTED\rIEF403I FTPD - STARTED - TIME=02.46.19\rFTPD000I FTPD 1.2.0 (57634A9) STARTING\rFTPD005I LIBC370 2.10.3 (A790DC4)\rFTPD008I AUTHORIZED BY SVC (MODULE KEY 8)\rFTPD004I STC IDENTITY SET TO FTPD/USER VIA RACINIT\rFTPD054I LISTENING ON ANY PORT 2121\rFTPD001I FTPD 1.2.0 READY\r","cmd-response-key":"E378D75C0B6FE880","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378D75C0B6FE880","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378D75C0B6FE880","status":"detected","msg":"FTPD054I LISTENING ON ANY PORT 2121"}

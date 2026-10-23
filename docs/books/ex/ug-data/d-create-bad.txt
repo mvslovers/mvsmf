@@ -3,7 +3,7 @@ $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X POST \
   -d '{"dsorg":"PS","recfm":"FB"}' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.BAD"
 HTTP/1.1 400 Bad Request
-Date: Fri, 23 Oct 2026 07:45:04 GMT
+Date: Fri, 23 Oct 2026 08:16:41 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
@@ -13,6 +13,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":8,"category":6,"reason":3,"message":"Invalid or missing allocation parameters"}

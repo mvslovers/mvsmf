@@ -11,6 +11,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=KTakhdxToIwepMzQlQJ8FdeD44fUDs5ELa0tCKLrb6Y=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":8,"category":4,"reason":0,"message":"LMOPEN error","details":["Authorization failed - You may not purge this job."]}

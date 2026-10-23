@@ -11,6 +11,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=A+mE62kRaJ/3/K3d0hpKiqTJumxdiMJX+eH+rBCLcw4=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":4,"category":6,"reason":2,"message":"Job 'MVSMFDM5(JOB00044)' not found"}

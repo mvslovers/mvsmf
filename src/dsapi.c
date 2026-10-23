@@ -13,6 +13,7 @@
 #include <ibm/mvs/dcbd.h>
 #include <errno.h>
 #include <mvs/racf.h>
+#include <mvs/lock.h>
 
 #include "dsapi.h"
 #include "dsapi_err.h"
@@ -1426,6 +1427,36 @@ dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,
 	return !(cmp < 0 || (start_after && cmp == 0));
 }
 
+/* __listds() under the ENQ that keeps two requests from naming the same
+   temporary data set (#436, dsapi.h). Blocking, no budget: __listc() already
+   runs IDCAMS one request at a time, so a waiter waits for what it would have
+   waited for anyway.
+
+   errno is read before the DEQ and put back after it: it is how a caller tells
+   a storage shortage (ENOMEM, #360) from an empty level.
+
+   If the ENQ is not granted (it returns 8 only when this task already holds
+   it, which no path does), the list goes ahead unlocked as it always did, and
+   nothing is released that was not taken. */
+DSLIST **dslist_locked(Session *session, const char *level, const char *filter)
+{
+	DSLIST	**dslist;
+	int	saved_errno;
+
+	session->dslist_lock = (lock_res(DSLIST_LOCK_RNAME, LOCK_EXC) == 0);
+
+	dslist = __listds(level, "NONVSAM VOLUME", filter);
+	saved_errno = errno;
+
+	if (session->dslist_lock) {
+		session->dslist_lock = 0;
+		unlock_res(DSLIST_LOCK_RNAME, LOCK_EXC);
+	}
+
+	errno = saved_errno;
+	return dslist;
+}
+
 int datasetListHandler(Session *session)
 {
 	/* signed, and that is the whole point: `if ((rc = http_printf(...)) < 0)`
@@ -1490,7 +1521,7 @@ int datasetListHandler(Session *session)
 	}
 
 	extract_level_prefix(dslevel, level_buf, sizeof(level_buf), &filter);
-	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
+	dslist = dslist_locked(session, level_buf, filter);
 
 	/* NULL with errno ENOMEM is a storage shortage, not an empty level: an
 	   empty items array would tell the client the catalog has nothing there

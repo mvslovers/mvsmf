@@ -91,7 +91,7 @@ CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
 against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
-stand. Open before the last pass: #372, #425, #428, #436, #452, #453, #454, #449.
+stand. Open before the last pass: #372, #425, #428, #452, #453, #454, #449.
 **#426 is done in its PR**: a purge JES2 only accepts (output held on a device)
 stays 200 with `status: 0`, and `message` now says the purge is only requested
 (`internals/zosmf-conformance.md`). What zxp answers for such a purge is not

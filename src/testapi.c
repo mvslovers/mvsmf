@@ -21,6 +21,7 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "testapi.h"
+#include "dsapi.h"            /* dslist_locked -- fn=listds (#436) */
 #include "blkptrk.h"          /* blocks_per_track -- fn=dscb (#439) */
 #include "jobauth.h"
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
@@ -448,7 +449,7 @@ int testHandler(Session *session) {
     if (!level)
       level = "SYS1";
 
-    dslist = __listds(level, "NONVSAM VOLUME", filter);
+    dslist = dslist_locked(session, level, filter);
     /* NULL with ENOMEM is a storage shortage, not an empty level (#360) */
     nomem = (!dslist && errno == ENOMEM);
 

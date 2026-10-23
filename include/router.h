@@ -107,6 +107,11 @@ struct session {
        before an abend is NOT released by task termination and would wedge the
        console endpoint for the life of the STC. */
     void *console_lock;                   /**< Held console ENQ, or NULL */
+    /* Data set list lock (#436): nonzero while this request holds the ENQ
+       dslist_locked() takes around __listds(). Tracked for the same reason as
+       console_lock: recovery keeps the task alive, so task end does not
+       release it. */
+    int dslist_lock;                      /**< Nonzero while the list ENQ is held */
 } __attribute__((aligned(FULL_WORD_ALIGNMENT)));
 
 /**

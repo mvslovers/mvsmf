@@ -124,11 +124,16 @@ Entries skipped by `start` are not charged against `X-IBM-Max-Items`, and
 ## Limitations
 - Only NONVSAM datasets are listed
 - `*` and `**` wildcards are treated identically (both match any number of qualifiers)
+- Lists are served one at a time per server. A list asks the catalog through
+  IDCAMS, which writes into a temporary data set, and two lists must not use
+  the same one (#436). Lists that arrive together wait for each other; none is
+  refused. A list that arrives while another is running is answered after it.
 
 ## Authorization
 
-**None.** This listing reads the catalog and the VTOC and opens nothing, so no
-RACF check is reached: any authenticated caller can enumerate any qualifier.
+**None.** This listing reads the catalog and the VTOC and opens none of the
+listed data sets, so no RACF check is reached: any authenticated caller can
+enumerate any qualifier.
 
 That is deliberate and matches the reference — real z/OSMF lists a data set the
 same userid cannot open, and z/OS does not gate `LISTCAT LEVEL()` per entry

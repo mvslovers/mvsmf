@@ -52,6 +52,19 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   client could not parse any of it. All of them are escaped now: backspace, form
   feed, carriage return, line feed and tab in their short form, the rest as
   `\u00XX`.
+
+- **Data set lists no longer fail with HTTP 500 under parallel requests**
+  (#436). `GET /zosmf/restfiles/ds` has IDCAMS write the catalog listing into a
+  temporary data set. Its name carries nothing that differs from one request
+  to the next, so two lists that started in the same second used the same data
+  set: one scratched it while the other opened it, the open abended `S213-04`,
+  and the client got a 500 with `MVSMF901E` on the console (11 of 600 and 14 of
+  400 requests, four at a time). Lists now take turns on a lock, so a list can
+  wait for another one that is still running. In 800 requests at four at a time
+  and 800 at eight at a time, every one answered 200 with the right entry. If a
+  list abends while it holds the lock, recovery releases it and says so
+  (`MVSMF915I`).
+
 - **The end-of-data estimate for FB data sets is right on a 3380** (#439).
   Binary and record-mode reads of an FB data set are capped at the number of
   records the VTOC says it holds, so a read stops at the last record instead

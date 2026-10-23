@@ -131,7 +131,7 @@ the next case).
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | ~~#209~~ | fixed in the PR for #209, awaiting merge | — |
+| 1 | ~~#209~~ | fixed in PR #482, merged | — |
 | 2 | #326 | its trigger has fired | nothing |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
@@ -160,7 +160,7 @@ PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
 
 ### 1 · ~~#209~~ — `exec-system` and `exec-member` are never emitted
 
-Fixed in the PR for #209, awaiting merge: both fields carry `JESJOB.sysid`
+Fixed in PR #482 (merged): both fields carry `JESJOB.sysid`
 (`JCTRDSID`), measured equal to `__smfid()`. `exec-submitted` is split out as
 #481 (libc370#79 is delivered; `JESJOB.submit_time64`).
 

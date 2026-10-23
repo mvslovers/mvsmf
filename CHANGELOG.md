@@ -45,6 +45,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the
+  job object now carries both, as z/OSMF does. MVS 3.8j has no sysplex and one
+  JES2 member, so both hold the system id JES2 recorded for the job (the SMF
+  id). `exec-submitted` is still missing (#481).
 - **A data set name over 44 characters no longer overruns a buffer on job submit** (#477).
   Submitting a job from a data set copied the quoted name into a 45-byte stack
   buffer using a length taken from the request, so a longer name wrote past it.

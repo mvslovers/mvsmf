@@ -14,7 +14,7 @@ GET
 - `jobid` (optional): Filter by specific job ID.
 - `status` (optional): Filter by job status (`INPUT`, `ACTIVE`, `OUTPUT`). Use `*` for all. See [Status filter](#status-filter).
 - `max-jobs` (optional): Maximum number of jobs **returned** (1-1000). Default: 1000. The filters are applied first, so `max-jobs` caps the matching jobs, not the checkpoint entries scanned.
-- `exec-data` (optional): `Y` adds the execution timestamps to each job object. Any other value (or omitting the parameter) returns the object unchanged. The Zowe CLI sends `exec-data=Y` for `zowe jobs list jobs --exec-data`.
+- `exec-data` (optional): `Y` adds the execution fields (`exec-system`, `exec-member`, `exec-started`, `exec-ended`) to each job object. Any other value (or omitting the parameter) returns the object unchanged. The Zowe CLI sends `exec-data=Y` for `zowe jobs list jobs --exec-data`.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON array of job objects:
@@ -36,14 +36,16 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 ]
 ```
 
-With `exec-data=Y`, two further fields follow `retcode`:
+With `exec-data=Y`, four further fields follow `retcode`:
 
 ```json
+        "exec-system": "MVSC",
+        "exec-member": "MVSC",
         "exec-started": "2026-08-07T18:57:10.000Z",
         "exec-ended": "2026-08-07T18:57:10.000Z"
 ```
 
-See [Execution timestamps](#execution-timestamps).
+See [Execution timestamps](#execution-timestamps) and [Execution system and member](#execution-system-and-member).
 
 ## Authorization
 
@@ -93,12 +95,31 @@ caller's timezone, so a local string would be unlabelled and the client could
 not tell which zone it received. Zowe and browsers localise the instant
 themselves.
 
-**`exec-submitted` is not implemented.** JES2 records it as `JCTRDRON` /
-`JCTRDTON` (time and date on the input processor), which libc370's `JESJOB`
-does not carry — tracked in mvslovers/libc370#79. The field is omitted rather
-than guessed.
+**`exec-submitted` is not implemented yet.** JES2 records it as `JCTRDRON` /
+`JCTRDTON` (time and date on the input processor). libc370 now delivers it, so
+the field is only missing from mvsMF: tracked in mvslovers/mvsmf#481. It is
+omitted rather than guessed.
 
-`exec-system` and `exec-member` are likewise not implemented (mvslovers/mvsmf#209).
+## Execution system and member
+
+With `exec-data=Y` each job also carries `exec-system` and `exec-member`, the
+z/OSMF fields that name the system and the JES2 member that ran the job. Both
+are strings, placed before `exec-started`:
+
+```json
+    "exec-system": "MVSC",
+    "exec-member": "MVSC"
+```
+
+MVS 3.8j has no sysplex and one JES2 member, so the two fields are always equal.
+Both come from the system id JES2 recorded for the job (`JCTRDSID`), the id of
+the system whose input processor read the job in; it is the SMF system id,
+the same value as the realm of the HTTP `WWW-Authenticate` challenge. It is
+not taken from the CVT: its system-name field (`CVTSNAME`) does not exist on
+3.8j.
+
+The value is up to 4 characters. Like the other identifiers of the job object, a
+character that is not a letter, digit, `$`, `#` or `@` is reported as `?`.
 
 ### Provenance of the format
 

@@ -79,9 +79,13 @@ body is then a JSON object with the field #cmd("file"), and the header is
 #cmd("Content-Type: application/json"). The value of the field names the data
 set between two apostrophes, and two slashes come before the first apostrophe.
 The next session submits the member #cmd("JOB2") of the data set
-#cmd("MVSMF_USER.MVSMF.DEMOJCL"):
+#cmd("MVSMF_USER.MVSMF.DEMOJCL"). The member holds the JCL of a job named
+#cmd("MVSMFDM2"). Write it beforehand with the data set services (@ug-data):
 
 #screen(raw(read("../ex/ug-jobs/j-submit-ds.txt"), block: true))
+
+The answer is the same JSON object as for a JCL body. Its job name is the one of
+the JOB statement in the member.
 
 The slashes and the apostrophes are part of the value. The shell expands
 #var("MVSMF_USER") in the example, because the here-document is not quoted. mvsMF
@@ -119,15 +123,26 @@ The job from the first session reaches JES2 in this form:
 
 #note[*The password is on the JOB statement.* The card that mvsMF adds carries
 the password of the user. The file #cmd("JESJCL") of the job holds the JCL
-that JES2 read, and a reader of that file can see the card. Treat the
+that JES2 read, and that includes the card. This book shows no session of that
+file, so it does not say whether JES2 masks the password there. Treat the
 file #cmd("JESJCL") of every job that you submitted through mvsMF as a file that
 holds a password, and do not copy it to a place that others read. The sessions
 of this chapter read no #cmd("JESJCL").]
 
-The statement must have room for the added card: a last card that is 70 columns
-or longer is refused (@ug-jobs-submit-fail). A JCL stream without a JOB
-statement is refused as well. The next session sends a card that is no JOB
-statement:
+The statement must have room for the changes. mvsMF refuses the request in
+these cases (@ug-jobs-submit-fail):
+
+- The last card of the JOB statement has 70 or more characters, not counting
+  the blanks at its end, and does not end with a comma. There is no room for the
+  comma;
+- a card with #cmd("NOTIFY=&SYSUID") is 72 characters or longer after mvsMF has
+  put the user ID in;
+- the card that mvsMF adds does not fit even with the short comment. It fits for
+  a user ID and a password of eight characters each.
+
+The answer is 400, with the category 6 and the reason 12. A JCL stream without a
+JOB statement is refused as well, with the reason 4. The next session sends a
+card that is no JOB statement:
 
 #screen(raw(read("../ex/ug-jobs/j-submit-nocard.txt"), block: true))
 
@@ -147,7 +162,8 @@ The cases of the submit request are:
     [The session has no password],
       [400], [#cmd("Job submission requires an authenticated session with a password")],
     [No JOB statement],
-      [400], [#cmd("No valid JOB card found in submitted JCL")],
+      [400], [#cmd("No valid JOB card found in submitted JCL"), or
+        #cmd("No valid JOB card found in dataset") when the JCL comes from a data set],
     [The JOB statement has no room for the added card],
       [400], [#cmd("JOB card too long: no room left for the NOTIFY, USER and PASSWORD operands mvsMF adds")],
     [JSON without a usable #cmd("file") field],
@@ -183,10 +199,12 @@ sessions of this chapter use these query parameters:
   [#cmd("prefix")], [A job name or a pattern for the job name. A star stands for
     any characters and a question mark for one character. A name with no star
     or question mark must match exactly. The case does not matter. The value
-    is cut at 11 characters.],
+    is cut at 11 characters. A value that begins with a star is ignored, and the
+    list is not narrowed by the name.],
   [#cmd("status")], [One of #cmd("ACTIVE"), #cmd("INPUT"), #cmd("OUTPUT"),
     #cmd("XMIT"), #cmd("SETUP"), #cmd("RECEIVE") (@ug-jobs-status). The case
-    does not matter, and the whole word must match.],
+    does not matter, and the whole word must match. A value that begins with a
+    star is ignored.],
   [#cmd("max-jobs")], [The largest number of jobs in the answer. The default and
     the largest value is 1000.],
   [#cmd("jobid")], [One job ID. mvsMF ignores #cmd("prefix") when the request has a
@@ -233,11 +251,12 @@ The field #cmd("retcode") has a value only for a job whose status is
     [Value], [Meaning],
     [#cmd("CC 0000")], [The job ended. The number is the completion code of the
       job, with four digits.],
-    [#cmd("ABEND S0C4")], [The job ended with a system abend. The text after
-      #cmd("S") is the abend code.],
+    [#cmd("ABEND S806")], [The job ended with a system abend. The text after
+      #cmd("S") is the abend code, three hexadecimal digits.],
     [#cmd("ABEND U0123")], [The job ended with a user abend. The text after
-      #cmd("U") is the abend code.],
-    [#cmd("JCL ERROR")], [The job ended because of an error in its JCL.],
+      #cmd("U") is the abend code, four decimal digits.],
+    [#cmd("JCL ERROR")], [The job did not run, or ended before a step produced a
+      code, because of an error in its JCL.],
     [#cmd("null")], [The job is not on the output queue, or JES2 holds no
       completion code for it.],
   )
@@ -251,7 +270,8 @@ time. Any value that starts with #cmd("Y") or #cmd("y") switches the fields on.
 #screen(raw(read("../ex/ug-jobs/j-status-exec.txt"), block: true))
 
 The next two sessions ask for a job that ended with a system abend (the program
-#cmd("NOSUCHPG") does not exist) and for a job that ended with a JCL error (the
+#cmd("NOSUCHPG") does not exist, and the system ends the job with the abend
+#cmd("S806")) and for a job that ended with a JCL error (the
 word #cmd("EXECC") is misspelled). The jobs were submitted out of sight, with
 the same request as the first job:
 
@@ -325,8 +345,11 @@ If mvsMF cannot read the spool, the answer is 500 (@ug-jobs-readerr).
 #idx("job", "output", "all files")
 mvsMF has no request that returns every file of a job in one answer. A client
 reads the list and then each file. The next session does this with a small
-shell loop. It leaves the file #cmd("JESJCL") out, because that file holds the
-password of the user (@ug-jobs-jobcard):
+shell loop. It leaves out every file whose name starts with #cmd("JESJCL"),
+that is #cmd("JESJCL") and also #cmd("JESJCLIN") (file 1). The file
+#cmd("JESJCL") holds the password of the user (@ug-jobs-jobcard). The loop
+reads the job log (file 2), the system messages (file 4) and the three files of
+the step (101, 102 and 103):
 
 #screen(raw(read("../ex/ug-jobs/j-read-all.txt"), block: true))
 
@@ -429,9 +452,10 @@ of the job, and purge the job:
 #screen(raw(read("../ex/ug-jobs/j-oth-none-purge.txt"), block: true))
 
 The list for the owner of the first user is empty. The list for #cmd("owner=*")
-holds the jobs of the second user only, and none of the first user. The files
-request and the purge request get the answer 404, the same answer as for a
-job that does not exist.
+holds the own jobs of the second user only, and none of the first user. Here it
+is empty too, because the second user owns no job whose name starts with
+#cmd("MVSMFDM"). The files request and the purge request get the answer 404, the
+same answer as for a job that does not exist.
 
 === READ Access <ug-jobs-others-read>
 
@@ -446,8 +470,9 @@ follow:
 
 With READ access the second user lists the job, asks for its status and its
 files, and reads its output. The purge request is refused with the answer 500,
-the category 4 and the text #cmd("Authorization failed - You may not purge this job.").
-The refusal differs from the 404 of a hidden job on purpose: the user sees the
+the category 4, the message #cmd("LMOPEN error") and the text
+#cmd("Authorization failed - You may not purge this job.") in the field
+#cmd("details"). The refusal differs from the 404 of a hidden job on purpose: the user sees the
 job and may not purge it.
 
 === UPDATE Access <ug-jobs-others-update>

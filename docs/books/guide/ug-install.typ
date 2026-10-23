@@ -27,11 +27,9 @@ The installation needs these parts on the system:
       #cmd("http_new_session") that HTTPD 4.2.0 introduced. There is no test
       for the entry at run time, so the floor is yours to check. The banner
       #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start).],
-    [UFSD 1.4.0 or later], [Only the UFS file service needs it (@ug-uss).
-      Without UFSD every request for a UFS file fails; the data set, job and
-      console services do not depend on it.],
-    [crypto370 1.0.0 or later], [mvsMF is built against it. HTTPD needs it too;
-      install it the way the documentation of HTTPD says.],
+    [UFSD 1.4.0 or later], [Only the UFS file service needs it (@ug-uss). The
+      data set, job and console services do not depend on it. mvsMF is built
+      against UFSD 1.4.0.],
     [RAKF], [Every request runs under the identity of the caller, which HTTPD
       resolves from the user ID and the password or the token. The job access
       described in @ug-install-upgrade needs RAKF 2.0.0 or later.],
@@ -40,10 +38,11 @@ The installation needs these parts on the system:
   )
 ]
 
-#note[The floors of HTTPD, UFSD and crypto370 are prose. SMP4 cannot express a
-floor: a prerequisite (#cmd("REQ")) in a SYSMOD means one exact level. The
-SYSMOD #cmd("TZMF140") therefore names none, and the install job does not
-check any of the three.]
+#note[The floors of HTTPD and UFSD are prose. SMP4 cannot express a floor: a
+prerequisite (#cmd("REQ")) in a SYSMOD means one exact level. The SYSMOD
+#cmd("TZMF140") therefore names none, and the install job does not check
+either. crypto370 and the C library are linked into the load module of mvsMF.
+They need no installation of their own.]
 
 The retcode of a finished job in the jobs service comes from a marker in the
 completion word of the job that a JES2 usermod writes. On a JES2 without that
@@ -137,8 +136,8 @@ two are the only lines you change:
     [#cmd("RECV")], [Receives the SYSMOD #cmd("TZMF140") into the SMP inventory.
       Runs only when #cmd("RECV2") ended with 0.],
     [#cmd("APPLYCHK")], [#cmd("APPLY") with #cmd("CHECK"): reports what would
-      happen and changes nothing. The next step runs only when this one ends
-      with 0.],
+      happen and changes nothing. Runs only when #cmd("RECV") ended with 0. The
+      next step runs only when this one ends with 0.],
     [#cmd("APPLY")], [Copies the module #cmd("MVSMF") into #cmd("MVSMF.LINKLIB").],
     [#cmd("ACCEPT")], [Copies the module into #cmd("MVSMF.AMVSMFLD") and accepts
       the SYSMOD. Runs when #cmd("APPLY") ended with 4 or less.],
@@ -147,7 +146,9 @@ two are the only lines you change:
   )
 ]
 
-// COORDINATOR: capture needed: the SYSPRINT/SMPOUT of the steps APPLY and ACCEPT of MVSMFINS for a first install of the released package (HMA2380 line, HMA2270, return codes per step).
+Each step from #cmd("RECV") on carries a condition on the return code of an
+earlier step. If the condition is not met, the step does not run. A job where
+an early step failed therefore runs fewer steps than the table lists.
 
 *What the install deletes.* Three things go away:
 
@@ -202,8 +203,6 @@ Third, the inventory has the SYSMOD in both zones. Run a job like this one:
 /*
 //
 ```
-
-// COORDINATOR: capture needed: the output of this LIST job and of the TSO command LISTDS 'MVSMF.LINKLIB' MEMBERS on a system after the install.
 
 Each zone shows the status of #cmd("TZMF140") as received, applied and accepted
 (#cmd("REC APP ACC")). The module is installed. mvsMF is not yet running,
@@ -317,32 +316,35 @@ mvsMF”.
 == Starting HTTPD and Checking mvsMF <ug-install-verify>
 
 #idx("verification")#idx("curl")#idx("GET /zosmf/info")
-HTTPD holds the module in storage from its start. A change of the STEPLIB or of
-the route lines takes effect when you stop HTTPD and start it again
-(@ug-ops-start). After the start, the console shows one message
+HTTPD reads the STEPLIB and the route lines when it starts. A change of either
+takes effect when you stop HTTPD and start it again (@ug-ops-start). After the
+start, the console shows one message
 #cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") for each of the four lines,
-and then #cmd("HTTPD001I").
+and then #cmd("HTTPD001I"). @ug-ops-start shows these messages from a real
+start.
 
 With curl, first send a request without a credential:
 
 #screen(raw(read("../ex/ug-install/i-noauth.txt"), block: true))
 
 The answer 401 shows that HTTPD sent the request to mvsMF, and that mvsMF
-wants a credential. Then send the request with your user ID and password:
+wants a credential. The header #cmd("WWW-Authenticate") names the Basic realm
+of HTTPD. Then send the request with your user ID and password:
 
 #screen(raw(read("../ex/ug-install/i-info.txt"), block: true))
 
-The answer is 200 and a JSON document. The field #cmd("zosmf_full_version") has
-the version of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The version is
-the version of the product, not of the build. The build that runs is another
-request:
+The answer is 200 and a JSON document. The header #cmd("Set-Cookie") sets the
+cookie #cmd("LtpaToken2"). The field #cmd("zosmf_full_version") has the version
+of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The version is the version
+of the product, not of the build. The session was taken from a build of the
+development line, so the field says #cmd("1.4.0-dev"). The released module says
+#cmd("1.4.0"). The build that runs is another request:
 
 #screen(raw(read("../ex/ug-install/i-version.txt"), block: true))
 
 The field #cmd("build") has the short commit that the module was built from. The
-field is the way to see that the new module is the one that runs. After a
-replacement of the module in the library it changes only after a restart of
-HTTPD (@ug-ops-build).
+field is the way to see that the new module is the one that runs
+(@ug-ops-build).
 
 #note[*The test service.* The request #cmd("/zosmf/test?fn=version") belongs to
 the diagnostic service of mvsMF. The module as released registers the service,
@@ -366,9 +368,8 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   jobs of their own, and a started task that a client found with
   #cmd("owner=*") disappears from the list. @ug-security describes the profiles
   and the setup step by step.
-+ *Stop HTTPD.* Send #cmd("P HTTPD") and wait for #cmd("HTTPD099I"). The running
-  server holds the old module in storage and keeps using it. Stopped, no request
-  reaches the library while SMP replaces the module.
++ *Stop HTTPD.* Send #cmd("P HTTPD") and wait for #cmd("HTTPD099I"). Stopped, no
+  request reaches the library while SMP replaces the module.
 + *Do not run the allocation job* and do not scratch any data set. The libraries
   exist, and the accepted copy of 1.3.0 is in them.
 + *Edit and submit* #cmd("mvsmf-1.4.0-inst.jcl") as in @ug-install-job. SMP
@@ -386,8 +387,6 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 + *Compare the route lines* in your member of HTTPD with #cmd("MVSMFPRM") of the
   new #cmd("MVSMF.SAMPLIB"). A member of 1.3.0 has three lines. The line for #cmd("/zosmf/restconsoles/*") is new in 1.4.0 and must stand above the line with the wild card.
 + *Start HTTPD* and check the build as in @ug-install-verify.
-
-// COORDINATOR: capture needed: the output of the steps APPLY and ACCEPT of MVSMFINS and of the LIST of TZMF130 and TZMF140 on a system that holds 1.3.0 (return codes per step, HMA2461 after HMA2270, DELBY tombstone).
 
 *Change from mvsMF 1.3.0.* The class #cmd("JESSPOOL") is new in 1.4.0. Version
 1.3.0 does not check it.
@@ -409,17 +408,3 @@ volume, needs the two statements with the right data set names, units and
 volumes. The sample procedure of HTTPD still carries them, with the values of one
 site. A wrong value breaks the jobs service. If the data sets cannot be opened,
 mvsMF writes #cmd("MVSMF201E UNABLE TO OPEN THE JES2 CHECKPOINT AND SPOOL DATA SETS").
-
-== The Desktop <ug-install-desktop>
-
-#idx("Desktop")
-The source repository of mvsMF has a static web page, the Desktop, in its
-directory #cmd("static"). The SMP package does not contain it, and the install
-job does not install it. The script #cmd("tools/deploy-desktop.sh") of the
-repository, called with #cmd("mbt run deploy-desktop"), uploads the files with
-the UFS service of mvsMF to the directory #cmd("/www/mvsmf"). HTTPD serves that
-directory as #cmd("/mvsmf/") when its document root is #cmd("/www"). The
-variable #cmd("DESKTOP_UFS_DIR") of the script names another directory for
-another document root.
-
-// COORDINATOR: decide whether the Desktop belongs in this book for 1.4.0; the only source for what it does is internals/desktop-spec.md, which this chapter did not verify.

@@ -6,7 +6,7 @@
 # Only the checks that a running mvsMF can answer are recorded. The SMP jobs
 # of the chapter (allocation, install, LIST, TSO LISTDS) need a system that
 # takes the released package; they are not captured here and stand in the
-# chapter as prose, marked "COORDINATOR: capture needed".
+# chapter as prose, without a captured session.
 #
 # Needs, on the system under test:
 #

@@ -72,7 +72,7 @@
 #
 # Output to expect in the answers: the "url" and "files-url" fields carry the
 # Host header the client sent, that is the host and port of MVSMF_URL.  The
-# coordinator decides how that is shown in the book.
+# book shows it as a variable.
 
 . "$(dirname "$0")/lib.sh"
 

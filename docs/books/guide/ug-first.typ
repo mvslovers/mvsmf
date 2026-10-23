@@ -15,8 +15,9 @@ HTTPD lets in (@ug-security).
 
 #idx("session")
 Every session in this book was run with the command line client #cmd("curl")
-(version 8.14.1) against mvsMF 1.4.0 on a test system. Four things hold for all
-of them:
+(version 8.14.1) against a build of mvsMF 1.4.0 on a test system. That build
+still carried the version #cmd("1.4.0-dev"), and the sessions show it; a
+release prints #cmd("1.4.0"). Four things hold for all of them:
 
 - The address of mvsMF, the user ID and the password are in three shell
   variables, and the sessions show the variables, not their values:
@@ -93,9 +94,12 @@ JSON object with these fields, in this order:
 #deflist(width: 1.9in,
   [#cmd("zosmf_hostname")], [The host name of the #cmd("Host") header that the
     client sent. #cmd("curl") sends the host name of the URL.],
-  [#cmd("zosmf_port")], [The port of that header.],
+  [#cmd("zosmf_port")], [The port of that header. If the header has no port,
+    mvsMF takes the header #cmd("X-Forwarded-Port") of a proxy, and otherwise
+    80 (443 for a request with the scheme https).],
   [#cmd("zosmf_version")], [Always #cmd("1").],
-  [#cmd("zosmf_full_version")], [The version of mvsMF, such as #cmd("1.4.0").],
+  [#cmd("zosmf_full_version")], [The version of mvsMF: #cmd("1.4.0-dev") in the session
+    above, #cmd("1.4.0") in a release.],
   [#cmd("plugins")], [Always an empty array.],
   [#cmd("zosmf_saf_realm")], [Always #cmd("SAFRealm").],
   [#cmd("api_version")], [Always #cmd("1").],
@@ -103,7 +107,9 @@ JSON object with these fields, in this order:
 )
 
 The name and the port come from the request and not from the configuration of
-the server, so they show what the client typed. The _mvsMF Reference_ describes
+the server, so they show what the client typed. The response of a request with
+Basic authentication carries a #cmd("Set-Cookie") header, too (see
+@ug-first-leave). The _mvsMF Reference_ describes
 the fields and the rules for the #cmd("Host") header in "Authentication and
 System Information".
 
@@ -141,9 +147,11 @@ request needs no earlier step. HTTPD decodes the header, asks the security
 product, and keeps the answer for the next request of the same client with the
 same user ID and password. Three details:
 
-- The user ID and the password together are limited to 255 bytes.
-- HTTPD folds the password to upper case before the security product sees it.
-  Whatever case you type, the password is checked in upper case.
+- The decoded text #cmd("user:password") is limited to 255 bytes, the colon
+  included.
+- HTTPD folds the user ID and the password to upper case and uses their first
+  eight characters. Whatever case you type, and whatever follows the eighth
+  character, the check is made with the upper case form of the first eight.
 - The user ID cannot contain a colon, because the first colon ends it.
 
 === Token login <ug-first-token>
@@ -168,9 +176,10 @@ say that the login worked. The token is in the header #cmd("Set-Cookie"):
 
 The cookie has the name #cmd("LtpaToken2"). It has no #cmd("Secure") attribute,
 so a client sends it over a connection without encryption, too. The header may
-appear twice in the response, with the same value. The option #cmd("-c") of
+appear twice in the response, with the same value, as the session shows. The option #cmd("-c") of
 #cmd("curl") writes the cookie to the file #cmd("cookies.txt"). Every login
-returns a new token, also for the same user ID.
+returns a new token, also for the same user ID. HTTPD accepts a token only from
+the address that logged in.
 
 A request sends the token back as a cookie. The option #cmd("-b") does that, and
 no user ID or password is needed:
@@ -280,19 +289,31 @@ administrator to look at the console of HTTPD.
 
 #idx("403")
 #idx("RES=")
-The administrator of HTTPD can tie the routes of mvsMF to a security profile
-(the keyword #cmd("RES=") on the route line, described in “Setting Up
-Security” in the _mvsMF User's Guide_, @ug-security). A user ID whose password
-is right, but which has no access to the profile, gets a 403 from HTTPD:
+The administrator of HTTPD can tie a route line of mvsMF to a security profile
+(the keyword #cmd("RES=") on the route line, described in @ug-security). A user
+ID whose password is right, but which has no READ access to the profile of the
+route, gets a 403 from HTTPD. The session was typed with a user ID that has no
+access to #cmd("MVSMF.ACCESS"), the profile that the catch-all route line
+#cmd("/zosmf/*") was tied to for this run (@ug-security-access):
 
 #screen(raw(read("../ex/ug-first/denied.txt"), block: true))
 
 The body is plain text, and it is not JSON. The 403 comes from HTTPD, not from
-mvsMF: mvsMF itself never answers with this status. If you get a 403 on every
-request, the user ID is not allowed to use mvsMF at all. Ask the administrator
-for access to the profile. A user ID that has access does not meet this 403. It
-meets the checks of the data sets, the files and the jobs instead
-(@ug-errors).
+mvsMF: mvsMF does not run for this request and never answers with this status.
+Which requests get it depends on the route lines:
+
+- The sample route lines tie the console services to #cmd("MVSMF.CONSOLE")
+  (@ug-security-console). The administrator may tie the catch-all to
+  #cmd("MVSMF.ACCESS") as well. A user ID without the access to the catch-all gets the
+  403 on every path under #cmd("/zosmf/") that the other lines do not cover. A
+  user ID without access to #cmd("MVSMF.CONSOLE") gets it only under
+  #cmd("/zosmf/restconsoles/").
+- A route line whose profile does not exist is not checked at all. HTTPD
+  reports that when it starts, and every user that got in passes.
+
+Ask the administrator for access to the profile that your 403 belongs to. A
+user ID that has access does not meet this 403. It meets the checks of the data
+sets, the files and the jobs instead (@ug-errors).
 
 == Leaving <ug-first-leave>
 

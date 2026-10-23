@@ -110,8 +110,9 @@ The values of #cmd("zosmf_version"), #cmd("zosmf_saf_realm"), #cmd("api_version"
 and #cmd("zos_version") are constants of the module. They do not reflect the
 installation.
 
-If the module cannot build the response, the answer is status 500 with no body
-(#cmd("Content-Length: 0")).
+If the module cannot create its JSON builder, the answer is status 500 with no
+body (#cmd("Content-Length: 0")). If a later step of the build fails, the module
+sends no response of its own.
 
 === The Host header <ref-auth-host>
 
@@ -248,7 +249,7 @@ tries that header next (@ref-auth-cred).
     [405], [A method other than GET, POST, PUT or DELETE (@ref-conv-methods).],
     [404], [A known method that the route does not have, such as a POST to
       #cmd("/zosmf/info") (@ref-conv-methods).],
-    [500], [The module could not build the information, or the login could not
+    [500], [The module could not create its JSON builder, or the login could not
       create a session.],
   )
 ]

@@ -15,10 +15,10 @@ scratch the libraries the new install writes to.]
 
 == Why UCLIN <ug-remove-why>
 
-#idx("UCLIN")#idx("RESTORE")#idx("REJECT")
-The install job accepts the SYSMOD in the same run as the APPLY. SMP4 refuses
-#cmd("RESTORE") and #cmd("REJECT") for a SYSMOD that is accepted. The
-#cmd("UCLIN") statements edit the inventory directly. They are the way back.
+#idx("UCLIN")#idx("REJECT")
+The install job accepts the SYSMOD in the same run as the APPLY. After the
+ACCEPT, #cmd("REJECT") no longer works. The #cmd("UCLIN") statements edit the
+inventory directly. They are the way back.
 
 == Freeing the Inventory <ug-remove-uclin>
 
@@ -79,14 +79,12 @@ This job removes all four ids from both zones:
 //
 ```
 
-// COORDINATOR: capture needed: the SMPOUT of this UCLIN job on a system that holds TZMF140 (one HMA2550 line per DEL statement, return code of the step).
-
 == Checking the Inventory <ug-remove-check>
 
 #idx("LIST", "removal")
-Every statement of the UCLIN job that succeeds writes the message
-#cmd("HMA2550"), the update-complete message. Do not stop at that message.
-Run a #cmd("LIST") for every id in both zones:
+Do not stop at the return code of the UCLIN job. A return code says that the
+job ran, not that the work happened. Run a #cmd("LIST") for every id in both
+zones:
 
 ```
 //MVSMFLST JOB (SYS),'MVSMF LIST',
@@ -106,13 +104,11 @@ Run a #cmd("LIST") for every id in both zones:
 //
 ```
 
-An id is free when its #cmd("LIST") ends with return code 4 and reports that
-the id is not found. If the list prints the id with its type, its status and
-an FMID, the id is still in the zone. This includes the entry of a deleted
-release, which SMP4 answers with return code 0. Read the output, not the
-return code.
-
-// COORDINATOR: capture needed: the SMPOUT of this LIST job after the UCLIN job (RC 04 and the not-found message per id), and one LIST of a deleted-release entry (TYPE FUNCTION, DELBY) for comparison.
+An id is free when its #cmd("LIST") ends with return code 4 and an empty list.
+If the list prints the id, the id is still in the zone. An id that is in use
+prints its type, its status and an FMID. The entry of a deleted release prints
+the type #cmd("FUNCTION") and the entry #cmd("DELBY"), and SMP4 answers it with
+return code 0. Read the output, not the return code.
 
 == Undoing the Configuration <ug-remove-config>
 
@@ -126,18 +122,17 @@ The installation changed two things in the configuration of HTTPD
   #cmd("HTTPD908E") with the text that the module could not be loaded. The
   message does not say why.
 + Take #cmd("MVSMF.LINKLIB") out of the STEPLIB concatenation of the HTTPD
-  procedure. If a STEPLIB names a data set that does not exist, the started
-  task does not start.
+  procedure.
 + Stop HTTPD with #cmd("/P HTTPD") and start it again.
 
-HTTPD holds the load module in storage until it stops (@ug-ops-replace). The
-server keeps serving the removed mvsMF until the restart.
+HTTPD reads the STEPLIB and the route lines when it starts (@ug-ops-replace).
+The running server keeps its old configuration until the restart.
 
 If you added #cmd("MVSMF.LINKLIB") to the list of authorized libraries in
 #cmd("SYS1.PARMLIB(IEAAPF00)"), the entry may stay. It names a data set that
 does not exist. Remove it at the next IPL, because the member is read at IPL.
 A data set that a later job allocates under the same name on the same volume
-would inherit the authorization.
+may inherit the authorization.
 
 == Scratching the Data Sets <ug-remove-delete>
 
@@ -167,13 +162,10 @@ exist. Because of it, the return code does not tell you whether a data set
 went away. Read the messages of IDCAMS, and list the catalog for the level
 #cmd("MVSMF") to see that no data set remains.
 
-// COORDINATOR: capture needed: the SYSPRINT of this IDCAMS job and a catalog listing of the level MVSMF before and after.
-
 == What Removal Leaves <ug-remove-left>
 
 Removal does not touch what mvsMF wrote for its users through its own
 services. The data sets that clients created, the jobs that clients
 submitted, and the files in the UFSD container belong to the users who
-created them. The Desktop (@ug-install-desktop) is not part of the SMP
-package. If you uploaded it to a UFS directory, that directory stays until you
-delete it.
+created them. The SMP package has no files for the UFS, so removal leaves none
+of its own there.

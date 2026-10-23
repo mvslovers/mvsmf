@@ -16,8 +16,8 @@ Services") lists every parameter, header, field, status code and error report.
 
 #idx("UFSD")
 mvsMF keeps no files of its own. Every request of this chapter goes to UFSD,
-which must be running, and HTTPD must run with its UFS support on, which is
-the default. When mvsMF cannot get a UFS session, every request of this
+which must be running, and HTTPD must run with its UFS support on. That is the
+default, and the HTTPD parameter #cmd("UFS=0") turns it off. When mvsMF cannot get a UFS session, every request of this
 chapter answers 503 with the message #cmd("UFSD subsystem not available").
 The data sets of @ug-data do not depend on UFSD.
 
@@ -31,8 +31,8 @@ directory is the exception: it names the directory in the query parameter
 #cmd("path"), as in #cmd("MVSMF_URL/zosmf/restfiles/fs?path=/tmp/mvsmf-demo").
 
 The sessions work in the directory #cmd("/tmp/mvsmf-demo"). Before the
-sessions, #cmd("/tmp") must be a UFSD file system that is mounted for reading
-and writing, and the user must be allowed to write to it
+sessions, the directory #cmd("/tmp") must be on a UFSD file system that is
+mounted for reading and writing, and the user must be allowed to write to it
 (@ug-uss-permissions). The sessions use curl with Basic authentication and
 the variables #var("MVSMF_URL"), #var("MVSMF_USER") and #var("MVSMF_PASS").
 
@@ -56,7 +56,8 @@ directory inside the demo directory, and an empty file:
 
 #note[The field #cmd("mode") is accepted, and it has no effect. UFSD makes every
 new file with the mode #cmd("rw-r--r--") and every new directory with
-#cmd("rwxr-xr-x"). The listing in @ug-uss-list shows both.]
+#cmd("rwxr-xr-x"). The second session asked for #cmd("rwxr-x---"), and the
+listing in @ug-uss-list shows #cmd("drwxr-xr-x") for that directory.]
 
 Making a file or directory that exists answers 400 (@ug-uss-errors).
 
@@ -112,8 +113,9 @@ directory, without the entries #cmd(".") and #cmd(".."):
   )
 ]
 
-The order of the entries is the order of the directory. A directory without
-entries answers #cmd("200") with an empty array.
+The entries come sorted by name, by the byte values of the EBCDIC names: lower
+case letters sort before upper case letters, and digits come last. A directory
+without entries answers #cmd("200") with an empty array.
 
 The header #cmd("X-IBM-Max-Items") limits the number of entries. Without it the
 limit is 1000. The value 0 means no limit. A listing that the limit cuts is still
@@ -127,8 +129,9 @@ the whole path:
 
 #screen(raw(read("../ex/ug-uss/u-list-file.txt"), block: true))
 
-A path that does not exist answers 404 (@ug-uss-errors). A request without
-#cmd("path") answers 400.
+A path that does not exist answers 404 (@ug-uss-errors), with the message
+#cmd("File not found"), or #cmd("Path not found") when the directory above it
+is missing. A request without #cmd("path") answers 400.
 
 == Reading a File <ug-uss-read>
 
@@ -161,10 +164,10 @@ differ: mvsMF reads and writes them in IBM-037 unless the request says
 otherwise (@ug-data). A request of this chapter that does not say otherwise
 uses IBM-1047.
 
-The two code pages assign different bytes to six characters. All other
-characters have the same byte in both:
+When mvsMF writes text, six characters get a different byte in the two code
+pages. All other characters get the same byte in both:
 
-#tab(caption: [Characters that differ between IBM-1047 and IBM-037])[
+#tab(caption: [Characters that differ between IBM-1047 and IBM-037 when written])[
   #table(columns: (1.15in, 1fr, 1fr, 1fr),
     [Character], [In Latin-1], [Byte in IBM-1047], [Byte in IBM-037],
     [#cmd("[")], [5B], [AD], [BA],
@@ -177,9 +180,14 @@ characters have the same byte in both:
 ]
 
 The exclamation mark does not differ: it is the byte 5A in both code pages.
-The first three characters are the ones that program source needs. A file that
-is written with one code page and read with the other is damaged without an
-error: the answer is a #cmd("200") or a #cmd("204"), and the bytes are wrong.
+The first three characters are the ones that C source uses.
+
+When mvsMF reads text, the same six bytes differ, and a seventh does as well.
+The byte #cmd("E1") becomes #cmd("÷") (the Latin-1 byte F7) under IBM-037 and
+#cmd("²") (the Latin-1 byte B2) under IBM-1047. Do not rely on a count of six
+characters when a file is read: the two translation tables of HTTPD differ in
+seven bytes in that direction. A file that is written with one code page and
+read with the other is damaged without an error: the answer is a #cmd("200") or a #cmd("204"), and the bytes are wrong.
 The next sessions write a line of C with the default code page and look at the
 stored bytes with #cmd("od"):
 
@@ -195,8 +203,8 @@ file is read as IBM-037. The header
 
 The bytes of the answer are #cmd("61 dd 31 a8 20 3d 20 62 dd 32 a8 20 ac 20 63 0a").
 The bytes #cmd("AD") and #cmd("BD") of the file became #cmd("Ý") and
-#cmd("¨"), and #cmd("5F") became #cmd("¬"). The client got
-#cmd("aÝ1¨ = bÝ2¨ ¬ c") instead of #cmd("a[1] = b[2] ^ c"). The reverse is the
+#cmd("¨"), and #cmd("5F") became #cmd("¬"). Read as Latin-1,
+the client got #cmd("aÝ1¨ = bÝ2¨ ¬ c") instead of #cmd("a[1] = b[2] ^ c"). The reverse is the
 same: a file that is written as IBM-037 and read with the default shows
 #cmd("[") as #cmd("Ý"), and the other characters of the table change as well.
 
@@ -211,12 +219,17 @@ header on both requests:
 The file now holds #cmd("81 BA F1 BB 40 7E 40 82 BA F2 BB 40 B0 40 83 15"), and
 the read as IBM-037 returns the line that was written. The accepted values of
 #cmd("fileEncoding") are #cmd("IBM-037"), #cmd("037"), #cmd("IBM-1047") and
-#cmd("1047"). Any other value, for example #cmd("IBM-37"), is an error, and
-mvsMF refuses the request before it changes the file.
+#cmd("1047"). Any other value, for example #cmd("IBM-37"), is an error: mvsMF
+answers 500 with the message #cmd("iconv_open() failed."), and it refuses the
+request before it changes the file. The value #cmd("record") of
+#cmd("X-IBM-Data-Type") is refused with 400. Any other data type than
+#cmd("binary") and #cmd("record") is text. With #cmd("binary"), mvsMF ignores
+#cmd("fileEncoding"), because it translates nothing.
 
 mvsMF translates byte for byte, from the code page of the request to the one
-of the file. It does not decode UTF-8. A character outside Latin-1 is not
-translated as a character, and mvsMF does not report it.
+of the file. It does not decode UTF-8. A character that UTF-8 writes with more
+than one byte is translated byte by byte, so the result is not that character,
+and mvsMF does not report it.
 
 #note[*A defect* (mvsmf\#234): the translation tables map the byte #cmd("85") to
 the EBCDIC line end, as they do for the line feed. A UTF-8 character with the
@@ -234,8 +247,9 @@ checksum in the header #cmd("ETag"):
 
 #screen(raw(read("../ex/ug-uss/u-etag-get.txt"), block: true))
 
-The value has sixteen hexadecimal digits. It comes from the content of the file
-and its length. A PUT request with the header #cmd("If-Match") writes only when
+The value has sixteen hexadecimal digits. The first eight are a CRC-32 of the
+content of the file, and the last eight are its length in bytes. The file in
+the session has 29 bytes, and the ETag ends in #cmd("0000001D"). A PUT request with the header #cmd("If-Match") writes only when
 the ETag of the file is the one given. The sessions below use the shell
 variable #var("ETAG"). Set it to the value of the header before:
 
@@ -278,25 +292,36 @@ the message #cmd("File or directory already exists"):
 
 #screen(raw(read("../ex/ug-uss/u-exists.txt"), block: true))
 
-*Too large.* A file in UFSD has a size limit that comes from the block size of
-the file system. With a block size of 4096 bytes a file holds at most 4,259,840
-bytes, which is 4.0625 MiB. The _mvsMF Reference_ gives the formula. The session
-writes 5,000,000 bytes. The empty header #cmd("Expect:") keeps curl from
+*No space.* When UFSD has no free block for a write, the answer is 500 with
+the category 8 and the message #cmd("No space left on device"). The next
+session writes 5,000,000 bytes. The empty header #cmd("Expect:") keeps curl from
 sending #cmd("Expect: 100-continue"):
 
 #screen(raw(read("../ex/ug-uss/u-toolarge.txt"), block: true))
 
-mvsMF answers 500 with the category 8 and the message
-#cmd("No space left on device"). UFSD gives the same answer when the file
-system is full. The request has already truncated the file, so it leaves the
-bytes that fitted before the limit:
+The request has already truncated the file, so it leaves the bytes that fitted
+before the error. The listing shows how many:
 
 #screen(raw(read("../ex/ug-uss/u-big-size.txt"), block: true))
 
-The file #cmd("big.txt") exists now, with a size of at most 4,259,840 bytes. A
-client that gets this error writes the file again or deletes it. The body of a
-request has its own limit: mvsMF refuses a body of 16 MiB or more with a 413
-before the request reaches UFSD.
+The file #cmd("big.txt") holds 2,056,192 bytes, not 5,000,000. On the system of
+this session the UFS file system was full: the write stopped because no block
+was free, and that is what the 500 reports. A client that gets this error
+frees space, or deletes the file, and writes it again. The sessions do not show
+the limit of a single file.
+
+UFSD has such a limit, and it gives the same answer for it. A file holds
+16 blocks that the inode addresses directly, plus the blocks that one indirect
+block addresses, which is the block size divided by 4. With a block size of
+4096 bytes that is 1040 blocks, or 4,259,840 bytes. A write that goes beyond
+that is refused with #cmd("No space left on device") as well, so the message
+does not tell a full file system from a file that is too long. A file that
+stopped well below the limit points to a full file system.
+
+The body of a request has a limit of its own, before UFSD is asked: mvsMF reads
+the whole body into memory, and a body of 16,777,216 bytes (16 MiB) or more is
+refused with 413 and the message #cmd("The request body is too large"). When
+mvsMF cannot get the storage for a smaller body, it answers 500.
 
 == Deleting Files and Directories <ug-uss-delete>
 

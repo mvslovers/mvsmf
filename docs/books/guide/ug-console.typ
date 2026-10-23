@@ -43,12 +43,13 @@ The console name in the path is any text of two to eight characters. The issue
 request uses it only to build the addresses it returns. The other requests do
 not look at it. All names reach the same table.
 
-#note[*The console services run with the authority of the server.* mvsMF makes
-no authorization check of its own for them: any caller that mvsMF lets in can
+#note[*The console services check nothing themselves.* mvsMF makes no
+authorization check of its own for them: any caller that mvsMF lets in can
 issue any operator command. The administrator protects the console services in
-the HTTPD configuration, in front of mvsMF. See @ug-security-console, which defines the route and the profile and shows what
-a user without the permission gets. Until that is done, treat every user ID that
-can log on to mvsMF as an operator.]
+the HTTPD configuration, in front of mvsMF. See @ug-security-console, which
+defines the route and the profile and shows what a user without the permission
+gets. Until that is done, treat every user ID that can log on to mvsMF as an
+operator.]
 
 == Issuing a Command <ug-console-issue>
 
@@ -71,9 +72,9 @@ What mvsMF does with the command:
 - It changes the command to upper case, all of it, also text in quotes. #cmd("d t")
   is issued as #cmd("D T").
 - It accepts a command of up to 126 characters. A longer command is refused
-  with #cmd("400"). Only the first 100 characters are sent to MVS, and mvsMF
-  looks for an echo that has the whole text. Keep a command to 100 characters
-  or fewer.
+  with #cmd("400") and #cmd("reason-code") 17. Only the first 100 characters are
+  sent to MVS, and mvsMF looks for an echo that has the whole text. Keep a
+  command to 100 characters or fewer.
 - It issues one command at a time. A request that arrives while another command
   is open waits for up to five seconds and then gets #cmd("429")
   (@ug-console-fail).
@@ -164,9 +165,10 @@ The field #cmd("sol-key") names text to look for. When the text is in the lines
 that the first request returned, the answer has
 #cmd("\"sol-key-detected\":true"), otherwise #cmd("false"). The test is a plain
 search for the text. It distinguishes upper and lower case, and it looks only at
-the lines of the first answer, not at lines that a collect returns later. The
-text has at most 63 characters. A regular expression is not supported: the field
-#cmd("solKeyReg") with the value #cmd("Y") is refused with #cmd("400").
+the lines of the first answer, not at lines that a collect returns later. A
+text of more than 63 characters is cut at 63. A regular expression is not
+supported: the field #cmd("solKeyReg") with the value #cmd("Y") is refused with
+#cmd("400") and #cmd("reason-code") 25, when #cmd("sol-key") is present.
 
 == Waiting for an Unsolicited Message <ug-console-detect>
 
@@ -180,19 +182,23 @@ the message that says FTPD is listening:
 #screen(raw(read("../ex/ug-console/c-start.txt"), block: true))
 
 The answer has the usual fields and two more. #cmd("status") is #cmd("detected")
-and #cmd("msg") is the line that matched. When the text does not show up in time,
+and #cmd("msg") is the message text of the newest line that matched, without the
+time and the originator. When the text does not show up in time,
 #cmd("status") is #cmd("timeout") and #cmd("msg") is empty. The wait is
 #cmd("unsol-detect-timeout") seconds, 20 when the field is missing. A value
 outside 1 to 60 also gives 20. The wait starts after the wait for the answer of
 the command, so the request can take 20 seconds and more. Keep the time-out of
 the client above that.
 
-The other form does not wait. Without #cmd("unsol-detect-sync") the answer comes
-back at once with a #cmd("detection-key"), and the client asks later with a
-#cmd("GET") on the path #cmd("detections"). The field #cmd("detect-time") sets
-the window in seconds, 30 when it is missing. This session arms a detection for
-#cmd("FTPD099I"), the message that ends the stop of FTPD, and asks eight seconds
-later. Set #cmd("DKEY") to the #cmd("detection-key"):
+The other form does not wait for the text. Without #cmd("unsol-detect-sync") the
+answer comes back after the wait for the answer of the command. It has the usual
+fields and the fields #cmd("detection-key"), #cmd("detection-url") and
+#cmd("detection-uri"). The client asks later with a #cmd("GET") on the path
+#cmd("detections"). The field #cmd("detect-time") sets the window in seconds, 30
+when it is missing. This session arms a detection for #cmd("FTPD099I"), the
+message that ends the stop of FTPD, and asks eight seconds later. The first
+answer holds only the first message of the stop (compare @ug-console-late). Set
+#cmd("DKEY") to the #cmd("detection-key"):
 
 #screen(raw(read("../ex/ug-console/c-arm.txt"), block: true))
 
@@ -202,13 +208,14 @@ The #cmd("status") is one of three words. #cmd("detected") comes with the
 message in #cmd("msg"). #cmd("waiting") means that nothing has matched yet and
 the window is open. #cmd("expired") means that nothing has matched and the
 window has closed. A key that mvsMF does not know gets the status #cmd("500")
-and a console error with #cmd("reason-code") 9.
+and a console error with #cmd("return-code") 5 and #cmd("reason-code") 9.
 
 What to keep in mind:
 
 - *The text can match more than the message you mean.* mvsMF compares against
   the whole line of the table, with the time and the originator in front of the
-  message, and it ignores case. A short word matches many lines.
+  message, up to 199 characters of it, and it ignores case. A short word matches
+  many lines.
 - *It counts new matches.* Right after it has issued the command, mvsMF counts
   the lines that contain the text, and it reports a detection when the count is
   higher later. The echo of your command and its reply can arrive after that
@@ -229,9 +236,9 @@ line is dropped as a new one arrives. Do not take #cmd("waiting") as proof that
 the message has not come. Ask again, and look at the log (@ug-console-log) if
 the message matters.]
 
-The text has at most 63 characters, and a regular expression is not supported:
-the field #cmd("unsolKeyReg") with the value #cmd("Y") is refused with
-#cmd("400").
+A text of more than 63 characters is cut at 63, and a regular expression is not
+supported: the field #cmd("unsolKeyReg") with the value #cmd("Y") is refused with
+#cmd("400") and #cmd("reason-code") 25, when #cmd("unsol-key") is present.
 
 == Reading the Log <ug-console-log>
 
@@ -244,12 +251,18 @@ asks for the last thirty seconds:
 
 #screen(raw(read("../ex/ug-console/c-log.txt"), block: true))
 
-Each item has the text of the line in #cmd("message"), the originator in
-#cmd("jobName"), the system in #cmd("system"), and the time twice: #cmd("time")
-as text and #cmd("timestamp") as a number of milliseconds. The items are in
-order of time, the oldest first. #cmd("jobName") holds the originator field of
-the table, which is the type of the originator and its number, for example the
-text #cmd("STC  320") for a started task. It is not always a job name.
+The answer has the fields #cmd("timezone"), #cmd("source") (always
+#cmd("SYSLOG")), #cmd("items"), #cmd("totalitems") (the number of items) and
+#cmd("nextTimestamp"). Each item has the text of the line in #cmd("message"), the
+originator in #cmd("jobName"), the system in #cmd("system"), the type
+#cmd("HARDCOPY") in #cmd("type"), and the time twice: #cmd("time") as text and
+#cmd("timestamp") as a number of milliseconds. The items are in order of time,
+the oldest first. #cmd("jobName") holds the originator field of the table, which
+is the type of the originator and its number, for example the text
+#cmd("STC   43") for a started task. It is not always a job name, and it is empty
+for a line without an originator. In the session the commands that mvsMF issued
+carry #cmd("STC   43"), and the messages of FTPD carry the number of the FTPD
+task that wrote them (37, 44 and 45 for three runs of FTPD).
 
 The query parameter #cmd("timeRange") sets the length of the period. It is a
 number from 1 to 999 and a unit, #cmd("s"), #cmd("m") or #cmd("h"): #cmd("90s"),
@@ -268,8 +281,8 @@ Three things about the times:
   but both carry the local time of the system as if it were Universal Time.
   The field #cmd("timezone") is the difference between the local clock and
   Universal Time in whole hours, as the C library of mvsMF sees it.
-- To go further back, take #cmd("nextTimestamp") from the answer and send it as
-  #cmd("timestamp"). The _mvsMF Reference_, chapter "Console Services", section
+- To go further back, take #cmd("nextTimestamp") from the answer, the start of
+  the period, and send it as #cmd("timestamp"). The _mvsMF Reference_, chapter "Console Services", section
   "The Hardcopy Log", describes this and the other parameters.
 
 == What the Capture Cannot Tell You <ug-console-limits>
@@ -287,9 +300,10 @@ table afterwards. The answer you get can be wrong in ways that the status
   has more than 100 characters. The echo had left the table. An empty
   #cmd("cmd-response") does not tell which.
 - *The answer can be too long.* The text is capped at 32768 bytes, and lines
-  that do not fit are left out without a sign. A single line holds at most 232
-  characters of message, because the table keeps 256 characters of each line and
-  24 of them are the time and the originator.
+  that do not fit are left out without a sign. mvsMF reads at most 256
+  characters of each line of the table, and 24 of them are the flags, the time
+  and the originator. A single line of the answer therefore holds at most 232
+  characters of message.
 - *The answer can belong to the wrong command.* mvsMF finds the answer by the
   echo of the command. When the same command was issued a moment ago and its echo
   is still in the table, the first read can find that echo and return the
@@ -302,9 +316,10 @@ table afterwards. The answer you get can be wrong in ways that the status
   the table at any time, and those lines can end the answer early or be taken
   into it.
 - *A command for another started task.* The reply to #cmd("F name,...") comes
-  from that task. mvsMF takes it into the answer when it arrives in the second
-  of the echo or in the second after. A reply that comes later is not in the
-  first answer. Collect it.
+  from that task. mvsMF takes it into the answer when its first line arrives in
+  the second of the echo or in the second after. A reply that starts later is
+  not in the answer, and a collect does not find it either, because a collect
+  applies the same rule.
 
 == When a Request Fails <ug-console-fail>
 

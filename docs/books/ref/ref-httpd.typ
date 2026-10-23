@@ -9,8 +9,8 @@ must hold. This chapter lists what HTTPD reads for that: the route lines in the
 member of the data definition #cmd("HTTPPRM"), the options of a route, the rule
 by which HTTPD picks a route, the gate in front of the route, the procedure and
 its STEPLIB, and the HTTPD messages that concern mvsMF. The text describes
-HTTPD 4.4.0-dev, the version in the file `mbt.toml` of the HTTPD sources read
-for this edition. mvsMF 1.4.0 needs HTTPD 4.2.0 or later.
+HTTPD 4.3.0. Where a function comes only with HTTPD 4.4.0, the text says so.
+mvsMF 1.4.0 needs HTTPD 4.2.0 or later.
 
 The steps that put the lines in place are in the chapter “Installing mvsMF” of
 the _mvsMF User's Guide_. The profiles that #cmd("RES=") names are described in
@@ -250,29 +250,35 @@ next request on, without a restart of HTTPD.]
 == Loading the Module: RESIDENT <ref-httpd-resident>
 
 #idx("RESIDENT")#idx("module", "replacement")
-The keyword #cmd("RESIDENT=YES") is the default. HTTPD loads each module named
-in a #cmd("MOD=") line once, when it starts, and holds it until it ends. A
-request then does not fetch the module from the library. HTTPD searches the
-module in the STEPLIB first (BLDL) and holds it only if it is reentrant or
-reusable.
+HTTPD 4.3.0 fetches the module from the library for each request. It has no
+keyword #cmd("RESIDENT"), and the messages of this section do not exist in it.
 
-A new level of #cmd("MVSMF") in the library therefore takes effect when HTTPD
-is restarted, not before. With #cmd("RESIDENT=NO") HTTPD fetches the module
-for each request.
+HTTPD 4.4.0 adds the keyword #cmd("RESIDENT"). #cmd("RESIDENT=YES") is the
+default. HTTPD then loads each module named in a #cmd("MOD=") line once, when it
+starts, and holds it until it ends. A request does not fetch the module from the
+library. HTTPD searches the module in the STEPLIB first (BLDL) and holds it only
+if it is reentrant or reusable. A module that is named by more than one route is
+held once.
 
-#tab(caption: [Messages of the resident load])[
+With HTTPD 4.4.0 a new level of #cmd("MVSMF") in the library takes effect when
+HTTPD is restarted, not before. With #cmd("RESIDENT=NO") HTTPD fetches the module
+for each request, as HTTPD 4.3.0 does.
+
+#tab(caption: [Messages of the resident load (HTTPD 4.4.0)])[
   #table(columns: (0.8in, 1fr),
     [Message], [Meaning],
     [#cmd("HTTPD440W")], [#cmd("MODULE name NOT FOUND AT STARTUP, NOT HELD"). The
       module is in no library of the STEPLIB or the link list.],
     [#cmd("HTTPD441W")], [#cmd("MODULE name NOT REUSABLE, FETCHED PER REQUEST").
       The module is neither RENT nor REUS.],
-    [#cmd("HTTPD442W")], [#cmd("MODULE name LOAD FAILED, FETCHED PER REQUEST").
-      The load failed; the system message #cmd("IEA703I") names the code.],
+    [#cmd("HTTPD442W")], [#cmd("MODULE name LOAD FAILED, ABEND CODE Snnn REASON rr, FETCHED PER REQUEST").
+      The load failed. The message names the completion code and the reason
+      code.],
     [#cmd("HTTPD443W")], [#cmd("INVALID RESIDENT VALUE \"value\" (YES|NO)"). The
       default stays.],
     [#cmd("HTTPD137I")], [#cmd("RESIDENT YES  MODULES HELD n"). The answer of
-      #cmd("F HTTPD,D C") shows how many modules HTTPD holds.],
+      #cmd("F HTTPD,D C") shows how many modules HTTPD holds. HTTPD 4.3.0
+      does not write this line.],
   )
 ]
 
@@ -372,8 +378,12 @@ When HTTPD cannot run the module, it answers 503 with a plain-text body
 #tab(caption: [The reasons of HTTPD908E])[
   #table(columns: (2.2in, 1fr),
     [Reason], [Cause],
-    [#cmd("could not be loaded")], [HTTPD found no member #cmd("MVSMF") in the
-      STEPLIB. The message does not tell which library or why.],
+    [#cmd("was not found")], [HTTPD 4.4.0: the LINK found the module in neither
+      the STEPLIB nor the link list (completion code S806).],
+    [#cmd("could not be loaded")], [HTTPD 4.3.0: the LINK could not load the
+      module, for instance because no member #cmd("MVSMF") is in the STEPLIB.
+      HTTPD 4.4.0 uses this text for every other load error. The message does not
+      tell which library or why.],
     [#cmd("was dispatched without a program name")], [The route has no program.],
     [#cmd("could not be started, ESTAE create failed")], [HTTPD could not set up
       its recovery for the call.],
@@ -389,10 +399,9 @@ When HTTPD cannot run the module, it answers 503 with a plain-text body
 == HTTPD Messages at Start <ref-httpd-msgs>
 
 #idx("messages", "HTTPD")
-A start of HTTPD with the four routes of mvsMF writes these messages, and a
-stop writes the last two. The messages #cmd("HTTPD000I"), #cmd("HTTPD005I") and
-#cmd("HTTPD002I") come first, and #cmd("HTTPD001I") says that the listener
-works. The full list of messages is in the HTTPD documentation.
+A start of HTTPD with the four routes of mvsMF writes these messages in this
+order, and a stop writes the last two. The full list of messages is in the HTTPD
+documentation.
 
 #tab(caption: [HTTPD messages that show the state of mvsMF])[
   #table(columns: (0.8in, 1fr),
@@ -402,7 +411,9 @@ works. The full list of messages is in the HTTPD documentation.
     [#cmd("HTTPD005I")], [The version of the C library in HTTPD.],
     [#cmd("HTTPD002I")], [How HTTPD got its authorization.],
     [#cmd("HTTPD004I")], [The identity of the started task.],
-    [#cmd("HTTPD036I")], [One message for each route of #cmd("MOD=").],
+    [#cmd("HTTPD036I")], [One message for each route of #cmd("MOD="): four
+      messages, in the order of the route lines.],
+    [#cmd("HTTPD054I")], [The port on which HTTPD listens.],
     [#cmd("HTTPD001I")], [HTTPD is ready. The listener works.],
     [#cmd("HTTPD098I")], [A #cmd("P HTTPD") was accepted. The quiesce has begun.],
     [#cmd("HTTPD099I")], [The shutdown is complete.],

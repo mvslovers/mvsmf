@@ -96,11 +96,17 @@ mvsMF does not need #cmd("X-CSRF-ZOSMF-HEADER") and does not read it.
 Every response carries #cmd("Cache-Control: no-store"), #cmd("Pragma: no-cache"),
 #cmd("X-Content-Type-Options: nosniff") and #cmd("Content-Language: en"). A
 response to a request with an #cmd("Authorization") header also carries the
-session cookie when HTTPD has a token for the user. A reply with no body has
-#cmd("Content-Length: 0"). A reply with a JSON body has the content type
-#cmd("application/json"). The success of a write, a delete and a rename is
-#cmd("204") with the content type #cmd("application/json"). A reply that reads
-a data set has no #cmd("Content-Length"); HTTPD sends it in chunks.
+session cookie when HTTPD has a token for the user.
+
+The framing of a reply depends on the request. A reply that reads (a list, a
+member list, a read) has no #cmd("Content-Length"); HTTPD sends it in chunks.
+The success of a create is #cmd("201") with the content type
+#cmd("application/json") and no body; it is chunked and has no
+#cmd("Content-Length"). The success of a write, a delete and a rename is
+#cmd("204") with the content type #cmd("application/json") and no
+#cmd("Content-Length"). The answer #cmd("304") has neither #cmd("Content-Type")
+nor #cmd("Content-Length"). An error report has the content type
+#cmd("application/json") and a #cmd("Content-Length").
 
 == List Data Sets <ref-ds-list>
 
@@ -160,7 +166,7 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("blksz")], [The block size.],
     [#cmd("catnm")], [Always the empty string.],
     [#cmd("cdate")], [The creation date as #cmd("YYYY/MM/DD").],
-    [#cmd("dev")], [The device type.],
+    [#cmd("dev")], [The device type, derived from the number of tracks per cylinder that the volume reports: 30 gives #cmd("3350"), 12 gives #cmd("3375"), 19 gives #cmd("3380"), any other number gives #cmd("3390"). A volume that does not report the number counts as 30.],
     [#cmd("dsntp")], [#cmd("PDS") for organization #cmd("PO"), #cmd("BASIC") for #cmd("PS"), #cmd("UNKNOWN") for any other.],
     [#cmd("dsorg")], [The data set organization.],
     [#cmd("edate")], [Always #cmd("***None***").],
@@ -441,8 +447,9 @@ read failed, is left out of the response.
 #idx("create", "data set")#idx("allocation")#idx("DCB")#idx("like")
 #cmd("POST /zosmf/restfiles/ds/{dataset-name}")
 
-The request allocates and catalogs a data set. mvsMF makes no RAKF check of its
-own for it (@ref-ds-auth). The body is a JSON object. mvsMF finds the fields by
+The request allocates and catalogs a data set. mvsMF passes no access level to
+the security check for it (@ref-ds-auth), but the allocation passes two RAKF
+checks of its own (@ref-ds-create-rakf). The body is a JSON object. mvsMF finds the fields by
 a plain text search for the name of the field: a field name inside a string
 value can be found by mistake, and a numeric field must be a number, not a
 string. When mvsMF reads the body from the connection, it takes at most 4095
@@ -451,14 +458,14 @@ bytes of it.
 #tab(caption: [Fields of the create body])[
   #table(columns: (0.95in, 0.7in, 1fr),
     [Field], [Type], [Meaning],
-    [#cmd("dsorg")], [string], [The organization, for example #cmd("PS") or #cmd("PO"). Required without #cmd("like").],
-    [#cmd("recfm")], [string], [The record format, for example #cmd("FB"). Required without #cmd("like").],
+    [#cmd("dsorg")], [string], [The organization, for example #cmd("PS") or #cmd("PO"). Required without #cmd("like"). mvsMF keeps at most 7 characters.],
+    [#cmd("recfm")], [string], [The record format, for example #cmd("FB"). Required without #cmd("like"). mvsMF keeps at most 7 characters.],
     [#cmd("lrecl")], [number], [Required without #cmd("like").],
     [#cmd("blksize")], [number], [Required without #cmd("like").],
     [#cmd("primary")], [number], [The primary quantity. Required without #cmd("like").],
     [#cmd("secondary")], [number], [The secondary quantity. Default 0.],
-    [#cmd("dirblk")], [number], [The directory blocks. Default 0. With #cmd("like") and a target of organization #cmd("PO"), the default is 20.],
-    [#cmd("alcunit")], [string], [The space unit. Default #cmd("TRK"). Folded to upper case. mvsMF passes the value on and does not check it.],
+    [#cmd("dirblk")], [number], [The directory blocks. Default 0. With #cmd("like") and a target of organization #cmd("PO"), the default is 20. The target is #cmd("PO") when the body gives #cmd("dsorg") with the value #cmd("PO"), or, when the body gives no #cmd("dsorg"), when the model is partitioned.],
+    [#cmd("alcunit")], [string], [The space unit. Default #cmd("TRK"). Folded to upper case, at most 7 characters. mvsMF passes the value on and does not check it.],
     [#cmd("like")], [string], [The name of a cataloged data set that serves as a model. The other fields are then overrides and none is required.],
   )
 ]
@@ -468,7 +475,8 @@ attributes of the model and the fields override them. When the body has no
 #cmd("primary"), the primary quantity comes from the extents of the model, in
 tracks, and the unit is then #cmd("TRK"). A secondary quantity that the body
 does not give is derived in the same way, but only when the unit in force is
-#cmd("TRK").
+#cmd("TRK"). With #cmd("like"), a primary quantity that is still 0 or less
+becomes 1.
 
 mvsMF builds one allocation request from the fields:
 #cmd("DSN=name;DISP=(NEW,CATLG,DELETE)"), then #cmd("DCBDSN=") for a model, the
@@ -477,7 +485,7 @@ attributes that were given, and #cmd("SPACE=unit(primary,secondary,dirblk)").
 #tab(caption: [Statuses of the create request])[
   #table(columns: (0.6in, 0.5in, 1fr),
     [Status], [Reason], [Cause],
-    [201], [], [The data set is allocated and cataloged. Content type #cmd("application/json"), no body.],
+    [201], [], [The data set is allocated and cataloged. Content type #cmd("application/json"), no body, no #cmd("Content-Length") (chunked).],
     [400], [3], [#cmd("Invalid or missing allocation parameters"): the body is empty, a required field is missing or is not of the right type, or the name of the model is too long. A name of the new data set that is too long gives reason 1.],
     [404], [4], [The model of #cmd("like") is not cataloged: #cmd("Dataset not found").],
     [500], [7], [Category 8, rc 900: #cmd("Dynamic allocation Error"). The allocation failed.],
@@ -487,6 +495,27 @@ attributes that were given, and #cmd("SPACE=unit(primary,secondary,dirblk)").
 The last report covers every failure of the allocation. It does not tell a
 refusal by RAKF, a lack of space, and any other cause apart. The failure writes
 no operator message.
+
+=== The Two RAKF Checks of a Create <ref-ds-create-rakf>
+
+#idx("create", "RAKF checks")#idx("master catalog")#idx("catalog alias")
+mvsMF makes the security check of the data set class for a create through the
+dynamic allocation, not through a call of its own. Two checks apply, in this
+order.
+
+#tab(caption: [The checks of a create])[
+  #table(columns: (0.4in, 1fr),
+    [Step], [Check],
+    [1], [The #cmd("DATASET") resource of the new name. RAKF permits a name whose first qualifier is the ID of the user. Under any other first qualifier the user needs ALTER access through a profile.],
+    [2], [When the first qualifier of the name has no catalog alias, so that the data set is cataloged in the master catalog: UPDATE access to the master catalog, the #cmd("DATASET") resource #cmd("SYS1.VSAM.MASTER.CAT").],
+  )
+]
+
+A refusal of either check, and any other failure of the allocation, has the same
+answer: #cmd("500") with the report #cmd("{\"rc\":900,\"category\":8,\"reason\":7,\"message\":\"Dynamic allocation Error\"}").
+The answer does not say which check refused. The security product records the
+refusal in its own log. The profiles are described in “Setting Up Security” in
+the _mvsMF User's Guide_.
 
 == Delete a Data Set or a Member <ref-ds-delete>
 
@@ -499,7 +528,9 @@ A data set delete needs ALTER access to the data set. A member delete needs
 UPDATE access to the library. The check comes first. For a data set, mvsMF then
 looks the name up in the catalog (#cmd("404"), reason 4) and removes it. For a
 member, mvsMF opens the member (#cmd("404"), reason 5,
-#cmd("PDS member not found")) and removes the entry from the directory. The
+#cmd("PDS member not found")) and removes the entry from the directory. The open
+fails, and so the answer is the same, for every cause: a missing member, a
+library that does not exist, or a library that cannot be opened. The
 success is #cmd("204") with the content type #cmd("application/json") and no
 body. A removal that fails answers #cmd("500") (category 6, rc 8, reason 11,
 #cmd("Dataset delete failed")) and writes #cmd("MVSMF103E").
@@ -512,7 +543,7 @@ body. A removal that fails answers #cmd("500") (category 6, rc 8, reason 11,
 #cmd("PUT /zosmf/restfiles/ds/{dataset-name}({new-member-name})")
 
 A PUT whose #cmd("Content-Type") contains #cmd("application/json") is a rename
-request, whatever the body is. A body of more than 16 MB answers #cmd("413")
+request, whatever the body is. A body of 16,777,216 bytes or more answers #cmd("413")
 (category 6, rc 8, reason 0, #cmd("The request body is too large")). A storage
 shortage while mvsMF reads the body answers #cmd("500") (category 7, rc 16,
 reason 0, #cmd("Storage for the request body could not be obtained")).
@@ -556,7 +587,7 @@ data set exists.
     [READ], [Read a data set\; read a member\; list the members.],
     [UPDATE], [Write a data set\; write a member\; rename a member\; delete a member.],
     [ALTER], [Delete a data set\; rename a data set (the old and the new name).],
-    [none], [List data sets\; create a data set. mvsMF asks nothing. The security product may still refuse the allocation of a create (@ref-ds-create).],
+    [none], [List data sets\; create a data set. mvsMF asks nothing. The allocation of a create passes two RAKF checks: the new name, then UPDATE on the master catalog when the first qualifier has no catalog alias (@ref-ds-create-rakf).],
   )
 ]
 
@@ -596,7 +627,7 @@ column "Cat/rc" gives category and rc.
     [404], [7/8], [4], [#cmd("Dataset not found")], [The directory for a member list could not be opened.],
     [404], [6/4], [7], [#cmd("Not Found")], [No route (@ref-ds-sum).],
     [412], [6/8], [10], [#cmd("The resource was modified since the supplied ETag was created")], [@ref-ds-etag.],
-    [413], [6/8], [0], [#cmd("The request body is too large")], [A rename body of more than 16 MB.],
+    [413], [6/8], [0], [#cmd("The request body is too large")], [A rename body of 16,777,216 bytes or more.],
     [500], [4/8], [0], [#cmd("LMOPEN error")], [A refusal (@ref-ds-denied).],
     [500], [6/8], [2], [#cmd("Memory allocation failed")], [A read or write could not get storage.],
     [500], [6/8], [3], [various (@ref-ds-write)], [An I/O error, a cut record, a data set with record length 0.],

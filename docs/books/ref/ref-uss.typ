@@ -58,6 +58,14 @@ headers #cmd("Cache-Control: no-store"), #cmd("Pragma: no-cache"),
 for a session the session cookie (see @ref-auth). The sections below name the
 other headers of each answer.
 
+The framing depends on the request. A listing and a read are sent in chunks and
+have no #cmd("Content-Length"). The success of a create (201), of a delete (204)
+and of a change or removal of a tag (200) has #cmd("Content-Length: 0") and no
+#cmd("Content-Type"). The success of a write (204) has neither
+#cmd("Content-Length") nor #cmd("Content-Type"). The answer 304 has no body and
+carries the header #cmd("ETag"). An error report has the content type
+#cmd("application/json") and a #cmd("Content-Length").
+
 == List a Directory <ref-uss-list>
 
 #idx("directory", "list")#idx("X-IBM-Max-Items")#idx("moreRows")
@@ -306,8 +314,11 @@ bytes #cmd("15") and #cmd("25") become #cmd("0A") and #cmd("85"). The byte
 #note[*A defect* (mvsmf\#234): a UTF-8 character with the byte #cmd("85"), for
 example #cmd("C3 85"), changes into a line end in a text transfer.]
 
-IBM-1047 and IBM-037 assign different bytes to six characters. For all other
-characters the two tables agree.
+From ASCII (Latin-1) to EBCDIC, the tables of IBM-1047 and IBM-037 assign
+different bytes to six characters, listed below. For all other bytes they
+agree in this direction. From EBCDIC to ASCII they differ in the same six places
+and in one more: the EBCDIC byte #cmd("E1") becomes #cmd("B2") under IBM-1047
+and #cmd("F7") under IBM-037.
 
 #tab(caption: [Characters with different bytes])[
   #table(columns: (1.15in, 1fr, 1fr, 1fr),
@@ -322,7 +333,10 @@ characters the two tables agree.
 ]
 
 A file that is read with another code page than the one it was written with
-returns the bytes of this table exchanged, without an error.
+returns the bytes of this table exchanged, without an error. The Latin-1 byte
+#cmd("F7") is stored as #cmd("E1") by both tables, so under IBM-1047 it is read
+back as #cmd("B2"): a transfer through IBM-1047 does not return #cmd("F7")
+unchanged.
 
 == ETag and Conditional Requests <ref-uss-etag>
 

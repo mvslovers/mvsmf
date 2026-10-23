@@ -7,6 +7,22 @@
 #define CELLS_DATA_FIX	12u
 
 #ifdef __MVS__
+__asm__("\n&FUNC	SETC 'dev_name'");
+#endif
+const char *
+device_name(unsigned devtk)
+{
+	switch (devtk) {
+	case 13165u: return "3330";
+	case 19254u: return "3350";
+	case 36000u: return "3375";
+	case 47968u: return "3380";
+	case 58786u: return "3390";
+	}
+	return DEVICE_UNKNOWN;
+}
+
+#ifdef __MVS__
 __asm__("\n&FUNC	SETC 'blks_per_trk'");
 #endif
 unsigned

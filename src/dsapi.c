@@ -148,20 +148,54 @@ typedef char dsx_f3_fmtid_ok[offsetof(DSCB3, fmtid) == DSX_F3_FMTID_OFF ? 1 : -1
 typedef char dsx_f3_ext9_ok[offsetof(DSCB3, extent9) == DSX_F3_EXT9_OFF ? 1 : -1];
 typedef char dsx_f3_ptr_ok[offsetof(DSCB3, ptrds) == DSX_F3_PTR_OFF ? 1 : -1];
 
-/* Tracks per cylinder of a volume, from its format-4 DSCB. 30 is the 3350
-   fallback the listing uses when the volume DSCB cannot be read. */
+/* Geometry of a volume from its format-4 DSCB: tracks per cylinder (30, the
+   3350 value, when the DSCB cannot be read) and the track capacity devtk (0
+   then, which device_name() reports as unknown). */
+__asm__("\n&FUNC    SETC 'vol_geom'");
+static void
+vol_geom(const char *vol, unsigned *tpc, unsigned *devtk)
+{
+	DSCB		dscb4buf;
+
+	*tpc = 0;
+	*devtk = 0;
+	memset(&dscb4buf, 0, sizeof(dscb4buf));
+	if (__dscbv(vol, &dscb4buf) == 0) {
+		*tpc = dscb4buf.dscb4.dstrk;
+		*devtk = dscb4buf.dscb4.devtk;
+	}
+	if (*tpc == 0) *tpc = 30;
+}
+
 __asm__("\n&FUNC    SETC 'vol_tpc'");
 static unsigned
 vol_tpc(const char *vol)
 {
-	DSCB		dscb4buf;
-	unsigned	tpc = 0;
+	unsigned	tpc;
+	unsigned	devtk;
 
-	memset(&dscb4buf, 0, sizeof(dscb4buf));
-	if (__dscbv(vol, &dscb4buf) == 0) {
-		tpc = dscb4buf.dscb4.dstrk;
+	vol_geom(vol, &tpc, &devtk);
+	return tpc;
+}
+
+/* Names the device of the volume ds is on from its track capacity (#443).
+   __listds() fills ds->dev from the tracks per cylinder, which a 3380 and a
+   3390 share, so every entry is renamed here. A listing is mostly a few
+   volumes in a row: the last volume read is kept in cvol/cdev, owned by the
+   caller (stack, not a static -- the module is RENT). */
+__asm__("\n&FUNC    SETC 'fix_dev'");
+static void
+fix_dev(DSLIST *ds, char cvol[7], char cdev[5])
+{
+	unsigned	tpc;
+	unsigned	devtk;
+
+	if (strcmp(cvol, ds->volser) != 0) {
+		vol_geom(ds->volser, &tpc, &devtk);
+		strcpy(cdev, device_name(devtk));
+		strcpy(cvol, ds->volser);
 	}
-	return tpc ? tpc : 30;
+	strcpy(ds->dev, cdev);
 }
 
 /* dscb_alloc_tracks() reader: the format-3 DSCB at cchhr on the volume ctx. */
@@ -1496,6 +1530,8 @@ int datasetListHandler(Session *session)
 	char		*start		= NULL;
 	char		*filter		= NULL;
 	char		level_buf[45]	= {0};
+	char		dev_vol[7]	= {0};
+	char		dev_name[5]	= {0};
 	char		dslevel_buf[MAX_DATASET_NAME + 1] = {0};
 	char		start_key[MAX_DATASET_NAME + 1] = {0};
 	int		have_start	= 0;
@@ -1605,13 +1641,6 @@ int datasetListHandler(Session *session)
 						unsigned tpc = vol_tpc(vol);
 						unsigned trks = 0;
 
-						switch (tpc) {
-						case 30: strcpy(ds->dev, "3350"); break;
-						case 12: strcpy(ds->dev, "3375"); break;
-						case 19: strcpy(ds->dev, "3380"); break;
-						case 15: strcpy(ds->dev, "3390"); break;
-						default: strcpy(ds->dev, "3390"); break;
-						}
 						if (dscb1_trks(dscb1, vol, tpc, &trks) == 0
 						    && trks <= 0xFFFF)
 							ds->alloc_trks = (unsigned short)trks;
@@ -1708,6 +1737,7 @@ int datasetListHandler(Session *session)
 		unsigned pct;
 
 		fix_alloc(ds);
+		fix_dev(ds, dev_vol, dev_name);
 
 		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
 
@@ -1718,7 +1748,7 @@ int datasetListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "      \"blksz\": \"%u\",\n", ds->blksize)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"catnm\": \"\",\n")) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u/%02u/%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"dev\": \"%.4s\",\n", ds->dev[0] ? ds->dev : "3390")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dev\": \"%.4s\",\n", ds->dev[0] ? ds->dev : DEVICE_UNKNOWN)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", dsntp)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.4s\",\n", ds->dsorg)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"edate\": \"***None***\",\n")) < 0) goto quit;

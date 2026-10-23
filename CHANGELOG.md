@@ -49,6 +49,12 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **The data set list names the right device** (#443). The `dev` attribute was
+  taken from the tracks per cylinder of the volume, which does not identify a
+  device: a 3380 volume, like a 3390, has 15, so it was listed as `3390`, and any
+  unknown value was silently answered `3390`. It now comes from the track
+  capacity in the volume's format-4 DSCB (3330, 3350, 3375, 3380, 3390). A capacity
+  that is none of these, or a DSCB that cannot be read, gives `????`.
 - **A JOB card that fills its last line is accepted** (#395). mvsMF adds
   `NOTIFY`, `USER` and `PASSWORD` on a continuation card, which needs a comma
   behind the last operand of the submitted card, and a comma is data only up to

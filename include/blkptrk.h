@@ -31,4 +31,18 @@
 unsigned blocks_per_track(unsigned devtk, unsigned devov, unsigned devk,
 			  unsigned devfg, unsigned blksz);
 
+/*
+ * Device type of a volume, from DS4DEVTK of its format-4 DSCB (#443): the
+ * track capacity identifies the device, the tracks per cylinder do not (a
+ * 3380 and a 3390 both have 15). DS4DEVTK is the usable bytes per track plus
+ * the per-block overhead (a 3390: 56664 + 2122 = 58786). 3350 (19254), 3380
+ * (47968) and 3390 (58786) are measured; 3330 (13165) and 3375 (36000) are
+ * the values libc370's tstdscb4 lists for those devices, not measured here.
+ */
+#define DEVICE_UNKNOWN	"????"
+
+/* "3330", "3350", "3375", "3380" or "3390"; DEVICE_UNKNOWN for anything else,
+   0 (the DSCB could not be read) included. Never a guess. */
+const char *device_name(unsigned devtk);
+
 #endif

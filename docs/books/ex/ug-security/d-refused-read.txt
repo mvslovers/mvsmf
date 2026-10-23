@@ -1,0 +1,3 @@
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  "$MVSMF_URL/zosmf/restfiles/ds/SYS1.SECURE.CNTL(PROFILES)"
+PENDING CAPTURE

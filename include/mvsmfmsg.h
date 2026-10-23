@@ -187,6 +187,13 @@
 #define MSG_HANDLER_CODE \
 	"MVSMF914I STORAGE AT INSTRUCTION-8: %08X %08X *%08X %08X"
 
+/** MVSMF915I recovery is releasing the data set list lock (#436) */
+#define MSG_RECOVERY_DSLSTLK	"MVSMF915I RECOVERY RELEASING THE DATA SET LIST LOCK"
+
+/** MVSMF916W the recovery DEQ abended; data set lists will wait until restart */
+#define MSG_RECOVERY_DSLSTLK_ABEND \
+	"MVSMF916W RECOVERY DEQ ABENDED, DATA SET LISTS WILL WAIT"
+
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted
  * into an uppercase literal.

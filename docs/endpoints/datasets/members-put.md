@@ -31,8 +31,10 @@ PUT
       at newlines, so the four bytes then taken as a length are one only by
       accident: the request stores garbage or answers 500. **A body produced by
       a `GET` with `X-IBM-Data-Type: record` cannot be written back** — use
-      `binary` for a byte-exact round trip. Whether this becomes a
-      length-prefixed reader or an outright 400 is issue #245.
+      `binary` for a byte-exact round trip. (A `record` read of a RECFM=V
+      library is refused, see [members-get.md](members-get.md#error-responses).)
+      Whether the write gets length-prefix framing or an outright 400 is
+      issue #245.
 - `If-Match` (optional): An `ETag` from an earlier read. The write proceeds
   only if the member still matches it (see **Conditional writes** below).
 - `X-IBM-Return-Etag` (optional): `true` returns the `ETag` of the member as

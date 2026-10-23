@@ -179,13 +179,15 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > empty body.) A client reads it as "the command ran; the server is going
 > away" and does not send it again.
 >
-> **Ordering.** Between
-> the `P` and the end of the address space the server answers a further console
-> command `503 / 8 / 17` without issuing it; once the address space has ended
-> the connection is refused or reset. Both mean the command did not run, so an
-> `S HTTPD` has to wait until the started task is gone (`D A,L` shows it) and
-> then be sent over another channel — the console of the system, not this
-> endpoint, which no longer exists.
+> **Ordering.** The answer carries `Connection: close`. A console command sent
+> after it is not answered `200`: where it reaches the handler before the address
+> space ends, it is refused `503 / 8 / 17` without being issued; in practice
+> httpd has usually stopped dispatching by then, and the request is accepted and
+> then reset with no answer (measured: a `D T` sent 35 ms after the answer to a
+> `P` was reset 0.9 s later, and never reached the handler). Either way the
+> command did not run. An `S HTTPD` has to wait until the started task is gone
+> (`D A,L`) and then be sent over another channel — this endpoint no longer
+> exists.
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

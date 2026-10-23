@@ -66,7 +66,7 @@ and outlive a token logout.
 
 ## Jobs (`/zosmf/restjobs/jobs`)
 
-Which jobs a caller sees, reads and purges is decided per job by RACF, see
+Which jobs a caller sees, reads, cancels and purges is decided per job by RACF, see
 [Job spool authorization](../jesspool.md).
 
 | Method | Path | Description |
@@ -74,6 +74,7 @@ Which jobs a caller sees, reads and purges is decided per job by RACF, see
 | GET | [`/zosmf/restjobs/jobs`](jobs/list.md) | List jobs |
 | PUT | [`/zosmf/restjobs/jobs`](jobs/submit.md) | Submit job (inline JCL or dataset reference) |
 | GET | [`/zosmf/restjobs/jobs/{name}/{id}`](jobs/status.md) | Job status |
+| PUT | [`/zosmf/restjobs/jobs/{name}/{id}`](jobs/cancel.md) | Cancel job (`{"request":"cancel"}`); the output stays on the spool |
 | DELETE | [`/zosmf/restjobs/jobs/{name}/{id}`](jobs/purge.md) | Purge job |
 | GET | [`/zosmf/restjobs/jobs/{name}/{id}/files`](jobs/files.md) | List spool files |
 | GET | [`/zosmf/restjobs/jobs/{name}/{id}/files/{ddid}/records`](jobs/records.md) | Read spool file content |

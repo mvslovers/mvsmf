@@ -80,6 +80,10 @@ status):
  "details":["Authorization failed - You may not purge this job."]}
 ```
 
+A [cancel](endpoints/jobs/cancel.md) (`PUT` with `{"request":"cancel"}`) is judged
+by the same rule as a purge: UPDATE for the job of another owner, and with READ
+only the same refusal with "You may not cancel this job."
+
 A hidden job is answered with the same 404 as a job that does not exist (the
 text names the job name and job id of the request), so the reply does not tell
 whether the job exists.
@@ -404,8 +408,8 @@ after `S RAKFPROF`.
 
 ## What the policy does not cover
 
-JESSPOOL decides the job services only: list, status, files, records and purge
-under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
+JESSPOOL decides the job services only: list, status, files, records, cancel and
+purge under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
 `fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
 
 - **Console services** (`/zosmf/restconsoles`). Any authenticated user can issue

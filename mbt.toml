@@ -197,6 +197,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJCARD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTJREQ: #417 — the body of PUT on a job decides what is done to it: cancel,
+# hold and release (not implemented yet), anything else, or no request at all.
+# A truncated body must never be read as a cancel. Portable C (`mbt test`); the
+# TU #includes src/jobreq.c so it drives the real parser jobsapi.c calls — do
+# not list jobreq.c here.
+[test.TSTJREQ]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTJWN: #440 — who may see, read and purge which job on the JES2 spool. An
 # own job is always allowed; a foreign one follows RACF class JESSPOOL (no
 # profile and NONE hide it, READ lists and reads, UPDATE also purges); a name

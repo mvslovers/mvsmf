@@ -63,8 +63,11 @@ profiles and examples: `docs/jesspool.md`. What a maintainer must keep:
   administrator included, sees only their own jobs. A tool that finds another
   user's job (for example the started task HTTPD through `owner=*`) needs a
   profile for it.
-- `PUT .../jobs/{name}/{id}` with a cancel request is not implemented (#417);
-  when it is, it follows the purge rule.
+- `PUT .../jobs/{name}/{id}` with `{"request":"cancel"}` (#417) follows the
+  purge rule: it goes through the same code as `DELETE` (`cancel_job()` in
+  `jobsapi.c`), so JESSPOOL UPDATE is needed for a foreign job, and READ only
+  answers 500, category 4, "You may not cancel this job." Hold and release
+  (#424) will take the same rule.
 
 The `racf_set_acee()` pair in `mvsmf.c` stays as the **second** net, on purpose
 (`httpd/docs/identity-redesign.md` §3.1 item 5). It is address-space-wide and

@@ -79,10 +79,13 @@ int jobStatusHandler(Session *session) asm("JAPI0005");
 int jobPurgeHandler(Session *session) asm("JAPI0006");
 
 /**
- * @brief Cancels a running job
+ * @brief PUT on a job: cancels it (#417)
  *
- * Cancels execution of a running job. Only jobs in execution
- * can be cancelled. Self-cancel is not allowed.
+ * The body names the request. {"request":"cancel"} stops the job and leaves
+ * its output on the spool; the caller needs the access a purge needs. "hold"
+ * and "release" answer 400 until they are implemented (#424), as does a body
+ * with no usable "request". A started task or TSO user cannot be cancelled,
+ * the HTTPD server itself included.
  *
  * @param session Current session context
  * @return 0 on success, negative value on error

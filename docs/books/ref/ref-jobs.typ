@@ -474,7 +474,7 @@ cards as a job.
 
 #idx("job", "purge")#idx("DELETE")#idx("purge")
 #cmd("DELETE /zosmf/restjobs/jobs/{job-name}/{jobid}") purges a job: it
-removes the job and its output from JES2. The caller needs UPDATE-level access
+asks JES2 to remove the job and its output. The caller needs UPDATE-level access
 (@ref-jobs-auth). The request has no body. mvsMF looks the job up as for the
 status, and it purges the job by the name and the ID that the lookup found,
 not by the spelling of the path.
@@ -482,7 +482,11 @@ not by the spelling of the path.
 #tab(caption: [Answers of the purge request])[
   #table(columns: (1.6in, 0.4in, 0.4in, 0.35in, 0.45in, 1fr),
     [Condition], [Status], [Cat.], [rc], [Reason], [Message],
-    [The job was purged], [200], [], [], [], [See below.],
+    [The job was purged], [200], [], [], [], [#cmd("Request was successful.") in
+      the object below.],
+    [JES2 took the purge and the job is still on the queue], [200], [], [], [],
+      [#cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
+      in the object below (@ref-jobs-purge-pending).],
     [No such job, or the caller may not see it], [404], [6], [4], [2],
       [#cmd("Job 'name(id)' not found")],
     [The job vanished between the lookup and the purge], [404], [6], [4], [2],
@@ -518,6 +522,42 @@ the purge completes at once and about a second when the job stays.
 
 The code does not treat a running job differently from a job on the output
 queue: the same purge function is called with the same flag.
+
+=== A Purge That Is Only Requested <ref-jobs-purge-pending>
+
+#idx("job", "purge", "requested only")#idx("purge", "output held by a device")
+The purge function of JES2 returns the code for success when JES2 has taken the
+request. That code does not say that the job has left the queue. A job whose
+output a device has selected stays on the queue, marked for purge, until the
+device releases the output. The case that was measured is a punch that has
+selected the output and halts to wait for setup (the User's Guide, section "A
+Purge That Is Only Requested").
+
+mvsMF therefore looks at the queue again after JES2 has accepted the request.
+The look is the lookup of the status request, with the same decision of the
+class #cmd("JESSPOOL") that the purge used (@ref-jobs-auth), for the name and
+the ID that the first lookup found. The rules:
+
+- mvsMF looks at most five times. Between two looks it waits 0.2 seconds, so
+  the pauses add up to 0.8 seconds at most. The lookups themselves take time
+  too.
+- It stops at the first look that finds no job. The message is then
+  #cmd("Request was successful.")
+- If all five looks find the job, the message is
+  #cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
+  Both messages end with a period.
+- Everything else in the object is as for a purge that is complete. The status
+  is 200 and #cmd("status") is 0 in both cases. mvsMF sends no other status for
+  the pending purge.
+- mvsMF does not know why the job stays. It sees only that the job is still
+  listed after the last look. The answer does not say what holds the job.
+- The check is made only for an answer that would be 200. A purge that is
+  refused, or of a job that is not found, has no wait.
+
+A second DELETE for the job, while it is still on the queue, takes the same
+path and gets the same answer. The status request answers 200 for the job as
+long as it is on the queue. After the output is released the job is not found,
+and every request for it gets the 404 of @ref-jobs-purge.
 
 == Requests That mvsMF Does Not Have <ref-jobs-absent>
 

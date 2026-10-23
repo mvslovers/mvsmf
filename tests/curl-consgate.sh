@@ -97,7 +97,7 @@ ROUTES=(
 	"test help|GET|/zosmf/test"
 	"test version|GET|/zosmf/test?fn=version"
 	"test cmd|GET|/zosmf/test?fn=cmd&cmd=D%20T"
-	"test password|GET|/zosmf/test?fn=password"
+	"test env|GET|/zosmf/test?fn=env"
 	"test wildcard|GET|/zosmf/test/wildcard/x"
 )
 

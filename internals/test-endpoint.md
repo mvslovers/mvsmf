@@ -47,6 +47,16 @@ a function, so it is no exception to the rule above: do not add a second check
 inside a `fn=` branch. Consequence for a deploy: the user who confirms the build
 id with `fn=version` needs READ on the profile.
 
+**No function of the endpoint returns session data (#508).** Whatever
+identifies a session or authenticates a caller (a credential, a token value)
+must not be readable through `/zosmf/test`, with or without a flag: the
+endpoint's gate is READ on one FACILITY profile, which says who may issue
+operator commands, not who may see another layer's secrets. `fn=token` shows
+that the line can be drawn: it reports the token's length and how the caller
+authenticated, never the value. The one function that returned a credential
+was removed outright; a function that needs such a value to work belongs in
+the handler that uses it, not in a probe.
+
 `tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
 caught, the server keeps serving, and it costs no storage. It deliberately
 faults the worker several times.

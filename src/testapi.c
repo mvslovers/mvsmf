@@ -930,36 +930,6 @@ int testHandler(Session *session) {
         toklen, toklen > 0 ? "true" : "false",
         authz ? "true" : "false", cookie ? "true" : "false");
 
-    /* --- fn=password (exercise http_get_password()) ---------------- */
-    /* Verifies httpd's HTTPX http_get_password() export (mvslovers/httpd#111),
-     * which decrypts the caller's password from the session credential -- the
-     * value job submission puts on the JOB card. The plaintext is a secret, so
-     * it is shown only with &reveal=1; otherwise it is masked. Auth-gated: a
-     * caller only ever sees their own password (which they already know). */
-  } else if (strcmp(fn, "password") == 0) {
-    UCHAR buf[64] = {0};
-    UCHAR *ret;
-    char *reveal =
-        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_REVEAL");
-    int len;
-    char masked[64] = {0};
-    int i;
-
-    ret = http_get_password(session->httpc, buf, sizeof(buf));
-    len = (int)strlen((char *)buf);
-
-    for (i = 0; i < len && i < (int)sizeof(masked) - 1; i++) {
-      masked[i] = '*';
-    }
-
-    rc = http_printf(
-        session->httpc,
-        "{ \"fn\": \"password\","
-        " \"http_get_password_ret\": \"%s\", \"strlen\": %d,"
-        " \"value\": \"%s\" }\n",
-        ret ? "non-null" : "NULL", len,
-        (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
-
     /* --- fn=env (what environment did this CGI load?) -------------- */
     /* httpd and the CGI do NOT share an environment, despite what this
      * comment claimed until #343.  Every LINK builds its own CLIBGRT with
@@ -1652,7 +1622,6 @@ int testHandler(Session *session) {
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=token               (session token length; value withheld)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
-        " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=textsum             (load point + FNV-1a per 4K block of the loaded MVSMF; mvsmf#425)\","
         " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF, off from the load point = entry-load + MVSMF913I EP offset; mvsmf#425)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","

@@ -253,6 +253,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   **Upgrade: define the profile and grant READ to those who may use it.** The
   deploy user, and whoever checks the build id with `?fn=version`, needs READ
   too. Rules and the profile commands: `docs/installation.md`.
+- **The diagnostic endpoint `/zosmf/test` no longer has a function that
+  returns session data** (#508). The function is removed, not gated: a
+  request to it now gets the endpoint's help text like any unknown `fn`. No
+  function of the endpoint may return what identifies a session.
 
 ## [1.3.0] - 2026-10-15
 

@@ -30,6 +30,8 @@ fi
 TEST_SEQ="${MVSMF_USER}.CURL.TESTBIN"
 TEST_PDS="${MVSMF_USER}.CURL.TESTBPDS"
 TEST_BLK="${MVSMF_USER}.CURL.TESTBBLK"
+TEST_VSEQ="${MVSMF_USER}.CURL.TESTBVB"
+TEST_VPDS="${MVSMF_USER}.CURL.TESTBVBP"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
@@ -85,6 +87,44 @@ cleanup_datasets() {
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}" >/dev/null 2>&1 || true
+}
+
+# The start of a body, printable characters only, for a failure message.
+body_head() {
+	head -c 200 "$1" | tr -c '[:print:]' '?'
+}
+
+# Four bytes of a file as hex: the length prefix of a record-mode read.
+first4_hex() {
+	head -c 4 "$1" | od -An -tx1 | tr -d ' \n'
+}
+
+# Record mode on a RECFM=V data set must be refused, with no data in the
+# answer (issue #455). $1 = URL, $2 = label, $3 = a string that is in the
+# data and so must not be in the answer (checked in ASCII, and as the EBCDIC
+# bytes of "VBRECORD").
+assert_record_refused() {
+	local url="$1" label="$2" marker="$3"
+	local code
+	code=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+		-K "$MVSMF_CURLRC" \
+		-H "X-IBM-Data-Type: record" \
+		"$url")
+	assert_http_status "400" "$code" "$label: record read is refused"
+	if [ "$(jq -r '[.category, .rc, .reason] | join(",")' "$DOWNLOAD_FILE" 2>/dev/null)" = "6,8,12" ]; then
+		pass "$label: error report is category 6, rc 8, reason 12"
+	else
+		fail "$label: error report is category 6, rc 8, reason 12" "body: $(body_head "$DOWNLOAD_FILE")"
+	fi
+	# The data reaches the client as it is stored, EBCDIC: look for both.
+	if LC_ALL=C grep -qa "$marker" "$DOWNLOAD_FILE" \
+		|| LC_ALL=C grep -qa "$(printf '\345\302\331\305\303\326\331\304')" "$DOWNLOAD_FILE"; then
+		fail "$label: no data in the answer" "the body contains the data set's content"
+	else
+		pass "$label: no data in the answer"
+	fi
 }
 
 # =========================================================================
@@ -146,6 +186,21 @@ else
 	DL_SIZE=$(wc -c < "$DOWNLOAD_FILE" | tr -d ' ')
 	DIFF_OFFSET=$(cmp "$BINARY_FILE" "$DOWNLOAD_FILE" 2>&1 || true)
 	fail "sequential binary round-trip matches" "sizes: orig=${ORIG_SIZE} dl=${DL_SIZE}; ${DIFF_OFFSET}"
+fi
+
+echo ""
+echo "--- Record Read from Sequential Dataset, RECFM=FB (issue #455 control) ---"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+	-K "$MVSMF_CURLRC" \
+	-H "X-IBM-Data-Type: record" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
+assert_http_status "200" "$HTTP_CODE" "record read of an FB dataset"
+if [ "$(first4_hex "$DOWNLOAD_FILE")" = "00000050" ] \
+	&& [ "$(tail -c +5 "$DOWNLOAD_FILE" | head -c 80 | od -An -tx1 | tr -d ' \n')" = "$(head -c 80 "$BINARY_FILE" | od -An -tx1 | tr -d ' \n')" ]; then
+	pass "record read of an FB dataset: 4-byte length 80, then the record"
+else
+	fail "record read of an FB dataset: 4-byte length 80, then the record" "prefix $(first4_hex "$DOWNLOAD_FILE")"
 fi
 
 echo ""
@@ -267,6 +322,82 @@ else
 	fail "PDS member binary round-trip matches" "sizes: orig=${ORIG_SIZE} dl=${DL_SIZE}; ${DIFF_OFFSET}"
 fi
 
+echo ""
+echo "--- Record Read from PDS Member, RECFM=FB (issue #455 control) ---"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+	-K "$MVSMF_CURLRC" \
+	-H "X-IBM-Data-Type: record" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(BINMBR)")
+assert_http_status "200" "$HTTP_CODE" "record read of an FB member"
+if [ "$(first4_hex "$DOWNLOAD_FILE")" = "00000050" ] \
+	&& [ "$(tail -c +5 "$DOWNLOAD_FILE" | head -c 80 | od -An -tx1 | tr -d ' \n')" = "$(head -c 80 "$BINARY_FILE" | od -An -tx1 | tr -d ' \n')" ]; then
+	pass "record read of an FB member: 4-byte length 80, then the record"
+else
+	fail "record read of an FB member: 4-byte length 80, then the record" "prefix $(first4_hex "$DOWNLOAD_FILE")"
+fi
+
+# -----------------------------------------------------------------
+# Record mode on RECFM=V is refused (issue #455)
+#
+# Until a correct RECFM=V record mode exists (#244, #245, #361), a record read
+# of a variable-length data set returned LRECL-sized chunks that cross record
+# boundaries. Lines of unequal length make that visible; the answer must now be
+# an error report and never data.
+# -----------------------------------------------------------------
+
+echo ""
+echo "--- Record Read, RECFM=VB (issue #455) ---"
+
+BODY='{"dsorg":"PS","recfm":"VB","lrecl":84,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}")
+assert_http_status "201" "$HTTP_CODE" "create VB sequential dataset"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -K "$MVSMF_CURLRC" \
+	-H "X-IBM-Data-Type: text" \
+	--data-binary $'VBRECORD ONE\nVBRECORD TWO IS LONGER\nVBRECORD 3\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}")
+assert_http_status "204" "$HTTP_CODE" "upload three lines of unequal length to the VB dataset"
+
+assert_record_refused "${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}" \
+	"VB sequential dataset" "VBRECORD"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+	-K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}")
+assert_http_status "200" "$HTTP_CODE" "text read of the VB dataset is unaffected"
+if [ "$(grep -c VBRECORD "$DOWNLOAD_FILE")" = "3" ]; then
+	pass "text read of the VB dataset returns the three lines"
+else
+	fail "text read of the VB dataset returns the three lines" "body: $(body_head "$DOWNLOAD_FILE")"
+fi
+
+echo ""
+echo "--- Record Read from PDS Member, RECFM=VB (issue #455) ---"
+
+BODY='{"dsorg":"PO","recfm":"VB","lrecl":84,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}")
+assert_http_status "201" "$HTTP_CODE" "create VB PDS"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X PUT -K "$MVSMF_CURLRC" \
+	-H "X-IBM-Data-Type: text" \
+	--data-binary $'VBRECORD ONE\nVBRECORD TWO IS LONGER\nVBRECORD 3\n' \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBMBR)")
+assert_http_status "204" "$HTTP_CODE" "upload three lines of unequal length to the VB member"
+
+assert_record_refused "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBMBR)" \
+	"VB member" "VBRECORD"
+
 # -----------------------------------------------------------------
 # Cleanup
 # -----------------------------------------------------------------
@@ -278,6 +409,16 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -K "$MVSMF_CURLRC" \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}")
 assert_http_status "204" "$HTTP_CODE" "cleanup: delete PDS"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}")
+assert_http_status "204" "$HTTP_CODE" "cleanup: delete VB PDS"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}")
+assert_http_status "204" "$HTTP_CODE" "cleanup: delete VB sequential dataset"
 
 # =========================================================================
 # Summary

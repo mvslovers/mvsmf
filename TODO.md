@@ -219,6 +219,11 @@ big-endian length per **logical** record, the data length without the RDW, nothi
 padded, the prefixes tiling the response exactly — and the same resource in binary
 mode is those bytes with the prefixes removed, byte for byte.
 
+Until then the read is refused (#455, 400, category 6, reason 12, in
+`read_and_send_dataset()`): record mode on a V data set no longer returns data.
+#361 replaces that refusal with the real thing; its tests are the VB cases in
+`curl-binary.sh` and `zowe-binary.sh`, which expect the 400 today.
+
 That second half matters as much as the first: **binary mode on a V data set is not
 a bug.** The reference concatenates there too, exactly as we do. It looks like the
 same defect and is not, so do not "fix" it.

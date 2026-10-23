@@ -464,6 +464,18 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 	int lrecl = fp->lrecl;
 	long count = 0;
 
+	/* Record mode frames each fread() of LRECL bytes as one record, which is
+	   only true of fixed-length data. On RECFM=V the reads cross record
+	   boundaries and carry RDWs, so the client would get wrong data with a 200.
+	   Refuse before the headers go out, and before the first read (issue
+	   #455). A correct variable-length record mode is #244/#245/#361. */
+	if (data_type == DATA_TYPE_RECORD
+		&& (fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_RECORD_MODE_RECFM_V,
+			ERR_MSG_RECORD_MODE_RECFM_V, NULL, 0);
+	}
+
 	buffer = calloc(1, lrecl + 2);
 	if (!buffer) {
 		return handle_error(session, ERR_MEMORY, "Memory allocation failed");

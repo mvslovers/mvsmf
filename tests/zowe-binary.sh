@@ -35,6 +35,8 @@ MVS_USER="$MVSMF_USER"
 # Test dataset names
 TEST_SEQ="${MVS_USER}.ZOWE.TESTBIN"
 TEST_PDS="${MVS_USER}.ZOWE.TESTBPDS"
+TEST_VSEQ="${MVS_USER}.ZOWE.TESTBVB"
+TEST_VPDS="${MVS_USER}.ZOWE.TESTBVBP"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
@@ -98,6 +100,32 @@ assert_rc() {
 cleanup_datasets() {
 	run_zowe files delete ds "$TEST_SEQ" -f >/dev/null 2>&1 || true
 	run_zowe files delete ds "$TEST_PDS" -f >/dev/null 2>&1 || true
+	run_zowe files delete ds "$TEST_VSEQ" -f >/dev/null 2>&1 || true
+	run_zowe files delete ds "$TEST_VPDS" -f >/dev/null 2>&1 || true
+}
+
+# A record-mode download of a RECFM=V data set must fail and write no data
+# (issue #455). $1 = what is downloaded, $2 = label.
+assert_record_refused() {
+	local what="$1" label="$2"
+	local rc=0 out
+	rm -f "$DOWNLOAD_FILE"
+	out=$(run_zowe files download ds "$what" -f "$DOWNLOAD_FILE" --record) || rc=$?
+	if [ "$rc" -ne 0 ]; then
+		pass "$label: record download fails (rc=$rc)"
+	else
+		fail "$label: record download fails" "rc=0"
+	fi
+	if echo "$out" | grep -q "RECFM=V"; then
+		pass "$label: the message says record mode is not supported for RECFM=V"
+	else
+		fail "$label: the message says record mode is not supported for RECFM=V" "output: $(echo "$out" | head -c 300)"
+	fi
+	if [ -s "$DOWNLOAD_FILE" ]; then
+		fail "$label: no data is written" "$(wc -c < "$DOWNLOAD_FILE" | tr -d ' ') bytes in the output file"
+	else
+		pass "$label: no data is written"
+	fi
 }
 
 # =========================================================================
@@ -197,6 +225,45 @@ else
 fi
 
 # -----------------------------------------------------------------
+# Record mode: RECFM=FB works, RECFM=V is refused (issue #455)
+# -----------------------------------------------------------------
+
+echo ""
+echo "--- Record Download from PDS Member, RECFM=FB (issue #455 control) ---"
+
+rm -f "$DOWNLOAD_FILE"
+RC=0
+OUTPUT=$(run_zowe files download ds "${TEST_PDS}(BINMBR)" -f "$DOWNLOAD_FILE" --record) || RC=$?
+assert_rc 0 "$RC" "record download of an FB member"
+
+echo ""
+echo "--- Record Download, RECFM=VB (issue #455) ---"
+
+VB_FILE=$(mktemp)
+mvsmf_on_exit 'rm -f "$VB_FILE"'
+printf 'VBRECORD ONE\nVBRECORD TWO IS LONGER\nVBRECORD 3\n' > "$VB_FILE"
+
+RC=0
+OUTPUT=$(run_zowe files create ps "$TEST_VSEQ" --recfm VB --lrecl 84 --blksize 3120 --size 1TRK) || RC=$?
+assert_rc 0 "$RC" "create VB sequential dataset"
+
+RC=0
+OUTPUT=$(run_zowe files upload ftds "$VB_FILE" "$TEST_VSEQ") || RC=$?
+assert_rc 0 "$RC" "upload three lines of unequal length to the VB dataset"
+
+assert_record_refused "$TEST_VSEQ" "VB sequential dataset"
+
+RC=0
+OUTPUT=$(run_zowe files create pds "$TEST_VPDS" --recfm VB --lrecl 84 --blksize 3120 --size 1TRK --dirblks 5) || RC=$?
+assert_rc 0 "$RC" "create VB PDS"
+
+RC=0
+OUTPUT=$(run_zowe files upload ftds "$VB_FILE" "${TEST_VPDS}(VBMBR)") || RC=$?
+assert_rc 0 "$RC" "upload three lines of unequal length to the VB member"
+
+assert_record_refused "${TEST_VPDS}(VBMBR)" "VB member"
+
+# -----------------------------------------------------------------
 # Cleanup
 # -----------------------------------------------------------------
 
@@ -206,6 +273,14 @@ echo "--- Cleanup ---"
 RC=0
 OUTPUT=$(run_zowe files delete ds "$TEST_PDS" -f) || RC=$?
 assert_rc 0 "$RC" "cleanup: delete PDS"
+
+RC=0
+OUTPUT=$(run_zowe files delete ds "$TEST_VPDS" -f) || RC=$?
+assert_rc 0 "$RC" "cleanup: delete VB PDS"
+
+RC=0
+OUTPUT=$(run_zowe files delete ds "$TEST_VSEQ" -f) || RC=$?
+assert_rc 0 "$RC" "cleanup: delete VB sequential dataset"
 
 # =========================================================================
 # Summary

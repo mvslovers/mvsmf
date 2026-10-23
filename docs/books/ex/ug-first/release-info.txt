@@ -1,0 +1,2 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/info"
+{"zosmf_hostname":"localhost","zosmf_port":"8080","zosmf_version":"1","zosmf_full_version":"1.4.0","plugins":[],"zosmf_saf_realm":"SAFRealm","api_version":"1","zos_version":"MVS 3.8j"}

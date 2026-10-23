@@ -17,7 +17,8 @@ HTTPD lets in (@ug-security).
 Every session in this book was run with the command line client #cmd("curl")
 (version 8.14.1) against a build of mvsMF 1.4.0 on a test system. That build
 still carried the version #cmd("1.4.0-dev"), and the sessions show it; a
-release prints #cmd("1.4.0"). Four things hold for all of them:
+release prints #cmd("1.4.0"). Only the sessions of @ug-first-build were taken
+from a build of the release version, too. Four things hold for all of them:
 
 - The address of mvsMF, the user ID and the password are in three shell
   variables, and the sessions show the variables, not their values:
@@ -121,16 +122,36 @@ server is up has to send a credential, too.]
 
 #idx("fn=version")
 #idx("build id")
-The version in the response of #cmd("/zosmf/info") is the release. To find the
-build that is loaded, ask the diagnostic endpoint:
+#idx("zosmf_full_version")
+#idx("release", "check the build")
+#idx("development build")
+The field #cmd("zosmf_full_version") of the response of #cmd("/zosmf/info") is
+the version that the module on the system was built as. For a release it
+answers the question which build runs. A release prints a version such as
+#cmd("1.4.0"), and the response of a release is all that a release has to say
+about itself:
+
+#screen(raw(read("../ex/ug-first/release-info.txt"), block: true))
+
+A release carries no commit identifier, and it does not register the
+diagnostic endpoint #cmd("/zosmf/test"). The request for it answers 404:
+
+#screen(raw(read("../ex/ug-first/release-test.txt"), block: true))
+
+A development build does register the endpoint. mvsMF decides by the version
+that is stamped into the module: a version that ends in #cmd("-dev") is a
+development build, and any other version is a release. Such a build names its
+source commit, too:
 
 #screen(raw(read("../ex/ug-first/version.txt"), block: true))
 
-The field #cmd("version") is the release, and #cmd("build") is the short
+The field #cmd("version") is the version, and #cmd("build") is the short
 identifier of the source commit. It ends with #cmd("-dirty") if the build was
-made from a changed tree. Give both when you report a problem. If a build
-leaves the diagnostic endpoint out, the request answers 404. The _mvsMF
-Reference_ describes the endpoint in "The Diagnostic Endpoint".
+made from a changed tree. Give both when you report a problem with a
+development build. If #cmd("zosmf_full_version") ends in #cmd("-dev") on a system that
+should run a release, the module is a development build, and you install the
+release package. The _mvsMF Reference_ describes the endpoint in "The
+Diagnostic Endpoint".
 
 == Connecting and Logging In <ug-first-login>
 
@@ -182,7 +203,8 @@ returns a new token, also for the same user ID. HTTPD accepts a token only from
 the address that logged in.
 
 A request sends the token back as a cookie. The option #cmd("-b") does that, and
-no user ID or password is needed:
+no user ID or password is needed. The request lists the data set
+#cmd("SYS1.PARMLIB"), a service that every build has:
 
 #screen(raw(read("../ex/ug-first/cookie.txt"), block: true))
 

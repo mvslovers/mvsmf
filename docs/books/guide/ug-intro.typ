@@ -39,8 +39,9 @@ mvsMF has six services. All paths begin with #cmd("/zosmf/"):
 ]
 
 Another path, #cmd("/zosmf/test"), is a diagnostic endpoint for the people who
-look after the system. It is not a service for users. The _mvsMF Reference_
-describes it in "The Diagnostic Endpoint".
+look after the system. It is not a service for users, and a release does not
+have it: only a development build, whose version ends in #cmd("-dev"),
+registers it. The _mvsMF Reference_ describes it in "The Diagnostic Endpoint".
 
 The _mvsMF Reference_ lists every request of these services with its parameters,
 headers, answers and status codes. This book shows how to do the work and

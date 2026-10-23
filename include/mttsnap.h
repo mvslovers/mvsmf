@@ -3,7 +3,7 @@
 
 /**
  * @file mttsnap.h
- * @brief Taking a snapshot of the Master Trace Table, and counting in it.
+ * @brief Taking a snapshot of the Master Trace Table, and finding new matches in it.
  *
  * The console endpoints read the MTT through a copy: cmtt_new() copies the
  * table, cmtt_get_array() indexes the copy. The copy is the largest allocation
@@ -60,11 +60,39 @@ int rstrip_len(const char *s, int len)                      asm("MFRSTRIP");
 int mtt_snap_open(Session *session, CMTT **cmtt, MTENTRY ***arr,
                   unsigned *n)                                asm("MFMTTSNP");
 
-/* Count the entries whose upper-cased text contains keyword_upper; copy the
- * newest match's message text, right-stripped, into latest (empty if none).
- * Returns the count, or MTT_SNAP_FAILED when the snapshot could not be taken --
- * which is not a count of 0. */
-int mtt_detect_count(Session *session, const char *keyword_upper,
-                     char *latest, size_t lsz)             asm("MFMTTDET");
+/* Seconds-of-day from the "hh.mm.ss" field of a formatted MTT line (right
+ * after the 4-character flags field); -1 if the line carries none. */
+int mtt_secs_of_day(const char *dat, int len)               asm("MFMTTSOD");
+
+/* A place in the Master Trace Table that survives the table wrapping (#195).
+ *
+ * The table is a window: the oldest entries leave it as new ones arrive, and
+ * the window is bounded in bytes, not in lines. A count of matches taken once
+ * and compared later is therefore not a measure of what arrived since -- a
+ * burst of other messages pushes earlier matches out and the count falls below
+ * the baseline while a fresh match sits in the table.
+ *
+ * So a detection remembers where the table ended instead: the hh.mm.ss of its
+ * newest stamped entry, and how many matches carry exactly that second (the
+ * stamp has no finer grain). Only matches stamped later count as new. */
+typedef struct mtt_anchor {
+	int      secs;     /* seconds-of-day of the newest stamped entry; -1: none */
+	unsigned same;     /* matches stamped exactly at secs                      */
+} MTT_ANCHOR;
+
+/* Take the anchor for keyword_upper. Returns 0, or MTT_SNAP_FAILED when the
+ * snapshot could not be taken -- in which case *anchor is not set. */
+int mtt_detect_anchor(Session *session, const char *keyword_upper,
+                      MTT_ANCHOR *anchor)                   asm("MFMTTANC");
+
+/* Count the entries whose upper-cased text contains keyword_upper and that are
+ * newer than anchor; copy the newest of them, message text only and
+ * right-stripped, into latest (empty if none). An entry without a time of its
+ * own (a continuation line) takes the time of the entry before it. Returns the
+ * count, or MTT_SNAP_FAILED when the snapshot could not be taken -- which is
+ * not a count of 0. */
+int mtt_detect_since(Session *session, const char *keyword_upper,
+                     const MTT_ANCHOR *anchor, char *latest,
+                     size_t lsz)                            asm("MFMTTSNC");
 
 #endif /* MTTSNAP_H */

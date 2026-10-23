@@ -180,6 +180,15 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   server has stopped accepting. The answer to the `P` itself closes the
   connection, as the answer to any request that carries a body does. See
   `docs/endpoints/console/issue-command.md`.
+- **A detection no longer reports `waiting` for a message that arrived**
+  (#195). The unsolicited-message detection compared the number of matching
+  lines in the Master Trace Table with a count taken at issue. The table is a
+  window that wraps and is bounded in bytes, so after a burst of other
+  messages the older matches were gone, the count fell below the baseline, and
+  a fresh match went unreported. The detection now remembers where the table
+  ended, the time of its newest entry, and reports a match stamped later. The
+  command's own reply can still count as a detection, and a detection is read
+  afresh on every poll (see `docs/endpoints/console/detections.md`).
 
 ### Changed
 

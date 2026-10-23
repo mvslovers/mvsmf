@@ -1,6 +1,6 @@
 $ curl -si -X DELETE -b cookies.txt "$MVSMF_URL/zosmf/services/authenticate"
 HTTP/1.1 204 No Content
-Date: Fri, 23 Oct 2026 07:43:35 GMT
+Date: Fri, 23 Oct 2026 07:57:57 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive

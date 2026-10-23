@@ -1,7 +1,7 @@
 $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restjobs/jobs?owner=*&prefix=SECDEMO*"
 HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 07:48:45 GMT
+Date: Fri, 23 Oct 2026 07:54:46 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive
@@ -11,6 +11,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=rMXUGMeP0ifaTUXfsXrAq5TzT7GC6rAskuXRE7zgDAY=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=fYW5NDOqzHlHLQPpRP45y4VjEpdmjtpBC80uE0abCIE=; Path=/; HttpOnly; SameSite=Strict
 
-[{"subsystem":"JES2","jobname":"SECDEMO","jobid":"JOB00049","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00049","files-url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00049/files","status":"OUTPUT","retcode":"CC 0000"}]
+[{"subsystem":"JES2","jobname":"SECDEMO","jobid":"JOB00056","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00056","files-url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00056/files","status":"OUTPUT","retcode":"CC 0000"}]

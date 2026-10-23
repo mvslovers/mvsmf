@@ -1,0 +1,31 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restjobs/jobs/JPPAIR/$JOBID/files/103/records"
+RDEF * CL(JESSPOOL) UACC(NONE)
+RDEFINE: JESSPOOL profile defined: *
+RDEFINE: Run RAKFPROF to activate the changes
+PE * CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/*
+PERMIT: ID = ADMIN
+PERMIT: Run RAKFPROF to activate the changes
+RDEF MIKE1.* CL(JESSPOOL) UACC(NONE)
+RDEFINE: JESSPOOL profile defined: MIKE1.*
+RDEFINE: Run RAKFPROF to activate the changes
+PE MIKE1.* CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/MIKE1.*
+PERMIT: ID = ADMIN
+PERMIT: Run RAKFPROF to activate the changes
+PE MIKE1.* CL(JESSPOOL) ID(MIKE2) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/MIKE1.*
+PERMIT: ID = MIKE2
+PERMIT: Run RAKFPROF to activate the changes
+RDEF MIKE2.* CL(JESSPOOL) UACC(NONE)
+RDEFINE: JESSPOOL profile defined: MIKE2.*
+RDEFINE: Run RAKFPROF to activate the changes
+PE MIKE2.* CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/MIKE2.*
+PERMIT: ID = ADMIN
+PERMIT: Run RAKFPROF to activate the changes
+PE MIKE2.* CL(JESSPOOL) ID(MIKE1) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/MIKE2.*
+PERMIT: ID = MIKE1
+PERMIT: Run RAKFPROF to activate the changes
+END

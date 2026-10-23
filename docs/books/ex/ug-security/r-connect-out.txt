@@ -1,0 +1,5 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restjobs/jobs/CONNECT/$JOBID/files/104/records"
+CONNECT JONES GROUP(AUDIT)
+CONNECT: User JONES    connected to Group AUDIT
+CONNECT: Run RAKFUSER to activate the changes
+END

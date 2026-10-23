@@ -167,7 +167,7 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   arrives. A console command sent while the server is stopping is refused
   with 503 / 8 / 17 and not issued, or the connection is reset once the
   server has stopped accepting. The answer to the `P` itself closes the
-  connection, as every console answer does. See
+  connection, as the answer to any request that carries a body does. See
   `docs/endpoints/console/issue-command.md`.
 
 ### Changed

@@ -1,3 +1,16 @@
 $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restconsoles/v1/log?timeRange=0m"
-PENDING CAPTURE
+HTTP/1.1 400 Bad Request
+Date: Fri, 23 Oct 2026 07:46:30 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 95
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+
+{"return-code":1,"reason-code":22,"reason":"The parameter timeRange is invalid. Example: 10m."}

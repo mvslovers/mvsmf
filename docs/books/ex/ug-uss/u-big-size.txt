@@ -1,3 +1,19 @@
 $ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restfiles/fs?path=/tmp/mvsmf-demo/big.txt"
-PENDING CAPTURE
+{
+  "items": [
+    {
+      "name": "/tmp/mvsmf-demo/big.txt",
+      "mode": "-rw-r--r--",
+      "size": 2056192,
+      "user": "SMITH",
+      "group": "USER",
+      "links": 1,
+      "mtime": "2026-10-23T07:45:46Z",
+      "inode": 58
+    }
+  ],
+  "returnedRows": 1,
+  "totalRows": 1,
+  "JSONversion": 1
+}

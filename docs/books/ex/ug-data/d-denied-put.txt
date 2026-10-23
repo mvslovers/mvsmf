@@ -1,4 +1,17 @@
 $ printf 'X\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
   -H 'Content-Type: text/plain' --data-binary @- \
   "$MVSMF_URL/zosmf/restfiles/ds/SYS1.MVSMF.NOSUCH"
-PENDING CAPTURE
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 23 Oct 2026 07:45:08 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 135
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=A+mE62kRaJ/3/K3d0hpKiqTJumxdiMJX+eH+rBCLcw4=; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":4,"reason":0,"message":"LMOPEN error","details":["Authorization failed - You may not use this protected data set."]}

@@ -1,2 +1,15 @@
 $ curl -si -X POST -u "$MVSMF_USER:wrong-password" "$MVSMF_URL/zosmf/services/authenticate"
-PENDING CAPTURE
+HTTP/1.1 401 Unauthorized
+Date: Fri, 23 Oct 2026 07:43:35 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 188
+WWW-Authenticate: Basic realm="MVSC"
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+
+{"returnCode":8,"reasonCode":1,"message":"Login failed. Check whether the user ID and password you use for the Basic Auth is correct, and if the user ID has the required SAF permissions."}

@@ -1,3 +1,16 @@
 $ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" \
   "$MVSMF_URL/zosmf/restjobs/jobs?owner=*&prefix=SECDEMO*"
-PENDING CAPTURE
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:48:59 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 2
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=ItYcjG2zw7lNH2amogzc3Wdg77c5HLpzIdN1S1EDcQ4=; Path=/; HttpOnly; SameSite=Strict
+
+[]

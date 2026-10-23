@@ -1,3 +1,16 @@
 $ curl -si -u "$MVSMF_USER3:$MVSMF_PASS3" \
   "$MVSMF_URL/zosmf/info"
-PENDING CAPTURE
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:48:43 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 188
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=cuUUV2vvj8RRCjl0OZDAYG2Gw7XqbZw/Z47UydgpUZk=; Path=/; HttpOnly; SameSite=Strict
+
+{"zosmf_hostname":"localhost","zosmf_port":"8080","zosmf_version":"1","zosmf_full_version":"1.4.0-dev","plugins":[],"zosmf_saf_realm":"SAFRealm","api_version":"1","zos_version":"MVS 3.8j"}

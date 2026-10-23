@@ -1,3 +1,52 @@
 $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restfiles/fs?path=/tmp/mvsmf-demo"
-PENDING CAPTURE
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:45:16 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Content-Type: application/json
+Transfer-Encoding: chunked
+
+{
+  "items": [
+    {
+      "name": "empty.txt",
+      "mode": "-rw-r--r--",
+      "size": 0,
+      "user": "SMITH",
+      "group": "USER",
+      "links": 1,
+      "mtime": "2026-10-23T07:45:15Z",
+      "inode": 62
+    }
+   ,{
+      "name": "hello.txt",
+      "mode": "-rw-r--r--",
+      "size": 29,
+      "user": "SMITH",
+      "group": "USER",
+      "links": 1,
+      "mtime": "2026-10-23T07:45:15Z",
+      "inode": 61
+    }
+   ,{
+      "name": "notes",
+      "mode": "drwxr-xr-x",
+      "size": 128,
+      "user": "SMITH",
+      "group": "USER",
+      "links": 2,
+      "mtime": "2026-10-23T07:45:15Z",
+      "inode": 63
+    }
+  ],
+  "returnedRows": 3,
+  "totalRows": 3,
+  "JSONversion": 1
+}

@@ -886,6 +886,50 @@ test_submit_dataset_missing_file_field() {
 	assert_http_status "400" "$HTTP_STATUS" "submit dataset missing file field"
 }
 
+test_submit_dataset_name_too_long() {
+	echo ""
+	echo "--- Submit Job: dataset name over 44 characters (issue #477) ---"
+
+	# 44 is the longest name; the 45th used to run past a stack buffer in
+	# submit_file(). Same 400 as a name without //'...'.
+	local name resp
+	name=$(printf 'A%.0s' $(seq 1 45))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "submit dataset name of 45 characters"
+
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d '{"file":"MY.JCL"}' \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit dataset name without //'...'"
+
+	# a name with a member within both limits gets past the name check: 404,
+	# not 400, as the data set does not exist
+	name=$(printf 'A%.0s' $(seq 1 36))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "404" "$HTTP_STATUS" "submit 36-character name with a member is looked up"
+
+	name=$(printf 'A%.0s' $(seq 1 45))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit 45-character name with a member"
+
+	return 0
+}
+
 test_submit_dataset_not_found() {
 	echo ""
 	echo "--- Submit Job: dataset not found ---"
@@ -1999,6 +2043,7 @@ test_submit_body_length_errors
 test_submit_from_dataset
 test_submit_from_dataset_without_notify
 test_submit_dataset_missing_file_field
+test_submit_dataset_name_too_long
 test_submit_dataset_not_found
 
 # List tests

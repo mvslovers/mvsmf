@@ -251,12 +251,23 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   depend on it.
 
   **Upgrade: define the profile and grant READ to those who may use it.** The
-  deploy user, and whoever checks the build id with `?fn=version`, needs READ
+  deploy user, and whoever checks the build id of a
+  development build with `?fn=version`, needs READ
   too. Rules and the profile commands: `docs/installation.md`.
 - **The diagnostic endpoint `/zosmf/test` no longer has a function that
   returns session data** (#508). The function is removed, not gated: a
   request to it now gets the endpoint's help text like any unknown `fn`. No
   function of the endpoint may return what identifies a session.
+- **A release does not register the diagnostic endpoint `/zosmf/test`** (#508).
+  Only a development build, whose version ends in `-dev`, answers it; a release
+  answers `404`, and so does a build with `-DMVSMF_NO_TEST_ENDPOINT`. The endpoint
+  carries operator commands (`fn=cmd`), deliberate abends and storage probes,
+  none of which belongs on a production system. The code is still in the module,
+  only unreachable: dropping it from the object needs a compile-time release
+  flag from the build tool. **A release deploy is checked with
+  `GET /zosmf/info`**, field `zosmf_full_version`, instead of `?fn=version`, and
+  `fn=version`, `fn=storage` and `fn=textsum` exist on development builds only.
+  `docs/installation.md`, step 5.
 
 ## [1.3.0] - 2026-10-15
 

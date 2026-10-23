@@ -95,7 +95,8 @@ static const char *jespr_reason_name(int reason) {
  * function here: fn=cmd issues operator commands through SVC 34 in
  * supervisor state and never had one, and every caller is authenticated
  * anyway.  The boundary that means something is the route -- see
- * MVSMF_NO_TEST_ENDPOINT in mvsmf.c (issue #343).
+ * MVSMF_NO_TEST_ENDPOINT and the -dev version test in mvsmf.c (issues #343,
+ * #508).
  */
 /* --- fn=denyopen (issue #315) -------------------------------------------
  * Take a real S913 through the real ESTAE, to check that the router answers a

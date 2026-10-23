@@ -212,8 +212,8 @@ PERMIT: Run RAKFPROF to activate the changes
 
 Then reload with `S RAKFPROF`; the console acknowledges it with
 `RAKFPROF7  RAKF PROFILES UPDATED`. `PROFILES` contains these two lines
-afterwards, shown so that you can check the result (class in columns 1-8, resource from column 9, group from column 53,
-access from column 61):
+afterwards, shown so that you can check the result (class in columns 1-8,
+resource from column 9, group from column 53, access from column 61):
 
 ```
 FACILITYMVSMF.CONSOLE                                       NONE

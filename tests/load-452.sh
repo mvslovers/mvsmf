@@ -20,6 +20,9 @@
 #
 #   HERC_LOG_CMD='docker logs NAME' mbt run rest-tests ...   # see below
 #
+# On a shared machine set TMPDIR to a directory of your own: the session file
+# lives in $TMPDIR/mvsmf-conn.* and a run is useless once something sweeps /tmp.
+#
 # Run through mbt: the connection and the session token come from the target
 # (tests/lib/conn.sh). The token lives as long as the session max-age (480
 # minutes unless the Parmlib says otherwise); a run longer than that answers
@@ -285,7 +288,7 @@ scenario_polls() {
 scenario_puts() {
 	local sz max=0 n=0 trks f="$WORK/put.bin" tmo
 	for sz in $PUT_SIZES; do [ "$sz" -gt "$max" ] && max="$sz"; done
-	trks=$((max / 50000 + 20))
+	trks=$((max / 14000 + 50))
 	req puts 0 -X POST -H "Content-Type: application/json" \
 		-d "{\"dsorg\":\"PS\",\"recfm\":\"FB\",\"lrecl\":80,\"blksize\":3120,\"alcunit\":\"TRK\",\"primary\":${trks},\"secondary\":10}" \
 		"$BASE/zosmf/restfiles/ds/$PUT_DSN"

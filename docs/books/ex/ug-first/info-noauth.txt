@@ -1,0 +1,2 @@
+$ curl -si "$MVSMF_URL/zosmf/info"
+PENDING CAPTURE

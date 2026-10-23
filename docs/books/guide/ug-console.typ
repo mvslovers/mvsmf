@@ -46,10 +46,9 @@ not look at it. All names reach the same table.
 #note[*The console services run with the authority of the server.* mvsMF makes
 no authorization check of its own for them: any caller that mvsMF lets in can
 issue any operator command. The administrator protects the console services in
-the HTTPD configuration, in front of mvsMF. See @ug-security. Until that is
-done, treat every user ID that can log on to mvsMF as an operator.]
-
-// COORDINATOR: console route protection goes here (#347)
+the HTTPD configuration, in front of mvsMF. See @ug-security-console, which defines the route and the profile and shows what
+a user without the permission gets. Until that is done, treat every user ID that
+can log on to mvsMF as an operator.]
 
 == Issuing a Command <ug-console-issue>
 

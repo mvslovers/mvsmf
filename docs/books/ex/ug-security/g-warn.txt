@@ -1,0 +1,2 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/restconsoles/v1/log?timeRange=10m" | grep -o "HTTPD425W[^\"]*" | tail -1
+HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/* NOT GATED

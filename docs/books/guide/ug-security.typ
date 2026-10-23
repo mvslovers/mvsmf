@@ -21,8 +21,7 @@ Four decisions are involved:
     [Which jobs a user sees, reads and purges],
       [mvsMF, with JESSPOOL profiles], [@ug-security-jesspool],
     [Who may use the console services],
-      [Described in its own section],
-      [The section "Protecting the Console Services"],
+      [HTTPD, with a FACILITY profile], [@ug-security-console],
   )
 ]
 
@@ -40,13 +39,15 @@ what happens then.]
 #idx("MVSMF.ACCESS")#idx("FACILITY class")#idx("route", "RES=")#idx("HTTPD", "route policy")
 The route lines of HTTPD decide who may reach mvsMF at all. The installation
 (@ug-install) registers the routes of mvsMF. With the third line below, every
-request to mvsMF other than the two #cmd("AUTH=NONE") routes needs a user
-who has READ access to the resource #cmd("MVSMF.ACCESS") in the class
-#cmd("FACILITY"):
+request to mvsMF other than the two #cmd("AUTH=NONE") routes and the console
+services needs a user who has READ access to the resource #cmd("MVSMF.ACCESS")
+in the class #cmd("FACILITY"). The last line below has the check. The console
+services have a route of their own (@ug-security-console):
 
 #screen(```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```)
 
@@ -55,7 +56,7 @@ accepts a token or a user ID and a password in a Basic header, and answers a
 bare #cmd("401 Unauthorized") without a challenge when neither is there.
 Stage 2 runs only for an authenticated caller. It asks RAKF, under the identity
 of the caller, for READ access to the resource of #cmd("RES="). The first
-route line that matches the URL applies, so the two #cmd("AUTH=NONE") lines
+route line that matches the URL applies, so the lines for the narrower paths
 come before the catch-all.
 
 === Limit mvsMF to a Group of Users <ug-security-access-task>
@@ -83,7 +84,7 @@ PE MVSMF.ACCESS CL(FACILITY) ID(MVSMFUSR) ACCESS(READ)
 
 // COORDINATOR: capture needed -- the job log of this job (RDEF, PE, RAKFPROF7)
 
-3. Put the third route line above into the #cmd("HTTPPRM") of HTTPD, then stop
+3. Put the last route line above into the #cmd("HTTPPRM") of HTTPD, then stop
    and start HTTPD (#cmd("P HTTPD"), #cmd("S HTTPD")). HTTPD reads its route
    policy only at start.
 
@@ -345,7 +346,156 @@ DATASET PAYROLL.*                                   PAYGRP  UPDATE
 
 // COORDINATOR: capture needed -- the real PROFILES lines
 
-// COORDINATOR: section "Protecting the Console Services" goes here (#347)
+== Protecting the Console Services <ug-security-console>
+
+#idx("console", "protection")#idx("MVSMF.CONSOLE")#idx("FACILITY class")#idx("route", "RES=")
+The console services issue operator commands. mvsMF makes no authorization
+check of its own for them, and the command runs under the identity of the
+caller. Any user who gets in can issue any command. HTTPD closes the gap: a
+route of its own for #cmd("/zosmf/restconsoles/*") asks RAKF for READ access to
+the resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"). The route
+lines are:
+
+#screen(```
+MOD=MVSMF /zosmf/info                    AUTH=NONE
+MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
+MOD=MVSMF /zosmf/*                       AUTH=TOKEN
+```)
+
+The route for the console services stands above the catch-all.
+HTTPD uses the first line that matches, so the catch-all would otherwise take
+every console request. The sample member #cmd("MVSMFPRM") of
+#cmd("MVSMF.SAMPLIB") has all four lines.
+
+=== Allow a Group to Use the Console Services <ug-security-console-task>
+
+#idx("MVSMF.CONSOLE", "defining")
+This task defines the resource, gives one group READ, and connects the users
+of the group. The group #cmd("CONSOPS") and the users #cmd("SMITH") and
+#cmd("IBMUSER") are examples. Run the commands in a TSO batch job as in
+@ug-security-access-task. The user of the job needs the group
+#cmd("RAKFADM"):
+
+#screen(```
+//CONSOLE  JOB (ACCT),'CONSOLE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+RDEF MVSMF.CONSOLE CL(FACILITY) UACC(NONE)
+PE MVSMF.CONSOLE CL(FACILITY) ID(CONSOPS) ACCESS(READ)
+CONNECT SMITH GROUP(CONSOPS)
+CONNECT IBMUSER GROUP(CONSOPS)
+/*
+//RAKFPROF EXEC RAKFPROF
+//RAKFUSER EXEC RAKFUSER
+```)
+
+The output of the commands in the step #cmd("TSO"), as the job wrote it to its
+spool file #cmd("SYSTSPRT"). The users #cmd("SMITH") and #cmd("IBMUSER") were
+connected to the group before, so #cmd("CONNECT") says so and changes nothing:
+
+#screen(raw(read("../ex/ug-security/r-console-out.txt"), block: true))
+
+The job log shows that both tables were rebuilt:
+
+#screen(raw(read("../ex/ug-security/r-console-log.txt"), block: true))
+
+After the reload the file #cmd("PROFILES") holds the lines for the resource. The
+universal access #cmd("NONE") is the line without an ID:
+
+#screen(raw(read("../ex/ug-security/r-console-prof.txt"), block: true))
+
+The profile takes effect at once. HTTPD asks RAKF on every request, so neither
+HTTPD nor mvsMF needs a restart after you define the profile or change a
+permission. Only a change of the route lines needs a restart of HTTPD.
+
+=== What a User without Access Sees <ug-security-console-refused>
+
+#idx("403")#idx("MVSMF.CONSOLE", "refusal")
+A user who has a valid password but no READ access to #cmd("MVSMF.CONSOLE")
+gets HTTP 403 from HTTPD on every request below
+#cmd("/zosmf/restconsoles/"). The body is the plain text #cmd("403 Forbidden"),
+as for #cmd("MVSMF.ACCESS") (@ug-security-access-refused). mvsMF does not
+run, and the command is not issued. The user #cmd("JONES") is not in the group
+#cmd("CONSOPS"):
+
+#screen(raw(read("../ex/ug-security/g-refused.txt"), block: true))
+
+The same user is refused the log of the console, and still reaches the
+other services of mvsMF:
+
+#screen(raw(read("../ex/ug-security/g-log.txt"), block: true))
+
+#screen(raw(read("../ex/ug-security/g-rest.txt"), block: true))
+
+A member of the group issues the same command:
+
+#screen(raw(read("../ex/ug-security/g-allowed.txt"), block: true))
+
+Tools that issue operator commands through the console service need the
+permission too. MBT uses it to issue commands, for example for the restart of
+a started task. The user of such a tool is a member of the group.
+
+=== Check the Start Messages <ug-security-console-start>
+
+#idx("HTTPD425W")
+The route is gated only when the profile exists. Without a profile, HTTPD
+cannot tell a protected resource from an unprotected one, and it lets everyone
+through. It writes the message #cmd("HTTPD425W") when it registers the route.
+The following session reads the line from the log of the console service:
+
+#screen(raw(read("../ex/ug-security/g-warn.txt"), block: true))
+
+With that message in the log the console services are open to every user who
+can log on:
+
+#screen(raw(read("../ex/ug-security/g-noprofile.txt"), block: true))
+
+The messages #cmd("HTTPD036I") list the routes in the order in which HTTPD
+registered them. After the start, check that the console route is above the
+catch-all:
+
+#screen(raw(read("../ex/ug-security/g-routes-gated.txt"), block: true))
+
+If the console route is below the catch-all, HTTPD starts without a message,
+the profile exists, and the route is never reached. The console services are
+open to every user of mvsMF. The session below runs on a configuration with
+the lines in the wrong order. The user #cmd("JONES"), who has no permission for
+the console, issues a command:
+
+#screen(raw(read("../ex/ug-security/g-routes-order.txt"), block: true))
+
+#screen(raw(read("../ex/ug-security/g-order.txt"), block: true))
+
+=== Users with the Console Permission Only <ug-security-console-only>
+
+The route #cmd("/zosmf/restconsoles/*") checks #cmd("MVSMF.CONSOLE") and
+nothing else. A route has one #cmd("RES="), and the first line that matches
+decides, so the check of #cmd("MVSMF.ACCESS") on the catch-all does not run
+for the console services. A user with READ on #cmd("MVSMF.CONSOLE") and none on
+#cmd("MVSMF.ACCESS") can issue commands, and is refused by every other service.
+The user #cmd("BROWN") has only the console permission:
+
+#screen(raw(read("../ex/ug-security/g-consonly.txt"), block: true))
+
+#screen(raw(read("../ex/ug-security/g-consonly-jobs.txt"), block: true))
+
+Give an operator who is to use mvsMF both permissions.
+
+#note[*A defect* (mvsmf\#460): The diagnostic endpoint #cmd("/zosmf/test") lies
+under the catch-all route, so the check of #cmd("MVSMF.CONSOLE") does not apply
+to it. Its functions #cmd("fn=cmd") and #cmd("fn=mtt") issue a command and
+read the Master Trace Table for any user that #cmd("MVSMF.ACCESS") lets in.
+Until the issue is fixed, the console gate is complete only for the routes
+below #cmd("/zosmf/restconsoles/").]
+
+The user #cmd("JONES") has no permission for the console and issues
+#cmd("D T") through the diagnostic endpoint:
+
+#screen(raw(read("../ex/ug-security/g-test.txt"), block: true))
+
 
 == Letting Users See the Jobs of Others: JESSPOOL <ug-security-jesspool>
 

@@ -35,21 +35,24 @@ uses its first eight characters.
 == The Route Lines <ref-httpd-lines>
 
 #idx("route", "MOD=")#idx("HTTPPRM", "route lines")
-mvsMF uses three lines in the member of the data definition #cmd("HTTPPRM"). The
+mvsMF uses four lines in the member of the data definition #cmd("HTTPPRM"). The
 sample member of the product (member #cmd("MVSMFPRM") of the data set
-#cmd("MVSMF.SAMPLIB")) and the sample of HTTPD (#cmd("HTTPPRM0")) carry the same
-three lines:
+#cmd("MVSMF.SAMPLIB")) carries them:
 
 ```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 ```
 
-The order of the three lines is part of the configuration (@ref-httpd-match).
-The two specific lines come before the line with the wild card.
+The sample #cmd("HTTPPRM0") of HTTPD has the first, the second and the last line
+only. A member that was built from it needs the third line.
 
-#tab(caption: [The three route lines of mvsMF])[
+The order of the four lines is part of the configuration (@ref-httpd-match).
+The three specific lines come before the line with the wild card.
+
+#tab(caption: [The four route lines of mvsMF])[
   #table(columns: (2.0in, 0.8in, 1fr),
     [Path], [AUTH=], [Meaning],
     [#cmd("/zosmf/info")], [#cmd("NONE")], [HTTPD does not gate the route.
@@ -59,20 +62,26 @@ The two specific lines come before the line with the wild card.
       logout of the token service. HTTPD does not gate the route. mvsMF lets
       the request reach its handler without a resolved credential, so that a
       failed login can answer with the error report of the service.],
+    [#cmd("/zosmf/restconsoles/*")], [#cmd("TOKEN")], [The console services,
+      which issue operator commands under the identity of the caller. HTTPD asks
+      RAKF for READ access to #cmd("MVSMF.CONSOLE") in the class
+      #cmd("FACILITY") (@ref-httpd-opts). A user without the access gets the
+      plain text 403 of HTTPD, and mvsMF does not run.],
     [#cmd("/zosmf/*")], [#cmd("TOKEN")], [Every other path of mvsMF. A request
       without a valid credential gets a bare 401 from HTTPD, before mvsMF runs.],
   )
 ]
 
-To require a RACF resource for the whole API, add #cmd("RES=") to the line with
-the wild card:
+To require a RACF resource for the rest of the API, add #cmd("RES=") to the line
+with the wild card. The console route does not check this resource: the first
+line that matches decides, and a route has one #cmd("RES="):
 
 ```
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-The sample member carries this line as a comment. The line gates the route only
-when the profile exists (@ref-httpd-opts).
+The sample member carries this line as a comment. A line gates its route only
+when the profile of its resource exists (@ref-httpd-opts).
 
 For each registered route HTTPD writes
 #cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") to the console.
@@ -120,7 +129,7 @@ once an earlier one matched.
 
 #note[*Order matters.* A line with the wild card above a more specific line
 swallows every request the specific line was meant for. In the sample member
-the line #cmd("/zosmf/*") is the last of the three for this reason. A route that
+the line #cmd("/zosmf/*") is the last of the four for this reason. A route that
 must be gated differently from the rest of the API stands above the line
 #cmd("/zosmf/*"), never below.]
 
@@ -226,15 +235,17 @@ with #cmd("RES=") needs an identity to check, so it authenticates.
     [A word that is none of the options], [#cmd("HTTPD413W IGNORING UNKNOWN ROUTE OPTION 'word'").],
     [#cmd("RECLAIM=")], [Retired. HTTPD ignores the option and writes a warning.],
     [#cmd("RES=") for a resource that no profile covers], [#cmd("HTTPD425W NO PROFILE FOR class:resource -- path NOT GATED").
-      HTTPD checks this once at start. The route is #emph[not] gated by the
-      resource.],
+      HTTPD checks this once at start. As long as no profile covers
+      the resource, the route is #emph[not] gated by it.],
   )
 ]
 
 #note[*A missing profile opens the route.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
 and no profile for #cmd("MVSMF.ACCESS") in the class #cmd("FACILITY"), HTTPD
 starts, writes #cmd("HTTPD425W"), and lets every authenticated caller through.
-Check the start messages after you add a #cmd("RES=") option.]
+Check the start messages after you add a #cmd("RES=") option. HTTPD asks RAKF
+on every request, so a profile that is defined later gates the route from the
+next request on, without a restart of HTTPD.]
 
 == Loading the Module: RESIDENT <ref-httpd-resident>
 
@@ -378,7 +389,7 @@ When HTTPD cannot run the module, it answers 503 with a plain-text body
 == HTTPD Messages at Start <ref-httpd-msgs>
 
 #idx("messages", "HTTPD")
-A start of HTTPD with the three routes of mvsMF writes these messages, and a
+A start of HTTPD with the four routes of mvsMF writes these messages, and a
 stop writes the last two. The messages #cmd("HTTPD000I"), #cmd("HTTPD005I") and
 #cmd("HTTPD002I") come first, and #cmd("HTTPD001I") says that the listener
 works. The full list of messages is in the HTTPD documentation.

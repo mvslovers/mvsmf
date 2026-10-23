@@ -40,7 +40,7 @@ quotes can be up to 54 characters long.
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and the job status as a JSON object (same format as the [status](status.md) endpoint).
 
-`exec-data=Y` is honoured here too, since the response is built by the same code, but it is of little use: a job that has just been submitted has usually not started yet, so `exec-started` and `exec-ended` are typically `null`. A very short job can already have run by the time the response is built, in which case they carry real instants — do not rely on either outcome.
+`exec-data=Y` is honoured here too, since the response is built by the same code, but it is of little use: a job that has just been submitted has usually not started yet, so `exec-started` and `exec-ended` are typically `null`. A very short job can already have run by the time the response is built, in which case they carry real instants — do not rely on either outcome. `exec-system` and `exec-member` are known as soon as the job is read in and are filled right away.
 
 `owner` is the submitting userid, and on this endpoint it is answered locally
 rather than read from JES2. The owner of a batch job lives in `JCTUSEID`, which

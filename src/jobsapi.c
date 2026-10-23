@@ -1153,6 +1153,7 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 	char jobname_p[JWN_PRTSZ];
 	char jobid_p[JWN_PRTSZ];
 	char owner_p[JWN_PRTSZ];
+	char sysid_p[JWN_PRTSZ];
 	const char *stat_str = job_status_str(job);
 
 	if (should_skip_job(job, owner, status)) {
@@ -1171,6 +1172,7 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 	jwn_printable(jobname_p, sizeof(jobname_p), (const char *)job->jobname);
 	jwn_printable(jobid_p, sizeof(jobid_p), (const char *)job->jobid);
 	jwn_printable(owner_p, sizeof(owner_p), (const char *)job->owner);
+	jwn_printable(sysid_p, sizeof(sysid_p), (const char *)job->sysid);
 
 	// type is the first 3 characters of the jobid
 	rc = snprintf(type_str, sizeof(type_str), "%.3s", jobid_p);
@@ -1283,9 +1285,16 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 		int  tzadjust = __tzget() * -1;
 		char exec_time[EXEC_TIME_STR_SIZE];
 
-		/* exec-submitted is deliberately absent: JES2 records it as
-		   JCTRDRON/JCTRDTON (time/date on the input processor), which libc370's
-		   JESJOB does not carry -- see mvslovers/libc370#79. */
+		/* exec-system and exec-member: z/OSMF names the system and the JES2
+		   member that ran the job.  MVS 3.8j has no sysplex and no CVTSNAME
+		   (CVT+154 is reserved in its CVT), and JES2 is a single member, so the
+		   system id JES2 recorded for the job (JCTRDSID, JESJOB.sysid) names
+		   both.  Measured equal to the SMF id (__smfid()) on jobs and TSO
+		   sessions.
+		   exec-submitted is not emitted: JESJOB.submit_time64 carries it, but
+		   it is a change of its own. */
+		rc = addJsonString(builder, "exec-system", sysid_p);
+		rc = addJsonString(builder, "exec-member", sysid_p);
 		rc = addJsonString(builder, "exec-started",
 			format_exec_time(&job->start_time64, tzadjust,
 				exec_time, sizeof(exec_time)));

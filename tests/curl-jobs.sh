@@ -1141,6 +1141,20 @@ test_list_jobs_exec_data() {
 	assert_json_field "$BODY" '[.[] | has("exec-ended")] | all' "true" \
 		"exec-data=Y: every job has exec-ended"
 
+	# exec-system / exec-member (#209): a job object carries them whether or not
+	# the job ran, and the value is the system id of the one system there is, so
+	# it is never null or blank.
+	assert_json_field "$BODY" '[.[] | has("exec-system")] | all' "true" \
+		"exec-data=Y: every job has exec-system"
+	assert_json_field "$BODY" '[.[] | has("exec-member")] | all' "true" \
+		"exec-data=Y: every job has exec-member"
+	assert_json_field "$BODY" \
+		'[.[] | .["exec-system"] | type == "string" and length > 0] | all' "true" \
+		"exec-data=Y: exec-system is a non-empty string"
+	assert_json_field "$BODY" \
+		'[.[] | .["exec-member"] | type == "string" and length > 0] | all' "true" \
+		"exec-data=Y: exec-member is a non-empty string"
+
 	# any non-null exec-started must be a well-formed UTC instant
 	local started
 	started=$(echo "$BODY" | jq -r '[.[] | .["exec-started"] | select(. != null)] | first // ""' 2>/dev/null)
@@ -1267,10 +1281,10 @@ test_job_status_exec_data() {
 		fail "status exec-ended" "null for a completed job"
 	fi
 
-	# exec-submitted is deliberately not implemented (libc370#79) -- assert it
-	# stays absent so the gap is visible if someone adds a placeholder
+	# exec-submitted is not implemented yet (#481) -- assert it stays absent
+	# so the gap is visible if someone adds a placeholder
 	assert_json_field "$BODY" 'has("exec-submitted")' "false" \
-		"exec-submitted absent (libc370#79)"
+		"exec-submitted absent (#481)"
 }
 
 test_job_status_not_found() {

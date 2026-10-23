@@ -131,7 +131,7 @@ the next case).
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #209 | client-visible, cheap on 3.8j | nothing |
+| 1 | ~~#209~~ | fixed in the PR for #209, awaiting merge | — |
 | 2 | #326 | its trigger has fired | nothing |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
@@ -152,18 +152,17 @@ the next case).
 
 **Empty.** #406 was its only entry and landed in PR #409, and #412 landed in
 PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
-#209.
+#326.
 
 ---
 
 ## Tier 2 — cheap and client-visible
 
-### 1 · #209 — `exec-system` and `exec-member` are never emitted
+### 1 · ~~#209~~ — `exec-system` and `exec-member` are never emitted
 
-3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
-libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
-(`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
-the code.
+Fixed in the PR for #209, awaiting merge: both fields carry `JESJOB.sysid`
+(`JCTRDSID`), measured equal to `__smfid()`. `exec-submitted` is split out as
+#481 (libc370#79 is delivered; `JESJOB.submit_time64`).
 
 ### 2 · #326 — five sources missing from the CLAUDE.md list
 

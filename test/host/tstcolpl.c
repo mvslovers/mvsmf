@@ -125,15 +125,18 @@ int main(void)
 	CHECK_EQ(corr_secs_seen, 42, "healthy: the correlator gets the echo second");
 	CHECK_EQ(fake_free_calls, 0, "healthy: the buffer is the caller's to free");
 	fake_free(resp);
+	resp = (char *)0;
 
 	/* 2. the count only moves forward: a shorter block does not count it down */
 	reset();
 	corr_total = 2;
 	delivered = 7;
+	resp = (char *)0;
 	r = collect_poll(&session, fake_corr, "D T", 42, 4096, &delivered, &resp);
 	CHECK_EQ(r, 0, "shorter block: poll succeeds");
 	CHECK_EQ(delivered, 7u, "shorter block: delivered is not counted down");
 	fake_free(resp);
+	resp = (char *)0;
 
 	/* 3. no storage for the buffer (#475): a failure, nothing handed out,
 	 *    the correlator never asked, the count untouched. Before the fix
@@ -167,10 +170,12 @@ int main(void)
 	reset();
 	corr_total = 0;
 	delivered = 0;
+	resp = (char *)0;
 	r = collect_poll(&session, fake_corr, "D T", -1, 4096, &delivered, &resp);
 	CHECK_EQ(r, 0, "empty block: poll succeeds");
 	CHECK_EQ(delivered, 0u, "empty block: delivered stays 0");
 	fake_free(resp);
+	resp = (char *)0;
 
 	return mbt_test_summary("TSTCOLPL");
 }

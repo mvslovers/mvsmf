@@ -100,6 +100,17 @@ themselves.
 the field is only missing from mvsMF: tracked in mvslovers/mvsmf#481. It is
 omitted rather than guessed.
 
+### Provenance of the format
+
+The conversion was validated against httpd's `/jes/status`, which emitted the
+same instants in the same format after mvslovers/httpd#151 — the two agreed to
+the second on the same job.
+
+**Do not reach for that comparison again:** httpd retires `/jes/*` (and `/dsl/*`)
+in 4.0.0, since these endpoints are what mvsMF replaces. The reference is
+recorded here because it is how the timezone handling was verified, not as a
+check to re-run.
+
 ## Execution system and member
 
 With `exec-data=Y` each job also carries `exec-system` and `exec-member`, the
@@ -113,24 +124,12 @@ are strings, placed before `exec-started`:
 
 MVS 3.8j has no sysplex and one JES2 member, so the two fields are always equal.
 Both come from the system id JES2 recorded for the job (`JCTRDSID`), the id of
-the system whose input processor read the job in; it is the SMF system id,
-the same value as the realm of the HTTP `WWW-Authenticate` challenge. It is
-not taken from the CVT: its system-name field (`CVTSNAME`) does not exist on
-3.8j.
+the system whose input processor read the job in; on 3.8j that is the SMF
+system id of the machine. It is not taken from the CVT: its system-name field
+(`CVTSNAME`) does not exist on 3.8j.
 
 The value is up to 4 characters. Like the other identifiers of the job object, a
 character that is not a letter, digit, `$`, `#` or `@` is reported as `?`.
-
-### Provenance of the format
-
-The conversion was validated against httpd's `/jes/status`, which emitted the
-same instants in the same format after mvslovers/httpd#151 — the two agreed to
-the second on the same job.
-
-**Do not reach for that comparison again:** httpd retires `/jes/*` (and `/dsl/*`)
-in 4.0.0, since these endpoints are what mvsMF replaces. The reference is
-recorded here because it is how the timezone handling was verified, not as a
-check to re-run.
 
 ## Error Responses
 - HTTP 500 (Internal Server Error)
@@ -160,7 +159,7 @@ curl "http://mvs:1080/zosmf/restjobs/jobs?jobid=JOB00123"
 # List only the jobs currently executing
 curl "http://mvs:1080/zosmf/restjobs/jobs?owner=*&status=ACTIVE"
 
-# List jobs with execution timestamps
+# List jobs with execution data (system, member, timestamps)
 curl "http://mvs:1080/zosmf/restjobs/jobs?prefix=TEST*&exec-data=Y"
 ```
 

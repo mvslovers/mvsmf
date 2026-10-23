@@ -36,6 +36,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   has written its owner.** The answer to the submit request itself is
   unchanged. A client that polls the status right after submitting has to
   accept a 404 for the first moments.
+- **Only an upgrade from 1.3.0 is the package and nothing else.** The SYSMOD
+  deletes `TZMF130`, not `TZMF120`. On a system still at 1.2.0 the install
+  copies nothing and ends RC 00; install 1.3.0 first. The installation guide
+  shows how to ask SMP which level owns the module.
 - **Stop HTTPD around the install job** (#434). The install replaces the
   module the running server loads from; see `docs/installation.md`.
 

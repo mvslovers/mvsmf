@@ -9,7 +9,8 @@
 #   4. GET  /zosmf/restjobs/jobs/{name}/{id}  (job status)
 #   5. GET  /zosmf/restjobs/jobs/{name}/{id}/files          (spool files)
 #   6. GET  /zosmf/restjobs/jobs/{name}/{id}/files/{ddid}/records (records)
-#   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge)
+#   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge, also of a job whose
+#      output a device holds)
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -885,6 +886,50 @@ test_submit_dataset_missing_file_field() {
 	assert_http_status "400" "$HTTP_STATUS" "submit dataset missing file field"
 }
 
+test_submit_dataset_name_too_long() {
+	echo ""
+	echo "--- Submit Job: dataset name over 44 characters (issue #477) ---"
+
+	# 44 is the longest name; the 45th used to run past a stack buffer in
+	# submit_file(). Same 400 as a name without //'...'.
+	local name resp
+	name=$(printf 'A%.0s' $(seq 1 45))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "400" "$HTTP_STATUS" "submit dataset name of 45 characters"
+
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d '{"file":"MY.JCL"}' \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit dataset name without //'...'"
+
+	# a name with a member within both limits gets past the name check: 404,
+	# not 400, as the data set does not exist
+	name=$(printf 'A%.0s' $(seq 1 36))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "404" "$HTTP_STATUS" "submit 36-character name with a member is looked up"
+
+	name=$(printf 'A%.0s' $(seq 1 45))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit 45-character name with a member"
+
+	return 0
+}
+
 test_submit_dataset_not_found() {
 	echo ""
 	echo "--- Submit Job: dataset not found ---"
@@ -1096,6 +1141,20 @@ test_list_jobs_exec_data() {
 	assert_json_field "$BODY" '[.[] | has("exec-ended")] | all' "true" \
 		"exec-data=Y: every job has exec-ended"
 
+	# exec-system / exec-member (#209): a job object carries them whether or not
+	# the job ran, and the value is the system id of the one system there is, so
+	# it is never null or blank.
+	assert_json_field "$BODY" '[.[] | has("exec-system")] | all' "true" \
+		"exec-data=Y: every job has exec-system"
+	assert_json_field "$BODY" '[.[] | has("exec-member")] | all' "true" \
+		"exec-data=Y: every job has exec-member"
+	assert_json_field "$BODY" \
+		'[.[] | .["exec-system"] | type == "string" and length > 0] | all' "true" \
+		"exec-data=Y: exec-system is a non-empty string"
+	assert_json_field "$BODY" \
+		'[.[] | .["exec-member"] | type == "string" and length > 0] | all' "true" \
+		"exec-data=Y: exec-member is a non-empty string"
+
 	# any non-null exec-started must be a well-formed UTC instant
 	local started
 	started=$(echo "$BODY" | jq -r '[.[] | .["exec-started"] | select(. != null)] | first // ""' 2>/dev/null)
@@ -1222,10 +1281,10 @@ test_job_status_exec_data() {
 		fail "status exec-ended" "null for a completed job"
 	fi
 
-	# exec-submitted is deliberately not implemented (libc370#79) -- assert it
-	# stays absent so the gap is visible if someone adds a placeholder
+	# exec-submitted is not implemented yet (#481) -- assert it stays absent
+	# so the gap is visible if someone adds a placeholder
 	assert_json_field "$BODY" 'has("exec-submitted")' "false" \
-		"exec-submitted absent (libc370#79)"
+		"exec-submitted absent (#481)"
 }
 
 test_job_status_not_found() {
@@ -1692,6 +1751,93 @@ test_spool_records_invalid_ddid() {
 	assert_http_status "400" "$HTTP_STATUS" "spool records invalid ddid"
 }
 
+# A deck of N IEBGENER steps; each step leaves three spool data sets (SYSPRINT
+# and SYSUT2 as SYSOUT=*, SYSUT1 in-stream).
+many_steps_jcl() {
+	local n="$1" i
+	printf '//MANYSTP  JOB (ACCT),'"'"'MVSMF MANY STEPS'"'"',CLASS=A,MSGCLASS=H\n'
+	for ((i = 1; i <= n; i++)); do
+		printf '//S%04d   EXEC PGM=IEBGENER\n' "$i"
+		printf '//SYSPRINT DD SYSOUT=*\n'
+		printf '//SYSIN    DD DUMMY\n'
+		printf '//SYSUT2   DD SYSOUT=*\n'
+		printf '//SYSUT1   DD *\n'
+		printf 'STEP %04d\n' "$i"
+		printf '/*\n'
+	done
+}
+
+test_spool_files_many_steps() {
+	echo ""
+	echo "--- Spool Files: job with many steps (issue #374) ---"
+
+	# 89 steps was where a build with an older jesjob() answered 500 for the
+	# whole list; 200 needs more than one IOT of the spool. MVSMF_MANY_STEPS
+	# overrides the counts, e.g. "87 88 89 120 200".
+	local n
+	for n in ${MVSMF_MANY_STEPS:-89 200}; do
+		local jcl resp jobname jobid
+		jcl=$(many_steps_jcl "$n")
+		resp=$(do_curl PUT \
+			-H "Content-Type: text/plain" \
+			--data-binary "$jcl" \
+			"${BASE_URL}/zosmf/restjobs/jobs")
+		split_response "$resp"
+		assert_http_status "200" "$HTTP_STATUS" "submit job with $n steps"
+
+		jobname=$(echo "$BODY" | jq -r '.jobname' 2>/dev/null)
+		jobid=$(echo "$BODY" | jq -r '.jobid' 2>/dev/null)
+		if [ -z "$jobid" ] || [ "$jobid" = "null" ]; then
+			fail "$n-step job submitted" "no jobid in response"
+			continue
+		fi
+
+		local attempt=0 status=""
+		while [ $attempt -lt 180 ]; do
+			resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}")
+			split_response "$resp"
+			status=$(echo "$BODY" | jq -r '.status' 2>/dev/null)
+			[ "$status" = "OUTPUT" ] && break
+			sleep 1
+			attempt=$((attempt + 1))
+		done
+		if [ "$status" != "OUTPUT" ]; then
+			fail "$n-step job reaches OUTPUT" "status '${status}' after ${attempt}s"
+			continue
+		fi
+		assert_json_field "$BODY" '.retcode' "CC 0000" "$n-step job retcode"
+
+		resp=$(do_curl GET \
+			"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+		split_response "$resp"
+		assert_http_status "200" "$HTTP_STATUS" "list spool files of the $n-step job"
+
+		# Three data sets per step plus the job's own (JESMSGLG, JESJCL,
+		# JESYSMSG at least); the last step is the one a truncated list loses.
+		local count sysout last
+		count=$(echo "$BODY" | jq 'length' 2>/dev/null)
+		sysout=$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSPRINT" or .ddname == "SYSUT2")] | length' 2>/dev/null)
+		last=$(echo "$BODY" | jq -r "[.[] | select(.stepname == \"S$(printf '%04d' "$n")\")] | length" 2>/dev/null)
+		if [ "${count:-0}" -ge $((3 * n + 3)) ] 2>/dev/null; then
+			pass "$n-step job lists all its spool files ($count entries)"
+		else
+			fail "$n-step job lists all its spool files" "expected at least $((3 * n + 3)) entries, got '${count}'"
+		fi
+		if [ "$sysout" = "$((2 * n))" ]; then
+			pass "$n-step job: $((2 * n)) SYSOUT data sets listed"
+		else
+			fail "$n-step job: SYSOUT data sets listed" "expected $((2 * n)), got '${sysout}'"
+		fi
+		if [ "$last" = "3" ]; then
+			pass "$n-step job: the last step's three data sets are listed"
+		else
+			fail "$n-step job: the last step's three data sets are listed" "got '${last}'"
+		fi
+
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}" > /dev/null
+	done
+}
+
 test_purge_job() {
 	echo ""
 	echo "--- Purge Job ---"
@@ -1735,6 +1881,111 @@ test_purge_not_found() {
 		assert_http_status "404" "$HTTP_STATUS" "purge job not found (${jid})"
 		assert_json_field "$BODY" '.reason' "2" "purge not found: reason 2 (${jid})"
 	done
+}
+
+# Issue an operator command through the console API; prints the response text.
+console_cmd() {
+	local resp
+	resp=$(do_curl PUT -H "Content-Type: application/json" \
+		-d "{\"cmd\":\"$1\"}" \
+		"${BASE_URL}/zosmf/restconsoles/consoles/defcn")
+	split_response "$resp"
+	echo "$BODY" | jq -r '."cmd-response" // empty' 2>/dev/null
+}
+
+test_purge_held_output() {
+	echo ""
+	echo "--- Purge Job: output held by a device (issue #426) ---"
+
+	# JES2 takes a purge for a job whose output a device has selected, but only
+	# marks the job; it stays on the queue until that output is released. The
+	# answer must not say "Request was successful." while the job is still
+	# listed -- a client reads that as "the spool is free".
+	#
+	# The hold is made on purpose: PUNCH1 is started and idle, the job's punch
+	# output asks for forms ZMF1, the device has others, so it selects the job
+	# and halts for setup. $C PUNCH1 at the end releases it.
+	local dev
+	dev=$(console_cmd '$DU,PUN1')
+	if ! printf '%s' "$dev" | grep -q 'PUNCH1 .*\(INACTIVE\|DRAINED\)'; then
+		skip "purge with held output (PUNCH1 is missing or busy: ${dev:-no answer})"
+		return
+	fi
+	local drained=0
+	if printf '%s' "$dev" | grep -q 'DRAINED'; then
+		drained=1
+		console_cmd '$S PUNCH1' >/dev/null
+	fi
+
+	local jcl resp jn ji
+	jcl=$(cat "${JCL_DIR}/heldpun.jcl")
+	resp=$(do_curl PUT -H "Content-Type: text/plain" --data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		fail "purge with held output: submit the job" "HTTP $HTTP_STATUS"
+		return
+	fi
+	wait_for_output "$jn" "$ji" || true
+
+	# the device has the job once it shows as "(JOB nn NAME)"
+	local held=0 i num=$((10#${ji#JOB}))
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		dev=$(console_cmd '$DU,PUN1')
+		if printf '%s' "$dev" | grep -q "(JOB  *${num} ${jn})"; then
+			held=1
+			break
+		fi
+		sleep 1
+	done
+
+	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "purge a job with held output"
+	local msg
+	msg=$(echo "$BODY" | jq -r '.message')
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	if [ "$HTTP_STATUS" = "200" ]; then
+		if [ "$msg" = "Request was successful." ]; then
+			fail "purge with held output: the answer admits the job is still queued" \
+				"the job is still listed, the message says '$msg'"
+		else
+			pass "purge with held output: job still queued, the answer says so ($msg)"
+		fi
+	elif [ "$held" -eq 1 ]; then
+		fail "purge with held output: the job a device holds is gone" \
+			"expected it to stay queued, got HTTP $HTTP_STATUS"
+	else
+		skip "purge with held output (the device never took the job)"
+	fi
+
+	# Release the output: the pending purge completes.
+	console_cmd '$C PUNCH1' >/dev/null
+	local gone=0
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		if [ "$HTTP_STATUS" = "404" ]; then
+			gone=1
+			break
+		fi
+		sleep 1
+	done
+	if [ "$gone" -eq 1 ]; then
+		pass "purge with held output: the job is gone once the output is released"
+	else
+		fail "purge with held output: the job is gone once the output is released" \
+			"still listed (HTTP $HTTP_STATUS) 10 s after \$C PUNCH1"
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+	fi
+
+	if [ "$drained" -eq 1 ]; then
+		console_cmd '$P PUNCH1' >/dev/null
+	fi
 }
 
 test_purge_started_task() {
@@ -1806,6 +2057,7 @@ test_submit_body_length_errors
 test_submit_from_dataset
 test_submit_from_dataset_without_notify
 test_submit_dataset_missing_file_field
+test_submit_dataset_name_too_long
 test_submit_dataset_not_found
 
 # List tests
@@ -1834,10 +2086,12 @@ test_spool_records_instream_jclin
 test_spool_records_stale_checkpoint
 test_spool_records_empty_dd_reused_mttr
 test_spool_records_invalid_ddid
+test_spool_files_many_steps
 
 # Purge tests (last, since it removes the test job)
 test_purge_job
 test_purge_not_found
+test_purge_held_output
 test_purge_started_task
 
 # Optional cleanup

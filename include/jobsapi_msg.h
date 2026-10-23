@@ -26,6 +26,9 @@
 /** @brief Detail of the refusal to purge a job the caller may read but not purge (#440) */
 #define ERR_MSG_JOB_PURGE_DENIED "Authorization failed - You may not purge this job."
 
+/** @brief Purge feedback `message` when JES2 accepted the purge but the job is still on the queue (#426) */
+#define MSG_PURGE_PENDING "Purge requested. JES2 keeps the job marked for purge until the output it holds is released."
+
 /** @brief Error message for incorrect JES VSAM handle */
 #define ERR_MSG_INCORRECT_JES_VSAM_HANDLE "Unable to open JES2 checkpoint and spool datasets"
 

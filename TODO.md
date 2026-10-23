@@ -22,9 +22,9 @@ every send once the server quiesced, the 8/15 report's body included.
 `curl-nospace`, `curl-datasets` hangs on its first sequential read, and the
 data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 0 of 3 on 2026-10-13, on libc370 2.10.2 and 2.10.3 alike (comments on #405);
-the cause is open. **#407 is new (2026-10-13) and not ranked either**: the two
+the cause is open. ~~**#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
-false `detected`, and #214's mis-anchor reopened.
+false `detected`, and #214's mis-anchor reopened.~~ Fixed in PR #470.
 **#417 and #418 are new (2026-10-13) and not ranked either**, both from a
 client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|release`
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
@@ -92,10 +92,11 @@ CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
 against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
-stand. Open before the last pass: #372, #425, #428, #436, #452, #453, #454, #449.
-**#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
-while JES2 keeps the job (output held on a device waiting for setup). What the
-reference answers for a purge that is only requested has to be measured first.
+stand. Open before the last pass: #372, #425, #428, #452, #453, #454, #449.
+**#426 is done in its PR**: a purge JES2 only accepts (output held on a device)
+stays 200 with `status: 0`, and `message` now says the purge is only requested
+(`internals/zosmf-conformance.md`). What zxp answers for such a purge is not
+measured (a write); `X-IBM-Job-Modify-Version: 2.0` is not implemented.
 **#360 is handled in the libc370 2.25.1 move (#442)**: the `ENOMEM` contract
 (2.0.0) is read in `datasetListHandler()` and `diagnose_open_failure()`, so a
 shortage is a 500 with `MVSMF006E`, no longer an empty 200 or a 404. The
@@ -131,11 +132,11 @@ the next case).
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #209 | client-visible, cheap on 3.8j | nothing |
+| 1 | ~~#209~~ | fixed in PR #482, merged | — |
 | 2 | #326 | its trigger has fired | nothing |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
-| 5 | #215 | latent, one place, every caller benefits | nothing |
+| 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
 | 6 | #257, #335 | one class, two tickets | a repro without a proxy |
 | 7 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
@@ -152,18 +153,17 @@ the next case).
 
 **Empty.** #406 was its only entry and landed in PR #409, and #412 landed in
 PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
-#209.
+#326.
 
 ---
 
 ## Tier 2 — cheap and client-visible
 
-### 1 · #209 — `exec-system` and `exec-member` are never emitted
+### 1 · ~~#209~~ — `exec-system` and `exec-member` are never emitted
 
-3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
-libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
-(`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
-the code.
+Fixed in PR #482 (merged): both fields carry `JESJOB.sysid`
+(`JCTRDSID`), measured equal to `__smfid()`. `exec-submitted` is split out as
+#481 (libc370#79 is delivered; `JESJOB.submit_time64`).
 
 ### 2 · #326 — five sources missing from the CLAUDE.md list
 
@@ -249,7 +249,14 @@ keeps #244's old slot above #215 because it is where #244 already sat and the
 three are one edit's worth of context — not on impact, where #215's unparseable
 response reaches every `consapi.c` caller and this reaches none.
 
-### 5 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 5 · ~~#215~~ — `addJsonStringEsc()` escapes five characters, not the control range
+
+**Fixed on `issue-215-json-control-chars`, awaiting merge:** one shared
+`append_quoted()` in `json.c` serves `addJsonStringEsc()` and
+`addJsonArrayString()`; every byte below `' '` is escaped (short form for
+`\b \f \n \r \t`, else `\u00XX`), tested by `TSTJSON`. The entry below is kept
+for the one point the fix did not take over: `dsapi.c`'s `json_escape_member()`
+still has its own copy, because it names the *translated* byte in the escape.
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.
@@ -569,6 +576,13 @@ empty window stays 200. The failure path cannot be provoked; on mvsdev,
 `curl-console` passed 66 of 66 on the deployed build `58b4f9b`. The other two
 snapshot sites went to #407.
 
+**PR #470, open** — #407: `correlate_once()` and `detect_count()` read a failed
+MTT snapshot as no matches — a false `detected` from a baseline of 0, and
+collect re-anchored on the newest echo (#214 reopened). A failed snapshot is
+`MTT_SNAP_FAILED` now: collect and detections answer 500 8/1, the issue command
+500 8/14. The failure path cannot be provoked; `TSTMTSN` drives the real
+snapshot and count against a failing `cmtt_new()`. Not run on MVS.
+
 **PR #403 and PR #404, merged 2026-10-13** — #371: a PUT whose last, partial
 block did not fit answered 204, because `session_fclose()` discarded the
 `EOF`/`ENOSPC` that `fclose()` reports since `libc370#182`. It returns the
@@ -766,15 +780,15 @@ Pointers only — the reasoning lives in the closing comments.
 
 ## Campaigns, not twenty tickets
 
-- **Console correctness** — **#195 and #407 are what is left**, with #346,
-  #214 and #251 (PR #408) closed out of it. One subsystem and one reading of `consapi.c`, but
+- **Console correctness** — **#195 is what is left**, with #346,
+  #214, #251 (PR #408) and #407 (PR #470) closed out of it. One subsystem and one reading of `consapi.c`, but
   four separate bugs, and the two that closed were the two that shared a
   premise: "MVS gives no end-of-response signal, so both ends of the block are
   guessed". #346 was the *end* guessed too early (by design, closed as
   documentation plus a test); #214 was the *start* guessed wrong and then no end
   guessed at all. #195 was ranked with #214 on the guess that it might not
   survive #214's first measurement, and that premise died before #214 did — see
-  #195's entry. #251 was always independent of all three, and so is #407, the
+  #195's entry. #251 was always independent of all three, and so was #407, the
   rest of it.
 - **The endpoint advertises what it does not do** — **#245 and #361 are what is
   left**, with #248 and now #336 as the worked examples of how it ends. #361 is
@@ -787,8 +801,8 @@ Pointers only — the reasoning lives in the closing comments.
   #245's doc-only half — the routes themselves are withdrawn (PR #358), and the
   six suite assertions that covered them turned out to have been green
   throughout, because they were measuring the cataloged path.
-- **Checked, then swallowed** — **#215 and #407 are what is left**, with #267
-  and #251 closed out of it as the worked examples: the return code is inspected and the
+- **Checked, then swallowed** — **#215 is what is left**, with #267, #251 and
+  #407 closed out of it as the worked examples: the return code is inspected and the
   failure goes nowhere. One convention, not three decisions. #267 also says how
   to find the rest of the class mechanically rather than by reading — see its
   entry under *Recently closed*.

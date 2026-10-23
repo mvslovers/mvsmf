@@ -152,7 +152,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 413 | 1 | 12 | `Content-Length` of 16 MB or more; nothing is read and the connection is closed. Shares 1 / 12 with the 400 above: both are a body that cannot be used, and the status tells them apart. |
 | 429 | 8 | 16 | Another console command is in progress; the command was **not** issued. |
 | 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
-| 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
+| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the baseline for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
 | 503 | 8 | 17 | Server quiescing; the command was **not** issued. Checked before the command goes out, whether or not another command is in progress. |
 
@@ -161,6 +161,17 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > means the command already ran. The distinction is the whole reason they are
 > separate reason codes: it decides whether an operator may re-send an `S`, `V`
 > or `$P`.
+
+> **`500 / 8 / 14` is post-issue as well.** The command ran; what failed is
+> reading the table afterwards, so a blind retry re-issues it exactly as after
+> `8 / 15`. It differs from `8 / 15` in the cause: the server could not make
+> the copy it reads from, not a server that is going down. No key is returned,
+> so there is nothing to collect.
+> A single poll that cannot copy the table is skipped and the next one tried;
+> the error is answered only when no poll of the capture got a copy, when the
+> `unsol-key` baseline could not be taken (a baseline of 0 would report every
+> message already in the table as new), or when the last look of a synchronous
+> `unsol-key` wait failed (`timeout` would claim the keyword did not appear).
 
 > **`503 / 8 / 15` is a post-issue outcome, not a pre-issue failure.** The command
 > has already executed (SVC 34 / MGCR) when the server begins quiescing; only the

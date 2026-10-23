@@ -133,7 +133,7 @@ the next case).
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
 | 1 | ~~#209~~ | fixed in PR #482, merged | — |
-| 2 | #326 | its trigger has fired | nothing |
+| 2 | ~~#326~~ | fixed in the PR for #326, awaiting merge | — |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
 | 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
@@ -152,8 +152,8 @@ the next case).
 ## Tier 1 — now
 
 **Empty.** #406 was its only entry and landed in PR #409, and #412 landed in
-PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
-#326.
+PR #413 the same day (see *Recently closed*). The top of the queue is Tier 3's
+#76.
 
 ---
 
@@ -165,12 +165,10 @@ Fixed in PR #482 (merged): both fields carry `JESJOB.sysid`
 (`JCTRDSID`), measured equal to `__smfid()`. `exec-submitted` is split out as
 #481 (libc370#79 is delivered; `JESJOB.submit_time64`).
 
-### 2 · #326 — five sources missing from the CLAUDE.md list
+### 2 · ~~#326~~ — five sources missing from the CLAUDE.md list
 
-`abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
-"next time `CLAUDE.md` is touched", so fold it into the next edit of that file
-rather than spending a PR on it. Read each file rather than inferring from the name,
-which is how the list drifted in the first place.
+Fixed in the PR for #326: `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c` and
+`spoolln.c` are in the Key Source Files list, each written from the source and its callers.
 
 ---
 

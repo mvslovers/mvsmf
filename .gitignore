@@ -104,3 +104,6 @@ mtt-ring-*.json
 herc-at-fail-*.log
 worker-watch-*.txt
 poll-425-*/
+# Built by make -C docs/books
+/docs/books/*.pdf
+/docs/books/site/

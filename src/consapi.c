@@ -12,6 +12,7 @@
 #include <mvs/lock.h>   /* trylock / unlock, LOCK_EXC -- #214 */
 
 #include "consapi.h"
+#include "consauth.h"
 #include "common.h"
 #include "json.h"
 #include "httpcgi.h"
@@ -708,6 +709,9 @@ int consoleIssueHandler(Session *session)
 	char det_msg[200] = {0};
 	int has_unsol = 0, unsol_sync = 0, unsol_base = 0, detect_secs = 30;
 
+	if (console_authorize(session) != 0)
+		return -1;
+
 	/* Content-Type must be application/json */
 	if (!ct || !strstr(ct, "application/json")) {
 		send_console_error(session, HTTP_STATUS_BAD_REQUEST, 1, 6,
@@ -1108,6 +1112,9 @@ int consoleCollectHandler(Session *session)
 	char *resp;
 	int rc, r;
 
+	if (console_authorize(session) != 0)
+		return -1;
+
 	store = mvsmf_kvstore(session->httpd);
 
 	/* store unavailable, or unknown / evicted key -> empty (done) */
@@ -1167,6 +1174,9 @@ int consoleDetectHandler(Session *session)
 	const char *status;
 	JsonBuilder *b;
 	int rc, count;
+
+	if (console_authorize(session) != 0)
+		return -1;
 
 	store = mvsmf_kvstore(session->httpd);
 	if (!dkey || !store ||
@@ -1330,6 +1340,9 @@ int consoleLogHandler(Session *session)
 	time_t *esecs = NULL;
 	JsonBuilder *b = NULL;
 	int rc;
+
+	if (console_authorize(session) != 0)
+		return -1;
 
 	/* ---- validate query params ---- */
 	range = parse_time_range(qrange);

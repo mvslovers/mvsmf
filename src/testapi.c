@@ -24,6 +24,7 @@
 #include "dsapi.h"            /* dslist_locked -- fn=listds (#436) */
 #include "blkptrk.h"          /* blocks_per_track -- fn=dscb (#439) */
 #include "jobauth.h"
+#include "consauth.h"
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
 #include "mvsmfmsg.h"
 #include "zosmferr.h"          /* CATEGORY_SERVICE, REASON_SERVER_ERROR */
@@ -404,6 +405,13 @@ static int text_copy_thunk(struct text_copy *tc) {
 int testHandler(Session *session) {
   int rc = 0;
   char *fn = NULL;
+
+  /* The whole endpoint is one surface behind one profile (#460): fn=cmd and
+   * fn=mtt reach the console, fn=abend and fn=denyopen fault the worker, and a
+   * function added later is covered without anyone remembering to. Before any
+   * output, and before fn=abend, which must run with headers_sent still 0. */
+  if (console_authorize(session) != 0)
+    return -1;
 
   fn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_FN");
   if (!fn)
@@ -1659,6 +1667,9 @@ quit:
 int testWildcardHandler(Session *session) {
   int rc = 0;
   char *filepath = NULL;
+
+  if (console_authorize(session) != 0)
+    return -1;
 
   filepath =
       (char *)http_get_env(session->httpc, (const UCHAR *)"HTTP_filepath");

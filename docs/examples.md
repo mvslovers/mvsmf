@@ -316,6 +316,16 @@ curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/hello.txt"
 zowe files view uss-file "/tmp/hello.txt"
 ```
 
+A download that the server cut off (the client stopped reading for about 10
+seconds) ends without the closing chunk; curl reports it:
+
+```bash
+curl -sS -u $USER:$PASS -o big.bin -H 'X-IBM-Data-Type: binary' \
+  "$BASE/zosmf/restfiles/fs/tmp/big.bin" || echo "incomplete, curl exit $?"   # 18
+```
+
+See [Slow clients](endpoints/README.md#slow-clients).
+
 ### Write a file
 `PUT /zosmf/restfiles/fs/{filepath}`
 

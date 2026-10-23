@@ -26,6 +26,8 @@ The raw records behind this are readable with `GET /zosmf/test?fn=spool&jobname=
 
 A spool file that exists but holds nothing returns 200 with an empty body.
 
+A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients).
+
 ## Purged spool output (HTTP 404, reason 10)
 
 The JES2 checkpoint keeps advertising a spool data set after JES2 has printed and purged it —

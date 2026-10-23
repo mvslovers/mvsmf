@@ -163,6 +163,10 @@ PUT page): 16 direct blocks plus one single-indirect block, which is
 4096. In general it is `(16 + blksize/4) × blksize` bytes for the block
 size the file system was formatted with.
 
+A client that stops reading for about 10 seconds is cut off, without the
+closing chunk and without a message on the console: see
+[Slow clients](../README.md#slow-clients).
+
 ## Examples
 
 ### Read a text file with curl

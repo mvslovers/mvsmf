@@ -14,9 +14,12 @@ Issues an MVS operator command and returns the captured command response. Part o
 > without a resolved user gets `401`. No operator message is written for a
 > refusal. The HTTPD route
 > `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
-> in `samplib/mvsmfprm` (listed before `/zosmf/*`) is an additional first layer: it answers a user
-> without READ with a plain-text `403` before mvsMF is reached. Set up, with the
-> traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service-and-zosmftest).
+> in `samplib/mvsmfprm` (listed before `/zosmf/*`) is an additional first
+> layer: it requires READ, and a user without it gets a plain-text `403` from
+> HTTPD before mvsMF is reached. Measured on MVS/CE with RAKF: a userid in
+> group `USER` was refused (`403`) with Basic and with a token, a userid in
+> `ADMIN` with READ ran `D T`, and the other `/zosmf/` endpoints stayed open to
+> both. Set up, with the traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service-and-zosmftest).
 >
 > **It gates who may issue commands, not which.** There is no per-command
 > policy and no console authority level. The command goes out by SVC 34 with the

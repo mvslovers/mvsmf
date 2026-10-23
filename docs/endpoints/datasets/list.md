@@ -38,15 +38,25 @@ The body is a JSON object:
     "items": [
         {
             "dsname": "string",
-            "dsntp": "PDS|BASIC|UNKNOWN",
+            "blksz": "string",
+            "catnm": "string",
+            "cdate": "string",
+            "dev": "string",
+            "dsntp": "string",
+            "dsorg": "string",
+            "edate": "string",
+            "extx": "string",
+            "lrecl": "string",
+            "migr": "string",
+            "mvol": "string",
+            "ovf": "string",
+            "rdate": "string",
             "recfm": "string",
-            "lrecl": 0,
-            "blksize": 0,
+            "sizex": "string",
+            "spacu": "string",
+            "used": "string",
             "vol": "string",
-            "vols": "string",
-            "dsorg": "PO|PS",
-            "cdate": "YYYY-MM-DD",
-            "rdate": "YYYY-MM-DD"
+            "vols": "string"
         }
     ],
     "returnedRows": 0,
@@ -54,25 +64,42 @@ The body is a JSON object:
 }
 ```
 
+**Every value of an item is a JSON string, numbers included** (`"lrecl": "80"`,
+not `80`). Dates are written `YYYY/MM/DD`.
+
 ### Field Descriptions
 - `dsname`: Dataset name (up to 44 characters)
-- `dsntp`: Dataset type (`PDS` for partitioned, `BASIC` for sequential, `UNKNOWN` for others)
-- `recfm`: Record format (e.g. `FB`, `VB`, `U`)
-- `lrecl`: Logical record length
-- `blksize`: Block size
-- `vol`/`vols`: Volume serial
-- `dsorg`: Dataset organization (`PO` = partitioned, `PS` = physical sequential)
+- `blksz`: Block size
+- `catnm`: Catalog name; always empty
 - `cdate`: Creation date
+- `dev`: Device type, derived from the tracks per cylinder of the volume the
+  data set is on: `3350` (30), `3375` (12), `3380` (19) or `3390` (15, and any
+  other value)
+- `dsntp`: Dataset type (`PDS` for partitioned, `BASIC` for sequential, `UNKNOWN` for others)
+- `dsorg`: Dataset organization (`PO` = partitioned, `PS` = physical sequential)
+- `edate`: Expiration date; always `***None***`
+- `extx`: Number of extents of the data set on its volume, counting every
+  extent, those beyond the third included
+- `lrecl`: Logical record length
+- `migr`, `mvol`, `ovf`: Migrated, multi-volume and overflow flags; always
+  `NO`, `N` and `NO`
 - `rdate`: Last referenced date
-- `extx`: Number of extents in use (all extents, including those beyond the third)
-- `sizex`: Allocated size in **tracks**, summed over every extent of the data
-  set. A data set with more than three extents keeps the rest in a format-3
-  DSCB, which the listing reads (issue #370). `"?"` when that chain cannot be
-  read or the total does not fit 16 bits, rather than a size that is too small.
-- `used`: Percentage of the allocation in use, computed from the same total;
-  `"?"` whenever `sizex` is `"?"`
-- `spacu`: Space unit reported for the data set (`CYLINDERS` or `TRACKS`); it
-  does not change the unit of `sizex`, which is always tracks
+- `recfm`: Record format (e.g. `FB`, `VB`, `U`)
+- `sizex`: Allocated size in **tracks**, the sum over every extent. A data set
+  with more than three extents keeps the rest in a further DSCB on the volume
+  (the format-3 DSCB), which the listing reads (issue #370). Where that DSCB
+  cannot be read, or the sum exceeds 65535 tracks, the value is `"?"` rather
+  than a size that is too small.
+- `spacu`: The unit the data set was allocated in: `CYLINDERS` if it was
+  allocated in cylinders, `TRACKS` otherwise. It describes the allocation, not
+  the listing: `sizex` is in tracks either way, so a data set of one cylinder on
+  a volume with 30 tracks per cylinder lists `"sizex": "30"` and
+  `"spacu": "CYLINDERS"`.
+- `used`: How full the data set is, as a whole percent of `sizex` (rounded
+  down). It is counted up to the track that holds the last block written, so a
+  new, empty data set already counts as one track: 3 on a 30-track allocation,
+  not 0. `"?"` whenever `sizex` is `"?"`.
+- `vol`/`vols`: Volume serial
 
 ## Pagination
 
@@ -120,20 +147,34 @@ zowe files list data-set "MIKE.**"
 ```
 
 ### Success Response
+
+A data set of seven extents, allocated as one track plus six secondary extents
+of one track each, written full:
+
 ```json
 {
     "items": [
         {
-            "dsname": "MIKE.TEST.JCL",
-            "dsntp": "PDS",
+            "dsname": "IBMUSER.DOC.EXTENTS",
+            "blksz": "6160",
+            "catnm": "",
+            "cdate": "2026/10/23",
+            "dev": "3350",
+            "dsntp": "BASIC",
+            "dsorg": "PS",
+            "edate": "***None***",
+            "extx": "7",
+            "lrecl": "80",
+            "migr": "NO",
+            "mvol": "N",
+            "ovf": "NO",
+            "rdate": "2026/10/23",
             "recfm": "FB",
-            "lrecl": 80,
-            "blksize": 6160,
-            "vol": "PUB001",
-            "vols": "PUB001",
-            "dsorg": "PO",
-            "cdate": "2024-01-15",
-            "rdate": "2024-06-20"
+            "sizex": "7",
+            "spacu": "TRACKS",
+            "used": "100",
+            "vol": "WORK01",
+            "vols": "WORK01"
         }
     ],
     "returnedRows": 1,

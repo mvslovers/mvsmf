@@ -175,7 +175,8 @@ the high-level qualifier #cmd("level"), optionally cut down by the pattern
 The field #cmd("filter") is the text #cmd("(null)") if the request has no
 filter. The field #cmd("nomem") is 1 if the catalog search ended for lack of
 storage, and 0 otherwise. An empty level and a lack of storage differ in this
-field only.
+field only. The function takes the lock that makes the data set lists take
+turns (@ref-ds-list-turns).
 
 === locate <ref-test-locate>
 

@@ -223,11 +223,12 @@ record that is too long, produces no console message.
 #idx("recovery")
 mvsMF runs every handler under a recovery routine. If a handler abends, the
 routine writes MVSMF901E, closes the resources that the handler left open
-(MVSMF904I, MVSMF908I, MVSMF911I) and answers the client with status 500 if
-it still can. A message of this range that ends with #cmd("W") means that a
-step of the recovery did not work.
+and releases the locks that it held (MVSMF904I, MVSMF908I, MVSMF911I,
+MVSMF915I), and answers the client with status 500 if it still can. A message
+of this range that ends with #cmd("W") means that a step of the recovery did not
+work.
 
-#tab(caption: [Messages MVSMF901E to MVSMF914I])[
+#tab(caption: [Messages MVSMF901E to MVSMF916W])[
   #table(columns: (0.9in, 1.6in, 1fr),
     [Id], [Text], [Meaning and action],
     [#cmd("MVSMF901E")], [#cmd("HANDLER ABEND S%03X U%04d FOR %s %s")],
@@ -291,6 +292,16 @@ step of the recovery did not work.
     [#cmd("MVSMF914I")], [#cmd("STORAGE AT INSTRUCTION-8: %08X %08X *%08X %08X")],
       [It shows the 16 bytes around the failing instruction. See
        @ref-msg-psw.],
+    [#cmd("MVSMF915I")], [#cmd("RECOVERY RELEASING THE DATA SET LIST LOCK")],
+      [The abended handler held the lock that makes the data set lists take
+       turns (@ref-ds-list-turns), and the recovery releases it. It goes with
+       MVSMF901E. No action. An abend in a list after its catalog search does not
+       write it, because the lock is released by then.],
+    [#cmd("MVSMF916W")], [#cmd("RECOVERY DEQ ABENDED, DATA SET LISTS WILL WAIT")],
+      [The release of the lock in the recovery abended. The lock stays held for
+       the life of the address space. From now on every request that lists data
+       sets (@ref-ds-list) waits for it, and mvsMF sets no limit to the wait.
+       The other routes are not affected. Restart HTTPD.],
   )
 ]
 

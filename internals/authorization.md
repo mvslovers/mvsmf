@@ -89,3 +89,35 @@ directory read open the PDS with BPAM, so they do go through OPEN.
 If that ever gets revisited, the constraint from #229 holds: a refusal must not
 be distinguishable from "does not exist", or the gate becomes the enumeration
 oracle it was meant to close.
+
+### Console services — gated by httpd, not by mvsMF (#347)
+
+`consapi.c` makes no authorization call and must not grow one for *who* may use
+the service: the gate is the httpd route `MOD=MVSMF /zosmf/restconsoles/*
+AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*` in
+`samplib/mvsmfprm` (and httpd's `samplib/httpprm0`; keep both in step).
+Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
+
+- A user without READ gets `403`, plain text, from httpd — outside the closed
+  status list of `zosmf-conformance.md`, and not a z/OSMF-shaped body. It is
+  httpd's answer; mvsMF is not reached (measured with a token session).
+- READ for a group line and for a user-id line (user id in the group column) both
+  work. The unauthorized user still passes every other `/zosmf/` route.
+- Route order decides. Listed after `/zosmf/*` the route is never consulted, the
+  start-up log shows no difference but the order of the `HTTPD036I` lines, and a
+  user without READ gets `200`.
+- No profile: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/*
+  NOT GATED` and everybody passes. The route is therefore fail-open until the
+  profile exists; there is nothing mvsMF can do about it.
+- Percent-encoded forms of the path (`restconsole%73`, `%72estconsoles`,
+  `%2f` for a slash) and `restconsoles//consoles` are decoded by httpd before it
+  matches and are refused (403). Forms httpd does not match (`RESTCONSOLES`,
+  `/zosmf//restconsoles`, `/zosmf/./restconsoles`, `/zosmf/x/../restconsoles`)
+  reach mvsMF's router, which has no route for them and answers 404.
+- `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning
+  and falls back to the Hercules console, or fails with "not delivered".
+
+**Not covered:** `/zosmf/test` (`fn=cmd`, `fn=mtt`) sits under `/zosmf/*`, so the
+profile does not reach it. Only `-DMVSMF_NO_TEST_ENDPOINT` closes it, or a
+second httpd route with the same `RES=` (which would also gate `fn=version`).
+**Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).

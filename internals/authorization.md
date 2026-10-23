@@ -89,3 +89,34 @@ directory read open the PDS with BPAM, so they do go through OPEN.
 If that ever gets revisited, the constraint from #229 holds: a refusal must not
 be distinguishable from "does not exist", or the gate becomes the enumeration
 oracle it was meant to close.
+
+### Console services — gated by httpd, not by mvsMF (#347)
+
+`consapi.c` makes no authorization call and must not grow one for *who* may use
+the service: the gate is the httpd route `MOD=MVSMF /zosmf/restconsoles/*
+AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*` in
+`samplib/mvsmfprm` (and httpd's `samplib/httpprm0`; keep both in step).
+Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
+
+- A user without READ gets `403`, plain text, from httpd — outside the closed
+  status list of `zosmf-conformance.md`, and not a z/OSMF-shaped body. It is
+  httpd's answer; mvsMF is not reached (measured with a token session).
+- READ for a group line and for a user-id line (user id in the group column) both
+  work. The unauthorized user still passes every other `/zosmf/` route.
+- Route order decides. Listed after `/zosmf/*` the route is never consulted, the
+  start-up log shows no difference but the order of the `HTTPD036I` lines, and a
+  user without READ gets `200`.
+- No profile: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/*
+  NOT GATED` and everybody passes. The route is therefore fail-open until the
+  profile exists; there is nothing mvsMF can do about it.
+- `restconsole%73`, `%72estconsoles` and `%2f` for a slash, and
+  `restconsoles//consoles`, were refused (403).
+- `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning
+  and falls back to the Hercules console, or fails with "not delivered".
+
+**Not covered (#460):** the diagnostic endpoint `/zosmf/test` sits under
+`/zosmf/*`, so the profile does not reach it, and it has no authorization check
+of its own. Only `-DMVSMF_NO_TEST_ENDPOINT` closes it; a second httpd route
+with the same `RES=` would also gate `fn=version`, and is no better than this
+route is (it depends on route order and is fail-open without the profile).
+**Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).

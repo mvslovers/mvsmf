@@ -422,11 +422,13 @@ JESSPOOL decides the job services only: list, status, files, records and purge
 under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
 `fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
 
-- **Console services** (`/zosmf/restconsoles`). Any authenticated user can issue
-  an operator command, including `$P` or `$C` for the job of somebody else,
-  and read the Master Trace Table, whose message texts name jobs (for example
-  `$HASP395 jobname ENDED`) and carry job numbers, whatever their owner.
-  `consapi.c` makes no authorization call. See [Issue Command](endpoints/console/issue-command.md) and
+- **Console services** (`/zosmf/restconsoles`). READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` allows issuing an operator command, including
+  `$P` or `$C` for the job of somebody else, and reading the Master Trace Table,
+  whose message texts name jobs (for example `$HASP395 jobname ENDED`) and carry
+  job numbers, whatever their owner. `consapi.c` makes no authorization call;
+  httpd's route does. Without the profile every user who can log in has that
+  power. See [Issue Command](endpoints/console/issue-command.md) and
   [#347](https://github.com/mvslovers/mvsmf/issues/347).
 - **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way. The
   endpoint is registered in the default build. A build with
@@ -435,9 +437,9 @@ under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
 
 A JESSPOOL profile does not keep a user from reaching a job through these two.
 To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
-services, a `RES=FACILITY:MVSMF.ACCESS` check on the catch-all route decides who
-may use mvsMF at all, not who may use the console services alone; see
-[Register the routes](installation.md#4-register-the-routes).
+services, the `/zosmf/restconsoles/*` route with `RES=FACILITY:MVSMF.CONSOLE`
+decides who may use them; see
+[Who may use the console service](installation.md#who-may-use-the-console-service).
 
 ## Check it
 

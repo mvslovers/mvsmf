@@ -35,20 +35,23 @@ explains who may see, read and purge which job.
 > needs a profile in the RAKF class `JESSPOOL` (READ to list and read, UPDATE
 > to purge), and without profiles nobody sees the jobs of others, see
 > [docs/jesspool.md](docs/jesspool.md) and
-> [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles` does
-> not authorize: for it, authentication is the *only* gate there is. On
-> consoles that means more: any user who can log in can issue **any** operator
-> command through `PUT /zosmf/restconsoles/consoles/{name}` — it goes out by
-> SVC 34 from console 0, the master console, with the text unfiltered — and can
-> read the whole Master Trace Table through `GET /zosmf/restconsoles/v1/log`. The diagnostic
-> endpoint `/zosmf/test?fn=cmd` is the same power through a second door and is
-> compiled in by default. There is no per-command policy yet
-> ([#347](https://github.com/mvslovers/mvsmf/issues/347)).
+> [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles`
+> is authorized by an httpd route, not by mvsMF: the shipped route
+> `/zosmf/restconsoles/*` requires READ on the RAKF resource
+> `FACILITY MVSMF.CONSOLE`, and a user without it gets `403`. **Define that
+> profile** — without it the route is open to every login and httpd only warns
+> (`HTTPD425W`), see
+> [Who may use the console service](docs/installation.md#who-may-use-the-console-service)
+> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). READ on that resource
+> allows **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
+> — it goes out by SVC 34 from console 0, the master console, with the text
+> unfiltered — and reading the whole Master Trace Table through
+> `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
+> diagnostic endpoint `/zosmf/test` can issue commands too, through a second
+> door that the profile does not cover, and it is compiled in by default.
 >
-> On a system where not every userid is trusted at the operator console:
-> register the prefixes you want instead of `/zosmf/*` — httpd matches a route
-> per `MOD=` line, so several lines can name the same module — and build with
-> `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
+> On a system where not every userid is trusted at the operator console, build
+> with `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
 
 ### Prerequisites
 
@@ -170,25 +173,29 @@ The short version of the configuration, which is the part people get wrong:
 ```text
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 ```
 
-**Order matters — first match wins**, so the two specific routes must precede
-the catch-all. `AUTH=NONE` on them is not a hole: both endpoints resolve the
+**Order matters — first match wins**, so the three specific routes must
+precede the catch-all. The console route needs READ on the RAKF resource
+`FACILITY MVSMF.CONSOLE`; without that profile nothing is gated, see
+[Who may use the console service](docs/installation.md#who-may-use-the-console-service).
+`AUTH=NONE` on the first two is not a hole: both endpoints resolve the
 caller themselves and answer 401 without a credential. `/zosmf/info` is
 authenticated like every other route (#324), and the token login has to reach
 its handler even when the login fails, to produce the z/OSMF-shaped 401 body.
 
 A route line naming no mode at all registers as `AUTH=NONE (public)` and reads
 that way in `/.dsrv?target=MOD` — a poor thing for an audit to find, which is
-why all three say what they mean. To narrow access, protect the catch-all with
+why all four say what they mean. To narrow access, protect the catch-all with
 a resource check rather than widening the prefix:
 
 ```text
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-These three lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
+These four lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
 `MVSMF.SAMPLIB(MVSMFPRM)`; keep them in step.
 
 For development, `mbt deploy` (see *Building* below) uploads and RECEIVEs the

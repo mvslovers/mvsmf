@@ -205,8 +205,9 @@ answer holds only the first message of the stop (compare @ug-console-late). Set
 #screen(raw(read("../ex/ug-console/c-poll.txt"), block: true))
 
 The #cmd("status") is one of three words. #cmd("detected") comes with the
-message in #cmd("msg"). #cmd("waiting") means that nothing has matched yet and
-the window is open. #cmd("expired") means that nothing has matched and the
+message in #cmd("msg"): the table holds a matching message that is newer than
+the start, and the window does not matter. #cmd("waiting") means that it holds
+none and the window is open. #cmd("expired") means that it holds none and the
 window has closed. A key that mvsMF does not know gets the status #cmd("500")
 and a console error with #cmd("return-code") 5 and #cmd("reason-code") 9.
 
@@ -216,25 +217,34 @@ What to keep in mind:
   the whole line of the table, with the time and the originator in front of the
   message, up to 199 characters of it, and it ignores case. A short word matches
   many lines.
-- *It counts new matches.* Right after it has issued the command, mvsMF counts
-  the lines that contain the text, and it reports a detection when the count is
-  higher later. The echo of your command and its reply can arrive after that
-  count. Text that the command itself contains, such as #cmd("FTPD") in
-  #cmd("S FTPD"), can therefore be reported as detected at once. Choose text
-  that only the message you wait for contains.
-- *A detection stays detected.* Each ask counts again. The key reports
-  #cmd("detected") for as long as more lines match than at the start, also after
-  the window has closed. #cmd("expired") only means that this is not so now.
-- *The table is a window.* It holds a limited number of recent lines, and the
-  oldest are dropped as new ones come. When matching lines are dropped as fast
-  as new ones arrive, the count does not rise.
+- *It looks for new matches.* Right after it has issued the command, mvsMF notes
+  where the table ends: the time of its newest line. A detection reports a
+  match that is stamped later than that. The echo of your command and its reply
+  can land on either side of that point. Text that the command itself contains,
+  such as #cmd("FTPD") in #cmd("S FTPD"), can therefore be reported as detected
+  at once, by the reply of the command. Choose text that only the message you
+  wait for contains.
+- *A detection is not kept.* Each ask looks at the table again, and
+  #cmd("detected") is not remembered. The table is a window: it holds a limited
+  number of recent lines, and the oldest are dropped as new ones come. A message
+  that has left the table before the next ask no longer counts, and the status
+  goes back to #cmd("waiting"), or to #cmd("expired") when the window has closed.
+  Ask soon after the message is expected: minutes later on a quiet system,
+  seconds later under heavy console traffic. A client that has seen
+  #cmd("detected") keeps the result itself.
+- *The time has a grain of one second.* The stamp of a line has no finer grain.
+  A second match in the very second at which the table was noted is seen only
+  when it raises the number of matches in that second above the number noted.
+- *A detection can be pushed out.* The 32 places for keys and detections are
+  shared (@ug-console-collect), and every command takes a place for its own key.
+  After about 30 further commands, an armed detection that nobody has asked about
+  in the meantime can be pushed out, and the next ask gets the status #cmd("500")
+  with #cmd("return-code") 5 and #cmd("reason-code") 9. Asking now and then keeps
+  the detection in its place.
 
-#note[*A defect* (mvsmf\#195): a detection can report #cmd("waiting") for a
-message that has been written. The detection compares a count of lines over a
-table that drops its oldest lines, and the count does not rise when a matching
-line is dropped as a new one arrives. Do not take #cmd("waiting") as proof that
-the message has not come. Ask again, and look at the log (@ug-console-log) if
-the message matters.]
+A #cmd("detect-time") of more than about 41000 ticks (12 hours) is not useful. A
+message that is stamped more than 12 hours after the start is not seen, and the
+status stays #cmd("waiting").
 
 A text of more than 63 characters is cut at 63, and a regular expression is not
 supported: the field #cmd("unsolKeyReg") with the value #cmd("Y") is refused with

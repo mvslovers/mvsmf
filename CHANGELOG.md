@@ -166,6 +166,14 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Changed
 
+- **A path mvsMF serves, requested with a method it does not offer, answers
+  405 and not 404** (#418). `DELETE /zosmf/info` is the example. The body is
+  the usual error report with the message `Http method DELETE is not supported
+  by this URL`, and, as in the reference z/OSMF, there is no `Allow` header. A
+  path no endpoint serves is still 404, and a request without credentials is
+  still 401. A client that tested for 404 to detect "this endpoint does not
+  exist" must now accept 405 as well. `PATCH` and `OPTIONS` are still answered
+  by HTTPD with its own 405.
 - **The installation guide says to stop HTTPD around an upgrade** (#434). The
   install replaces the module the running server loads on every request.
   Whether a request that arrives meanwhile fails has not been measured.

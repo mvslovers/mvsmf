@@ -1,0 +1,5 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"P FTPD","unsol-key":"FTPD099I"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+PENDING CAPTURE

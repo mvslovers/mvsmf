@@ -1,0 +1,4 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -d '{"cmd":"D T"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+PENDING CAPTURE

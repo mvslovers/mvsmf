@@ -18,8 +18,8 @@ device_name(unsigned devtk)
 	case 36000u: return "3375";
 	case 47968u: return "3380";
 	case 58786u: return "3390";
+	default:     return DEVICE_UNKNOWN;
 	}
-	return DEVICE_UNKNOWN;
 }
 
 #ifdef __MVS__

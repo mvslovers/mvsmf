@@ -76,9 +76,9 @@ not `80`). Dates are written `YYYY/MM/DD`.
   capacity of the volume (`DS4DEVTK` of its format-4 DSCB): `3330` (13165),
   `3350` (19254), `3375` (36000), `3380` (47968) or `3390` (58786). Any other
   capacity, or a volume whose format-4 DSCB cannot be read, gives `????`; the
-  listing never guesses a device. Tracks per cylinder do not decide it: a 3380 and a 3390
-  both have 15. Before 1.4.0 the name came from the tracks per cylinder and
-  reported a 3380 volume as `3390`.
+  listing never guesses a device. Tracks per cylinder do not decide it: a
+  3380 and a 3390 both have 15. Before 1.4.0 the name came from the tracks
+  per cylinder and reported a 3380 volume as `3390`.
 - `dsntp`: Dataset type (`PDS` for partitioned, `BASIC` for sequential, `UNKNOWN` for others)
 - `dsorg`: Dataset organization (`PO` = partitioned, `PS` = physical sequential)
 - `edate`: Expiration date; always `***None***`

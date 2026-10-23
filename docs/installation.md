@@ -189,7 +189,10 @@ FACILITYMVSMF.CONSOLE                               ADMIN   READ
 
 The second line lets the group `ADMIN` in; a line with a user id in the group
 column grants one person (measured on RAKF 2). READ is the only level that
-matters.
+matters. `ADMIN` is only an example: READ means every operator command, from
+console 0 and without a `UCMAUTH` filter, so grant it to a group of its own
+that holds just the people who may do that, not to a group that exists for
+other reasons.
 
 Three things to know:
 

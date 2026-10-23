@@ -109,9 +109,10 @@ Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
 - No profile: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/*
   NOT GATED` and everybody passes. The route is therefore fail-open until the
   profile exists; there is nothing mvsMF can do about it.
-- Percent-encoded forms of the path (`restconsole%73`, `%72estconsoles`,
-  `%2f` for a slash) and `restconsoles//consoles` are decoded by httpd before it
-  matches and are refused (403). Forms httpd does not match (`RESTCONSOLES`,
+- Only single-encoded forms were measured: `restconsole%73`, `%72estconsoles`
+  and `%2f` for a slash, and `restconsoles//consoles`, were refused (403). The
+  double-encoded case is under review (#347); `router.c` decodes the path a
+  second time. Forms httpd does not match (`RESTCONSOLES`,
   `/zosmf//restconsoles`, `/zosmf/./restconsoles`, `/zosmf/x/../restconsoles`)
   reach mvsMF's router, which has no route for them and answers 404.
 - `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning

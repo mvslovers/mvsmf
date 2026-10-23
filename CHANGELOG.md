@@ -191,19 +191,23 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
   longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
   list. An empty `owner=` means the caller's own jobs.
-- **The console service is gated by httpd, with a RAKF profile** (#347). The
+- **The console service has a route and a RAKF profile of its own** (#347). The
   shipped route configuration gains `MOD=MVSMF /zosmf/restconsoles/*
   AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*`. A user
-  without READ on `FACILITY MVSMF.CONSOLE` gets `403` from httpd on every
-  console URL (command, response, detection, hardcopy log); a user with READ
-  can issue any operator command, as before. mvsMF itself still performs no
-  check and there is still no per-command policy. **Upgrade: add the route to
-  the httpd parmlib member and define the profile.** Without the profile httpd
-  permits everyone and only warns (`HTTPD425W`); with the route listed after
-  `/zosmf/*` nothing is gated and nothing warns. The user that runs
-  `mbt run restart` needs READ too. The diagnostic endpoint `/zosmf/test`
-  (`fn=cmd`, `fn=mtt`) is not covered ([#460](https://github.com/mvslovers/mvsmf/issues/460));
-  a build with `-DMVSMF_NO_TEST_ENDPOINT` closes it. Rules and the profile lines: `docs/installation.md`.
+  without READ on `FACILITY MVSMF.CONSOLE` gets `403` from httpd on the console
+  URLs that reach this route (command, response, detection, hardcopy log); a
+  user with READ can issue any operator command, as before. mvsMF itself still
+  performs no check and there is still no per-command policy. **This is not yet
+  a gate against every path to the console:** the diagnostic endpoint
+  `/zosmf/test` (`fn=cmd`, `fn=mtt`) is not covered
+  ([#460](https://github.com/mvslovers/mvsmf/issues/460)), a build with
+  `-DMVSMF_NO_TEST_ENDPOINT` closes it, and whether a path can be written so
+  that it matches `/zosmf/*` instead of the console route is still under
+  review (#347). **Upgrade: add the route to the httpd parmlib member and
+  define the profile.** Without the profile httpd permits everyone and only
+  warns (`HTTPD425W`); with the route listed after `/zosmf/*` nothing is routed
+  to it and nothing warns. The user that runs `mbt run restart` needs READ too.
+  Rules and the profile lines: `docs/installation.md`.
 
 ## [1.3.0] - 2026-10-15
 

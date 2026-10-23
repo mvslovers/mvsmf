@@ -194,6 +194,11 @@ PERMIT  'resource' CLASS(class) ID(group) ACCESS(NONE|READ|UPDATE|CONTROL|ALTER)
   (`PERMIT: No universal access record found`), so the trap of rule 7 does not
   exist when you use the commands. For each
   profile `RDEFINE` comes before `PERMIT`.
+- **Start every command in column 1.** In a TSO batch step a command with a
+  leading blank is not run as written: ` RDEF * CL(JESSPOOL) ...` answers
+  `ADDSD  : Profile already defined`, ` PE ...` answers
+  `PERMIT: No universal access record found`, the job ends with return code 8
+  and `JESSPOOL` stays unchanged.
 - **A reload is part of every sequence.** Without `S RAKFPROF` the profile is
   not in effect. A successful reload is acknowledged on the console with
   `RAKFPROF7  RAKF PROFILES UPDATED`. A changed group membership applies after a

@@ -60,6 +60,15 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **The request path is decoded once** (#507). httpd decodes the percent
+  escapes of the path before it hands the request over, and the router then
+  decoded the result a second time. A name with a literal `%` was read as the
+  start of an escape, so `%25b1` in a URL, which names `%b1`, reached the
+  handler as another character, and a path that had been encoded twice was
+  decoded twice. The route match, the path variables and the name a handler
+  authorizes and opens are now the name the client sent, decoded once. A
+  client that relied on double encoding has to send the name once-encoded.
+  Query parameters were already decoded once and are unchanged.
 - **The data set list names the right device** (#443). The `dev` attribute was
   taken from the tracks per cylinder of the volume, which does not identify a
   device: a 3380 volume, like a 3390, has 15, so it was listed as `3390`, and any

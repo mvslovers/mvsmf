@@ -11,6 +11,7 @@
 #include "router.h"
 #include "dsapi.h"      /* DSLIST_LOCK_RNAME -- list lock recovery (#436) */
 #include "common.h"
+#include "reqpath.h"
 #include "httpcgi.h"
 #include "abendmsg.h"
 #include "mvsmfmsg.h"
@@ -37,10 +38,6 @@ static int safe_fclose_thunk(FILE *fp);
 
 static int route_matching_middleware(Session *session);
 static int path_vars_extracting_middleware(Session *session);
-
-static unsigned char hex_nibble(char c);
-static int is_hex_digit(char c);
-static void percent_decode(Session *session, char *str);
 
 static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
@@ -112,10 +109,12 @@ int handle_request(Router *router, Session *session)
     char *raw_path = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_PATH");
     char path[1024];
 
-    // Percent-decode the request path (e.g. %28/%29 -> parentheses)
-    strncpy(path, raw_path, sizeof(path) - 1);
-    path[sizeof(path) - 1] = '\0';
-    percent_decode(session, path);
+    // httpd has already percent-decoded REQUEST_PATH (httppars.c); decoding
+    // it again would read a literal '%' in a name as an escape (#507).
+    if (request_path_copy(raw_path, path, sizeof(path)) != 0) {
+        http_resp(httpc, 400);
+        return -1;
+    }
 
     HttpMethod reqMethod = parseMethod(method);
     if ((int)reqMethod == -1) {
@@ -469,50 +468,6 @@ void session_cleanup(Session *session)
 //
 // private functions
 //
-
-__asm__("\n&FUNC    SETC 'hex_nibble'");
-static unsigned char
-hex_nibble(char c)
-{
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	return 0;
-}
-
-__asm__("\n&FUNC    SETC 'is_hex_digit'");
-static int
-is_hex_digit(char c)
-{
-	return (c >= '0' && c <= '9') ||
-	       (c >= 'A' && c <= 'F') ||
-	       (c >= 'a' && c <= 'f');
-}
-
-// Decode percent-encoded characters in-place.
-// URL percent-encoding uses ASCII byte values (e.g. %28 = ASCII '(').
-// Since we run on EBCDIC, decoded bytes must be converted from ASCII to EBCDIC.
-__asm__("\n&FUNC    SETC 'percent_decode'");
-static void
-percent_decode(Session *session, char *str)
-{
-	char *src = str;
-	char *dst = str;
-
-	while (*src) {
-		if (*src == '%' && is_hex_digit(src[1]) && is_hex_digit(src[2])) {
-			unsigned char ascii_val = (hex_nibble(src[1]) << 4) | hex_nibble(src[2]);
-			http_atoe(&ascii_val, 1);
-			*dst = (char)ascii_val;
-			src += 3;
-		} else {
-			*dst = *src;
-			src++;
-		}
-		dst++;
-	}
-	*dst = '\0';
-}
 
 __asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 

@@ -188,6 +188,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTBKND]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTRQPTH: #507 — the router decoded REQUEST_PATH a second time after httpd had
+# already done it, so a name with a literal percent sign was read as an escape.
+# Portable C (`mbt test`); the TU #includes src/reqpath.c so it drives the real
+# function router.c calls — do not list reqpath.c here.
+[test.TSTRQPTH]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
 # translation (IBM-1047 content was always read as CP037), and BINARY or
 # binary;param must not fall back to text. Portable C (`mbt test`); the TU

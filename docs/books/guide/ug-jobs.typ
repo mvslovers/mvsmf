@@ -403,6 +403,15 @@ the value 0. The same request again finds no job:
 
 #screen(raw(read("../ex/ug-jobs/j-purge-again.txt"), block: true))
 
+The answer 200 says that JES2 took the request. If a device has selected the
+output of the job, for example a punch that waits for its forms, JES2 keeps the
+job on the queue, marked for purge, until the output is released. mvsMF looks
+at the queue for about a second after the request. If the job is still there,
+the answer is still 200, and the field #cmd("message") says
+#cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
+instead. A client that must know that the spool is free reads the message or
+lists the job again. This book has no session for it.
+
 A started task cannot be purged. The answer is 400 with the message
 #cmd("Cannot purge a started task"). A user who may see a job of another user
 but has no right to purge it gets the answer 500 with the text

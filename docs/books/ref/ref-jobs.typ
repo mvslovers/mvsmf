@@ -505,6 +505,17 @@ The fields come in this order. #cmd("jobid") and #cmd("original-jobid") are the
 same value. #cmd("status") is the number 0. mvsMF writes the message
 #cmd("MVSMF207E") for a code it does not know.
 
+*Change from mvsMF 1.3.0:* the answer 200 says that JES2 took the request, not
+that the job is gone. When a device has selected the output of the job, JES2
+marks the job for purge and keeps it on the queue until the output is released.
+After JES2 took the request, mvsMF looks up the job on the queue again, up to
+five times with a pause of 0.2 seconds between the looks, and stops at the
+first look that does not find it. If the job is gone, the answer is the object
+above. If the job is still there, the status stays 200 and #cmd("status") stays
+0, and #cmd("message") reads #cmd("Purge requested. JES2 keeps the job marked
+for purge until the output it holds is released."). The looks cost nothing when
+the purge completes at once and about a second when the job stays.
+
 The code does not treat a running job differently from a job on the output
 queue: the same purge function is called with the same flag.
 

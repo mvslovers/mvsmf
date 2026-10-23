@@ -32,16 +32,24 @@ Stop it with the command #cmd("/P HTTPD"). HTTPD answers
 #cmd("HTTPD099I HTTPD SHUTDOWN COMPLETE") when everything is released and the
 address space ends.
 
-A normal start writes these messages. The messages #cmd("HTTPD000I"),
-#cmd("HTTPD005I") and #cmd("HTTPD002I") come first and #cmd("HTTPD001I") comes
-last:
+A normal start of HTTPD 4.3.0 with the four route lines of mvsMF writes these
+messages. The session reads them from the log of the console service
+(@ug-console-log) and shows the last ten of them. The log reaches back only as
+far as the master trace table does, so read it soon after the start. The user
+needs READ access to the resource #cmd("MVSMF.CONSOLE")
+(@ug-security-console):
+
+#screen(raw(read("../ex/ug-ops/o-start.txt"), block: true))
+
+The table explains them. #cmd("HTTPD000I") comes first and #cmd("HTTPD001I")
+comes last:
 
 #tab(caption: [The messages of a normal start of HTTPD with mvsMF])[
   #table(columns: (0.9in, 1fr),
     [Message], [Meaning],
     [#cmd("HTTPD000I")], [HTTPD is starting. The message has the version and the
       commit that HTTPD was built from.],
-    [#cmd("HTTPD005I")], [The version of the C library in HTTPD.],
+    [#cmd("HTTPD005I")], [The version of the C library that HTTPD is linked with.],
     [#cmd("HTTPD002I")], [How HTTPD got its authorization: by the library
       (module key 0) or by SVC 244 (module key 8). If neither works, HTTPD
       writes #cmd("HTTPD012E") and does not start (@ug-install-apf).],
@@ -50,7 +58,9 @@ last:
       inherited.],
     [#cmd("HTTPD036I")], [One message for each line #cmd("MOD="). You expect four
       for mvsMF (@ug-install-routes).],
-    [#cmd("HTTPD001I")], [HTTPD is ready. Clients can connect.],
+    [#cmd("HTTPD054I")], [HTTPD listens on the port.],
+    [#cmd("HTTPD001I")], [HTTPD is ready. Clients can connect. The message has
+      the version of HTTPD and the document root.],
   )
 ]
 
@@ -59,25 +69,41 @@ path does not reach mvsMF. The messages #cmd("HTTPD411E") to #cmd("HTTPD425W")
 come from the route lines. An unknown value after #cmd("AUTH=") ends the start
 (#cmd("HTTPD420E ... HTTPD WILL NOT START")).
 
-#cmd("HTTPD440W") says that HTTPD did not find the module #cmd("MVSMF") in the
-STEPLIB at the start. Look at the STEPLIB before the first request, not after.
+HTTPD 4.3.0 does not look for the module at the start. If it cannot load the
+module, it finds out with the first request (@ug-ops-trouble). Look at the
+STEPLIB before the first request.
 
 #note[*Nothing starts mvsMF by itself.* A call of #cmd("MVSMF") from TSO or from
 a batch job writes #cmd("MVSMF005E MVSMF MUST BE CALLED BY THE HTTPD SERVER")
 and ends with the return code 12.]
 
-The command #cmd("F HTTPD,HELP") lists the console commands of HTTPD. Two of them
-help with mvsMF:
+The command #cmd("F HTTPD,HELP") lists the console commands of HTTPD. The
+session sends the command through the console service of mvsMF and shows the
+lines of HTTPD that come back:
+
+#screen(raw(read("../ex/ug-ops/o-help.txt"), block: true))
+
+Two of the commands help with mvsMF:
 
 #tab(caption: [Commands of HTTPD that help with mvsMF])[
   #table(columns: (1.4in, 1fr),
     [Command], [Answer],
-    [#cmd("F HTTPD,D C")], [The configuration that the running server uses. One
-      line, #cmd("HTTPD137I RESIDENT YES  MODULES HELD n"), says how many modules
-      HTTPD holds in storage (@ug-ops-replace).],
-    [#cmd("F HTTPD,D V")], [The version and the build of HTTPD.],
+    [#cmd("F HTTPD,D C")], [The configuration that the running server uses: port
+      and task limits (#cmd("HTTPD128I")), timeouts (#cmd("HTTPD129I"),
+      #cmd("HTTPD130I"), #cmd("HTTPD135I")), document root, code page, realm,
+      the SMF level, and the source of the configuration (#cmd("HTTPD133I")).],
+    [#cmd("F HTTPD,D V")], [The version and the build of HTTPD
+      (#cmd("HTTPD140I")).],
   )
 ]
+
+#screen(raw(read("../ex/ug-ops/o-dc.txt"), block: true))
+
+#screen(raw(read("../ex/ug-ops/o-dv.txt"), block: true))
+
+The session shows HTTPD 4.3.0, which meets the floor of @ug-install-prereq. The
+value #cmd("MAXTASK") in the first line of the configuration is the number of
+worker tasks (@ug-ops-storage).
 
 The procedure has these data definitions (the _mvsMF Reference_ lists them in
 full): #cmd("STEPLIB") for the libraries, #cmd("HTTPPRM") for the configuration,
@@ -102,8 +128,8 @@ is the better check after a replacement, because a rebuilt module has another
 build and the same version.
 
 #note[The build is the answer of the module that ran. If it is not the one you
-expect, another library comes first in the STEPLIB, or HTTPD still holds the old
-module (@ug-ops-replace).]
+expect, another library comes first in the STEPLIB, or HTTPD has not been
+restarted since the change (@ug-ops-replace).]
 
 == Storage and Region <ug-ops-storage>
 
@@ -143,10 +169,14 @@ The library under mvsMF 1.3.0 and 1.4.0 frees the block.
 == Replacing the Module <ug-ops-replace>
 
 #idx("restart")#idx("RESIDENT")#idx("module", "replacement")
-HTTPD loads the module #cmd("MVSMF") when it starts and holds it until it ends.
-This is the default, #cmd("RESIDENT=YES"). A new level of the module in the
-library therefore runs only after you stop HTTPD and start it again. The steps
-for a replacement:
+HTTPD enters the module #cmd("MVSMF") with a LINK for each request. HTTPD
+releases before 4.4.0 fetch the module from the library for every request.
+HTTPD 4.4.0 loads every module of a #cmd("MOD=") line once at the start and
+holds it until it ends. This is its default, #cmd("RESIDENT=YES"). With
+#cmd("RESIDENT=NO") it fetches the module for every request, as the earlier
+releases do. The STEPLIB of the started task is fixed when the task starts.
+The procedure for a replacement is the same for every version: stop HTTPD and
+start it again. The steps:
 
 + Put the new module in the library (the SMP install of @ug-install-job).
 + Stop HTTPD with #cmd("/P HTTPD") and wait for #cmd("HTTPD099I").
@@ -175,7 +205,9 @@ information, #cmd("W") warning, #cmd("E") error. The ranges are:
   )
 ]
 
-A message of mvsMF is for what an operator can act on. What a client causes, for
+The ranges #cmd("MVSMF3xx") for the UFS files and #cmd("MVSMF4xx") for the
+console services hold no message in 1.4.0. A message of mvsMF is for what an
+operator can act on. What a client causes, for
 example a missing parameter or a data set that does not exist, goes into the
 answer to the client and nowhere else. The _mvsMF Reference_ lists every message
 in the appendix “Messages”.
@@ -211,9 +243,8 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
     [503, #cmd("failed with Snnn ABEND") or #cmd("failed with Unnnn ABEND")], [An
       abend that mvsMF did not handle. Look at the messages #cmd("MVSMF901E") and
       #cmd("MVSMF913I") before it.],
-    [503, #cmd("returned rc n")], [The module ended with a return code other than 0.
-      The return code 12 means that the module did not run under HTTPD
-      (#cmd("MVSMF005E")).],
+    [503, #cmd("returned rc n")], [The module ended with a negative return code of
+      its own. The code is the number in the message.],
     [A request for a path under #cmd("/zosmf/") is answered like a static file
       and not by mvsMF], [No route matched. Check that the four
       #cmd("HTTPD036I") messages appeared at the start, and that the path has
@@ -222,7 +253,7 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
       wins (@ug-install-routes).],
     [401 for a request with a user ID and password], [HTTPD or mvsMF found no
       valid credential. Check the user ID and password with another service of
-      the system. A token is valid only for the client address that got it.],
+      the system.],
     [401 on #cmd("/zosmf/info") without a credential], [This is the intended
       answer (@ug-install-verify).],
     [403, body #cmd("403 Forbidden")], [The route has a #cmd("RES=") option and
@@ -240,13 +271,12 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
       profile that gives them READ access to the others (@ug-security).],
     [A request for a UFS file fails with 503], [UFSD is not running, or HTTPD
       started without UFS (@ug-uss).],
-    [After an install the old behavior stays], [HTTPD still holds the old module,
-      or the STEPLIB names another library first (@ug-ops-replace).],
+    [After an install the old behavior stays], [HTTPD has not been restarted, or the
+      STEPLIB names another library first (@ug-ops-replace). With HTTPD 4.4.0 or
+      later the running server also holds the module it loaded at the start.],
     [HTTPD does not start; #cmd("HTTPD012E")], [HTTPD is not authorized
       (@ug-install-apf).],
     [HTTPD does not start; #cmd("HTTPD411E") and #cmd("HTTPD420E")], [A route line
       has an #cmd("AUTH=") value that HTTPD does not know. Correct the line.],
   )
 ]
-
-// COORDINATOR: capture needed: the console output of a normal start of HTTPD with mvsMF 1.4.0 (HTTPD000I to HTTPD001I) and of F HTTPD,D C, from the system log of the throwaway system.

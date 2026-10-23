@@ -38,11 +38,12 @@ what happens then.]
 
 #idx("MVSMF.ACCESS")#idx("FACILITY class")#idx("route", "RES=")#idx("HTTPD", "route policy")
 The route lines of HTTPD decide who may reach mvsMF at all. The installation
-(@ug-install) registers the routes of mvsMF. With the third line below, every
+(@ug-install-routes) registers four routes of mvsMF. On the last of them, the
+catch-all, the option #cmd("RES=FACILITY:MVSMF.ACCESS") adds a check: every
 request to mvsMF other than the two #cmd("AUTH=NONE") routes and the console
-services needs a user who has READ access to the resource #cmd("MVSMF.ACCESS")
-in the class #cmd("FACILITY"). The last line below has the check. The console
-services have a route of their own (@ug-security-console):
+services then needs a user who has READ access to the resource
+#cmd("MVSMF.ACCESS") in the class #cmd("FACILITY"). The console services have a
+route of their own (@ug-security-console). With the check, the four lines are:
 
 #screen(```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
@@ -82,11 +83,27 @@ PE MVSMF.ACCESS CL(FACILITY) ID(MVSMFUSR) ACCESS(READ)
 //RAKFPROF EXEC RAKFPROF
 ```)
 
-// COORDINATOR: capture needed -- the job log of this job (RDEF, PE, RAKFPROF7)
+The output of the commands in the step #cmd("TSO"), as the job wrote it to its
+spool file #cmd("SYSTSPRT"). Both commands tell you to run #cmd("RAKFPROF"):
 
-3. Put the last route line above into the #cmd("HTTPPRM") of HTTPD, then stop
-   and start HTTPD (#cmd("P HTTPD"), #cmd("S HTTPD")). HTTPD reads its route
-   policy only at start.
+#screen(raw(read("../ex/ug-security/r-access-out.txt"), block: true))
+
+The job log shows that the step #cmd("RAKFPROF") rebuilt the table:
+
+#screen(raw(read("../ex/ug-security/r-access-log.txt"), block: true))
+
+The member #cmd("PROFILES") now holds the two lines of the resource. The
+universal access #cmd("NONE") is the line without an ID. The class fills the
+columns 1 to 8, so the resource follows it without a blank. The name
+#cmd("MVSMFUSR") has eight characters and fills the field of the ID (columns 53
+to 60), so the access follows it without a blank. #cmd("PERMIT") wrote the line
+in this form:
+
+#screen(raw(read("../ex/ug-security/r-access-prof.txt"), block: true))
+
+3. Put the option #cmd("RES=FACILITY:MVSMF.ACCESS") on the last route line in
+   the #cmd("HTTPPRM") of HTTPD, then stop and start HTTPD (#cmd("P HTTPD"),
+   #cmd("S HTTPD")). HTTPD reads its route policy only at start.
 
 Submit the job through mvsMF (@ug-jobs), so that it runs as your own user ID.
 A job that arrives without #cmd("USER=") and #cmd("PASSWORD=") runs under the
@@ -178,8 +195,11 @@ Run #cmd("ADDUSER") in a TSO batch job, and reload the users with the procedure
 #cmd("RAKFUSER"). The DD statements #cmd("SYSPRINT"), #cmd("SYSTERM"),
 #cmd("SYSIN") and #cmd("SYSTSPRT") are all needed. #cmd("ADDUSER") opens them
 before it reads the command, and without one of them the step ends with return
-code 12 and no message. The HELP text of #cmd("ADDUSER") shows the command in
-the form below:
+code 12 and no message. Write the operands as they stand, without quotes: a
+quoted operand list ends with the message #cmd("ADDUSER: Parse error"). The
+first operand is the user ID. The job below defines the user #cmd("ADAMS") with
+the default group #cmd("USER"), connects the user to #cmd("MVSMFUSR"), and
+reloads the users:
 
 #screen(```
 //ADDUSER  JOB (ACCT),'ADDUSER',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
@@ -189,12 +209,24 @@ the form below:
 //SYSIN    DD DUMMY
 //SYSTSPRT DD SYSOUT=*
 //SYSTSIN  DD *
- ADDUSER 'SMITH PASSWORD(START123) DFLTGRP(USER) GROUP(MVSMFUSR)'
+ ADDUSER ADAMS PASSWORD(START123) DFLTGRP(USER) GROUP(MVSMFUSR)
 /*
 //RAKFUSER EXEC RAKFUSER
 ```)
 
-// COORDINATOR: capture needed -- the job log of this job; confirm the form of the command in SYSTSIN (the HELP text of ADDUSER shows the quoted form with a leading blank)
+The blank before #cmd("ADDUSER") does no harm: #cmd("ADDUSER") does not look at
+the name under which it was called. The output of the step #cmd("TSO"):
+
+#screen(raw(read("../ex/ug-security/r-adduser-out.txt"), block: true))
+
+The job log shows that #cmd("RAKFUSER") rebuilt the user table:
+
+#screen(raw(read("../ex/ug-security/r-adduser-log.txt"), block: true))
+
+The member #cmd("USERS") now has two lines for the user, one for each group. The
+star in column 18 marks the default group:
+
+#screen(raw(read("../ex/ug-security/r-adduser-users.txt"), block: true))
 
 #cmd("ADDUSER") writes one line of #cmd("USERS") for each group, with the star
 on the default group, and a record in #cmd("SYS1.SECURE.SHADOW"). It folds its
@@ -207,22 +239,44 @@ user that exists.
 
 #idx("group", "connecting a user")
 A group exists as soon as a line of #cmd("USERS") names it. To connect an
-existing user to one more group, run the command
+existing user to one more group, run #cmd("CONNECT") in a TSO batch job with
+the same DD statements as for #cmd("ADDUSER"), and reload with
+#cmd("RAKFUSER") or with #cmd("S RAKFUSER") at the console. The job connects the
+user #cmd("JONES") to the group #cmd("AUDIT"):
 
 #screen(```
-CONNECT SMITH GROUP(AUDIT)
+//CONNECT  JOB (ACCT),'CONNECT',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTERM  DD SYSOUT=*
+//SYSIN    DD DUMMY
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+CONNECT JONES GROUP(AUDIT)
+/*
+//RAKFUSER EXEC RAKFUSER
 ```)
 
-// COORDINATOR: capture needed -- CONNECT in a batch step (column 1, DD statements as for ADDUSER)
+The output of the step #cmd("TSO"):
 
-in a TSO batch step like the one above, and reload with #cmd("RAKFUSER") or
-with #cmd("S RAKFUSER") at the console. The command adds a line with the new
-group to #cmd("USERS").
+#screen(raw(read("../ex/ug-security/r-connect-out.txt"), block: true))
 
-HTTPD caches the security environment of a session when the user logs in. A
-changed group membership therefore reaches a client at its next login, after
-the idle timeout or the maximum age of the session of HTTPD. A change to a
-profile applies from the next check after the reload.
+The job log:
+
+#screen(raw(read("../ex/ug-security/r-connect-log.txt"), block: true))
+
+The command adds a line with the new group to #cmd("USERS"). The user
+#cmd("JONES") now has three lines. The star is on the default group
+#cmd("USER"):
+
+#screen(raw(read("../ex/ug-security/r-connect-users.txt"), block: true))
+
+HTTPD keeps the credential of a user, with the groups of the logon. A
+#cmd("CONNECT") does not reach a user whose credential HTTPD already holds: the
+user stays without the new group. A restart of HTTPD clears the credentials.
+How long HTTPD keeps a credential is not stated here. A change to a profile
+applies from the next check after the reload. This holds for every group of this
+chapter, #cmd("MVSMFUSR"), #cmd("CONSOPS") and #cmd("AUDIT") included.
 
 === Which Identity Does Work Run Under <ug-security-identity>
 
@@ -279,6 +333,64 @@ allocation Error". The answer does not say why. A success answers 201.
 RAKF logs a refusal on the console. A client that reads the console services
 (@ug-console) can see it there.
 
+=== Create Needs the Catalog Too <ug-security-dsn-catalog>
+
+#idx("data set", "creating")#idx("SYS1.VSAM.MASTER.CAT")#idx("master catalog")
+A create request passes two RAKF checks, in this order:
+
++ *The name of the new data set.* A data set whose first qualifier is the user
+  ID of the caller is always allowed. Under any other first qualifier the
+  caller needs ALTER through a profile; READ is not enough. The session in
+  @ug-security-dsn-create is a refusal at this step: the new name has no profile
+  that gives the user access. RAKF writes #cmd("RAKF0005") and #cmd("RAKF000A")
+  to the console, and #cmd("RAKF000A") names the new data set.
++ *The catalog.* When the high-level qualifier of the name has no alias in the
+  catalog, the data set goes to the master catalog, and the caller needs UPDATE
+  to the resource #cmd("SYS1.VSAM.MASTER.CAT") in the class #cmd("DATASET").
+  Without it the allocation fails, and #cmd("RAKF000A") on the console names
+  #cmd("SYS1.VSAM.MASTER.CAT") instead of the new data set.
+
+The two refusals look the same to the client: both answer HTTP 500 with the
+body of @ug-security-dsn-create (return code 900, category 8, reason 7). Tell
+them apart in the log of the console, where the second message names the
+resource that was refused.
+
+To let the members of a group create data sets that the master catalog holds,
+give the group UPDATE to the catalog. The job below defines the profile, adds
+the group #cmd("CATUPD") with UPDATE, connects the user #cmd("SMITH") to the
+group, and reloads both tables:
+
+#screen(```
+//CATALOG  JOB (ACCT),'CATALOG',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTERM  DD SYSOUT=*
+//SYSIN    DD DUMMY
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+ADDSD SYS1.VSAM.MASTER.CAT UACC(READ)
+PE SYS1.VSAM.MASTER.CAT CLASS(DATASET) ID(CATUPD) ACCESS(UPDATE)
+CONNECT SMITH GROUP(CATUPD)
+/*
+//RAKFPROF EXEC RAKFPROF
+//RAKFUSER EXEC RAKFUSER
+```)
+
+The output of the step #cmd("TSO"):
+
+#screen(raw(read("../ex/ug-security/r-catalog-out.txt"), block: true))
+
+The job log shows that both tables were rebuilt:
+
+#screen(raw(read("../ex/ug-security/r-catalog-log.txt"), block: true))
+
+The lines in #cmd("PROFILES"):
+
+#screen(raw(read("../ex/ug-security/r-catalog-prof.txt"), block: true))
+
+The new group reaches #cmd("SMITH") at the next logon with a credential that
+HTTPD does not hold yet (@ug-security-connect).
+
 === How RAKF Chooses the Profile <ug-security-dsn-match>
 
 #idx("DATASET class", "profile matching")
@@ -329,22 +441,21 @@ PE PAYROLL.* CLASS(DATASET) ID(PAYGRP) ACCESS(UPDATE)
 //RAKFPROF EXEC RAKFPROF
 ```)
 
-// COORDINATOR: capture needed -- the job log, and the PROFILES lines below
+The output of the step #cmd("TSO"):
 
-#cmd("ADDSD") defines the profile and its universal access. #cmd("PERMIT") adds
-the line for the group, and is refused without the universal line. After the
-reload #cmd("PROFILES") has these lines for the class DATASET. The columns are
-the class in 1 to 8, the profile in 9 to 52, the group or user ID in 53 to 60,
-and the access from 61:
+#screen(raw(read("../ex/ug-security/r-protect-out.txt"), block: true))
 
-#screen(```
-         1         2         3         4         5         6
-123456789012345678901234567890123456789012345678901234567890123456
-DATASET PAYROLL.*                                           READ
-DATASET PAYROLL.*                                   PAYGRP  UPDATE
-```)
+The job log shows the reload:
 
-// COORDINATOR: capture needed -- the real PROFILES lines
+#screen(raw(read("../ex/ug-security/r-protect-log.txt"), block: true))
+
+#cmd("ADDSD") defines the profile and its universal access, always in the class
+DATASET. #cmd("PERMIT") adds the line for the group, and is refused without the
+universal line. In #cmd("PROFILES") the columns are the class in 1 to 8, the
+profile in 9 to 52, the group or user ID in 53 to 60, and the access from 61.
+The first line is the universal access and has no ID:
+
+#screen(raw(read("../ex/ug-security/r-protect-prof.txt"), block: true))
 
 == Protecting the Console Services <ug-security-console>
 
@@ -366,7 +477,9 @@ MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 The route for the console services stands above the catch-all.
 HTTPD uses the first line that matches, so the catch-all would otherwise take
 every console request. The sample member #cmd("MVSMFPRM") of
-#cmd("MVSMF.SAMPLIB") has all four lines.
+#cmd("MVSMF.SAMPLIB") has all four lines. If you also gate the catch-all with
+#cmd("MVSMF.ACCESS"), the last line carries #cmd("RES=FACILITY:MVSMF.ACCESS")
+(@ug-security-access).
 
 === Allow a Group to Use the Console Services <ug-security-console-task>
 
@@ -381,6 +494,8 @@ of the group. The group #cmd("CONSOPS") and the users #cmd("SMITH") and
 //CONSOLE  JOB (ACCT),'CONSOLE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
 //TSO      EXEC PGM=IKJEFT01,REGION=4096K
 //SYSPRINT DD SYSOUT=*
+//SYSTERM  DD SYSOUT=*
+//SYSIN    DD DUMMY
 //SYSTSPRT DD SYSOUT=*
 //SYSTSIN  DD *
 RDEF MVSMF.CONSOLE CL(FACILITY) UACC(NONE)
@@ -409,7 +524,11 @@ universal access #cmd("NONE") is the line without an ID:
 
 The profile takes effect at once. HTTPD asks RAKF on every request, so neither
 HTTPD nor mvsMF needs a restart after you define the profile or change a
-permission. Only a change of the route lines needs a restart of HTTPD.
+permission. Only a change of the route lines needs a restart of HTTPD. A change
+of the group of a user is different: a user whose credential HTTPD already holds
+keeps the groups of the logon, so the connection to #cmd("CONSOPS") does not
+reach that user until HTTPD has dropped the credential
+(@ug-security-connect).
 
 === What a User without Access Sees <ug-security-console-refused>
 
@@ -702,16 +821,17 @@ PERMIT  'resource' CLASS(class) ID(id) ACCESS(NONE|READ|UPDATE|CONTROL|ALTER)
   that has no universal line. It replaces the access of an identical line of
   class, profile and ID instead of writing a second one. The default access is
   #cmd("NONE"), the default class #cmd("DATASET").
-- *Write every command from column 1.* #cmd("RDEFINE") decides from the first
-  four characters of the command buffer whether it runs as #cmd("RDEFINE").
-  With a leading blank the same program runs as #cmd("ADDSD"), and it defines a
-  profile of the class DATASET.
+- *Write #cmd("RDEFINE") and #cmd("RDEF") from column 1.* The program that
+  serves #cmd("RDEFINE") and #cmd("ADDSD") decides from the first four
+  characters of the command text whether it was called as #cmd("RDEF"). With a
+  leading blank it does not take that branch: it works as #cmd("ADDSD"), takes
+  no notice of #cmd("CLASS"), and defines a profile of the class DATASET. The
+  sessions of this chapter write every #cmd("RDEF"), #cmd("PE") and
+  #cmd("ADDSD") from column 1.
 - Define the profile with #cmd("RDEFINE") before you use #cmd("PERMIT") on it.
 - The reload is part of every sequence. Run the procedure #cmd("RAKFPROF") as
   the last step of the job, or enter #cmd("S RAKFPROF") at the console. The
   console shows #cmd("RAKFPROF7  RAKF PROFILES UPDATED") when it worked.
-
-// COORDINATOR: the column-1 rule is derived from the RDEFINE/ADDSD source only; the messages of a leading blank (RDEF and PE) were not re-measured and are not quoted
 
 To withdraw a profile, run #cmd("RDELETE 'resource' CLASS(class)"). It removes
 all lines of the resource, the universal line too. With #cmd("ID(id)") it
@@ -738,18 +858,19 @@ PE * CL(JESSPOOL) ID(AUDIT) ACCESS(READ)
 RDEF SYSTEM.* CL(JESSPOOL) UACC(NONE)
 ```)
 
-// COORDINATOR: capture needed -- a real batch run of the tasks of this section (audit, operators, administrators, pair) with the job log, the console reply of S RAKFPROF and the PROFILES lines
+The output of the step #cmd("TSO"):
+
+#screen(raw(read("../ex/ug-security/r-audit-out.txt"), block: true))
+
+The job log shows the reload:
+
+#screen(raw(read("../ex/ug-security/r-audit-log.txt"), block: true))
 
 After the reload #cmd("PROFILES") has these lines. The columns are as in
-@ug-security-dsn-task:
+@ug-security-dsn-task. The class #cmd("JESSPOOL") has eight characters and
+fills its field, so the profile follows it without a blank:
 
-#screen(```
-         1         2         3         4         5         6
-123456789012345678901234567890123456789012345678901234567890123456
-JESSPOOL*                                                   NONE
-JESSPOOL*                                           AUDIT   READ
-JESSPOOLSYSTEM.*                                            NONE
-```)
+#screen(raw(read("../ex/ug-security/r-audit-prof.txt"), block: true))
 
 The universal #cmd("NONE") closes the jobs of others to everyone. #cmd("AUDIT")
 reads them, because the group line of the same profile gives READ. An auditor
@@ -757,9 +878,16 @@ lists them with #cmd("owner=*"): READ access to the entity #cmd("..") comes
 from the #cmd("*") profile. Jobs without an owner fall under #cmd("*"), so an
 auditor reads them, and nothing can exclude them.
 
-The session below lists as a second user who is connected to #cmd("AUDIT"):
+The session below lists as a second user who is connected to #cmd("AUDIT"). The
+first user, who owns the job, submitted it as in @ug-security-jp-check:
 
 #screen(raw(read("../ex/ug-security/j-list-audit.txt"), block: true))
+
+READ does not purge. The same auditor gets this answer for a purge of that job.
+The body has the shape of every refusal of the data set services (category 4,
+message #cmd("LMOPEN error")):
+
+#screen(raw(read("../ex/ug-security/j-purge-read.txt"), block: true))
 
 === Let Operators Purge <ug-security-jp-ops>
 
@@ -768,26 +896,33 @@ A purge needs UPDATE. The group #cmd("OPS") reads all jobs and purges them, and
 everyone purges the own jobs:
 
 #screen(```
+//JPOPS    JOB (ACCT),'OPS',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
 RDEF * CL(JESSPOOL) UACC(READ)
 PE * CL(JESSPOOL) ID(OPS) ACCESS(UPDATE)
 RDEF SYSTEM.* CL(JESSPOOL) UACC(NONE)
+/*
+//RAKFPROF EXEC RAKFPROF
 ```)
 
-#screen(```
-JESSPOOL*                                                   READ
-JESSPOOL*                                           OPS     UPDATE
-JESSPOOLSYSTEM.*                                            NONE
-```)
+The output of the step #cmd("TSO"):
+
+#screen(raw(read("../ex/ug-security/r-ops-out.txt"), block: true))
+
+The job log is the one of @ug-security-jp-audit: #cmd("RAKFPROF7  RAKF PROFILES
+UPDATED"). The lines in #cmd("PROFILES"):
+
+#screen(raw(read("../ex/ug-security/r-ops-prof.txt"), block: true))
 
 The line #cmd("SYSTEM.*") with #cmd("NONE") closes the logs of the started
 tasks for #cmd("OPS") too. To open them for #cmd("OPS"), add a line with the
 ID #cmd("OPS") and the access READ or UPDATE to that profile. Jobs without an
 owner are readable for everyone.
 
-A caller who has READ only gets this answer for a purge. The body has the shape
-of every refusal of the data set services:
-
-#screen(raw(read("../ex/ug-security/j-purge-read.txt"), block: true))
+A caller who has READ only is refused the purge (@ug-security-jp-audit).
 
 === Let a Group Administer All Jobs <ug-security-jp-admin>
 
@@ -797,30 +932,34 @@ the started tasks and the jobs without an owner included. Everyone else sees
 the own jobs:
 
 #screen(```
+//JPADMIN  JOB (ACCT),'ADMIN',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
 RDEF * CL(JESSPOOL) UACC(NONE)
 PE * CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
+/*
+//RAKFPROF EXEC RAKFPROF
 ```)
 
-#screen(```
-JESSPOOL*                                                   NONE
-JESSPOOL*                                           ADMIN   UPDATE
-```)
+The output of the step #cmd("TSO"):
+
+#screen(raw(read("../ex/ug-security/r-admin-out.txt"), block: true))
+
+The lines in #cmd("PROFILES"):
+
+#screen(raw(read("../ex/ug-security/r-admin-prof.txt"), block: true))
 
 To keep the logs of the started tasks from #cmd("ADMIN"), add #cmd("SYSTEM.*")
 with #cmd("NONE"). Without an #cmd("ADMIN") line in that block the group is
 shut out as well (rule 7 in @ug-security-jp-rules).
 
 To let everyone read everything except the started-task logs, and only
-#cmd("ADMIN") purge, set the universal line of #cmd("*") to READ and add the
-profile #cmd("SYSTEM.*") with #cmd("NONE"). The group #cmd("ADMIN") then has no
+#cmd("ADMIN") purge, use the commands of @ug-security-jp-ops with the group
+#cmd("ADMIN") in place of #cmd("OPS"). The group #cmd("ADMIN") then has no
 access to the started tasks unless you add a line with the ID #cmd("ADMIN") and
-the access UPDATE to that profile:
-
-#screen(```
-JESSPOOL*                                                   READ
-JESSPOOL*                                           ADMIN   UPDATE
-JESSPOOLSYSTEM.*                                            NONE
-```)
+the access UPDATE to the profile #cmd("SYSTEM.*").
 
 === Let Two Users See Each Other's Jobs <ug-security-jp-pair>
 
@@ -830,6 +969,11 @@ the group #cmd("ADMIN") everything, and everyone else sees the own jobs. Each
 of the two gets an owner block, and #cmd("ADMIN") appears in both:
 
 #screen(```
+//JPPAIR   JOB (ACCT),'PAIR',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
 RDEF * CL(JESSPOOL) UACC(NONE)
 PE * CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
 RDEF MIKE1.* CL(JESSPOOL) UACC(NONE)
@@ -838,18 +982,13 @@ PE MIKE1.* CL(JESSPOOL) ID(MIKE2) ACCESS(UPDATE)
 RDEF MIKE2.* CL(JESSPOOL) UACC(NONE)
 PE MIKE2.* CL(JESSPOOL) ID(ADMIN) ACCESS(UPDATE)
 PE MIKE2.* CL(JESSPOOL) ID(MIKE1) ACCESS(UPDATE)
+/*
+//RAKFPROF EXEC RAKFPROF
 ```)
 
-#screen(```
-JESSPOOL*                                                   NONE
-JESSPOOL*                                           ADMIN   UPDATE
-JESSPOOLMIKE1.*                                             NONE
-JESSPOOLMIKE1.*                                     ADMIN   UPDATE
-JESSPOOLMIKE1.*                                     MIKE2   UPDATE
-JESSPOOLMIKE2.*                                             NONE
-JESSPOOLMIKE2.*                                     ADMIN   UPDATE
-JESSPOOLMIKE2.*                                     MIKE1   UPDATE
-```)
+The lines in #cmd("PROFILES"), in the order in which RAKF keeps them:
+
+#screen(raw(read("../ex/ug-security/r-pair-prof.txt"), block: true))
 
 #cmd("MIKE2") lists the jobs of #cmd("MIKE1") with #cmd("owner=MIKE1"): READ
 access to #cmd("MIKE1..") comes from the profile #cmd("MIKE1.*").
@@ -885,14 +1024,8 @@ If you edit the member by hand, these abends reject it:
 ]
 
 An abend leaves the old tables active. The broken member stays as it is.
-
-#note[*A broken PROFILES member and the next IPL.* The project notes report
-that on RAKF 2.0.0 a broken #cmd("PROFILES") or #cmd("USERS") member keeps
-JES2 from starting at the next IPL. Correct the member and run
-#cmd("S RAKFPROF") before the next IPL. #cmd("RAKFPROF7  RAKF PROFILES UPDATED")
-on the console confirms it. Have valid tables before you restart the system.]
-
-// COORDINATOR: the JES2 start hazard on RAKF 2.0.0 comes from docs/jesspool.md (it says "measured"); it is not derivable from the RAKF source. Confirm or cut.
+Correct it and run #cmd("S RAKFPROF") again. The console shows
+#cmd("RAKFPROF7  RAKF PROFILES UPDATED") when the reload worked.
 
 === Check It <ug-security-jp-check>
 
@@ -918,9 +1051,11 @@ profile names, and read the console after every reload.
 
 #note[*A new job has no owner for a while.* The answer to the submit
 request names the submitting user as the owner. JES2 writes the owner during
-conversion. Until then the job has none, and a status, a file list or a purge of
-it is answered 404, like a hidden job. A caller who polls right after the submit
-may see 404 for a short time.]
+conversion. Until then the job has none, and the decision for it is the one for a
+job without an owner (rule 11 in @ug-security-jp-rules): the entity falls under
+the profile #cmd("*"). Where no profile gives the caller READ there, a status,
+a file list or a purge is answered 404, like a hidden job. A caller who polls
+right after the submit may see 404 for a short time.]
 
 === When It Does Not Work <ug-security-jp-trouble>
 
@@ -934,7 +1069,8 @@ may see 404 for a short time.]
     [#cmd("PERMIT: No universal access record found")],
       [The profile has no #cmd("RDEFINE") yet. Define it first.],
     [HTTP 404 right after a submit, later 200],
-      [JES2 has not written the owner yet.],
+      [JES2 has not written the owner yet, and no #cmd("*") profile gives the
+        caller READ.],
     [HTTP 404 for a job that exists],
       [The job belongs to another owner and no profile gives READ. Or the job
         ID is not in upper case.],
@@ -957,8 +1093,6 @@ may see 404 for a short time.]
   )
 ]
 
-// COORDINATOR: the deploy and test user -- the user who deploys with mbt and runs the REST tests needs access to ... (not written here; decide what the section says)
-
 == What the Profiles Do Not Cover <ug-security-notcovered>
 
 #idx("security", "limits")#idx("/zosmf/test")
@@ -966,7 +1100,9 @@ The profiles above decide the data set and job services of mvsMF. These
 surfaces reach the system without them:
 
 - *The test endpoint.* #cmd("/zosmf/test") is registered in the default
-  build. #cmd("fn=cmd") issues an operator command with no check.
+  build. #cmd("fn=cmd") issues an operator command and #cmd("fn=mtt") reads the
+  Master Trace Table. The check of #cmd("MVSMF.ACCESS") is the only one that
+  applies (@ug-security-console-only).
   #cmd("fn=listds"), #cmd("fn=locate") and #cmd("fn=dscb") read the catalog
   and the VTOC with no data set check. #cmd("fn=password") prints the password
   of the caller, masked, and unmasked with #cmd("reveal=1"). The job probes

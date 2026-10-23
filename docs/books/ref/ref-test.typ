@@ -60,6 +60,16 @@ if the operator has put one on the route #cmd("/zosmf/*").
 The only way to close the endpoint is to restrict the route in HTTPD or to
 build mvsMF with #cmd("-DMVSMF_NO_TEST_ENDPOINT").
 
+#note[*A defect* (mvsmf\#460): The console routes are gated by a route line of
+their own with #cmd("RES=FACILITY:MVSMF.CONSOLE") (@ref-httpd). The functions
+#cmd("cmd") and #cmd("mtt") of this endpoint do the work of the console routes,
+but their route is #cmd("/zosmf/test"), which the catch-all line
+#cmd("/zosmf/*") matches. HTTPD does not check the console profile for them.
+A user without access to the console routes can issue an operator command
+through #cmd("fn=cmd") and read the Master Trace Table through #cmd("fn=mtt").
+A build with #cmd("-DMVSMF_NO_TEST_ENDPOINT") does not register the routes and
+has no such path.]
+
 Several functions show data of the system and the caller beyond the user's
 own permissions:
 
@@ -82,7 +92,9 @@ Errors of a function are in the body.
 
 The body is a JSON object for most functions. The functions #cmd("syslog"),
 #cmd("mtt") and #cmd("cmd") send plain text lines, although the header says
-JSON. Their last line is #cmd("DONE step=N") (#cmd("DONE") for #cmd("cmd")).
+JSON. Their last line is #cmd("DONE step=N") (#cmd("DONE") for #cmd("cmd")). The
+function #cmd("cmd") ends without it when it does not get the console lock
+(@ref-test-cmd).
 
 The three functions that fail on purpose answer before any byte of a response
 is sent, so the router can send its error report (@ref-conv-fixed).
@@ -221,8 +233,9 @@ caller. The answer has the fields #cmd("http_get_password_ret"),
 #cmd("strlen") and #cmd("value"). Without #cmd("reveal=1") the #cmd("value") is
 a string of asterisks as long as the password, so the answer shows the length.
 With #cmd("reveal=1") the #cmd("value") is the password of the caller in
-plain text. The password then appears in the response, in any proxy log and in the terminal of the
-caller.
+plain text. The password then appears in the response, in any proxy log and in
+the terminal of the caller. Any other value of #cmd("reveal") masks the
+password.
 
 === env <ref-test-env>
 
@@ -259,7 +272,7 @@ The answer for a valid subpool has these fields:
   [#cmd("stack_at")], [The address of the stack of this request.],
   [#cmd("total"), #cmd("blocks"), #cmd("truncated"), #cmd("sizes")], [Only
     with #cmd("total=1") (also #cmd("y") or #cmd("Y")). The total of all free
-    blocks, their number, whether the count was cut (more than 256 blocks), and
+    blocks, their number, whether the count was cut (the function holds at most 256 blocks), and
     up to 32 block sizes.],
   [#cmd("probes"), #cmd("free_errors")], [The number of probes, and the number
     of blocks that could not be freed again.],
@@ -283,7 +296,8 @@ includes the steps before it. It prints plain text lines:
     [1], [Opens JES2: #cmd("step1 jesopen -> OK") or #cmd("step1 jesopen -> NULL").],
     [2], [Looks for jobs named SYSLOG: #cmd("step2 jesjob -> OK count=N"). The
       count holds only the jobs that the user may read.],
-    [3], [One line per job: #cmd("step3 entry N jobid=... jesdd=set").],
+    [3], [One line per job: #cmd("step3 entry N jobid=... jesdd=set"). The value
+      is #cmd("NULL") if the job has no output data set list.],
     [4], [One line per output data set of each job:
       #cmd("step4 entry N dd M dsid=... mttr=... records=...").],
     [5], [The records of each output data set, between the marker line
@@ -330,9 +344,9 @@ The last line is #cmd("DONE").
 
 Every user that reaches the route can issue any operator command with this
 function. mvsMF makes no check of its own, and the user ID of the caller is
-not used. The command runs with the authority of the address space. The
-console routes work the same way in this respect (see the chapter on the
-console in this book). The boundary is the route (@ref-test-access).
+not used. The command runs with the authority of the address space, as for
+the console routes (@ref-cons). The console routes have a gate in HTTPD for
+this reason; this function does not (@ref-test-access).
 
 === job <ref-test-job>
 
@@ -348,7 +362,9 @@ The answer has the fields #cmd("fn"), #cmd("jobname"), #cmd("count") and
 #cmd("q_flag1"), #cmd("q_flag2"), #cmd("completion") (8 hex digits),
 #cmd("comp_hi"), #cmd("abend"), #cmd("maxcc"), #cmd("jtflg"), the flags
 #cmd("JF"), #cmd("CF") and #cmd("ABD"), and #cmd("retcode"), the text that the
-job status route would show (such as #cmd("CC 0000") or #cmd("JCL ERROR")).
+job status route would show (such as #cmd("CC 0000"), #cmd("JCL ERROR") or
+#cmd("(null)")). The field #cmd("count") is the number of items, that is, of
+the jobs that the user may read.
 
 === spool <ref-test-spool>
 
@@ -400,8 +416,11 @@ and #cmd("both") calls both. An #cmd("attr") that is not one of the four values
 is reported in the answer and is not treated as #cmd("read"). The answer has
 the fields #cmd("class"), #cmd("resource"), #cmd("attr"), #cmd("attr_value"),
 #cmd("via"), #cmd("acee"), #cmd("racf_auth_rc") and #cmd("http_check_auth_rc").
-A call that was not made shows a marker value in its field. The function only
-asks. A denial is still logged by the security product.
+A call that was not made shows a marker value in its field: #cmd("-901") if
+the call was not made (not requested by #cmd("via"), or an unknown #cmd("attr")), #cmd("-902") if there is no ACEE to
+check against (#cmd("racf_auth_rc") only), and #cmd("-903") in
+#cmd("attr_value") for an #cmd("attr") that is not known.
+The function only asks. A denial is still logged by the security product.
 
 === textsum and textdump <ref-test-text>
 

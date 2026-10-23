@@ -62,7 +62,9 @@ There is no debug level and no other letter. The numbers are grouped by area:
 
 A number is used once. An id that was retired is not given to a new message
 (@ref-msg-ds). In the texts below, #cmd("%d") and similar marks stand for the
-value that mvsMF inserts.
+value that mvsMF inserts. The texts of the HTTP error reports are not part of
+this appendix. They are in the chapters of the routes (@ref-ds, @ref-uss,
+@ref-jobs, @ref-cons).
 
 == Router and Core: MVSMF0xx <ref-msg-core>
 
@@ -155,15 +157,12 @@ record that is too long, produces no console message.
        free. The text shows the data set, the old member name and the new
        member name.],
     [#cmd("MVSMF106E")], [#cmd("I/O ERROR READING %s ERRNO=%d")],
-      [A read had an uncorrectable I/O error, such as a bad track, a record of
-       the wrong length or a device error. #cmd("%s") is the data set. The
+      [A read had an uncorrectable I/O error, such as a bad track or a device
+       error. #cmd("%s") is the data set. The
        message is also issued when the read of the JCL data set of a job
        submission fails. The status is already on the wire when the error
        happens, so the client sees a broken transfer, and this message is the
-       place where the cause is recorded. Check the volume and the data set. A
-       data set that was allocated and never written has no end-of-file mark,
-       and a read runs into the data of earlier data sets on those tracks.
-       Rewrite or allocate the data set again.],
+       place where the cause is recorded. Check the volume and the data set.],
     [#cmd("MVSMF107E")], [#cmd("OUT OF SPACE WRITING %s - RECORDS LOST")],
       [The data set was full while a write replaced its content, and records
        were lost. #cmd("%s") is the data set or the member. The client gets
@@ -187,17 +186,21 @@ record that is too long, produces no console message.
        HTTPD. The job routes that read the job queue or the spool fail while
        this lasts. Check JES2.],
     [#cmd("MVSMF202W")], [#cmd("SPOOL READ %-8.8s(%-8.8s) DSID %u: %s")],
-      [A read of spool output broke after the first record had gone to the
+      [A read of spool output ended early after output had gone to the
        client, so the response was already committed with status 200. The
        fields are the job name, the job ID, the data set ID and a reason in
-       mixed case, such as #cmd("spool read failed") or
-       #cmd("spool block limit reached, output truncated"). The records that
-       were sent are valid. The rest is missing.],
+       mixed case. The reasons are #cmd("JES2 checkpoint or spool data set not available"),
+       #cmd("spool read failed"), #cmd("no longer on the spool"),
+       #cmd("first spool block belongs to another data set"),
+       #cmd("spool block chain loops, output truncated"),
+       #cmd("spool block limit reached, output truncated"),
+       #cmd("incomplete spanned record, output truncated") and
+       #cmd("out of storage, output truncated"). The records that were sent are
+       valid. The rest is missing.],
     [#cmd("MVSMF203I")], [#cmd("JOB %s(%s) SUBMITTED")],
       [A job entered the system through mvsMF. The fields are the job name and
        the job ID. This is the audit trail for work that was submitted over
-       the web. The tools that deploy mvsMF use the same route, so a deploy
-       writes a short series of these messages.],
+       the web.],
     [#cmd("MVSMF204E")], [#cmd("UNABLE TO OPEN THE JES2 INTERNAL READER")],
       [The internal reader could not be opened. No job can be submitted until
        this clears. Check JES2.],
@@ -232,9 +235,8 @@ step of the recovery did not work.
        path of the request, so the message says which request did it. The
        client gets status 500 with the abend code (@ref-conv-fixed). The
        exception is S913, a refusal by the security product to open a data set.
-       It is answered with the authorization report, but the message is still
-       written, because an abend costs the module its storage in any case. A
-       series of these messages is a fault of mvsMF. Report it with the lines
+       It is answered with the authorization report, and MVSMF901E is still
+       written. Any other abend points to a fault. Report it with the lines
        MVSMF913I and MVSMF914I and the build (@ref-test-version).],
     [#cmd("MVSMF902W")], [#cmd("HEADERS ALREADY SENT, NO ERROR RESPONSE POSSIBLE")],
       [The abend came after the response had begun. The client sees a body that
@@ -329,6 +331,6 @@ there show what overwrote it.
 
 mvsMF writes MVSMF914I only together with MVSMF913I, and only if all 16 bytes
 lie inside the running copy of mvsMF. Anywhere else the bytes could belong to a
-buffer with the request or the credentials of another user, and every
-authenticated user can read the console through the console routes. The message
+buffer with the request or the credentials of another user, and a user who
+may use the console routes can read the console, and with it this message. The message
 is also not written if the read of the bytes fails.

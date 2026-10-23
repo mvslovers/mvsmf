@@ -41,7 +41,7 @@
 #
 # Output to expect: the Host header of info shows the host and port of
 # MVSMF_URL, and the realm of the 401 answers is the REALM of HTTPD or the SMF
-# system ID. The coordinator decides how a host and port are shown in the book.
+# system ID. The book shows a host and port as variables.
 
 . "$(dirname "$0")/lib.sh"
 

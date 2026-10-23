@@ -14,8 +14,8 @@ parameter, header and error report of the data set services, in the chapter
 
 The variables #cmd("MVSMF_URL"), #cmd("MVSMF_USER") and #cmd("MVSMF_PASS") in
 the sessions, and the way to read them, are explained in @ug-first. One more
-appears in the sections on the ETag. #cmd("ETAG") holds an ETag from an earlier
-answer. Set it by hand from the answer before.
+appears in the sections on the ETag. #cmd("ETAG") holds the value of the header
+#cmd("ETag") of an earlier answer. Copy it from that answer by hand.
 
 == Names and What to Expect <ug-data-names>
 
@@ -31,13 +31,14 @@ The sessions use three data sets below the user ID of the caller:
 #cmd("MVSMF_USER.DEMO.SEQ") (a sequential data set), #cmd("MVSMF_USER.DEMO.PDS")
 (a PDS) and #cmd("MVSMF_USER.DEMO.BIN") (a sequential data set for binary data).
 Where a session shows #cmd("$MVSMF_USER.DEMO.SEQ"), the shell fills in your
-user ID. The user needs RAKF access to create and update data sets below the own
-user ID, and some space on a volume.
+user ID. The user needs some space on a volume. Creating a data set needs one
+more right than writing it, which @ug-data-create names.
 
 mvsMF does not need the header #cmd("X-CSRF-ZOSMF-HEADER"), and no request in
-this chapter sends it. Every session uses #cmd("curl -si"), so that the output
-begins with the status line and the headers. The sessions are a prediction from
-the source code. The text next to each session says what the code decides.
+this chapter sends it. Most sessions use #cmd("curl -si"), so that the output
+begins with the status line and the headers. The sessions that show only bytes
+use #cmd("curl -s"). The answers carry the header #cmd("Set-Cookie") with a
+session token. The sessions show its value as #cmd("<token>").
 
 #note[*The status line is the first thing to read.* A request that fails
 returns a JSON error report with the fields #cmd("category"), #cmd("rc"),
@@ -69,10 +70,20 @@ status is #cmd("400") and the message is
 #screen(raw(read("../ex/ug-data/d-create-bad.txt"), block: true))
 
 A field with a number in quotes counts as missing: write #cmd("80"), not
-#cmd("\"80\""). If the allocation itself fails, the answer is #cmd("500") with the
-message #cmd("Dynamic allocation Error"). That one answer covers a name that
-exists already, a lack of space, and a refusal by RAKF. mvsMF does not tell them
-apart.
+#cmd("\"80\"").
+
+mvsMF has no check of its own for a create. The system allocates the data set
+for the caller, and RAKF can refuse it there, in two steps. The first looks at
+the name of the new data set: a data set whose first qualifier is the user ID of
+the caller is always allowed. The second looks at the catalog: when the first
+qualifier has no alias in the catalog, the caller needs UPDATE to the resource
+#cmd("SYS1.VSAM.MASTER.CAT"). The sessions of this chapter were taken by a
+user who has this right through a group. @ug-security shows how to give it. If
+the allocation fails, the answer is #cmd("500") with the return code
+#cmd("900"), the category #cmd("8"), the reason #cmd("7") and the message
+#cmd("Dynamic allocation Error"). The report does not say whether RAKF refused
+the name, RAKF refused the catalog, or the system could not meet the
+parameters: the code gives the same answer for all of them.
 
 The field #cmd("like") names an existing data set as a model. The other fields
 then override the model, and none is required. The _mvsMF Reference_ describes
@@ -82,9 +93,11 @@ what mvsMF takes from the model.
 
 #idx("write", "data set")#idx("replace")
 A #cmd("PUT") to the name of an existing data set replaces its content. The body
-is the new content. A line feed ends a record. mvsMF translates the text from
-ASCII to EBCDIC. mvsMF does not create the data set for a #cmd("PUT"): create it
-first, as in the section before.
+is the new content. A line feed, a carriage return, or a carriage return and a
+line feed together end a record. The terminator is not stored, and an empty line
+is a record of blanks. mvsMF translates the text from ASCII to EBCDIC. mvsMF
+does not create the data set for a #cmd("PUT"): create it first, as in the
+section before. A name that is not cataloged answers #cmd("404").
 
 #screen(raw(read("../ex/ug-data/d-put-seq.txt"), block: true))
 
@@ -159,16 +172,20 @@ for one:
 
 The status is still #cmd("200"). The field #cmd("moreRows") with the value
 #cmd("true") says that more data sets follow. When there are no more, the field
-is not in the answer. To read the next page, send the first name of that page in
-the parameter #cmd("start"). The list begins with that name. This request
-continues at #cmd("DEMO.PDS"):
+is not in the answer. The answer holds no cursor and does not name the next data
+set. To read the next page, send the name of its first data set in the parameter
+#cmd("start"). The list begins with that name: it is included. This request
+continues at #cmd("DEMO.PDS"), the data set after the first page in the full
+list above:
 
 #screen(raw(read("../ex/ug-data/d-list-ds-next.txt"), block: true))
 
-The parameter #cmd("volser") is read and ignored.
+The page has one item again, and #cmd("moreRows") is still #cmd("true"), because
+#cmd("DEMO.SEQ") follows. The parameter #cmd("volser") is read and ignored.
 
 *Change from mvsMF 1.3.0:* when mvsMF could not get the storage for the list, it
-answered an empty #cmd("200"). It answers #cmd("500") with the message
+did not look for the cause and answered #cmd("200") with the list that it had,
+which could be empty. It answers #cmd("500") with the message
 #cmd("Storage for the list could not be obtained") now, and writes the message
 #cmd("MVSMF006E") on the console. An empty level is still a #cmd("200") with no
 items.
@@ -212,21 +229,29 @@ translation. This session writes six bytes into the data set
 #screen(raw(read("../ex/ug-data/d-put-bin.txt"), block: true))
 
 mvsMF cuts the bytes into records of the record length. The last record, which is
-not full, is filled with X'00' to the full length. The six bytes are one record
-of 80 bytes. The read in binary mode returns the records one after another:
+not full, is filled with X'00' to the full length, except in a data set of
+record format U. The six bytes are one record of 80 bytes. The read in binary
+mode returns the records one after another, as they are stored:
 
 #screen(raw(read("../ex/ug-data/d-get-bin.txt"), block: true))
 
 The first six bytes of the output are #cmd("41 42 43 00 01 ff"), the bytes that
-were written. The rest of the record is X'00'. The command pipes the answer to
-#cmd("od"), because the bytes are not text. The _mvsMF Reference_ describes the
-third type, #cmd("record"), and the way mvsMF finds the end of the data in a
-sequential data set.
+were written. The 26 bytes after them, which the session shows, are X'00': the
+padding of the record. The command pipes the answer to #cmd("od") and keeps its
+first two lines, 32 bytes, because the bytes are not text. The answer has the
+content type #cmd("application/octet-stream"). The _mvsMF Reference_ describes
+the third type, #cmd("record"), which puts a length of four bytes before each
+record.
 
-*Change from mvsMF 1.3.0:* mvsMF estimates the end of the data of a fixed-block
-data set from the layout of the device. On a 3380 the estimate counted too many
-blocks on a track. It follows the device now. For a device that it does not know,
-mvsMF does not estimate and reads to the end of the data set.
+*Change from mvsMF 1.3.0:* a binary read of a fixed-block data set, and the
+ETag, stop at the last block that holds data. mvsMF works out that block count
+from the position of the last block and from the number of blocks that fit on a
+track. Version 1.3.0 used one formula for every device. Version 1.4.0 takes the
+formula from the device type in the format-4 DSCB of the volume: bytes per block
+for the devices that count a track in bytes (such as the 3350 in the sessions),
+and cells for the 3380, which the old formula did not fit. For a device that it
+does not know, a 3390 among them, mvsMF makes no estimate and reads to the end
+of the data set.
 
 === Two Codepages <ug-data-codepage>
 
@@ -243,10 +268,19 @@ The default read uses the same table and returns the line as it was written:
 
 #screen(raw(read("../ex/ug-data/d-enc-get.txt"), block: true))
 
-The same bytes read with IBM-1047 are other characters. The two characters
-#cmd("[") and #cmd("]") and the circumflex do not come back:
+The same stored bytes read with IBM-1047 are other characters. The session pipes
+the answer to #cmd("od"), because the bytes are not all ASCII:
 
 #screen(raw(read("../ex/ug-data/d-enc-get1047.txt"), block: true))
+
+The bytes #cmd("41") and #cmd("42") are #cmd("A") and #cmd("B"), and #cmd("0a")
+is the line feed. The three characters between them did not come back. CP037
+stored #cmd("[") as X'BA', #cmd("]") as X'BB' and #cmd("^") as X'B0'. IBM-1047
+has no square bracket or circumflex at those places. Its table turns the bytes
+into the bytes #cmd("dd"), #cmd("a8") and #cmd("ac") of the dump. In ISO 8859-1
+these are a capital Y with an acute accent, a diaeresis and a not sign. In
+IBM-1047 the characters themselves are X'AD', X'BD' and X'5F'. So
+all three characters change, not two.
 
 The rule is: read a data set with the table that wrote it. Pass
 #cmd("text;fileEncoding=IBM-1047") on a write as well as on a read when the
@@ -257,8 +291,10 @@ text with the default table. Any other value is refused:
 
 #screen(raw(read("../ex/ug-data/d-enc-bad.txt"), block: true))
 
-The status is #cmd("500"), and the detail of the report names the value and the
-two tables that are supported. A binary request ignores the encoding.
+The status is #cmd("500"). The report has the return code #cmd("121"), the
+category #cmd("16") and the message #cmd("iconv_open() failed."), and its detail
+names the value and the two tables that are supported. A binary request ignores
+the encoding.
 
 #note[*The UNIX side has its own default.* The files below
 #cmd("/zosmf/restfiles/fs") use IBM-1047 unless the request says otherwise. The
@@ -270,7 +306,12 @@ data sets use CP037. See @ug-uss.]
 Two users can read the same data set, change it, and write it back. The second
 write replaces the first. An ETag prevents this. The ETag is a short value that
 mvsMF computes from the records of the data set. It changes when the content
-changes. It has 16 hexadecimal digits.
+changes. It has 16 hexadecimal digits. The first eight are a CRC-32 checksum of
+the records, in which the length of every record is part of the sum. The last
+eight are the number of bytes in the records, in hexadecimal. The ETags in the
+sessions end in #cmd("00000050"), which is 80: one record of 80 bytes, the
+record length of the data set. The sum covers the record as it is stored, with
+its trailing blanks.
 
 Ask for the ETag with the header #cmd("X-IBM-Return-Etag: true") on a read:
 
@@ -284,24 +325,26 @@ for the new ETag in the same request:
 
 The write goes through, because the data set has not changed since the read. The
 status is #cmd("204"), and the answer carries the ETag of the data set after the
-write. Keep it in #cmd("ETAG") for the next update. This value is read from the
-data set again after the write. It is not a value of the body that was sent.
+write. Keep it for the next update. This value is read from the data set again
+after the write. It is not a value of the body that was sent.
 
-Now the data set has changed, and the old ETag is stale. A write with the old
-value is refused before mvsMF touches the data set:
+Now the data set has changed, and the old ETag is stale. In the next session
+#cmd("ETAG") still holds the old value, the one of the first read. A write with
+it is refused before mvsMF touches the data set:
 
 #screen(raw(read("../ex/ug-data/d-etag-stale.txt"), block: true))
 
-The status is #cmd("412") and the message is
+The status is #cmd("412"), the reason is #cmd("10") and the message is
 #cmd("The resource was modified since the supplied ETag was created"). The data
 set keeps its content. Read the data set again, merge the change, and write with
 the new ETag. A member that does not exist, or that mvsMF cannot read, gives the
 same #cmd("412") for an #cmd("If-Match"), and a data set that does not exist
 gives #cmd("404").
 
-The header #cmd("If-None-Match") works for a read. Send the ETag that you hold.
-If the data set has not changed, the answer is #cmd("304") with no body, and you
-do not transfer the content again:
+The header #cmd("If-None-Match") works for a read. Send the ETag that you hold;
+in the next session #cmd("ETAG") holds the new value from the write.
+If the data set has not changed, the answer is #cmd("304") with no body. It
+carries the ETag again, and you do not transfer the content again:
 
 #screen(raw(read("../ex/ug-data/d-etag-304.txt"), block: true))
 
@@ -319,19 +362,24 @@ client chooses to make.]
 
 #idx("rename")
 A rename is a #cmd("PUT") with a JSON body. In the form for a member, the
-address names the new member. The body names the old one. The body must say
-#cmd("\"request\":\"rename\""), and the header #cmd("Content-Type") must be
-#cmd("application/json"). That header makes mvsMF treat the request as a rename
-and not as a write of data.
+address names the new member. The body names the old one in the object
+#cmd("from-dataset"). The body must say #cmd("\"request\":\"rename\""), and the
+header #cmd("Content-Type") must be #cmd("application/json"). That header makes
+mvsMF treat the request as a rename and not as a write of data.
 
 #screen(raw(read("../ex/ug-data/d-rename-mbr.txt"), block: true))
 
 The status is #cmd("204"), and the answer has no body. The member #cmd("HOLA")
-is now #cmd("ADIOS"). If the new name exists, the answer is #cmd("400") with
-the message #cmd("Rename target already exists"), and if the old member does not
-exist, the answer is #cmd("404"). A data set is renamed in the same way: the
-address names the new name, and the body has the field #cmd("dsn") with the old
-name and no field #cmd("member").
+is now #cmd("ADIOS"). For a member, mvsMF takes the library from the address
+and the old member name from the field #cmd("member") of the body. If the new
+name exists, the answer is #cmd("400") with the message
+#cmd("Rename target already exists"). If the old member does not exist, the
+answer is #cmd("404") with the message #cmd("PDS member not found"). A data set
+is renamed in the same way: the address names the new name, and the field
+#cmd("dsn") of #cmd("from-dataset") holds the old name, with no field
+#cmd("member"). If the old data set is not cataloged, the answer is #cmd("404")
+with the message #cmd("Dataset not found"). Any other failure of the rename of a
+data set answers #cmd("500") with the message #cmd("Rename operation failed").
 
 == Deleting a Member and a Data Set <ug-data-delete>
 
@@ -350,7 +398,8 @@ A #cmd("DELETE") with the name of a data set removes the data set:
 
 #screen(raw(read("../ex/ug-data/d-del-ds.txt"), block: true))
 
-There is no question and no way back. A read now says that the data set is not
+mvsMF asks for no confirmation, and the data set is scratched and uncataloged.
+A read now says that the data set is not
 cataloged. The status is #cmd("404"), and the message is #cmd("Dataset not found"):
 
 #screen(raw(read("../ex/ug-data/d-del-ds-gone.txt"), block: true))
@@ -364,7 +413,9 @@ mvsMF asks RAKF for every request that reads, writes, renames or deletes, and
 asks it before it looks at the catalog. The class is #cmd("DATASET"). The access
 needed is READ to read a data set or a member and to list members, UPDATE to
 write, to rename a member and to delete a member, and ALTER to delete or rename
-a data set. A list of data sets and a create are not checked by mvsMF.
+a data set. A rename of a data set checks the old name and the new name. A list
+of data sets and a create are not checked by mvsMF; for a create, see
+@ug-data-create.
 
 A name for which no profile exists is permitted. A refusal is not a #cmd("403").
 It is a #cmd("500") with the message #cmd("LMOPEN error") and the detail
@@ -375,7 +426,8 @@ caller who is refused sees this on a write and on a delete:
 
 #screen(raw(read("../ex/ug-data/d-denied-del.txt"), block: true))
 
-Both sessions name a data set that does not exist. A caller who has no access to
+The sessions were taken by a second user ID that has no right to the name. Both
+sessions name a data set that does not exist. A caller who has no access to
 the name is refused with the report above. A caller for whom no profile covers
 the name gets #cmd("404") with #cmd("Dataset not found") instead. Because the
 check comes first, a refused caller learns nothing about whether the data set

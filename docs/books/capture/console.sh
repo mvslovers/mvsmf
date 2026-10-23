@@ -8,7 +8,7 @@
 #   - a user ID that mvsMF lets in. mvsMF makes no authorization check of its
 #     own for the console services, so no RAKF profile is needed in the
 #     default set-up. If the HTTPD configuration protects the console routes
-#     (the coordinator's section of ug-security), this user ID must have the
+#     ("Protecting the Console Services" in ug-security), this user ID must have the
 #     access that section describes.
 #   - FTPD installed as a started task named FTPD and RUNNING when the script
 #     starts. The sessions c-late, c-start, c-arm and c-poll stop and start
@@ -25,7 +25,7 @@
 #
 # Output to expect in the answers: cmd-response-url / detection-url carry the
 # Host header the client sent, that is the host and port of MVSMF_URL.  The
-# coordinator decides how that is shown in the book.
+# book shows it as a variable.
 
 . "$(dirname "$0")/lib.sh"
 

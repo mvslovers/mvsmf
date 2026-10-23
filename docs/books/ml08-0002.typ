@@ -31,7 +31,37 @@
 
 #heading(numbering: none)[About This Book] <about>
 
-ABOUT
+This book is the reference for mvsMF (mvsmf), the z/OSMF REST API for MVS
+3.8j. It lists every service of mvsMF with its method and path, its query
+parameters, request headers and body fields, the fields of the answer, the
+status codes and the error report. It also lists the HTTPD configuration that
+mvsMF needs, the diagnostic endpoint and the messages. It does not teach: the
+tasks, with sessions typed at a real mvsMF, are the subject of the companion
+volume, the _mvsMF User's Guide_.
+
+The book describes mvsMF 1.4. mvsMF is a clone of the REST interface of IBM's
+z/OSMF. It is not z/OSMF, and where it differs the text says so.
+
+== How This Book Is Organized
+
+#deflist(width: 1.35in,
+  [Chapter 1], [“Conventions”.],
+  [Chapter 2], [“Authentication and System Information”.],
+  [Chapter 3], [“Data Set Services”.],
+  [Chapter 4], [“File Services”.],
+  [Chapter 5], [“Job Services”.],
+  [Chapter 6], [“Console Services”.],
+  [Chapter 7], [“Configuring HTTPD for mvsMF”.],
+  [Chapter 8], [“The Diagnostic Endpoint”.],
+  [Appendix A], [“Messages”.],
+)
+
+== Related Publications
+
+#deflist(width: 1.35in,
+  [ML08-0001], [_mvsMF User's Guide_: the tasks, with sessions, and the
+    chapters on security, installation, operation and removal.],
+)
 
 #mainmatter()
 ]

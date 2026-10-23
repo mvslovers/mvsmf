@@ -12,11 +12,16 @@ The console services clone the console REST interface of IBM z/OSMF. mvsMF
 implements the parts described here. Section @ref-cons-unsup lists what it does
 not.
 
-#note[*The console services run with the authority of the server.* The console
-code of mvsMF makes no authorization check of its own: any caller that mvsMF
-lets in can issue any operator command. The administrator protects the console
-routes in the HTTPD configuration. See the _mvsMF User's Guide_, chapter
-"Setting Up Security", and @ref-auth.]
+#note[*The console code of mvsMF makes no authorization check of its own.* Any
+caller that HTTPD lets in to the module can issue any operator command. The
+sample HTTPD configuration of mvsMF 1.4.0 puts the console routes behind the
+RAKF resource #cmd("FACILITY:MVSMF.CONSOLE") (@ref-httpd, @ref-auth). See
+"Protecting the Console Services" in the _mvsMF User's Guide_.]
+
+#note[*A defect* (mvsmf\#460): the diagnostic endpoint #cmd("/zosmf/test") with
+#cmd("fn=cmd") or #cmd("fn=mtt") lies under the catch-all route, not under the
+console route, so the console gate does not cover it (@ref-test). The issue is
+open.]
 
 == Requests <ref-cons-req>
 
@@ -74,24 +79,27 @@ double quotes. See @ref-cons-body-rules.
        case before it issues it. Only its first 100 characters are sent to MVS
        (@ref-cons-limits).],
     [#cmd("async")], [no],
-      [#cmd("Y") or #cmd("y"): the answer carries no #cmd("cmd-response"). Any
-       other text, or no field: it does.],
+      [The first character of the value is #cmd("Y") or #cmd("y"): the answer
+       carries no #cmd("cmd-response"). Any other value, or no field: it does.],
     [#cmd("sol-key")], [no],
       [Text to look for in the lines of the answer. At most 63 characters
        (longer text is cut). Case sensitive.],
     [#cmd("solKeyReg")], [no],
-      [The value #cmd("Y") together with a #cmd("sol-key") is refused (reason code
-       25). Any other value is ignored.],
+      [Together with a #cmd("sol-key"), a value that begins with an upper-case
+       #cmd("Y") is refused (reason code 25). The check looks at the first
+       character of the first three only, so #cmd("Yes") is refused. Any other
+       value, a lower-case #cmd("y") included, is ignored.],
     [#cmd("unsol-key")], [no],
       [Text to wait for in the table after the command. At most 63 characters
        (longer text is cut). Case is ignored. Without it, there is no detection.],
     [#cmd("unsolKeyReg")], [no],
-      [The value #cmd("Y") together with an #cmd("unsol-key") is refused (reason
-       code 25). Any other value is ignored.],
+      [Together with an #cmd("unsol-key"), a value that begins with an upper-case
+       #cmd("Y") is refused (reason code 25), by the same rule as
+       #cmd("solKeyReg"). Any other value is ignored.],
     [#cmd("unsol-detect-sync")], [no],
-      [#cmd("Y") or #cmd("y"): wait for the detection in this request
-       (@ref-cons-detect-sync). Any other text: arm a detection for a later
-       request (@ref-cons-detect-async).],
+      [The first character of the value is #cmd("Y") or #cmd("y"): wait for the
+       detection in this request (@ref-cons-detect-sync). Any other value: arm a
+       detection for a later request (@ref-cons-detect-async).],
     [#cmd("unsol-detect-timeout")], [no],
       [Seconds to wait with #cmd("unsol-detect-sync"). Read with #cmd("atoi").
        Default 20. A value of 0, a negative value, or a value above 60 gives 20.],
@@ -233,8 +241,10 @@ mvsMF reads one copy of the table per cycle. It finds the answer in it like this
   characters at column 14 of the formatted line) is the source of the issuer.
 + *The lines.* The entries after the echo are examined in order. An entry whose
   source equals the block's source, or is blank, belongs to the block, and so
-  does a continuation line of a multi-line message (a line that begins, after
-  blanks, with the message number of the last line that had one).
+  does a continuation line of a multi-line message. The message number is the
+  last word of the latest line of the block that has a source, when that word
+  consists of digits only. A continuation line begins, after blanks, with that
+  number.
 + *The end.* The block ends at an entry that has another source, once the block
   has a line. Before the first line, such an entry is skipped.
 + *The next command.* An entry that is not a continuation, that has the source of
@@ -249,8 +259,9 @@ mvsMF reads one copy of the table per cycle. It finds the answer in it like this
 
 mvsMF numbers the lines of the block from 0. A line with an empty text counts but
 is not returned. The text of a line is the formatted line from column 24 on,
-without trailing blanks. A line that would make the text exceed 32768 bytes is
-left out, and it still counts. The lines after it that still fit are kept.
+without trailing blanks. A line that would not fit into the answer text is
+left out, and it still counts. The lines after it that still fit are kept. The
+answer text is less than 32768 bytes long (@ref-cons-limits).
 
 The answer block of a collect is the same block, read again. Only the lines from
 the number that the cursor holds on are returned.
@@ -263,7 +274,8 @@ the number that the cursor holds on are returned.
     [Command length accepted], [126 characters. A longer command gets reason code
       17. The issue handler sends only the first 100 characters to MVS; the echo
       that mvsMF looks for is the whole command.],
-    [Answer text], [32768 bytes, including the one #cmd("\\r") per line.],
+    [Answer text], [Less than 32768 bytes (32767 at most), including the one
+      #cmd("\\r") per line.],
     [Message text of one line], [232 characters: the table keeps 256 characters of
       an entry, and 24 are the prefix.],
     [Capture time], [2.1 to 3.1 seconds, or 0.3 seconds after the last change.],
@@ -442,21 +454,22 @@ mvsMF looks for the parameter name as the client sent it, and then in upper case
        #cmd("h") (either case), for example #cmd("10m"). Default 10 minutes (600
        seconds). Anything else gives reason code 22.],
     [#cmd("direction")],
-      [#cmd("backward") (default) or #cmd("forward"), either case. The period
+      [#cmd("backward") (default) or #cmd("forward"), either case, or empty. The period
        lies before or after the starting point. Anything else gives reason code
        22.],
     [#cmd("time")],
       [The starting point as #cmd("yyyy-mm-ddThh:mm[:ss]Z"). At least five numbers
        must be read with the format #cmd("%d-%d-%dT%d:%d:%d"); the #cmd("Z") is not
        checked. The time is taken as the local time of the system (see below).
-       Without it and without #cmd("timestamp"), the starting point is now.],
+       Without it and without #cmd("timestamp"), the starting point is now. It is
+       not read when #cmd("timestamp") is present and not empty.],
     [#cmd("timestamp")],
       [The starting point as milliseconds, digits only. mvsMF drops the last three
        digits. A value of three digits or fewer is 0. It wins over #cmd("time").
        Another character gives reason code 22.],
     [#cmd("hardcopy")],
-      [#cmd("operlog") or #cmd("syslog"), either case. The value is checked and
-       otherwise unused. Another value gives reason code 22.],
+      [#cmd("operlog") or #cmd("syslog"), either case, or empty. The value is
+       checked and otherwise unused. Another value gives reason code 22.],
     [#cmd("sysName")],
       [Up to 8 characters. The value is checked for its length (reason code 24)
        and otherwise unused. The log is always that of the local system.],
@@ -474,7 +487,8 @@ A #cmd("time") or #cmd("timestamp") after the current time gives reason code 23.
   later than that of the line after it (for the newest line: than the time now).
 - A line whose time cannot be read is left out.
 - The items are in the order of the table, the oldest first, for both directions.
-- At most 10000 items are returned.
+- At most 10000 items are returned. The items run from the oldest to the newest,
+  so when more lines match, the newest are the ones left out.
 - The time frame is the local clock of the system. The text #cmd("GMT") in
   #cmd("time") and the number in #cmd("timestamp") label this local time as if it
   were Universal Time. A #cmd("time") or #cmd("timestamp") parameter is read in the
@@ -557,10 +571,13 @@ The store compares the first 16 characters of a key, so a key with the same firs
     [Value], [At most 192 bytes.],
     [Lifetime], [About 5 minutes after the last use (300 ticks of the TOD high word,
       about 1.05 seconds each). A read or a write is a use.],
-    [Full store], [A new entry takes a free slot, then an expired one, then the one
-      that was used least recently.],
-    [Locking], [A latch protects each operation, not a sequence of them. The
-      store allows one open operation per key.],
+    [Full store], [A new entry with the name of an existing one overwrites it.
+      Otherwise it takes the first slot, in the order of the slots, that is free
+      or expired. If there is none, it takes the slot that was used least
+      recently.],
+    [Locking], [One latch for the whole store protects each single operation. It
+      does not span a sequence of operations. The store is meant for one
+      outstanding operation per key.],
     [Not available], [Collect answers empty. A detection read answers
       #cmd("500"). The issue request still works, and the cursor is not stored.],
   )
@@ -599,7 +616,8 @@ not the shape of the data set and job requests.
     [#cmd("400")], [1], [14], [issue],
       [Incorrect console name. The length must be greater than 1 and less than 9.],
     [#cmd("400")], [1], [12], [issue],
-      [The body of the request is not in JSON format. The body is missing or could not be read.],
+      [The body of the request is not in JSON format. Cause: the body is missing or
+       could not be read.],
     [#cmd("413")], [1], [12], [issue],
       [The request body is too large.],
     [#cmd("500")], [8], [1], [issue],
@@ -617,10 +635,11 @@ not the shape of the data set and job requests.
     [#cmd("503")], [8], [17], [issue],
       [Server is quiescing; the command was NOT issued. Retry later.],
     [#cmd("429")], [8], [16], [issue],
-      [Another console command is in progress. Retry the request. The command was
-       not issued.],
+      [Another console command is in progress. Retry the request. Cause: the
+       console lock was not free within 5 seconds. The command was not issued.],
     [#cmd("500")], [8], [14], [issue],
-      [Cannot get the command response. The command has been issued.],
+      [Cannot get the command response. Cause: no storage for the response buffer. The command has
+       been issued.],
     [#cmd("503")], [8], [15], [issue],
       [Command was issued; response capture abandoned (server quiescing). Do not
        blindly retry -- retry re-issues the command.],
@@ -654,8 +673,8 @@ future test.
 
 A reason code is not unique. Reason code 14 with return code 1 is a bad console
 name, and with return code 8 it is a storage failure after the command was issued.
-Reason code 12 and reason code 1 also occur twice. Read the return code with the
-reason code.
+Reason codes 12, 1, 15 and 17 also occur more than once. Read the return code
+and the text with the reason code.
 
 The console error shape applies to errors of the console handlers. A user ID that
 mvsMF does not let in gets the #cmd("401") of @ref-auth. A route or method that
@@ -664,9 +683,9 @@ does not exist gets the router's reply (@ref-conv).
 == What Is Not Supported <ref-cons-unsup>
 
 #idx("not supported", "console")
-- *Regular expressions.* #cmd("solKeyReg") and #cmd("unsolKeyReg") with the value
-  #cmd("Y") are refused. A lower-case #cmd("y") is not refused and is ignored, so
-  the key is then a plain text.
+- *Regular expressions.* #cmd("solKeyReg") and #cmd("unsolKeyReg") with a value
+  that begins with an upper-case #cmd("Y") are refused. Any other value, a
+  lower-case #cmd("y") included, is ignored, so the key is then a plain text.
 - *Routing to another system.* #cmd("system") with any value is refused.
 - *Console selection.* The console name is a label. All requests use the one
   Master Trace Table of the local system, and mvsMF does not check the name

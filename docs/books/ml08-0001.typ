@@ -31,7 +31,45 @@
 
 #heading(numbering: none)[About This Book] <about>
 
-ABOUT
+This book shows how to use mvsMF (mvsmf), the z/OSMF REST API for MVS 3.8j,
+with the command line client curl. It is organized by tasks: logging in,
+working with data sets and their members, working with files in UFS,
+submitting a job and reading its output, issuing a console command, and finding
+what a typical error means. Each task has a session that was typed at a real
+mvsMF, so the reader sees what to type and what comes back. The chapters for
+the administrator are tasks as well: setting up security, installing mvsMF,
+running it and removing it again. Every endpoint, parameter, header, field,
+status code and message in full is the subject of the companion volume, the
+_mvsMF Reference_.
+
+The book describes mvsMF 1.4: how to use it, how to install it, upgrade it and
+take it off a system again, and how to run it. mvsMF is a clone of the REST
+interface of IBM's z/OSMF. It is not z/OSMF.
+
+== How This Book Is Organized
+
+#deflist(width: 1.35in,
+  [Chapter 1], [“Introducing mvsMF”.],
+  [Chapter 2], [“Connecting and Logging In”.],
+  [Chapter 3], [“Working with Data Sets”.],
+  [Chapter 4], [“Working with Files in UFS”.],
+  [Chapter 5], [“Submitting Jobs and Reading Their Output”.],
+  [Chapter 6], [“Issuing Console Commands”.],
+  [Chapter 7], [“Typical Errors and What They Mean”.],
+  [Chapter 8], [“Setting Up Security”.],
+  [Chapter 9], [“Installing mvsMF”.],
+  [Chapter 10], [“Running mvsMF”.],
+  [Chapter 11], [“Removing mvsMF”.],
+  [Appendix A], [“Glossary”.],
+)
+
+== Related Publications
+
+#deflist(width: 1.35in,
+  [ML08-0002], [_mvsMF Reference_: the services, parameters, headers, status
+    codes and error reports of mvsMF, the HTTPD configuration it needs, the
+    diagnostic endpoint and the messages of mvsMF.],
+)
 
 #mainmatter()
 ]

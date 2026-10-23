@@ -67,7 +67,8 @@ request for one is a request for an unknown route (@ref-conv-errors).
 
 #idx("percent escape")
 The router copies the path into a buffer of 1024 bytes, so it keeps at most
-1023 characters. It decodes the percent escapes and translates the result from
+1023 characters. It decodes the percent escapes. HTTPD hands over the path in
+EBCDIC, and the router translates each byte that a percent escape gives from
 ASCII to EBCDIC. A path variable can hold up to 1023 characters. The router
 does not look at the query string. Each handler reads the parameters that it
 knows.
@@ -146,7 +147,8 @@ headers that mvsMF itself reads.
 === Response headers <ref-conv-resphdr>
 
 #idx("response header")
-Every response that mvsMF builds carries these headers:
+Every response that mvsMF builds carries these headers, except the bare 405
+for an unknown method (@ref-conv-methods):
 
 #deflist(width: 2.1in,
   [#cmd("Cache-Control")], [#cmd("no-store")],
@@ -157,8 +159,9 @@ Every response that mvsMF builds carries these headers:
 
 mvsMF sends no CORS header. A response with a body carries
 #cmd("Content-Type") and #cmd("Content-Length"). A response that the handler
-sends without a body has #cmd("Content-Length: 0"). A 204 and a 304 carry
-neither header.
+sends without a body has #cmd("Content-Length: 0"). The 201 of a data set
+create is an exception: it declares #cmd("Content-Type: application/json") and
+no length. A 204 and a 304 carry neither header.
 
 #idx("cookie", "LtpaToken2")
 When the request has an #cmd("Authorization") header and HTTPD holds a token for
@@ -185,9 +188,10 @@ that list, with one exception, status 201 for the create of a data set.
     [200], [Success with a body. An empty list is also 200, with an empty
       #cmd("items") array. A list that was cut short is 200 and sets
       #cmd("moreRows").],
-    [201], [Create of a data set (#cmd("POST /zosmf/restfiles/ds/{dataset-name}")).
-      It is outside the z/OSMF list. mvsMF sends it because the reference
-      system answers 201 for this request.],
+    [201], [Create of a data set (#cmd("POST /zosmf/restfiles/ds/{dataset-name}"))
+      and create of a file or directory (#cmd("POST /zosmf/restfiles/fs/{*filepath}")).
+      It is outside the z/OSMF list. The data set create sends it because the
+      reference system answers 201 for that request.],
     [204], [Success without a body: a write, a delete, and the logout.],
     [304], [A read whose ETag matches #cmd("If-None-Match"). The answer carries
       the ETag, also without #cmd("X-IBM-Return-Etag").],
@@ -200,7 +204,8 @@ that list, with one exception, status 201 for the create of a data set.
       is wrong for the route (@ref-conv-methods).],
     [405], [A method other than GET, POST, PUT or DELETE. No body.],
     [412], [An #cmd("If-Match") that does not match the ETag.],
-    [413], [A request body of 16 MB or more (@ref-conv-limits).],
+    [413], [A request body of 16 MB or more (@ref-conv-limits). The body of a
+      chunked request counts when its chunks add up to 16 MB.],
     [429], [Console: another command holds the correlation lock.],
     [500], [An error in the server, an I/O error, an abend, a denial by the
       security product, a full volume or a full file system.],
@@ -486,8 +491,9 @@ area are in its chapter.
       tracked, so the recovery after an abend does not close it (message
       MVSMF903W).],
     [Request body], [A request that declares a length of 16 MB (16,777,216
-      bytes) or more gets 413. A smaller body is read into storage in one
-      piece. If the storage is not there, the answer is 500.],
+      bytes) or more gets 413. A chunked request gets 413 when its chunks add
+      up to that size. A smaller body is read into storage in one piece. If
+      the storage is not there, the answer is 500.],
     [Wait for the request body], [mvsMF reads the body one byte at a time. It
       waits 50 ms for a byte and gives up after 200 waits, that is after 10
       seconds. The operator gets MVSMF007W.],

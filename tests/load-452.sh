@@ -85,7 +85,7 @@ CONSEC_FAIL_MAX="${CONSEC_FAIL_MAX:-50}"
 PARALLEL="${PARALLEL:-1}"
 KEEP="${KEEP:-0}"
 # The console log of a local mvsce-target container, unless told otherwise.
-if [ -z "${HERC_LOG_CMD:-}" ] && [ -n "${MVSCE_TARGET_NAME:-}" ] && command -v docker >/dev/null 2>&1; then
+if [ -z "${HERC_LOG_CMD:-}" ] && [ -n "${MVSCE_TARGET_NAME:-}" ] && docker ps >/dev/null 2>&1; then
 	HERC_LOG_CMD="docker logs mvsce-${MVSCE_TARGET_NAME} 2>&1"
 fi
 HERC_LOG_CMD="${HERC_LOG_CMD:-}"
@@ -398,7 +398,7 @@ summarize() {
 		echo '```'
 		echo
 		echo "## Console log (new lines since the run started)"
-		if [ -s "$OUT/console-after.txt" ]; then
+		if grep -q -E '^[0-9]{2}:[0-9]{2}:[0-9]{2} / ' "$OUT/console-after.txt" 2>/dev/null; then
 			echo "| pattern | before | after | new |"
 			echo "|---|---:|---:|---:|"
 			for pat in MVSMF901E MVSMF007W 'S213' 'U0801' HTTPD908E 'S0C[0-9]' SA03 MVSMF106E MVSMF913I MVSMF914I; do
@@ -413,7 +413,7 @@ summarize() {
 				grep -F -x -v -f "$OUT/console-before.txt" 2>/dev/null
 			echo '```'
 		else
-			echo "HERC_LOG_CMD was not set: only the HTTP answers above are counted."
+			echo "No console log was collected (HERC_LOG_CMD unset or unreadable): only the HTTP answers above are counted."
 		fi
 		echo
 		echo "## fn=storage"

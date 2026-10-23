@@ -9,7 +9,8 @@ Issues an MVS operator command and returns the captured command response. Part o
 > `/zosmf/test` request starts with that check, fail-closed: it permits only
 > when RAKF answers "permitted". A user without READ, and **every user while
 > the profile is not defined**, gets `500` with category 4 (Authorization) and
-> the message "Authorization failed - You may not use this service."; a request
+> the detail "Authorization failed - You may not use this service." (the same
+> report a refused data set open gets, `"message": "LMOPEN error"`); a request
 > without a resolved user gets `401`. No operator message is written for a
 > refusal. The shipped HTTPD route
 > `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`

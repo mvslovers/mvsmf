@@ -170,16 +170,16 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("dsntp")], [#cmd("PDS") for organization #cmd("PO"), #cmd("BASIC") for #cmd("PS"), #cmd("UNKNOWN") for any other.],
     [#cmd("dsorg")], [The data set organization.],
     [#cmd("edate")], [Always #cmd("***None***").],
-    [#cmd("extx")], [The number of extents.],
+    [#cmd("extx")], [The number of extents of the data set on its volume, all of them.],
     [#cmd("lrecl")], [The logical record length.],
     [#cmd("migr")], [Always #cmd("NO").],
     [#cmd("mvol")], [Always #cmd("N").],
     [#cmd("ovf")], [Always #cmd("NO").],
     [#cmd("rdate")], [The reference date as #cmd("YYYY/MM/DD").],
     [#cmd("recfm")], [The record format, for example #cmd("FB").],
-    [#cmd("sizex")], [The number of allocated tracks, whatever the value of #cmd("spacu") is.],
+    [#cmd("sizex")], [The number of allocated tracks, whatever the value of #cmd("spacu") is. The sum covers every extent. The disk label holds three extents of a data set, and a data set with more has the rest in a further label on the volume, which mvsMF reads. If mvsMF cannot read it, the value is the string #cmd("?").],
     [#cmd("spacu")], [#cmd("CYLINDERS") or #cmd("TRACKS"), the unit of the allocation.],
-    [#cmd("used")], [The share of the allocated tracks that the data set uses, in percent.],
+    [#cmd("used")], [The share of the allocated tracks that the data set uses, in percent. The count goes up to the track that holds the last block written, so a new data set that is empty already uses one track. The value is #cmd("?") whenever #cmd("sizex") is #cmd("?").],
     [#cmd("vol")], [The volume serial.],
     [#cmd("vols")], [The volume serials.],
   )
@@ -473,10 +473,16 @@ bytes of it.
 Other fields are not read. With #cmd("like"), the data set takes the
 attributes of the model and the fields override them. When the body has no
 #cmd("primary"), the primary quantity comes from the extents of the model, in
-tracks, and the unit is then #cmd("TRK"). A secondary quantity that the body
-does not give is derived in the same way, but only when the unit in force is
-#cmd("TRK"). With #cmd("like"), a primary quantity that is still 0 or less
-becomes 1.
+tracks over all extents of the model, and the unit is then #cmd("TRK"). A
+secondary quantity that the body does not give is derived in the same way, but
+only when the unit in force is #cmd("TRK"). With #cmd("like"), a primary
+quantity that is still 0 or less becomes 1.
+
+If mvsMF cannot read the extents of the model, it derives no space. The
+request is not refused: the allocation uses the quantities and the unit of the
+body, and for a primary quantity that the body does not give, 1 track. The new
+data set can then be much smaller than the model. A client that needs the size
+of the model sends #cmd("primary") and #cmd("secondary") itself.
 
 mvsMF builds one allocation request from the fields:
 #cmd("DSN=name;DISP=(NEW,CATLG,DELETE)"), then #cmd("DCBDSN=") for a model, the

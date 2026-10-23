@@ -166,8 +166,8 @@ an early step failed therefore runs fewer steps than the table lists.
 The function SYSMOD ids of mvsMF are #cmd("TZMF110"), #cmd("TZMF120"),
 #cmd("TZMF130") and #cmd("TZMF140"). The id is the letter T, the product letters
 ZMF, and the major and minor version and a zero. Each id is used once. The
-SYSMOD of 1.4.0 deletes only #cmd("TZMF130"). This edition does not describe an
-upgrade from a system that holds an older id.
+SYSMOD of 1.4.0 deletes only #cmd("TZMF130"). A system that holds an older id
+has to be brought to 1.3.0 first. This edition does not describe that upgrade.
 
 #note[*Ending with 0 is not the proof.* A return code says that the job ran. It
 does not say that the work happened. SMP installs an element only when the SYSMOD

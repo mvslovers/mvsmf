@@ -235,11 +235,12 @@ Three things to know:
   means the console is open.
 - **The deploy user needs the profile.** `mbt run restart -- HTTPD` and
   `mbt target console` send `P`, `S` and `D` commands through this service. A
-  user without READ is refused with the `500` above. mbt takes a `500` for "the
-  command may have run": it stops and does not send the command on another
-  channel, with `console: "<command>" went out through mvsmf and got no answer
-  -- it may have run; not sent again`. The same holds for `?fn=version`, the
-  call that confirms a deploy: the user who checks the build id needs READ too.
+  user without READ is refused with the `500` above. With such a user
+  `mbt run restart -- HTTPD` prints `WARNING: P HTTPD went out but its answer
+  was lost` (naming the HTTP 500 and "Authorization failed") and then `ERROR:
+  restart: HTTPD is still active after P -- not started again`. The restart is
+  abandoned and HTTPD keeps running. The same holds for `?fn=version`, the call
+  that confirms a deploy: the user who checks the build id needs READ too.
 - **One profile for both.** There is no separate resource for `/zosmf/test`; a
   user who may use the console may use the test endpoint, and the other way
   round. A build with `-DMVSMF_NO_TEST_ENDPOINT` still leaves `/zosmf/test`

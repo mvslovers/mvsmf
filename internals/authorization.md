@@ -131,11 +131,13 @@ at the top; a new console route must call it too.
   (the route only warns with `HTTPD425W NO PROFILE FOR
   FACILITY:MVSMF.CONSOLE`). Do not add a route for `/zosmf/test`.
 - `mbt` sends `P`/`S`/`D` through the console service; the user in the target
-  needs READ. The refusal is a `500`, and mbt's `consoleFailure()`
-  (`internal/mvsmf/client.go`) takes every `500` except `503/8/17` for "may
-  have been issued": `mbt run restart` stops with `console: "<cmd>" went out
-  through mvsmf and got no answer -- it may have run; not sent again` and does
-  not try the Hercules console. Teaching mbt this refusal (a `500` with
+  needs READ. The refusal is a `500`. Measured on a throwaway container
+  with a Hercules channel in the target: `mbt run restart -- HTTPD` without
+  READ prints `WARNING: P HTTPD went out but its answer was lost (... HTTP 500
+  ... Authorization failed ...)` and then `ERROR: restart: HTTPD is still
+  active after P -- not started again`; HTTPD keeps running. The fall back to
+  the Hercules console happens only when the connection is refused, not for
+  this refusal. Teaching mbt this refusal (a `500` with
   `"category":4` is certainly not issued) is a question for mbt, not for mvsMF.
 - Tests: `test/host/tstauthd.c` (the decision), `tests/curl-consgate.sh` (the
   matrix on MVS: no profile, READ for one user only, READ for both, profile

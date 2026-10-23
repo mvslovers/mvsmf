@@ -12,9 +12,9 @@ Issues an MVS operator command and returns the captured command response. Part o
 > the detail "Authorization failed - You may not use this service." (the same
 > report a refused data set open gets, `"message": "LMOPEN error"`); a request
 > without a resolved user gets `401`. No operator message is written for a
-> refusal. The shipped HTTPD route
+> refusal. The HTTPD route
 > `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
-> (listed before `/zosmf/*`) is an additional first layer: it answers a user
+> in `samplib/mvsmfprm` (listed before `/zosmf/*`) is an additional first layer: it answers a user
 > without READ with a plain-text `403` before mvsMF is reached. Set up, with the
 > traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service-and-zosmftest).
 >

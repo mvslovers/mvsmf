@@ -185,7 +185,7 @@ EOF
 ses ug-data/d-enc-get1047.txt "$(cat <<'EOF'
 curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
   -H 'X-IBM-Data-Type: text;fileEncoding=IBM-1047' \
-  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ" | od -An -tx1
 EOF
 )"
 

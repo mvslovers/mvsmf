@@ -2,17 +2,16 @@ $ printf 'NEW CONTENT\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
   -H 'Content-Type: text/plain' --data-binary @- \
   -H "If-Match: $ETAG" -H 'X-IBM-Return-Etag: true' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
-HTTP/1.1 404 Not Found
-Date: Fri, 23 Oct 2026 07:45:07 GMT
+HTTP/1.1 204 No Content
+Date: Fri, 23 Oct 2026 08:16:45 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
 Content-Type: application/json
-Content-Length: 62
 Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+ETag: 46E3474E00000050
 
-{"rc":8,"category":6,"reason":4,"message":"Dataset not found"}

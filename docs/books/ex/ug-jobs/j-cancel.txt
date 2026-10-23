@@ -3,7 +3,7 @@ $ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
   -d '{"request":"cancel","version":"2.0"}' \
   "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID"
 HTTP/1.1 404 Not Found
-Date: Fri, 23 Oct 2026 07:45:56 GMT
+Date: Fri, 23 Oct 2026 08:15:42 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
@@ -13,6 +13,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"rc":4,"category":6,"reason":7,"message":"Not Found"}

@@ -13,7 +13,7 @@ THIRD LINE OF THE INPUT
 //SYSIN    DD DUMMY
 JCL
 HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 07:45:52 GMT
+Date: Fri, 23 Oct 2026 08:15:35 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
@@ -23,6 +23,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
-{"subsystem":"JES2","jobname":"MVSMFDM1","jobid":"JOB00041","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM1/JOB00041","files-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM1/JOB00041/files","status":"ACTIVE","retcode":null}
+{"subsystem":"JES2","jobname":"MVSMFDM1","jobid":"JOB00077","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM1/JOB00077","files-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM1/JOB00077/files","status":"ACTIVE","retcode":null}

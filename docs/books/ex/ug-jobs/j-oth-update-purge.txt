@@ -11,6 +11,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=KTakhdxToIwepMzQlQJ8FdeD44fUDs5ELa0tCKLrb6Y=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"jobid":"JOB00060","message":"Request was successful.","original-jobid":"JOB00060","jobname":"MVSMFDM5","owner":"SMITH","status":0}

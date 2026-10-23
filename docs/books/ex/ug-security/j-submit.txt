@@ -16,6 +16,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=fYW5NDOqzHlHLQPpRP45y4VjEpdmjtpBC80uE0abCIE=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"subsystem":"JES2","jobname":"SECDEMO","jobid":"JOB00056","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00056","files-url":"http://localhost:8080/zosmf/restjobs/jobs/SECDEMO/JOB00056/files","status":"ACTIVE","retcode":null}

@@ -13,6 +13,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=cyOEeB/ri97PcmcJWebx4qQBB54Nn3uQgtJN37F6tvg=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"cmd-response":"IEE136I LOCAL: TIME=03.01.24 DATE=2026.296  UTC: TIME=08.01.24 DATE=2026.296\r","cmd-response-key":"E378DABB26E3E040","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378DABB26E3E040","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378DABB26E3E040"}

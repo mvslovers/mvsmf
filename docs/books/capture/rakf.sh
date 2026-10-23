@@ -4,7 +4,7 @@
 #   MVSMF_URL=http://localhost:8080 MVSMF_ADMIN=... MVSMF_ADMIN_PASS=... \
 #       sh capture/rakf.sh STEP
 #
-# STEP is one of: access adduser connect protect audit auditupd auditread ops admin pair console consonly noconsole clean
+# STEP is one of: access adduser connect protect audit auditupd auditread ops admin pair catalog console consonly noconsole clean
 #
 # Needs, on the system under test:
 #
@@ -239,6 +239,23 @@ JCL
 	profiles r-pair '^JESSPOOL'
 	;;
 
+catalog)
+	rakfjob CATALOG r-catalog <<'JCL'
+//CATALOG  JOB (ACCT),'CATALOG',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
+//TSO      EXEC PGM=IKJEFT01,REGION=4096K
+//SYSPRINT DD SYSOUT=*
+//SYSTSPRT DD SYSOUT=*
+//SYSTSIN  DD *
+ADDSD SYS1.VSAM.MASTER.CAT UACC(READ)
+PE SYS1.VSAM.MASTER.CAT CLASS(DATASET) ID(CATUPD) ACCESS(UPDATE)
+CONNECT SMITH GROUP(CATUPD)
+/*
+//RAKFPROF EXEC RAKFPROF
+//RAKFUSER EXEC RAKFUSER
+JCL
+	profiles r-catalog '^DATASET SYS1.VSAM'
+	;;
+
 console)
 	rakfjob CONSOLE r-console <<'JCL'
 //CONSOLE  JOB (ACCT),'CONSOLE',CLASS=A,MSGCLASS=H,GROUP=RAKFADM
@@ -307,7 +324,7 @@ JCL
 	;;
 
 *)
-	echo "usage: rakf.sh access|adduser|connect|protect|audit|auditupd|auditread|ops|admin|pair|console|consonly|noconsole|clean" >&2
+	echo "usage: rakf.sh access|adduser|connect|protect|audit|auditupd|auditread|ops|admin|pair|catalog|console|consonly|noconsole|clean" >&2
 	exit 1
 	;;
 esac

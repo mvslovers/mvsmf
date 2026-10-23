@@ -1,4 +1,4 @@
 $ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
   -H 'X-IBM-Data-Type: text;fileEncoding=IBM-1047' \
-  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
-{"rc":8,"category":6,"reason":4,"message":"Dataset not found"}
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ" | od -An -tx1
+ 41 dd 42 a8 ac 0a

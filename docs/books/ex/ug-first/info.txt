@@ -10,6 +10,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=fYW5NDOqzHlHLQPpRP45y4VjEpdmjtpBC80uE0abCIE=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
 {"zosmf_hostname":"localhost","zosmf_port":"8080","zosmf_version":"1","zosmf_full_version":"1.4.0-dev","plugins":[],"zosmf_saf_realm":"SAFRealm","api_version":"1","zos_version":"MVS 3.8j"}

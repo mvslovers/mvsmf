@@ -1,7 +1,7 @@
 $ curl -si -X DELETE -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID"
 HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 07:45:57 GMT
+Date: Fri, 23 Oct 2026 08:15:43 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive
@@ -11,6 +11,6 @@ Cache-Control: no-store
 Pragma: no-cache
 X-Content-Type-Options: nosniff
 Content-Language: en
-Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
-{"jobid":"JOB00041","message":"Request was successful.","original-jobid":"JOB00041","jobname":"MVSMFDM1","owner":"SMITH","status":0}
+{"jobid":"JOB00077","message":"Request was successful.","original-jobid":"JOB00077","jobname":"MVSMFDM1","owner":"SMITH","status":0}

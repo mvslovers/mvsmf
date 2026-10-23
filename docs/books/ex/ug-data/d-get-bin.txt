@@ -1,4 +1,4 @@
 $ curl -s -u "$MVSMF_USER:$MVSMF_PASS" -H 'X-IBM-Data-Type: binary' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.BIN" | od -An -tx1 | head -n 2
- 7b 22 72 63 22 3a 38 2c 22 63 61 74 65 67 6f 72
- 79 22 3a 36 2c 22 72 65 61 73 6f 6e 22 3a 34 2c
+ 41 42 43 00 01 ff 00 00 00 00 00 00 00 00 00 00
+ 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00

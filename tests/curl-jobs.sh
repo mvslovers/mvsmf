@@ -908,6 +908,26 @@ test_submit_dataset_name_too_long() {
 		"${BASE_URL}/zosmf/restjobs/jobs")
 	split_response "$resp"
 	assert_http_status "400" "$HTTP_STATUS" "submit dataset name without //'...'"
+
+	# 44 + 8 is legal: it must get past the name check (404, not 400, as the
+	# data set does not exist)
+	name=$(printf 'A%.0s' $(seq 1 36))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "404" "$HTTP_STATUS" "submit 36-character name with a member is looked up"
+
+	name=$(printf 'A%.0s' $(seq 1 45))
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d "{\"file\":\"//'${name}(MEMBER01)'\"}" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "400" "$HTTP_STATUS" "submit 45-character name with a member"
+
+	return 0
 }
 
 test_submit_dataset_not_found() {

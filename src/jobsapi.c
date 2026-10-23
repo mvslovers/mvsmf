@@ -45,7 +45,7 @@
 #define RECFM_STR_SIZE   4 + 1
 #define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
-#define DSNAME_STR_SIZE  DSNAME_MAX // the +1 for null termination will be added on initialization
+#define DSNAME_STR_SIZE  (SUBDSN_SIZE - 1) // DSN(MEMBER) in full; the +1 for null termination will be added on initialization
 
 /* process_jobcard() failure codes. Both are reported as 400, but with
    different messages: the two conditions were indistinguishable to the client

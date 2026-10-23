@@ -303,6 +303,7 @@ mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each
 - **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`, `curl-dslist-parallel.sh` (400 list requests, 4 at a time; `DSLIST_REQUESTS` and `DSLIST_PARALLEL` change that, #436); `curl-diag.sh`, `curl-nospace.sh`, `curl-jesspool.sh` and `curl-quiesce.sh` by name only (`curl-quiesce` stops HTTPD with `P HTTPD`, so it is for a throwaway container and the last thing it does; `curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
 - **Load run**: `load-452.sh`, by name only -- the combined stability run of #452 (member reads, job status polls, large PUTs, concurrent listings), for a local throwaway container; its header lists the knobs
+- **Measurement run**: `poll-425.sh` (by name only) -- status polls on a running read-only job from several clients, with `fn=textsum` sampling, `fn=storage` before/after and a console check, for #425. Not part of `all`; it needs a restartable HTTPD.
 - **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`
 

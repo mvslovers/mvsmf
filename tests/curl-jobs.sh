@@ -674,24 +674,91 @@ test_submit_missing_programmer_name_retcode() {
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
 
+# Submit a one-step job whose JOB card is $2 and check that it is accepted,
+# runs to CC 0000 and reaches JES with $3 on the card (a text the card must
+# still carry after mvsMF has continued it). $1 names the case.
+submit_card_expect_accepted() {
+	local what="$1" card="$2" must_carry="$3"
+	local jcl resp jn ji
+
+	jcl=$(printf '%s\n%s\n' "$card" '//STEP1    EXEC PGM=IEFBR14')
+	resp=$(do_curl PUT \
+		-H "Content-Type: text/plain" \
+		--data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+
+	assert_http_status "200" "$HTTP_STATUS" "submit $what"
+
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		skip "$what runs and keeps its card (no jobid)"
+		return
+	fi
+
+	if wait_for_output "$jn" "$ji"; then
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		assert_json_field "$BODY" '.retcode' "CC 0000" "$what runs to CC 0000"
+
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files/3/records")
+		split_response "$resp"
+		case "$BODY" in
+			*"$must_carry"*) pass "$what: JESJCL carries $must_carry" ;;
+			*)               fail "$what: JESJCL carries $must_carry" "not found in JESJCL" ;;
+		esac
+	else
+		skip "$what runs and keeps its card (job never reached OUTPUT)"
+	fi
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_submit_jobcard_full_line() {
+	echo ""
+	echo "--- Submit Job: JOB card whose last line leaves no room for mvsMF's operands (issue #395) ---"
+
+	# mvsMF continues the card onto a card of its own for NOTIFY/USER/PASSWORD.
+	# That needs a comma behind the last operand, and a comma is data only up
+	# to column 71. Until #395 a card ending in column 70 or 71 was refused
+	# with reason 12 although z/OSMF accepts it.
+
+	# Ends in column 71: the comma does not fit, so the last operand moves to a
+	# continuation card of its own. The card of the issue, measured on mvsdev.
+	local card='//JC395A  JOB (1),'"'"'ENQ PROBE CLEANUP'"'"',CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1)'
+	if [ "${#card}" -ne 71 ]; then
+		fail "column-71 JOB card fixture" "built a ${#card}-column card, expected 71"
+		return
+	fi
+	submit_card_expect_accepted "JOB card ending in column 71" "$card" 'MSGLEVEL=(1,1),'
+
+	# Ends in column 70: the comma fits in column 71 and nothing moves.
+	card='//JC395B JOB (1),'"'"'ENQ PROBE CLEANUP'"'"',CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1)'
+	if [ "${#card}" -ne 70 ]; then
+		fail "column-70 JOB card fixture" "built a ${#card}-column card, expected 70"
+		return
+	fi
+	submit_card_expect_accepted "JOB card ending in column 70" "$card" 'MSGLEVEL=(1,1),'
+}
+
 test_submit_jobcard_too_long() {
 	echo ""
-	echo "--- Submit Job: JOB card with no room for the injected operands (issue #130) ---"
+	echo "--- Submit Job: JOB card that cannot be continued (issue #130) ---"
 
-	# process_jobcard() has to append a comma to the last job card line to
-	# continue onto the USER=/PASSWORD= card it generates, and cannot once the
-	# line reaches column 70. That used to be reported as "No valid JOB card
-	# found in submitted JCL", which sends people looking for a missing card.
-	# It now has its own message and reason code 12.
-	local head="//OVRFLOW  JOB (ACCT),'"
-	local tail="',CLASS=A"
-	local pad=$((70 - ${#head} - ${#tail}))
+	# What stays refused: a line ending in column 71 with no operand separator
+	# to cut at, so the comma cannot be placed and nothing can move. That used
+	# to be reported as "No valid JOB card found in submitted JCL", which sends
+	# people looking for a missing card; it has its own message and reason 12.
+	local head="//OVRFLOW  JOB '"
+	local tail="'"
+	local pad=$((71 - ${#head} - ${#tail}))
 	local name
 	name=$(printf '%*s' "$pad" '' | tr ' ' 'X')
 
 	local card="${head}${name}${tail}"
-	if [ "${#card}" -ne 70 ]; then
-		fail "JOB card too long fixture" "built a ${#card}-column card, expected 70"
+	if [ "${#card}" -ne 71 ]; then
+		fail "JOB card too long fixture" "built a ${#card}-column card, expected 71"
 		return
 	fi
 
@@ -705,14 +772,14 @@ test_submit_jobcard_too_long() {
 		"${BASE_URL}/zosmf/restjobs/jobs")
 	split_response "$resp"
 
-	assert_http_status "400" "$HTTP_STATUS" "submit JOB card with no room for injection"
+	assert_http_status "400" "$HTTP_STATUS" "submit JOB card that cannot be continued"
 	assert_json_field "$BODY" '.reason' "12" "JOB card too long reason code"
 
 	local msg
 	msg=$(echo "$BODY" | jq -r '.message' 2>/dev/null) || msg=""
 	case "$msg" in
-		*"too long"*) pass "JOB card too long message (\"$msg\")" ;;
-		*)            fail "JOB card too long message" "got '$msg'" ;;
+		*"cannot be continued"*) pass "JOB card too long message (\"$msg\")" ;;
+		*)                       fail "JOB card too long message" "got '$msg'" ;;
 	esac
 }
 
@@ -2049,6 +2116,7 @@ test_submit_literal_notify_not_duplicated
 test_submit_user_on_card_is_overwritten
 test_submit_notify_inside_programmer_name
 test_submit_missing_programmer_name_retcode
+test_submit_jobcard_full_line
 test_submit_jobcard_too_long
 test_submit_invalid_intrdr_header
 test_submit_invalid_content_type

@@ -399,7 +399,9 @@ A DELETE request to #cmd("MVSMF_URL/zosmf/restjobs/jobs/name/id") purges the job
 
 The answer is 200 and an object with the ID, the name and the owner of the job,
 the message #cmd("Request was successful.") and the field #cmd("status") with
-the value 0. The same request again finds no job:
+the value 0. That message says that the job is gone. A 200 with another message
+says that JES2 took the request and the job is still on the queue
+(@ug-jobs-purge-pending). The same request again finds no job:
 
 #screen(raw(read("../ex/ug-jobs/j-purge-again.txt"), block: true))
 
@@ -417,6 +419,65 @@ A started task cannot be purged. The answer is 400 with the message
 but has no right to purge it gets the answer 500 with the text
 #cmd("Authorization failed - You may not purge this job.") in the field
 #cmd("details") (@ug-jobs-others).
+
+== A Purge That Is Only Requested <ug-jobs-purge-pending>
+
+#idx("job", "purge", "requested only")#idx("purge", "output held by a device")
+The answer 200 to a DELETE says that JES2 took the purge request. It does not
+always say that the job has left the queue. When a device has selected the
+output of the job, JES2 marks the job for purge and keeps it on the queue until
+the device lets the output go.
+
+After JES2 has taken the request, mvsMF looks at the queue again. It looks up
+to five times, 0.2 seconds apart, and stops at the first look that no longer
+finds the job. The message of the answer depends on the result:
+
+- A look finds no job: the message is #cmd("Request was successful.")
+- All five looks find the job: the message is
+  #cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
+
+The status is 200 and the field #cmd("status") is 0 in both cases. Only the
+message differs. The answer with the second message arrives about a second
+later than the other, because of the pauses between the looks.
+
+The session below makes this happen on purpose. The job #cmd("MVSMFDM6") sends
+its output to the class #cmd("B") and asks for the forms #cmd("ZMF1"). The
+punch #cmd("PUNCH1") has other forms. It selects the output and halts to wait
+for setup:
+
+#screen(raw(read("../ex/ug-jobs/j-held-submit.txt"), block: true))
+
+Set #var("HJOB") to the job ID of the answer. The console service
+(@ug-console) shows the state of the device. The job is the one that
+#cmd("PUNCH1") holds:
+
+#screen(raw(read("../ex/ug-jobs/j-held-device.txt"), block: true))
+
+The purge is answered with 200, and the message says that the purge is only
+requested:
+
+#screen(raw(read("../ex/ug-jobs/j-held-purge.txt"), block: true))
+
+The job is still on the queue. A status request finds it, and the status is
+#cmd("OUTPUT"), as before the purge. The status request does not show the mark.
+A second DELETE gets the same answer as the first.
+
+#screen(raw(read("../ex/ug-jobs/j-held-status.txt"), block: true))
+
+The job leaves the queue when the output is released. The session releases it
+by cancelling the device with the console command #cmd("$C PUNCH1"). On a
+production system the operator decides how to release the output:
+
+#screen(raw(read("../ex/ug-jobs/j-held-release.txt"), block: true))
+
+Now the job is gone, and the status request gets the 404 of any job that does
+not exist:
+
+#screen(raw(read("../ex/ug-jobs/j-held-gone.txt"), block: true))
+
+A client that must know that the spool is free does not rely on the 200. It
+reads the field #cmd("message"), or it asks for the job again until the answer
+is 404.
 
 == Jobs of Other Users <ug-jobs-others>
 
@@ -520,6 +581,13 @@ mvsMF 1.4.0 changes the jobs service in these places:
 - *Hidden jobs.* A job that the user may not see is answered with the 404 of a
   job that does not exist. A purge of a job that the user may read and not
   update is answered with 500.
+- *A purge that is only requested.* In mvsMF 1.3.0 the answer to a purge always
+  had the message #cmd("Request was successful."), also when JES2 kept the job
+  on the queue because a device held its output. In 1.4.0 mvsMF looks at the
+  queue again after JES2 took the request, and the message says when the job is
+  still there (@ug-jobs-purge-pending). The status stays 200 and the field
+  #cmd("status") stays 0. A client that tests the status only sees no
+  difference. The answer in that case takes about a second longer.
 - *The HTTPD procedure.* mvsMF no longer needs the DD statements
   #cmd("HASPCKPT") and #cmd("HASPACE1") in the procedure of HTTPD (httpd) to
   read the jobs. With libc370 2.24 mvsMF opens the JES2 checkpoint as

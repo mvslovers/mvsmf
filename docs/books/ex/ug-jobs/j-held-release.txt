@@ -1,0 +1,5 @@
+$ curl -s -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"$C PUNCH1"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+{"cmd-response":"$HASP000 OK\r$HASP170 PUNCH1   DELETED\r$HASP160 PUNCH1   INACTIVE - CLASS=B\r","cmd-response-key":"E378DFDC58D87800","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378DFDC58D87800","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378DFDC58D87800"}

@@ -1,0 +1,16 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM6/$HJOB"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 08:24:21 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 287
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"subsystem":"JES2","jobname":"MVSMFDM6","jobid":"JOB00039","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM6/JOB00039","files-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM6/JOB00039/files","status":"OUTPUT","retcode":"CC 0000"}

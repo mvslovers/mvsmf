@@ -2,16 +2,21 @@
 
 Issues an MVS operator command and returns the captured command response. Part of the z/OSMF Console services (`/zosmf/restconsoles`).
 
-> **Authorization: httpd decides, mvsMF does not. Read this before exposing the endpoint.**
+> **Authorization: READ on `FACILITY MVSMF.CONSOLE`, checked by mvsMF in the
+> handler. Read this before exposing the endpoint.**
 >
-> `consapi.c` makes no authorization call. The shipped HTTPD route
+> Every console request (command, response, detection, log) and every
+> `/zosmf/test` request starts with that check, fail-closed: it permits only
+> when RAKF answers "permitted". A user without READ, and **every user while
+> the profile is not defined**, gets `500` with category 4 (Authorization) and
+> the detail "Authorization failed - You may not use this service." (the same
+> report a refused data set open gets, `"message": "LMOPEN error"`); a request
+> without a resolved user gets `401`. No operator message is written for a
+> refusal. The HTTPD route
 > `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
-> (listed **before** `/zosmf/*`) requires READ on that RAKF resource; a user
-> without it gets `403 Forbidden` from HTTPD, a plain-text body, before mvsMF
-> is reached. Measured on MVS/CE with RAKF: a userid in group
-> `USER` was refused (`403`) with Basic and with a token, a userid in `ADMIN`
-> with READ ran `D T`, and the other `/zosmf/` endpoints stayed open to both.
-> Set up, with the traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service).
+> in `samplib/mvsmfprm` (listed before `/zosmf/*`) is an additional first layer: it answers a user
+> without READ with a plain-text `403` before mvsMF is reached. Set up, with the
+> traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service-and-zosmftest).
 >
 > **It gates who may issue commands, not which.** There is no per-command
 > policy and no console authority level. The command goes out by SVC 34 with the
@@ -23,15 +28,10 @@ Issues an MVS operator command and returns the captured command response. Part o
 > entered at, and MGCR from a program has none), and a display-only allow-list
 > would break `P FTPD` / `S FTPD`, which are group-1 SYS commands in normal use.
 >
-> **Without the profile nothing is gated** — SAF treats an unprotected resource
-> as permitted — and HTTPD only warns at startup (`HTTPD425W NO PROFILE FOR
-> FACILITY:MVSMF.CONSOLE`). The route listed after `/zosmf/*` is never reached,
-> silently. And the diagnostic endpoint `/zosmf/test` is a second door to the
-> same SVC 34 that this route does not cover; build with `-DMVSMF_NO_TEST_ENDPOINT` to close it.
->
-> The same gate applies to collect, detect and the hardcopy log
-> (`/zosmf/restconsoles/*`). Tracked as
-> [#347](https://github.com/mvslovers/mvsmf/issues/347).
+> The same check covers collect, detect, the hardcopy log and the diagnostic
+> endpoint `/zosmf/test`, with the one profile. Tracked as
+> [#347](https://github.com/mvslovers/mvsmf/issues/347) and
+> [#460](https://github.com/mvslovers/mvsmf/issues/460).
 
 ## HTTP Method
 PUT
@@ -140,7 +140,7 @@ Adds detection fields on top of the keys above:
 See [Detect Unsolicited Message](detections.md).
 
 ## Error Responses
-Console services use a `return-code`/`reason-code`/`reason` body (not `category`/`rc`/`message`):
+Console services use a `return-code`/`reason-code`/`reason` body (not `category`/`rc`/`message`), with one exception: the authorization refusal (first two rows of the table) uses the `category`/`rc`/`message`/`details` body of the data set and job services.
 
 ```json
 { "return-code": 1, "reason-code": 13, "reason": "..." }
@@ -148,6 +148,8 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 
 | HTTP | return-code | reason-code | Cause |
 |------|-------------|-------------|-------|
+| 401 | | | No resolved user. Body in the `category`/`rc`/`message` form; the command was **not** issued. |
+| 500 | | | No READ on `FACILITY MVSMF.CONSOLE`, or the profile is not defined (`category` 4, `rc` 8, `reason` 0, `details` "Authorization failed - You may not use this service."). The command was **not** issued; nothing is written to the operator console. |
 | 400 | 1 | 6 | Content-Type not `application/json` |
 | 400 | 1 | 12 | Body not valid JSON |
 | 400 | 1 | 13 | `cmd` missing or empty |
@@ -210,7 +212,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > the handler; the command did not run.
 
 ## Implementation (MVS 3.8j)
-mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check; httpd gates the route (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
+mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF checks READ on `FACILITY MVSMF.CONSOLE` before it reads the request (see the notice at the top), and the httpd route is an additional first layer, but there is no per-command check; the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
 
 ### One command at a time (#214)
 

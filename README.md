@@ -36,19 +36,19 @@ explains who may see, read and purge which job.
 > to purge), and without profiles nobody sees the jobs of others, see
 > [docs/jesspool.md](docs/jesspool.md) and
 > [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles`
-> is authorized by an httpd route, not by mvsMF: the shipped route
-> `/zosmf/restconsoles/*` requires READ on the RAKF resource
-> `FACILITY MVSMF.CONSOLE`, and a user without it gets `403`. **Define that
-> profile** — without it the route is open to every login and httpd only warns
-> (`HTTPD425W`), see
-> [Who may use the console service](docs/installation.md#who-may-use-the-console-service)
-> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). READ on that resource
-> allows **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
+> and `/zosmf/test` are gated by mvsMF itself: both need READ on the RAKF
+> resource `FACILITY MVSMF.CONSOLE`, and a user without it gets `500`
+> (Authorization). **Define that profile and grant READ — until you do, both
+> refuse every user**, administrators included; that is the upgrade behaviour
+> of this version, see
+> [Who may use the console service](docs/installation.md#who-may-use-the-console-service-and-zosmftest)
+> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). A user with READ can
+> issue **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
 > — it goes out by SVC 34 from console 0, the master console, with the text
 > unfiltered — and reading the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
-> diagnostic endpoint `/zosmf/test` can issue commands too, through a second
-> door that the profile does not cover, and it is compiled in by default.
+> diagnostic endpoint `/zosmf/test` can issue commands too and is compiled in
+> by default.
 >
 > On a system where not every userid is trusted at the operator console, build
 > with `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
@@ -179,8 +179,9 @@ MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 
 **Order matters — first match wins**, so the three specific routes must
 precede the catch-all. The console route needs READ on the RAKF resource
-`FACILITY MVSMF.CONSOLE`; without that profile nothing is gated, see
-[Who may use the console service](docs/installation.md#who-may-use-the-console-service).
+`FACILITY MVSMF.CONSOLE`, and so does mvsMF's own check in the handler (without
+the profile both refuse everybody), see
+[Who may use the console service](docs/installation.md#who-may-use-the-console-service-and-zosmftest).
 `AUTH=NONE` on the first two is not a hole: both endpoints resolve the
 caller themselves and answer 401 without a credential. `/zosmf/info` is
 authenticated like every other route (#324), and the token login has to reach
@@ -195,8 +196,9 @@ a resource check rather than widening the prefix:
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-These four lines are the same ones in httpd's own `samplib(HTTPPRM0)` and in
-`MVSMF.SAMPLIB(MVSMFPRM)`; keep them in step.
+These four lines are in `MVSMF.SAMPLIB(MVSMFPRM)`; the httpd release that
+contains [httpd#338](https://github.com/mvslovers/httpd/pull/338) ships the same
+four in its own `samplib(HTTPPRM0)`. Keep the two in step.
 
 For development, `mbt deploy` (see *Building* below) uploads and RECEIVEs the
 load module directly into `MVSMF.DEV.LINKLIB` — no SMP, and no install package.

@@ -189,7 +189,7 @@ Measured on MVS 3.8j, all with `NOTIFY`:
 | `IEF452I JOB NOT RUN - JCL ERROR` (converter) | `00000004` | `00` | `JCL ERROR` |
 | `IEF452I JOB NOT RUN - JCL ERROR` (job select, `IEF633I`) | `00000000` | `80` | `JCL ERROR` |
 
-`/zosmf/test?fn=job&jobname=NAME` reports these fields directly.
+`/zosmf/test?fn=job&jobname=NAME` reports these fields directly (it needs READ on `FACILITY MVSMF.CONSOLE`, like every `/zosmf/test` request).
 
 ## Examples
 

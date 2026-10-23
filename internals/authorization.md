@@ -90,33 +90,58 @@ If that ever gets revisited, the constraint from #229 holds: a refusal must not
 be distinguishable from "does not exist", or the gate becomes the enumeration
 oracle it was meant to close.
 
-### Console services — gated by httpd, not by mvsMF (#347)
+### Console services and `/zosmf/test` — a fail-closed check in the handler (#347, #460)
 
-`consapi.c` makes no authorization call and must not grow one for *who* may use
-the service: the gate is the httpd route `MOD=MVSMF /zosmf/restconsoles/*
-AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*` in
-`samplib/mvsmfprm` (and httpd's `samplib/httpprm0`; keep both in step).
-Measured on MVS/CE 2026-10-23 with httpd 4.3.0:
+Every console handler (`consoleIssueHandler`, `consoleCollectHandler`,
+`consoleDetectHandler`, `consoleLogHandler` in `consapi.c`) and both `/zosmf/test`
+handlers (`testHandler` including `fn=version` and the help text, and
+`testWildcardHandler` in `testapi.c`) call `console_authorize()` (`consauth.c`,
+header `consauth.h`) as their **first statement**, before any parameter is read
+or any byte is written. A new `fn=` in `testHandler` is covered by that one call
+at the top; a new console route must call it too.
 
-- A user without READ gets `403`, plain text, from httpd — outside the closed
-  status list of `zosmf-conformance.md`, and not a z/OSMF-shaped body. It is
-  httpd's answer; mvsMF is not reached (measured with a token session).
-- READ for a group line and for a user-id line (user id in the group column) both
-  work. The unauthorized user still passes every other `/zosmf/` route.
-- Route order decides. Listed after `/zosmf/*` the route is never consulted, the
-  start-up log shows no difference but the order of the `HTTPD036I` lines, and a
-  user without READ gets `200`.
-- No profile: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE -- /zosmf/restconsoles/*
-  NOT GATED` and everybody passes. The route is therefore fail-open until the
-  profile exists; there is nothing mvsMF can do about it.
-- `restconsole%73`, `%72estconsoles` and `%2f` for a slash, and
-  `restconsoles//consoles`, were refused (403).
-- `mbt` sends `P`/`S`/`D` through this service; without READ it prints a warning
-  and falls back to the Hercules console, or fails with "not delivered".
-
-**Not covered (#460):** the diagnostic endpoint `/zosmf/test` sits under
-`/zosmf/*`, so the profile does not reach it, and it has no authorization check
-of its own. Only `-DMVSMF_NO_TEST_ENDPOINT` closes it; a second httpd route
-with the same `RES=` would also gate `fn=version`, and is no better than this
-route is (it depends on route order and is fail-open without the profile).
+- **The profile is `FACILITY MVSMF.CONSOLE`, READ, for both.** One resource
+  gates the console and `/zosmf/test`; there is no second profile.
+- **Only SAF return code 0 permits.** `console_authorize()` takes the caller's
+  ACEE from `http_get_acee()` and calls `racf_auth(acee, "FACILITY",
+  "MVSMF.CONSOLE", RACF_ATTR_READ)`. No profile (rc 4), a denial (rc 8), any
+  other code and a missing ACEE all refuse. `http_check_auth()` is the wrong
+  call here: it folds rc 4 into "allowed" (see the comment at `require_access()`
+  in `dsapi.c`), which is correct for data sets and wrong for a service that must
+  stay closed until somebody has defined the profile.
+- **The decision is a pure function** (`authdec.c`, header `authdec.h`, free of
+  MVS headers so `test/host/tstauthd.c` links it): `authdec_decide(acee_present,
+  rc)` returns allow only for an ACEE and rc 0, and `authdec_gate()` asks the
+  RACF callback at most once and not at all without an ACEE. `consauth.c` is the
+  thin glue around `racf_auth`; keep the logic out of it.
+- **The answer:** `send_not_authorized()` — `500`, category 4 (Authorization),
+  inside the closed status list — for rc 4 and rc 8 alike, so a client cannot
+  tell "no profile" from "no READ". A missing ACEE gives `401` as in
+  `require_access()`. The handler returns `-1`, not the sender's return value.
+  **No WTO**: the refusal is caused by the client, and `consapi.c` reads the
+  Master Trace Table, so a message would come back out of the console API.
+- **Upgrade behaviour, not an error:** until the profile is defined and READ is
+  granted, these endpoints refuse **every** user, administrators included.
+- **The httpd route stays a first layer.** The shipped route `MOD=MVSMF
+  /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`, listed before
+  `/zosmf/*` in `samplib/mvsmfprm` (httpd's `samplib/httpprm0` gets it with
+  httpd#338, still open when this was written; keep both in step), refuses a user without READ with a plain-text `403` before mvsMF is
+  reached. It is optional now: the handler check is the authoritative one, it
+  does not depend on route order, and it does not fail open without the profile
+  (the route only warns with `HTTPD425W NO PROFILE FOR
+  FACILITY:MVSMF.CONSOLE`). Do not add a route for `/zosmf/test`.
+- `mbt` sends `P`/`S`/`D` through the console service; the user in the target
+  needs READ. The refusal is a `500`. Measured on a throwaway container
+  with a Hercules channel in the target: `mbt run restart -- HTTPD` without
+  READ prints `WARNING: P HTTPD went out but its answer was lost (... HTTP 500
+  ... Authorization failed ...)` and then `ERROR: restart: HTTPD is still
+  active after P -- not started again`; HTTPD keeps running. The fall back to
+  the Hercules console happens only when the connection is refused, not for
+  this refusal. Teaching mbt this refusal (a `500` with
+  `"category":4` is certainly not issued) is a question for mbt, not for mvsMF.
+- Tests: `test/host/tstauthd.c` (the decision), `tests/curl-consgate.sh` (the
+  matrix on MVS: no profile, READ for one user only, READ for both, profile
+  removed again; every route and its path variants; by name only, rewrites
+  `PROFILES`, needs `MVSMF_CONSGATE_WRITE_PROFILES=yes` and a throwaway
+  system).
 **Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).

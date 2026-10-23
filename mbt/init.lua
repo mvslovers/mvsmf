@@ -21,7 +21,7 @@ local LUA_ORDER = { "auth", "info-cookie" }
 --   curl-nospace  fills a volume to find its capacity
 --   curl-jesspool rewrites SYS1.SECURE.CNTL(PROFILES) and reloads RAKF
 --   curl-quiesce  stops HTTPD with P HTTPD; only for a throwaway container
-local NOT_BY_DEFAULT = { ["curl-diag"] = true, ["curl-nospace"] = true, ["curl-jesspool"] = true, ["curl-quiesce"] = true }
+local NOT_BY_DEFAULT = { ["curl-diag"] = true, ["curl-nospace"] = true, ["curl-jesspool"] = true, ["curl-quiesce"] = true, ["curl-consgate"] = true }
 
 local function basename(p)
   return (p:match("([^/]+)%.sh$"))

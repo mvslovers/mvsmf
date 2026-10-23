@@ -135,7 +135,7 @@ the next case).
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
 | 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
 | 6 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 7 | #347 | an authenticated user can stop the system | **who** is gated in review (httpd route + `FACILITY MVSMF.CONSOLE`, no mvsMF code); **which commands** stays a policy — measured, nothing to delegate to |
+| 7 | #347 | an authenticated user can stop the system | **who** is gated in review (fail-closed check in the handlers, `FACILITY MVSMF.CONSOLE`, console and `/zosmf/test`; #460); **which commands** stays a policy — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
 | 10 | #345 | superseded by #440 | done with #440 (in review); #417 cancel follows |
@@ -287,16 +287,15 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 *an authenticated user can stop the system*
 
-**Status, 2026-10-23: the gate on *who* is in review, with no mvsMF code.** The
-shipped httpd configuration (httpd#335) routes `/zosmf/restconsoles/*` ahead of
-`/zosmf/*` with `RES=FACILITY:MVSMF.CONSOLE`; measured on MVS/CE, a user without
-READ gets 403 from httpd, one with READ runs the command. Docs:
-`docs/installation.md`, *Who may use the console service*. Two things stay open:
-a **per-command policy** (below, unchanged), and the diagnostic endpoint
-**`/zosmf/test`**, which sits under `/zosmf/*`, outside the profile (#460),
-until a deployment builds with `-DMVSMF_NO_TEST_ENDPOINT` or mvsMF gets a check
-of its own. The text below is the analysis that led here and is still true of
-the command level.
+**Status, 2026-10-23: the gate on *who* is in review.** Every console handler
+and both `/zosmf/test` handlers start with `console_authorize()`
+(`consauth.c`): READ on `FACILITY MVSMF.CONSOLE`, fail-closed (no profile, no
+READ, no ACEE: refused), the decision in `authdec.c`, host test
+`tstauthd.c`, MVS matrix `tests/curl-consgate.sh` (#460). The httpd route
+(httpd#335) stays as an extra first layer. Docs: `docs/installation.md`, *Who
+may use the console service and `/zosmf/test`*; `internals/authorization.md`.
+What stays open: a **per-command policy** (below, unchanged). The text below is
+the analysis that led here; its `grep` count is of the state before the check.
 
 `grep -c 'http_check_auth\|require_access\|racf' src/consapi.c` → **0**, against
 25 in `dsapi.c`. `issue_command()` leaves the SVC 34 buffer's bytes +2/+3 zero,

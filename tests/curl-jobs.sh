@@ -1692,6 +1692,93 @@ test_spool_records_invalid_ddid() {
 	assert_http_status "400" "$HTTP_STATUS" "spool records invalid ddid"
 }
 
+# A deck of N IEBGENER steps; each step leaves three spool data sets (SYSPRINT
+# and SYSUT2 as SYSOUT=*, SYSUT1 in-stream).
+many_steps_jcl() {
+	local n="$1" i
+	printf '//MANYSTP  JOB (ACCT),'"'"'MVSMF MANY STEPS'"'"',CLASS=A,MSGCLASS=H\n'
+	for ((i = 1; i <= n; i++)); do
+		printf '//S%04d   EXEC PGM=IEBGENER\n' "$i"
+		printf '//SYSPRINT DD SYSOUT=*\n'
+		printf '//SYSIN    DD DUMMY\n'
+		printf '//SYSUT2   DD SYSOUT=*\n'
+		printf '//SYSUT1   DD *\n'
+		printf 'STEP %04d\n' "$i"
+		printf '/*\n'
+	done
+}
+
+test_spool_files_many_steps() {
+	echo ""
+	echo "--- Spool Files: job with many steps (issue #374) ---"
+
+	# 89 steps was where a build with an older jesjob() answered 500 for the
+	# whole list; 200 needs more than one IOT of the spool. MVSMF_MANY_STEPS
+	# overrides the counts, e.g. "87 88 89 120 200".
+	local n
+	for n in ${MVSMF_MANY_STEPS:-89 200}; do
+		local jcl resp jobname jobid
+		jcl=$(many_steps_jcl "$n")
+		resp=$(do_curl PUT \
+			-H "Content-Type: text/plain" \
+			--data-binary "$jcl" \
+			"${BASE_URL}/zosmf/restjobs/jobs")
+		split_response "$resp"
+		assert_http_status "200" "$HTTP_STATUS" "submit job with $n steps"
+
+		jobname=$(echo "$BODY" | jq -r '.jobname' 2>/dev/null)
+		jobid=$(echo "$BODY" | jq -r '.jobid' 2>/dev/null)
+		if [ -z "$jobid" ] || [ "$jobid" = "null" ]; then
+			fail "$n-step job submitted" "no jobid in response"
+			continue
+		fi
+
+		local attempt=0 status=""
+		while [ $attempt -lt 180 ]; do
+			resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}")
+			split_response "$resp"
+			status=$(echo "$BODY" | jq -r '.status' 2>/dev/null)
+			[ "$status" = "OUTPUT" ] && break
+			sleep 1
+			attempt=$((attempt + 1))
+		done
+		if [ "$status" != "OUTPUT" ]; then
+			fail "$n-step job reaches OUTPUT" "status '${status}' after ${attempt}s"
+			continue
+		fi
+		assert_json_field "$BODY" '.retcode' "CC 0000" "$n-step job retcode"
+
+		resp=$(do_curl GET \
+			"${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}/files")
+		split_response "$resp"
+		assert_http_status "200" "$HTTP_STATUS" "list spool files of the $n-step job"
+
+		# Three data sets per step plus the job's own (JESMSGLG, JESJCL,
+		# JESYSMSG at least); the last step is the one a truncated list loses.
+		local count sysout last
+		count=$(echo "$BODY" | jq 'length' 2>/dev/null)
+		sysout=$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSPRINT" or .ddname == "SYSUT2")] | length' 2>/dev/null)
+		last=$(echo "$BODY" | jq -r "[.[] | select(.stepname == \"S$(printf '%04d' "$n")\")] | length" 2>/dev/null)
+		if [ "${count:-0}" -ge $((3 * n + 3)) ] 2>/dev/null; then
+			pass "$n-step job lists all its spool files ($count entries)"
+		else
+			fail "$n-step job lists all its spool files" "expected at least $((3 * n + 3)) entries, got '${count}'"
+		fi
+		if [ "$sysout" = "$((2 * n))" ]; then
+			pass "$n-step job: $((2 * n)) SYSOUT data sets listed"
+		else
+			fail "$n-step job: SYSOUT data sets listed" "expected $((2 * n)), got '${sysout}'"
+		fi
+		if [ "$last" = "3" ]; then
+			pass "$n-step job: the last step's three data sets are listed"
+		else
+			fail "$n-step job: the last step's three data sets are listed" "got '${last}'"
+		fi
+
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jobname}/${jobid}" > /dev/null
+	done
+}
+
 test_purge_job() {
 	echo ""
 	echo "--- Purge Job ---"
@@ -1834,6 +1921,7 @@ test_spool_records_instream_jclin
 test_spool_records_stale_checkpoint
 test_spool_records_empty_dd_reused_mttr
 test_spool_records_invalid_ddid
+test_spool_files_many_steps
 
 # Purge tests (last, since it removes the test job)
 test_purge_job

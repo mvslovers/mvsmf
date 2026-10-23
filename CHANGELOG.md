@@ -42,6 +42,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   shows how to ask SMP which level owns the module.
 - **Stop HTTPD around the install job** (#434). The install replaces the
   module the running server loads from; see `docs/installation.md`.
+- **A record-mode read of a RECFM=V data set now fails** (#455). A client that
+  sends `X-IBM-Data-Type: record` for a V, VB or VBS data set or member
+  used to get `200` with wrong data and now gets `400`. Read
+  such data with `text` or `binary`. RECFM=F and FB are unchanged.
 
 ### Fixed
 

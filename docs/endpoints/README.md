@@ -136,7 +136,7 @@ file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 
 | Header | Used By | Description |
 |--------|---------|-------------|
-| `X-IBM-Data-Type` | Dataset/member GET | `text` (default), `binary`, `record` |
+| `X-IBM-Data-Type` | Dataset/member GET | `text` (default), `binary`, `record`. `record` is answered `400` for RECFM=V, VB and VBS data sets (#455) |
 | `X-IBM-Data-Type` | Dataset/member PUT | `text` (default), `binary`. `record` is accepted and **not implemented** — the write path frames no length prefix (#245) |
 | `X-IBM-Intrdr-Mode` | Job submit | Validated but fixed to `TEXT` |
 | `X-IBM-Intrdr-Lrecl` | Job submit | Validated but fixed to `80` |

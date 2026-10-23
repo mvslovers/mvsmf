@@ -166,3 +166,78 @@ jobcard_strip_credentials(char **lines, int start_idx, int end_idx)
 
 	return removed;
 }
+
+#ifdef __MVS__
+__asm__("\n&FUNC    SETC 'jc_continue'");
+#endif
+int
+jobcard_continue(char *line, char *moved, size_t moved_size)
+{
+	const char	indent[]	= "//         ";
+	size_t	len		= 0;
+	size_t	last_comma	= 0;
+	size_t	olen		= 0;
+	size_t	ii		= 0;
+	int	in_quotes	= 0;
+	int	depth		= 0;
+	int	found		= 0;
+
+	if (!line) {
+		return -1;
+	}
+
+	len = strlen(line);
+	while (len > 0 && line[len - 1] == ' ') {
+		line[--len] = '\0';
+	}
+
+	if (len == 0 || line[len - 1] == ',') {
+		return 0;
+	}
+
+	if (len < JOBCARD_LAST_COL) {
+		line[len++] = ',';
+		line[len] = '\0';
+		return 1;
+	}
+
+	if (len > JOBCARD_LAST_COL || !moved) {
+		return -1;
+	}
+
+	/* Column 71 is taken, so no comma fits behind the last operand. Cut at the
+	   last separator that is not inside quotes or parentheses -- the comma
+	   inside (1,1) or 'A,B' does not separate operands. */
+	for (ii = 0; ii < len; ii++) {
+		if (line[ii] == '\'') {
+			in_quotes = !in_quotes;
+		} else if (in_quotes) {
+			continue;
+		} else if (line[ii] == '(') {
+			depth++;
+		} else if (line[ii] == ')') {
+			depth--;
+		} else if (line[ii] == ',' && depth == 0) {
+			last_comma = ii;
+			found = 1;
+		}
+	}
+
+	if (!found) {
+		return -1;
+	}
+
+	olen = len - (last_comma + 1);
+	if (sizeof(indent) - 1 + olen + 1 > JOBCARD_LAST_COL
+	    || sizeof(indent) - 1 + olen + 1 >= moved_size) {
+		return -1;
+	}
+
+	memcpy(moved, indent, sizeof(indent) - 1);
+	memcpy(moved + sizeof(indent) - 1, line + last_comma + 1, olen);
+	moved[sizeof(indent) - 1 + olen] = ',';
+	moved[sizeof(indent) + olen] = '\0';
+	line[last_comma + 1] = '\0';
+
+	return 2;
+}

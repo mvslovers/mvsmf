@@ -45,6 +45,14 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **A JOB card that fills its last line is accepted** (#395). mvsMF adds
+  `NOTIFY`, `USER` and `PASSWORD` on a continuation card, which needs a comma
+  behind the last operand of the submitted card, and a comma is data only up to
+  column 71. A card ending in column 70 or 71 was refused with reason 12 although
+  z/OSMF accepts it. A column-70 card now simply gets its comma; a column-71 card
+  hands its last operand to a continuation card of its own, so the same operands
+  reach JES2 in the same order. A card that cannot be cut anywhere is still
+  refused, with the new text `JOB card cannot be continued`.
 - **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the
   job object now carries both, as z/OSMF does. MVS 3.8j has no sysplex and one
   JES2 member, so both hold the system id JES2 recorded for the job (the SMF

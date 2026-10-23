@@ -58,7 +58,7 @@ a status poll issued inside that same window can still show an empty `owner`.
 - HTTP 400 (Bad Request)
     - Invalid internal reader parameters
     - No valid JOB card in the submitted JCL or the referenced dataset
-    - `JOB card too long: no room left for the NOTIFY, USER and PASSWORD operands mvsMF adds` (reason 12) — the submitted card's own operands leave under 72 columns for the ones mvsMF injects
+    - `JOB card cannot be continued: no room for the comma that joins it to the NOTIFY, USER and PASSWORD operands mvsMF adds` (reason 12) — the last line of the JOB card runs past column 71, or ends in column 71 with no operand separator to cut at (a single quoted name, say), or its last operand is too wide for a continuation card of its own. A card that merely ends in column 70 or 71 is accepted, see above (#395)
     - Unsupported `Content-Type` (anything other than `application/json` or `text/plain`)
     - Missing `file` field in JSON body
     - A `file` value that is not of the form `//'DSN'` or `//'DSN(MEMBER)'`, whose data set name is longer than 44 characters, or whose member is empty, longer than 8 characters or missing its closing parenthesis (#477)
@@ -84,6 +84,21 @@ a status poll issued inside that same window can still show an empty `owner`.
   ```
 
   With an injected `NOTIFY` the card reads `//         NOTIFY=$MVSMF,USER=MIKE,PASSWORD=xxxxxxxx   BY MVSMF`. `NOTIFY` goes first and the comment shortens because the operands have to fit in 72 columns and `PASSWORD=` has to stay last — JES2 masks it in listings from that position.
+- **A JOB card that fills its last line is continued, not refused (#395).** The continuation card above needs a comma behind the last operand of your card, and a comma is data only up to column 71 (column 72 is the continuation column). So: a last line that already ends in a comma is left as it is; one that ends before column 71 gets the comma appended; and one that ends in column 71 itself has no room for it, so mvsMF moves the **last operand** (the part behind the last comma outside quotes and parentheses) onto a continuation card of its own, in front of the one it adds:
+
+  ```jcl
+  //MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1)
+  ```
+
+  reaches JES2 as
+
+  ```jcl
+  //MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,
+  //         MSGLEVEL=(1,1),
+  //         NOTIFY=$MVSMF,USER=MIKE,PASSWORD=xxxxxxxx   BY MVSMF
+  ```
+
+  The operands and their order are the ones you wrote; only the line break moved. Such a card is still refused (reason 12) when there is nothing to cut at — a column-71 line with a single quoted operand and no separator before it — when the last operand is too wide for a continuation card, or when the line runs past column 71.
 - The `NOTIFY` parameter in the job card is updated with the authenticated user's ID if `&SYSUID` is present. `&SYSUID` may appear in any position on the job card (e.g. `NOTIFY=&SYSUID,REGION=0K`); parameters following it are preserved. Trailing blanks from fixed 80-column records are ignored during this rewrite.
 - **`NOTIFY=$MVSMF` is added when the card has none.** MVS records a job's completion code only for jobs that requested a notify, so a card without one used to yield `"retcode": null` for the whole life of the job — however it ended — and clients that poll for a completion code, such as `zowe jobs submit --wait-for-output`, waited forever. Since #307 the generated continuation card carries a `NOTIFY` whenever the submitted card names none of its own; a card that already has one is left alone.
 

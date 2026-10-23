@@ -1,0 +1,18 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"D T","async":"Y"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:46:13 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 222
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"cmd-response-key":"E378D75691BDC880","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378D75691BDC880","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378D75691BDC880"}

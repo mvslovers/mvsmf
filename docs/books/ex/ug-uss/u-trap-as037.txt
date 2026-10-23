@@ -1,0 +1,4 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Data-Type: text;fileEncoding=IBM-037' \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/code.txt" | od -An -tx1
+ 61 dd 31 a8 20 3d 20 62 dd 32 a8 20 ac 20 63 0a

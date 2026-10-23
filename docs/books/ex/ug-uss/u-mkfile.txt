@@ -1,0 +1,16 @@
+$ curl -si -X POST -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"file"}' \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/empty.txt"
+HTTP/1.1 201 Created
+Date: Fri, 23 Oct 2026 07:45:15 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Length: 0
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+

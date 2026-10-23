@@ -1,0 +1,9 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restjobs/jobs/PROTECT/$JOBID/files/103/records"
+ADDSD PAYROLL.* UACC(READ)
+ADDSD  : DATASET  profile defined: PAYROLL.*
+ADDSD  : Run RAKFPROF to activate the changes
+PE PAYROLL.* CLASS(DATASET) ID(PAYGRP) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to DATASET /PAYROLL.*
+PERMIT: ID = PAYGRP
+PERMIT: Run RAKFPROF to activate the changes
+END

@@ -1,0 +1,16 @@
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/SECDEMO/$JOBID"
+HTTP/1.1 404 Not Found
+Date: Fri, 23 Oct 2026 07:54:46 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 78
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":4,"category":6,"reason":2,"message":"Job 'SECDEMO(JOB00056)' not found"}

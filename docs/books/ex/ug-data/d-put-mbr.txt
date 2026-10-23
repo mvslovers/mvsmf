@@ -1,0 +1,4 @@
+$ printf 'MEMBER HELLO\nSECOND LINE\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.PDS(HELLO)"
+PENDING CAPTURE

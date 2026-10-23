@@ -1,0 +1,5 @@
+$ printf 'NEW CONTENT\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  -H "If-Match: $ETAG" -H 'X-IBM-Return-Etag: true' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+PENDING CAPTURE

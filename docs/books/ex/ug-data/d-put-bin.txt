@@ -1,0 +1,5 @@
+$ printf 'ABC\000\001\377' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: application/octet-stream' \
+  -H 'X-IBM-Data-Type: binary' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.BIN"
+PENDING CAPTURE

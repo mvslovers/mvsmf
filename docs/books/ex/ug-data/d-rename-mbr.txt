@@ -1,0 +1,5 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: application/json' \
+  -d '{"request":"rename","from-dataset":{"dsn":"'$MVSMF_USER'.DEMO.PDS","member":"HOLA"}}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.PDS(ADIOS)"
+PENDING CAPTURE

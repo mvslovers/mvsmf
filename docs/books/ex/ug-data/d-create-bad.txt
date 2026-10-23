@@ -1,0 +1,5 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"dsorg":"PS","recfm":"FB"}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.BAD"
+PENDING CAPTURE

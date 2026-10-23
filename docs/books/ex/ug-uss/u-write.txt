@@ -1,0 +1,4 @@
+$ printf 'Hello from mvsMF\nSecond line\n' | curl -si -X PUT \
+  -u "$MVSMF_USER:$MVSMF_PASS" --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/hello.txt"
+PENDING CAPTURE

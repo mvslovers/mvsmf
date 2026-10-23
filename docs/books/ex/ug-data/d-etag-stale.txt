@@ -1,0 +1,5 @@
+$ printf 'LOST UPDATE\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  -H "If-Match: $ETAG" \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+PENDING CAPTURE

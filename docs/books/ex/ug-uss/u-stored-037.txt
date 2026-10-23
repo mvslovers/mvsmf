@@ -1,0 +1,4 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Data-Type: binary' \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/code037.txt" | od -An -tx1
+PENDING CAPTURE

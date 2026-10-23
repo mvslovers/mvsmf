@@ -56,13 +56,12 @@ typedef struct chain {
 } CHAIN;
 
 static void
-f3_init(unsigned char *a, unsigned char id, unsigned char next)
+f3_init(unsigned char *a, unsigned char next)
 {
 	memset(a, 0, DSX_F3_LEN);
 	memset(a, 0x03, 4);
 	a[DSX_F3_FMTID_OFF] = DSX_F3_FMTID;
 	a[DSX_F3_PTR_OFF + 4] = next;
-	(void)id;
 }
 
 static int
@@ -127,7 +126,7 @@ main(void)
 	/* SYS2.LINKLIB: six extents; the format-1 DSCB has 600 + 30 + 30, the
 	   other three are in the format-3 DSCB */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0);
+	f3_init(c.area[0], 0);
 	c.at[0] = 0x0A;
 	c.n = 1;
 	put_cyls(c.area[0] + DSX_F3_EXT4_OFF, 188, 188, TPC3350);
@@ -141,7 +140,7 @@ main(void)
 
 	/* the fourth extent only: the first four-extent group of the format-3 */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0);
+	f3_init(c.area[0], 0);
 	c.at[0] = 0x0A;
 	c.n = 1;
 	put_cyls(c.area[0] + DSX_F3_EXT4_OFF, 188, 188, TPC3350);
@@ -152,7 +151,7 @@ main(void)
 	/* extents beyond the thirteenth hold what the 8th to 16th are: past the
 	   four-extent group the nine-extent group is read */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0);
+	f3_init(c.area[0], 0);
 	c.at[0] = 0x0A;
 	c.n = 1;
 	{
@@ -198,7 +197,7 @@ main(void)
 
 	/* the chain ends before NOEPV is met */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0);
+	f3_init(c.area[0], 0);
 	c.at[0] = 0x0A;
 	c.n = 1;
 	put_cyls(c.area[0] + DSX_F3_EXT4_OFF, 188, 188, TPC3350);
@@ -207,7 +206,7 @@ main(void)
 
 	/* DS1PTRDS pointing at something that is not a format-3 DSCB */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0);
+	f3_init(c.area[0], 0);
 	c.area[0][DSX_F3_FMTID_OFF] = 0xF2;
 	c.at[0] = 0x0A;
 	c.n = 1;
@@ -217,7 +216,7 @@ main(void)
 
 	/* a chain that points back at itself ends */
 	memset(&c, 0, sizeof(c));
-	f3_init(c.area[0], 0, 0x0A);
+	f3_init(c.area[0], 0x0A);
 	c.at[0] = 0x0A;
 	c.n = 1;
 	rc = dscb_alloc_tracks(f1, ptr_a, 200, TPC3350, reader, &c, &trks);

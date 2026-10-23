@@ -62,7 +62,7 @@ dscb_alloc_tracks(const unsigned char *f1ext, const unsigned char *f1ptr,
 		  unsigned noepv, unsigned tpc,
 		  DSX_READ3 read3, void *ctx, unsigned *trks)
 {
-	unsigned char area[DSX_F3_LEN];
+	unsigned char area[DSX_F3_LEN] = {0};
 	unsigned char ptr[DSX_PTR_LEN];
 	unsigned total = 0;
 	unsigned left = noepv;

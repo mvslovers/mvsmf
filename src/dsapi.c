@@ -184,10 +184,10 @@ read_dscb3(const unsigned char cchhr[DSX_PTR_LEN],
    sets *trks, or non-zero with *trks untouched. */
 __asm__("\n&FUNC    SETC 'dscb1_trks'");
 static int
-dscb1_trks(const DSCB1 *dscb1, const char *vol, unsigned tpc, unsigned *trks)
+dscb1_trks(const DSCB1 *dscb1, char *vol, unsigned tpc, unsigned *trks)
 {
 	return dscb_alloc_tracks((const unsigned char *)dscb1->extent,
-		dscb1->ptrds, dscb1->noepv, tpc, read_dscb3, (void *)vol, trks);
+		dscb1->ptrds, dscb1->noepv, tpc, read_dscb3, vol, trks);
 }
 
 /* __listds() adds up the three extents of the format-1 DSCB (its own source

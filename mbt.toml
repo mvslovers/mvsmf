@@ -167,7 +167,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTTXSM]
 rent = false          # mbtcheck.h keeps file-static counters
 
-# TSTHOST: #260 — a Host header with no name in front of the colon parsed as
+# TSTLSFL: #360 — a NULL from __listds()/__listpd() is an empty result, a
+# storage shortage (ENOMEM) or a failed directory read, and errno says which.
+# Portable C (`mbt test`); the TU #includes src/listfail.c so it drives the
+# real decision dsapi.c and testapi.c call — do not list listfail.c here.
+[test.TSTLSFL]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTHOST: #260— a Host header with no name in front of the colon parsed as
 # success with an empty string, so /zosmf/info's fallback never ran. Portable C
 # (`mbt test`); the TU #includes src/hostparse.c so it drives the real parser
 # infoapi.c calls — do not list hostparse.c here.

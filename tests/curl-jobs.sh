@@ -9,7 +9,8 @@
 #   4. GET  /zosmf/restjobs/jobs/{name}/{id}  (job status)
 #   5. GET  /zosmf/restjobs/jobs/{name}/{id}/files          (spool files)
 #   6. GET  /zosmf/restjobs/jobs/{name}/{id}/files/{ddid}/records (records)
-#   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge)
+#   7. DELETE /zosmf/restjobs/jobs/{name}/{id}  (purge, also of a job whose
+#      output a device holds)
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -1824,6 +1825,111 @@ test_purge_not_found() {
 	done
 }
 
+# Issue an operator command through the console API; prints the response text.
+console_cmd() {
+	local resp
+	resp=$(do_curl PUT -H "Content-Type: application/json" \
+		-d "{\"cmd\":\"$1\"}" \
+		"${BASE_URL}/zosmf/restconsoles/consoles/defcn")
+	split_response "$resp"
+	echo "$BODY" | jq -r '."cmd-response" // empty' 2>/dev/null
+}
+
+test_purge_held_output() {
+	echo ""
+	echo "--- Purge Job: output held by a device (issue #426) ---"
+
+	# JES2 takes a purge for a job whose output a device has selected, but only
+	# marks the job; it stays on the queue until that output is released. The
+	# answer must not say "Request was successful." while the job is still
+	# listed -- a client reads that as "the spool is free".
+	#
+	# The hold is made on purpose: PUNCH1 is started and idle, the job's punch
+	# output asks for forms ZMF1, the device has others, so it selects the job
+	# and halts for setup. $C PUNCH1 at the end releases it.
+	local dev
+	dev=$(console_cmd '$DU,PUN1')
+	if ! printf '%s' "$dev" | grep -q 'PUNCH1 .*\(INACTIVE\|DRAINED\)'; then
+		skip "purge with held output (PUNCH1 is missing or busy: ${dev:-no answer})"
+		return
+	fi
+	local drained=0
+	if printf '%s' "$dev" | grep -q 'DRAINED'; then
+		drained=1
+		console_cmd '$S PUNCH1' >/dev/null
+	fi
+
+	local jcl resp jn ji
+	jcl=$(cat "${JCL_DIR}/heldpun.jcl")
+	resp=$(do_curl PUT -H "Content-Type: text/plain" --data-binary "$jcl" \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	jn=$(echo "$BODY" | jq -r '.jobname')
+	ji=$(echo "$BODY" | jq -r '.jobid')
+	if [ "$jn" = "null" ] || [ "$ji" = "null" ]; then
+		fail "purge with held output: submit the job" "HTTP $HTTP_STATUS"
+		return
+	fi
+	wait_for_output "$jn" "$ji" || true
+
+	# the device has the job once it shows as "(JOB nn NAME)"
+	local held=0 i num=$((10#${ji#JOB}))
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		dev=$(console_cmd '$DU,PUN1')
+		if printf '%s' "$dev" | grep -q "(JOB  *${num} ${jn})"; then
+			held=1
+			break
+		fi
+		sleep 1
+	done
+
+	resp=$(do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "purge a job with held output"
+	local msg
+	msg=$(echo "$BODY" | jq -r '.message')
+
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+	split_response "$resp"
+	if [ "$HTTP_STATUS" = "200" ]; then
+		if [ "$msg" = "Request was successful." ]; then
+			fail "purge with held output: the answer admits the job is still queued" \
+				"the job is still listed, the message says '$msg'"
+		else
+			pass "purge with held output: job still queued, the answer says so ($msg)"
+		fi
+	elif [ "$held" -eq 1 ]; then
+		fail "purge with held output: the job a device holds is gone" \
+			"expected it to stay queued, got HTTP $HTTP_STATUS"
+	else
+		skip "purge with held output (the device never took the job)"
+	fi
+
+	# Release the output: the pending purge completes.
+	console_cmd '$C PUNCH1' >/dev/null
+	local gone=0
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}")
+		split_response "$resp"
+		if [ "$HTTP_STATUS" = "404" ]; then
+			gone=1
+			break
+		fi
+		sleep 1
+	done
+	if [ "$gone" -eq 1 ]; then
+		pass "purge with held output: the job is gone once the output is released"
+	else
+		fail "purge with held output: the job is gone once the output is released" \
+			"still listed (HTTP $HTTP_STATUS) 10 s after \$C PUNCH1"
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+	fi
+
+	if [ "$drained" -eq 1 ]; then
+		console_cmd '$P PUNCH1' >/dev/null
+	fi
+}
+
 test_purge_started_task() {
 	echo ""
 	echo "--- Purge Job: a started task is refused (issue #250) ---"
@@ -1926,6 +2032,7 @@ test_spool_files_many_steps
 # Purge tests (last, since it removes the test job)
 test_purge_job
 test_purge_not_found
+test_purge_held_output
 test_purge_started_task
 
 # Optional cleanup

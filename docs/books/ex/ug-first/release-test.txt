@@ -1,0 +1,15 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"
+HTTP/1.1 404 Not Found
+Date: Fri, 23 Oct 2026 16:41:04 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 54
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":4,"category":6,"reason":7,"message":"Not Found"}

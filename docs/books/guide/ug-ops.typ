@@ -115,20 +115,25 @@ step of the sample runs with #cmd("REGION=8M") (@ug-ops-storage).
 
 #idx("build")#idx("version")
 After an install or a replacement you want to know which module serves the
-requests. Two requests tell it:
+requests. The request #cmd("GET /zosmf/info") answers #cmd("zosmf_full_version")
+with the version that the module was built as. For a release this is the check:
+a release has one version, and a module of another release shows another
+version. A release does not register the diagnostic endpoint, so
+#cmd("GET /zosmf/test?fn=version") answers 404 (@ug-first-build).
 
-- #cmd("GET /zosmf/info") answers #cmd("zosmf_full_version") with the version of
-  the product.
-- #cmd("GET /zosmf/test?fn=version") answers the version and the build. The
-  build is the short commit that the module was built from. A module built from a
-  tree with uncommitted changes has the suffix #cmd("-dirty").
+A development build, the module of #cmd("mbt deploy") whose version ends in
+#cmd("-dev"), registers the endpoint. #cmd("GET /zosmf/test?fn=version") answers
+the version and the build there. The build is the short commit that the module
+was built from. A module built from a tree with uncommitted changes has the
+suffix #cmd("-dirty"). This is the better check after a replacement of a
+development build, because a rebuilt module has another build and the same
+version.
 
-The two sessions are in @ug-install-verify. The request with #cmd("fn=version")
-is the better check after a replacement, because a rebuilt module has another
-build and the same version.
+The sessions of both builds are in @ug-first-build and in
+@ug-install-verify.
 
-#note[The build is the answer of the module that ran. If it is not the one you
-expect, another library comes first in the STEPLIB, or HTTPD has not been
+#note[The version and the build are the answer of the module that ran. If it is
+not the one you expect, another library comes first in the STEPLIB, or HTTPD has not been
 restarted since the change (@ug-ops-replace).]
 
 == Storage and Region <ug-ops-storage>
@@ -158,7 +163,9 @@ that started task, and each request needs a block of it for the C stack.
 The remedy for a U0801 is more region or less fragmented storage. Free storage
 that is split into pieces smaller than the stack does not help. The request
 #cmd("GET /zosmf/test?fn=storage&sp=0") reports the largest contiguous free block
-of a subpool. The test service is described in the _mvsMF Reference_. The option
+of a subpool. A release does not have the request: only a development build,
+whose version ends in #cmd("-dev"), registers the test service, which the
+_mvsMF Reference_ describes. The option
 #cmd("total=1") makes the service hold all the free storage for a short time,
 so use it between load runs and never during one.
 

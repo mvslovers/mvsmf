@@ -5,13 +5,16 @@
 #idx("/zosmf/test")
 #idx("diagnostic endpoint")
 The diagnostic endpoint is an internal route of mvsMF that is not part of
-z/OSMF. It exists to look at the running system from outside: the build that is
+z/OSMF. *A release does not register it.* Only a build whose version
+ends in #cmd("-dev") has it (@ref-test-build), so every function in this
+chapter exists on a development build only, and on a release the request
+answers 404. The endpoint exists to look at the running system from outside: the build that is
 loaded, the catalog, the Master Trace Table, the storage of the address space,
 the JES2 spool, the security product. It also holds functions that cause
 a failure on purpose, to test the recovery of mvsMF.
 
-Read @ref-test-cmd and @ref-test-access before you decide to leave the
-endpoint in a production system.
+Read @ref-test-build and @ref-test-access before you decide to run a
+development build on a production system.
 
 == The Request <ref-test-req>
 
@@ -36,16 +39,32 @@ The value of #cmd("filepath") is the rest of the path after
 #cmd("/zosmf/test/wildcard/"), or the text #cmd("(null)") if the variable is
 empty.
 
-== The Build Option <ref-test-build>
+== Which Builds Have It <ref-test-build>
 
 #idx("MVSMF_NO_TEST_ENDPOINT")
-Both routes are registered unless mvsMF is compiled with the option
-#cmd("-DMVSMF_NO_TEST_ENDPOINT"). Without the routes a request for
-#cmd("/zosmf/test") is a request for an unknown route and gets the 404 of
-@ref-conv-fixed. The shipped module is built without the option, so the
-endpoint is present. This is on purpose: the functions #cmd("version") and
-#cmd("storage") serve the operation of mvsMF (@ref-test-version,
-@ref-test-storage).
+#idx("development build")
+#idx("release", "diagnostic endpoint")
+Both routes are registered only if the version that is stamped into the module
+ends in #cmd("-dev"). The module makes the test when it sets up its routes, on
+the version that the build tool wrote into the module. The same version is the field
+#cmd("zosmf_full_version") of #cmd("/zosmf/info") (@ref-auth). A version that is
+missing, shorter than the suffix or ends in anything else counts as a release.
+For a release the request for #cmd("/zosmf/test") is a request for an unknown
+route and gets the 404 of @ref-conv-fixed.
+
+The build of a release therefore has no way to the functions of this chapter,
+and the build id is not available there. To see which release runs, read
+#cmd("zosmf_full_version"). A development build, for example the module that
+#cmd("mbt deploy") puts into the development library, shows its source commit
+through #cmd("version") (@ref-test-version).
+
+Two limits hold. The code of the endpoint is still in the module of a release.
+No route reaches it, but it is not removed from the object; that needs a
+compile-time release flag from the build tool, which does not exist yet. And a
+package whose version ends in #cmd("-dev") is a development build for this
+purpose, so a prerelease package keeps the endpoint. The option
+#cmd("-DMVSMF_NO_TEST_ENDPOINT") leaves both routes unregistered in any build,
+whatever the version.
 
 == Who May Use It <ref-test-access>
 
@@ -58,8 +77,9 @@ With the shipped route lines (@ref-httpd) that is every user with a valid
 credential, or every user that holds the permission of the #cmd("RES=") profile
 if the operator has put one on the route #cmd("/zosmf/*").
 
-The only way to close the endpoint is to restrict the route in HTTPD or to
-build mvsMF with #cmd("-DMVSMF_NO_TEST_ENDPOINT").
+A release closes the endpoint, because it does not register it. To close it in
+a development build, restrict the route in HTTPD or build mvsMF with
+#cmd("-DMVSMF_NO_TEST_ENDPOINT").
 
 #note[*A defect* (mvsmf\#460): The console routes are gated by a route line of
 their own with #cmd("RES=FACILITY:MVSMF.CONSOLE") (@ref-httpd). The functions
@@ -78,9 +98,11 @@ own permissions:
   whoever wrote them.
 - #cmd("listds") and #cmd("locate") read the catalog and #cmd("dscb") the
   volume table of contents, without a RACF check for the data set.
-- #cmd("password") returns the password of the caller, if the caller asks for
-  it.
 - #cmd("env") lists the names of the environment variables of the server.
+
+No function of the endpoint returns what identifies a session: #cmd("token")
+shows only the length of the token. A function that returned session data was
+removed in mvsMF 1.4.0.
 
 == Response Format <ref-test-resp>
 
@@ -115,7 +137,6 @@ is sent, so the router can send its error report (@ref-conv-fixed).
     [#cmd("dscb")], [#cmd("dsn") (#cmd("SYS1.MACLIB"))], [Format-1 DSCB.],
     [#cmd("userid")], [none], [The user ID of the request, read two ways.],
     [#cmd("token")], [none], [Whether a session token exists.],
-    [#cmd("password")], [#cmd("reveal") (0)], [The password export of HTTPD.],
     [#cmd("env")], [none], [The environment of the module.],
     [#cmd("storage")], [#cmd("sp") (0), #cmd("total") (off)], [Free storage.],
     [#cmd("syslog")], [#cmd("step") (0)], [Probe the JES2 SYSLOG job.],
@@ -145,7 +166,7 @@ is sent, so the router can send its error report (@ref-conv-fixed).
 
 #idx("fn", "help")
 The answer is a JSON object with the field #cmd("fn") (#cmd("help")) and the
-field #cmd("usage"), an array of 19 sentences. Each sentence shows the form of
+field #cmd("usage"), an array of 18 sentences. Each sentence shows the form of
 one request. The list does not contain #cmd("env"), #cmd("help") or #cmd("jesabend"). A value of #cmd("fn")
 that mvsMF does not know gives the same answer.
 
@@ -154,12 +175,15 @@ that mvsMF does not know gives the same answer.
 #idx("fn", "version")
 The answer is
 
-#screen(raw("{ \"fn\": \"version\", \"version\": \"1.4.0\", \"build\": \"a1b2c3d\" }"))
+#screen(raw("{ \"fn\": \"version\", \"version\": \"1.4.0-dev\", \"build\": \"a1b2c3d\" }"))
 
-The #cmd("version") is the version of the build. The #cmd("build") is the short
+The #cmd("version") is the version of the build, and it ends in #cmd("-dev")
+on every build that has this function. The #cmd("build") is the short
 identifier of the source commit that the module was built from. It ends with
 #cmd("-dirty") if a tracked file differed from the commit at build time. After a
-deploy, the value shows which build is loaded.
+deploy of a development build, the value shows which build is loaded. On a
+release the request answers 404 (@ref-test-build); read
+#cmd("zosmf_full_version") instead.
 
 === listds <ref-test-listds>
 
@@ -226,18 +250,6 @@ The function tells whether HTTPD holds a token for the request. The answer has
 the fields #cmd("toklen") (the length of the token, 0 if none),
 #cmd("have_token"), #cmd("sent_authorization"), #cmd("sent_cookie") (true or
 false) and #cmd("note"). The value of the token is never shown.
-
-=== password <ref-test-password>
-
-#idx("fn", "password")
-The function exercises the export of HTTPD that returns the password of the
-caller. The answer has the fields #cmd("http_get_password_ret"),
-#cmd("strlen") and #cmd("value"). Without #cmd("reveal=1") the #cmd("value") is
-a string of asterisks as long as the password, so the answer shows the length.
-With #cmd("reveal=1") the #cmd("value") is the password of the caller in
-plain text. The password then appears in the response, in any proxy log and in
-the terminal of the caller. Any other value of #cmd("reveal") masks the
-password.
 
 === env <ref-test-env>
 

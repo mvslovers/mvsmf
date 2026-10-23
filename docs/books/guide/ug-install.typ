@@ -336,20 +336,22 @@ of HTTPD. Then send the request with your user ID and password:
 The answer is 200 and a JSON document. The header #cmd("Set-Cookie") sets the
 cookie #cmd("LtpaToken2"). The field #cmd("zosmf_full_version") has the version
 of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The version is the version
-of the product, not of the build. The session was taken from a build of the
-development line, so the field says #cmd("1.4.0-dev"). The released module says
-#cmd("1.4.0"). The build that runs is another request:
+of the product. The session was taken from a build of the development line,
+so the field says #cmd("1.4.0-dev"). The released module says #cmd("1.4.0").
+The field is the way to see that the new module is the one that runs: a
+release carries no commit identifier, and its version is all that the module
+reports. If the field ends in #cmd("-dev") on a system that should run a release, the module is a
+development build. Install the release package. @ug-first-build shows the
+answer of a release and of a development build, and @ug-ops-build the check
+after a restart.
 
-#screen(raw(read("../ex/ug-install/i-version.txt"), block: true))
-
-The field #cmd("build") has the short commit that the module was built from. The
-field is the way to see that the new module is the one that runs
-(@ug-ops-build).
-
-#note[*The test service.* The request #cmd("/zosmf/test?fn=version") belongs to
-the diagnostic service of mvsMF. The module as released registers the service,
-and the route #cmd("/zosmf/*") covers it like every other path. A module built
-with the option #cmd("-DMVSMF_NO_TEST_ENDPOINT") does not have the service.]
+#note[*The test service.* A release does not register the diagnostic service
+#cmd("/zosmf/test"). The request #cmd("GET /zosmf/test?fn=version") answers
+404 (@ug-first-build). Only a build whose version ends in #cmd("-dev")
+registers the service, and only such a build answers the request
+#cmd("fn=version") with its build id. The code of the service stays in the
+released module, but no route reaches it. A package of a version that ends in
+#cmd("-dev") keeps the service.]
 
 If the answers are not the ones above, the table in @ug-ops-trouble lists the
 causes by symptom.
@@ -386,7 +388,9 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   another library ends with 0 in every step, and the old module keeps serving.
 + *Compare the route lines* in your member of HTTPD with #cmd("MVSMFPRM") of the
   new #cmd("MVSMF.SAMPLIB"). A member of 1.3.0 has three lines. The line for #cmd("/zosmf/restconsoles/*") is new in 1.4.0 and must stand above the line with the wild card.
-+ *Start HTTPD* and check the build as in @ug-install-verify.
++ *Start HTTPD* and check the version with #cmd("GET /zosmf/info") as in
+  @ug-install-verify. The field #cmd("zosmf_full_version") must name the release
+  that you installed.
 
 *Change from mvsMF 1.3.0.* The class #cmd("JESSPOOL") is new in 1.4.0. Version
 1.3.0 does not check it.

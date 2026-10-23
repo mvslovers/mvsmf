@@ -50,8 +50,9 @@ it accepts. The last column names the chapter that describes the route.
 ] <ref-conv-routes>
 
 The table has 29 routes, counting each method. The two routes under
-#cmd("/zosmf/test") exist only in a build without
-#cmd("-DMVSMF_NO_TEST_ENDPOINT") (@ref-test-build). The HTTPD route lines that
+#cmd("/zosmf/test") exist only in a development build, whose version ends in
+#cmd("-dev"), and not in a build with #cmd("-DMVSMF_NO_TEST_ENDPOINT")
+(@ref-test-build). A release does not register them. The HTTPD route lines that
 decide who may reach the routes are in @ref-httpd.
 
 A part of the path in braces is a variable. #cmd("{name}") takes the text up to

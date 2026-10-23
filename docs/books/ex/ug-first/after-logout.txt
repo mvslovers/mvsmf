@@ -1,6 +1,6 @@
-$ curl -si -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"
+$ curl -si -b cookies.txt "$MVSMF_URL/zosmf/restfiles/ds?dslevel=SYS1.PARMLIB"
 HTTP/1.1 401 Unauthorized
-Date: Fri, 23 Oct 2026 07:57:57 GMT
+Date: Fri, 23 Oct 2026 16:41:05 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive

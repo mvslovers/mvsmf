@@ -183,6 +183,13 @@ list above:
 The page has one item again, and #cmd("moreRows") is still #cmd("true"), because
 #cmd("DEMO.SEQ") follows. The parameter #cmd("volser") is read and ignored.
 
+A server searches the catalog for one list at a time. When several clients ask
+for a list together, the lists run one after the other, so each of them can take
+longer than a single list does. None is refused and none fails because of it.
+A client that lists while others do may need a longer timeout. The list of
+members does not wait for the lists of data sets. The _mvsMF Reference_ names
+the lock.
+
 *Change from mvsMF 1.3.0:* when mvsMF could not get the storage for the list, it
 did not look for the cause and answered #cmd("200") with the list that it had,
 which could be empty. It answers #cmd("500") with the message

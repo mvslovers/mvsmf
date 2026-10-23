@@ -196,6 +196,32 @@ level that matches nothing is a #cmd("200") with an empty #cmd("items").
 *Change from mvsMF 1.3.0:* a storage shortage answered #cmd("200") with an
 empty list. It answers #cmd("500") now.
 
+=== Lists Take Turns <ref-ds-list-turns>
+
+#idx("lock", "data set list")#idx("list", "parallel requests")
+#idx("MVSMF915I")#idx("MVSMF916W")
+mvsMF runs the catalog search of one data set list at a time in a server. The
+search has IDCAMS write the catalog entries into a temporary data set, and two
+searches must not use the same one. The search takes an exclusive lock, an ENQ
+with the resource name #cmd("MVSMF.LISTDS") and the scope of the job step, and
+gives it up when the search is done.
+
+- A list that arrives while another search runs waits for it and is then
+  served. No list is refused. The wait has no limit in mvsMF.
+- The lock covers the catalog search only. The answer is sent after the lock is
+  released.
+- #cmd("GET /zosmf/test?fn=listds") (@ref-test-listds) takes the same lock. The
+  list of members (@ref-ds-members) and the other requests do not.
+- The status and the body of a list are the same with or without a wait.
+- When a list abends while it holds the lock, the recovery releases it and
+  writes MVSMF915I. When that release abends in turn, the recovery writes
+  MVSMF916W, and every later list waits (@apx-messages).
+
+*Change from mvsMF 1.3.0:* the lists did not take turns. With the C library
+that mvsMF 1.4.0 is built against, two lists that ran at the same time could
+use the same temporary data set. One of them then abended with S213-04, and the
+client got status 500 with the message MVSMF901E on the console.
+
 == List the Members of a PDS <ref-ds-members>
 
 #idx("list", "members")#idx("member list")#idx("pattern, member")

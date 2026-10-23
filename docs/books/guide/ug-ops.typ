@@ -267,6 +267,12 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
     [A job is not submitted; #cmd("MVSMF204E"), #cmd("MVSMF205E") or
       #cmd("MVSMF206E")], [The internal reader of JES2 could not be opened,
       written or closed.],
+    [Every request for a list of data sets waits and gets no answer;
+      #cmd("MVSMF916W") on the console], [A list abended while it held the lock
+      that makes the lists take turns, and the release of the lock abended too.
+      The lock stays held, and each later list waits for it with no limit. Each
+      waiting list occupies a worker of HTTPD. The other routes are not
+      affected. Restart HTTPD.],
     [A user sees only the jobs of their own], [The class #cmd("JESSPOOL") has no
       profile that gives them READ access to the others (@ug-security).],
     [A request for a UFS file fails with 503], [UFSD is not running, or HTTPD

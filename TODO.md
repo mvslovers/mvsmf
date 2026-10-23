@@ -85,6 +85,13 @@ m38b with pl1c370's load started the same day.
 section says stop HTTPD, run the install job, start HTTPD. An APPLY into
 `MVSMF.LINKLIB` under a running server was never measured; the v1.3.0 release
 page and the stand rollout already do it that way. Docs only.
+**1.4.0 release mechanics (#450), prepared 2026-10-23**: FMID `TZMF140`
+(deleting `TZMF130`) in README, installation guide and uninstall job; the
+CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
+against" follows the final pins). `mbt package` on a throwaway tree with a local
+`1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
+DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
+stand. Open before the last pass: #372, #425, #428, #436, #452, #453, #454, #449.
 **#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
 while JES2 keeps the job (output held on a device waiting for setup). What the
 reference answers for a purge that is only requested has to be measured first.

@@ -3,8 +3,9 @@
 mvsMF is delivered as an **SMP Release 4** install package — the SMP that ships
 with MVS 3.8j, not SMP/E. `mbt package` builds it; a release attaches it.
 
-FMID **`TZMF130`** (mvsMF 1.3.0). Each release spends one id and **deletes its
-predecessor**, so an upgrade needs nothing beyond the package.
+FMID **`TZMF140`** (mvsMF 1.4.0). Each release spends one id and **deletes its
+predecessor**, so an upgrade from the release just before needs nothing beyond
+the package. From any older level, see [Upgrading](#upgrading).
 
 ## What you need first
 
@@ -188,9 +189,26 @@ hand.
 ## Upgrading
 
 From 1.2.0 onwards each release's SYSMOD **deletes its predecessor**, so an
-upgrade is RECEIVE/APPLY/ACCEPT of the new package and nothing else. Do **not**
-run the uninstall job's `DELETE` step in between: it names the data sets the new
-install is about to use.
+upgrade from the release just before is RECEIVE/APPLY/ACCEPT of the new package
+and nothing else. Do **not** run the uninstall job's `DELETE` step in between:
+it names the data sets the new install is about to use.
+
+**The SYSMOD deletes only the release just before it.** 1.4.0 (`TZMF140`)
+deletes `TZMF130`. On a system still at 1.2.0 (`TZMF120`), `TZMF120` keeps
+owning `MOD(MVSMF)`: the install prints `NOT SEL` for it, copies nothing, and
+every step still ends RC 00. Install 1.3.0 first, then 1.4.0. Check which level
+owns the module before you start:
+
+```
+//LIST    EXEC SMPAPP
+//SMPCNTL  DD  *
+ LIST CDS  MOD(MVSMF) .
+ LIST ACDS MOD(MVSMF) .
+/*
+```
+
+`TZMF130` is the level this package replaces. An id that is not found means a
+fresh install.
 
 **Stop HTTPD before the install job and start it afterwards:**
 

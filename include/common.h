@@ -55,6 +55,7 @@
 #define HTTP_STATUS_BAD_REQUEST 400           /**< Invalid parameters */
 #define HTTP_STATUS_UNAUTHORIZED 401          /**< Unauthorized */
 #define HTTP_STATUS_NOT_FOUND 404             /**< Resource not found */
+#define HTTP_STATUS_METHOD_NOT_ALLOWED 405    /**< Known path, no route for the method (#418) */
 #define HTTP_STATUS_PRECONDITION_FAILED 412   /**< If-Match ETag no longer current */
 #define HTTP_STATUS_PAYLOAD_TOO_LARGE 413     /**< Body beyond 24-bit storage (#412) */
 #define HTTP_STATUS_TOO_MANY_REQUESTS 429     /**< Console lock busy (#214) */

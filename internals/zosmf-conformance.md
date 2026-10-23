@@ -70,6 +70,35 @@ Two further consequences that keep getting rediscovered:
   proves it is not.
 
 
+### A known path, a method nobody registered: 405 (#418)
+
+Until #418 the router answered 404 for any request it found no route for, so
+`DELETE /zosmf/info` looked the same as a typo in the path. The reference tells
+them apart. Measured on `zxp` on 2026-10-23 (read-only probes, the exact status
+line through the SDK):
+
+| Request | Reference answer |
+|---|---|
+| `DELETE /zosmf/info` | **405** `Http method DELETE is not supported by this URL`, no `Allow` header |
+| unknown path | 404 `SRVE0190E: File not found` |
+| `PATCH /zosmf/info`, `PATCH /zosmf/restfiles/fs` | 403 `AuthorizationFailed` |
+| `PATCH /zosmf/restjobs/jobs` | 501 |
+
+Decision: a path that some route serves, requested with a method none is
+registered for, answers **405** with the usual error report (`category` 6,
+`rc` 4, `reason` 7, `message` `Http method <METHOD> is not supported by this
+URL`) and **no `Allow` header** -- the reference sends none, and 405 is in the
+closed list. A path no route matches stays 404. The check is in
+`handle_request()` (`src/router.c`), after the middleware chain, so an
+unauthenticated request is still a 401; `find_route()` is unchanged and
+`path_is_known()` asks only whether any pattern matches, regardless of method.
+
+Not covered, on purpose: methods `parseMethod()` does not know (`PATCH`, `HEAD`,
+`OPTIONS`) still get httpd's bare 405 before the middleware chain. The
+reference answers PATCH with 403 or 501 depending on the service, which is a
+different question and not part of #418.
+
+
 ### Purge of a job whose output a device holds (#426)
 
 `jescanj(name, id, 1)` returns `CANJ_OK` when JES2 has *taken* the purge, which

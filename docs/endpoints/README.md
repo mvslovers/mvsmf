@@ -25,6 +25,15 @@ working.
 `POST /zosmf/services/authenticate` remains the explicit way in, and the only
 way to get the cookie without also making an API call.
 
+## Unknown path, wrong method
+
+A path no endpoint serves answers `404`. A path an endpoint serves, requested
+with a method that endpoint does not offer (for example `DELETE /zosmf/info`),
+answers `405` with the usual error report
+(`"message":"Http method DELETE is not supported by this URL"`). Like the
+reference z/OSMF, the response carries no `Allow` header. Authentication comes
+first: a request without credentials is a `401` either way.
+
 ## `X-MVSMF-Client` — for browser clients only
 
 A `401` carries `WWW-Authenticate: Basic realm="<SMF ID>"`, as the reference

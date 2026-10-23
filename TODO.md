@@ -30,8 +30,7 @@ client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|rele
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
 **#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
-SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method should
-perhaps be 405 — measure the reference first.
+SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method. Measured on `zxp` (2026-10-23): the reference answers 405 without `Allow`; implemented on `issue-418-router-405`, in review.
 **#423** (USS file GET: no `ufs_ferror()` check after the read loop) is fixed in
 its PR: the loop is `src/ussread.c` (host test `TSTUSSRD`), the failure is
 `MVSMF301E` plus `abort_response()`. A mid-file UFSD read error *can* be
@@ -115,8 +114,8 @@ handed its list over). In hand, in this order:
   with it.
 - **#417** (cancel) right after #440 -- it widens the same gap and takes the
   purge rule (UPDATE on the JESSPOOL entity).
-- **#418** waits on a read-only zxp measurement (404 or 405 for a known path
-  with an unregistered method).
+- **#418** (405 for a known path with an unregistered method, no `Allow`; measured
+  on zxp 2026-10-23) is implemented on `issue-418-router-405`, in review.
 - **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
 - **#443** is new (2026-10-22, found in #442): the listing's `dev` names a 3380 volume "3390".
 

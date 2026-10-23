@@ -44,6 +44,7 @@ static void percent_decode(Session *session, char *str);
 
 static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
+static int path_is_known(Router *router, const char *path);
 static int is_pattern_match(const char *pattern, const char *path);
 static int extract_path_vars(Session *session, const char *pattern, const char *path);
 
@@ -136,6 +137,16 @@ int handle_request(Router *router, Session *session)
     Route *route = find_route(router, reqMethod, path);
 
     if (route == NULL) {
+        // A path some route serves, asked with a method none registered for
+        // it, is a 405 -- not a 404 (#418). Like the reference, no Allow.
+        if (path_is_known(router, path)) {
+            char msg[64];
+
+            snprintf(msg, sizeof(msg),
+                     "Http method %s is not supported by this URL", method);
+            sendErrorResponse(session, HTTP_STATUS_METHOD_NOT_ALLOWED, 6, 4, 7, msg, NULL, 0);
+            return -1;
+        }
         sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);
         return -1;
     }
@@ -548,6 +559,19 @@ Route *find_route(Router *router, HttpMethod method, const char *path)
         }
     }
     return NULL;
+}
+
+__asm__("\n&FUNC	SETC 'path_is_known'");
+static
+int path_is_known(Router *router, const char *path)
+{
+    int i = 0;
+    for (i = 0; i < (int)router->route_count; i++) {
+        if (is_pattern_match(router->routes[i].pattern, path)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 __asm__("\n&FUNC	SETC 'is_pattern_match'");

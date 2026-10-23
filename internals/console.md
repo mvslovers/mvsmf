@@ -54,7 +54,7 @@ What each caller does with it:
 | issue, capture failed | 500 `8/14`, the command **was issued** |
 | issue, `unsol-key` baseline | 500 `8/14`; nothing is armed |
 | issue, sync `unsol-key` wait | a failed poll is retried; 500 `8/14` if the **last** look at the deadline failed (`timeout` would claim absence) |
-| `consoleCollectHandler` | 500 `8/1`; cursor rewritten unchanged (kept alive, not advanced) |
+| `consoleCollectHandler` | 500 `8/1`; cursor rewritten unchanged (kept alive, not advanced). Also when the 32 KB response buffer cannot be allocated (#475), which is checked before the table is read; both go through `collect_poll()` (`src/collpoll.c`) |
 | `consoleDetectHandler` | 500 `8/1`; the detection stays armed |
 | `consoleLogHandler` | 500 `8/1` (#251) |
 
@@ -69,8 +69,16 @@ the table it is reading.
 
 The failure cannot be provoked on MVS. `test/host/tstmtsn.c` runs the real
 `mtt_snap_open()` and `mtt_detect_count()` against a fake `cmtt_new()` that
-fails; what `correlate_once()` and the handlers do with the result is checked
-by review (the handlers do not compile on the host).
+fails. `test/host/tstcolpl.c` runs the real `collect_poll()` against a `malloc`
+that fails and a correlator that reports `MTT_SNAP_FAILED`: both give
+`COLLECT_POLL_FAILED`, the delivered count stays as it was and nothing is left
+to free. That the handler answers 500 `8/1` on it, and what `correlate_once()`
+does with its snapshot, is checked by review (consapi.c does not compile on
+the host).
+
+Collect answered an empty `200` for the buffer until #475: the allocation sat
+in the handler ahead of the table, so it was the one failure the #407 fix did
+not reach.
 
 ### Notes
 

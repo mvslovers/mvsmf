@@ -139,6 +139,16 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   The command **was issued** in all three, so a retry re-issues it. None of
   them writes an operator message: the console API reads the table back, and a
   polling client would flood it.
+- **Collect no longer answers an empty `200` when it has no storage for its
+  response buffer** (#475). It needs 32 KB for the lines it returns, and when
+  that allocation failed it answered `200` with an empty `cmd-response` before
+  it looked at the table. A client that polls collect stops on an empty answer
+  and takes the block for finished, so a storage shortage lost the lines still
+  to come. It answers `500` with reason code 8/1 now, the same answer as a copy
+  of the table that cannot be made (#407), and the cursor is kept as it was, so
+  asking again with the same key works. No operator message is written. An
+  empty `200` stays the answer for no new lines and for an unknown or evicted
+  key.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.

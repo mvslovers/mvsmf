@@ -64,6 +64,15 @@ The body is a JSON object:
 - `dsorg`: Dataset organization (`PO` = partitioned, `PS` = physical sequential)
 - `cdate`: Creation date
 - `rdate`: Last referenced date
+- `extx`: Number of extents in use (all extents, including those beyond the third)
+- `sizex`: Allocated size in **tracks**, summed over every extent of the data
+  set. A data set with more than three extents keeps the rest in a format-3
+  DSCB, which the listing reads (issue #370). `"?"` when that chain cannot be
+  read or the total does not fit 16 bits, rather than a size that is too small.
+- `used`: Percentage of the allocation in use, computed from the same total;
+  `"?"` whenever `sizex` is `"?"`
+- `spacu`: Space unit reported for the data set (`CYLINDERS` or `TRACKS`); it
+  does not change the unit of `sizex`, which is always tracks
 
 ## Pagination
 

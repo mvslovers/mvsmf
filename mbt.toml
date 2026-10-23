@@ -121,6 +121,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTBLKT]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTDSEXT: #370 — the allocated size of a data set with more than three
+# extents. The listing summed the format-1 DSCB's three extents and never read
+# the format-3 DSCB, so sizex was short and used too high. Portable C (`mbt
+# test`); the TU #includes src/dsextent.c so it drives the real function
+# dsapi.c calls — do not list dsextent.c here.
+[test.TSTDSEXT]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
 # the lines[] array and the line buffer consistent. Portable C (`mbt test`); the
 # TU #includes src/jclines.c with a fault-injecting realloc, so it exercises the

@@ -2,30 +2,36 @@
 
 Issues an MVS operator command and returns the captured command response. Part of the z/OSMF Console services (`/zosmf/restconsoles`).
 
-> **Authorization: none. Read this before exposing the endpoint.**
+> **Authorization: httpd decides, mvsMF does not. Read this before exposing the endpoint.**
 >
-> The request needs an authenticated userid and nothing else. There is no
-> per-command policy, no console authority level and no RACF check — `consapi.c`
-> makes no authorization call at all. Measured on MVS/CE with RAKF: a userid in
-> group `USER` without operations authority (RAKF refuses it a protected data
-> set) ran `D T`, `D A,L` and `S RAKFUSER` through this endpoint, and none was
-> refused. The command goes out by SVC 34 with the
+> `consapi.c` makes no authorization call. The shipped HTTPD route
+> `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
+> (listed **before** `/zosmf/*`) lets only users with READ on that RAKF
+> resource through; everyone else gets `403 Forbidden` from HTTPD, a plain-text
+> body, before mvsMF is reached. Measured on MVS/CE with RAKF: a userid in group
+> `USER` was refused (`403`) with Basic and with a token, a userid in `ADMIN`
+> with READ ran `D T`, and the other `/zosmf/` endpoints stayed open to both.
+> Set up, with the traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service).
+>
+> **It gates who may issue commands, not which.** There is no per-command
+> policy and no console authority level. The command goes out by SVC 34 with the
 > MCS console field left zero, which is **console 0**: no console entered it, so
-> no `UCMAUTH` authority group applies and nothing is filtered. `$P JES2`,
-> `V xxx,OFFLINE` and `P`/`S` of any started task are all reachable by any user
-> who can log in.
->
-> That is [#347](https://github.com/mvslovers/mvsmf/issues/347), open and
-> deliberately unfixed rather than half-fixed: the policy has to be invented
-> here, because MVS 3.8j has no mechanism to delegate it to (measured — the
+> no `UCMAUTH` authority group applies and nothing is filtered. A user with
+> READ can run `$P JES2`, `V xxx,OFFLINE` and `P`/`S` of any started task. MVS
+> 3.8j has no mechanism to delegate a per-command policy to (measured — the
 > authority machinery hangs off the UCM entry of the console a command was
-> entered at, and MGCR from a program has none). Note that a display-only
-> allow-list is not the obvious answer it looks like: `P FTPD` / `S FTPD` are
-> group-1 SYS commands and are in normal use.
+> entered at, and MGCR from a program has none), and a display-only allow-list
+> would break `P FTPD` / `S FTPD`, which are group-1 SYS commands in normal use.
 >
-> Until it is settled: register only the prefixes you want in the httpd parmlib
-> member rather than `/zosmf/*`, and leave `/zosmf/restconsoles/*` out on a
-> system where not every userid is trusted at the operator console.
+> **Without the profile nothing is gated** — SAF treats an unprotected resource
+> as permitted — and HTTPD only warns at startup (`HTTPD425W NO PROFILE FOR
+> FACILITY:MVSMF.CONSOLE`). The route listed after `/zosmf/*` is never reached,
+> silently. And the diagnostic endpoint `/zosmf/test` is a second door to the
+> same SVC 34 that this route does not cover; build with `-DMVSMF_NO_TEST_ENDPOINT` to close it.
+>
+> The same gate applies to collect, detect and the hardcopy log
+> (`/zosmf/restconsoles/*`). Tracked as
+> [#347](https://github.com/mvslovers/mvsmf/issues/347).
 
 ## HTTP Method
 PUT
@@ -204,7 +210,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > the handler; the command did not run.
 
 ## Implementation (MVS 3.8j)
-mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
+mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check; httpd gates the route (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
 
 ### One command at a time (#214)
 

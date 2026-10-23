@@ -140,17 +140,19 @@ copy.
 
 ## 4. Register the routes
 
-See `MVSMF.SAMPLIB(MVSMFPRM)`. Add these three lines to the member your HTTPD
+See `MVSMF.SAMPLIB(MVSMFPRM)`. Add these four lines to the member your HTTPD
 started task names on its `//HTTPPRM` DD:
 
 ```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 ```
 
-**Order matters — first match wins.** The two specific routes must precede the
-catch-all.
+**Order matters — first match wins.** The three specific routes must precede
+the catch-all. Listed after it, the console route is never reached and nothing
+says so.
 
 `AUTH=NONE` on the first two is not a hole. Both endpoints resolve the caller
 themselves and answer 401 without a credential: `/zosmf/info` is authenticated
@@ -165,6 +167,49 @@ widening the prefix:
 ```
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
+
+### Who may use the console service
+
+The console service issues operator commands, and mvsMF checks no authority of
+its own: every user who can log in could stop a started task or vary a device.
+That is why it has the route of its own above, which also needs READ on the
+RAKF resource `FACILITY MVSMF.CONSOLE`. A user without it gets `403` from
+HTTPD on every `/zosmf/restconsoles/...` URL (command, response, detection and
+log); the rest of the API is not affected.
+
+Define the profile in `SYS1.SECURE.CNTL(PROFILES)`: the class in columns 1–8,
+the resource in 9–52, a group or user id in 53–60, the access from column 61;
+the universal entry (blank group) first, the lines in ascending order. Then
+reload the profiles (`S RAKFPROF` on RAKF 2):
+
+```
+FACILITYMVSMF.CONSOLE                                       NONE
+FACILITYMVSMF.CONSOLE                               MVSCONS READ
+```
+
+The second line lets the group `MVSCONS` in, a name chosen for this example; a
+line with a user id in the group column grants one person (measured on RAKF 2).
+READ is the only level that matters, and it means every operator command, from
+console 0 and without a `UCMAUTH` filter: nothing narrows it per command. Use a
+group of its own that holds just the people who may do that, not a broad one
+such as `ADMIN` that exists for other reasons.
+
+Three things to know:
+
+- **Without the profile nothing is gated.** An unprotected resource permits
+  the access, so the route is open to every login and HTTPD only warns at
+  startup: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE --
+  /zosmf/restconsoles/* NOT GATED`. Look for it after every start.
+- **The development user needs the profile.** `mbt run restart -- HTTPD` and
+  `mbt target console` send `P`, `S` and `D` commands through this service.
+  Without READ they get the `403`; mbt warns and falls back to the target's
+  Hercules console if it has one, and stops with "not delivered" if it has not.
+- **`/zosmf/test` is not covered**
+  ([#460](https://github.com/mvslovers/mvsmf/issues/460)). The diagnostic
+  endpoint has no authorization check of its own and sits under `/zosmf/*`,
+  which carries no profile, so it is a second door past this one. A build with
+  `-DMVSMF_NO_TEST_ENDPOINT` closes it; the default build keeps it, because
+  `fn=version` is how a deploy is confirmed.
 
 ## 5. Restart httpd and verify
 
@@ -256,7 +301,7 @@ copy:
    id as spent, and an uninstall has to name it.
 2. **Put `MVSMF.LINKLIB` first in the STEPLIB** (step 3). While the
    hand-copied module sits in a library ahead of it, that copy is what runs.
-3. **Replace the old route lines** with the three of step 4. A `MOD=MVSMF`
+3. **Replace the old route lines** with the four of step 4. A `MOD=MVSMF`
    line without `AUTH=` is public to HTTPD. After the restart an
    unauthenticated request must be refused:
 

@@ -1,2 +1,29 @@
-$ curl -s -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"
-{ "fn": "version", "version": "1.4.0-dev", "build": "aae7db2" }
+$ curl -s -b cookies.txt "$MVSMF_URL/zosmf/restfiles/ds?dslevel=SYS1.PARMLIB"
+{
+  "items": [
+    {
+      "dsname": "SYS1.PARMLIB",
+      "blksz": "80",
+      "catnm": "",
+      "cdate": "2026/08/01",
+      "dev": "3350",
+      "dsntp": "PDS",
+      "dsorg": "PO",
+      "edate": "***None***",
+      "extx": "1",
+      "lrecl": "80",
+      "migr": "NO",
+      "mvol": "N",
+      "ovf": "NO",
+      "rdate": "2026/10/23",
+      "recfm": "F",
+      "sizex": "240",
+      "spacu": "CYLINDERS",
+      "used": "5",
+      "vol": "MVSRES",
+      "vols": "MVSRES"
+    }
+  ],
+  "returnedRows": 1,
+  "JSONversion": 1
+} 

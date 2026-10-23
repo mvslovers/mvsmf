@@ -603,7 +603,7 @@ exist, and the answer is the 404 of @ref-conv-fixed:
 mvsMF 1.4.0 decides for every job whether the caller may see it, read it or
 purge it. The decision uses the RACF class #cmd("JESSPOOL") (RAKF). The rules are in the module that decides, which
 has no MVS headers and also runs on the host in the tests. The test endpoint
-(@ref-test) applies the same policy.
+(@ref-test) of a development build applies the same policy.
 
 === The Entity <ref-jobs-auth-entity>
 

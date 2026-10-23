@@ -1,0 +1,4 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Data-Type: text;fileEncoding=IBM-273' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+PENDING CAPTURE

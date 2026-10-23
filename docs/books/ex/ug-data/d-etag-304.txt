@@ -1,0 +1,4 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H "If-None-Match: $ETAG" \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+PENDING CAPTURE

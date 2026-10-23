@@ -1,0 +1,4 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Max-Items: 1' \
+  "$MVSMF_URL/zosmf/restfiles/fs?path=/tmp/mvsmf-demo"
+PENDING CAPTURE

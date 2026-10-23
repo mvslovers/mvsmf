@@ -1,0 +1,5 @@
+$ curl -si -X POST -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"type":"directory"}' \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo"
+PENDING CAPTURE

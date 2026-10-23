@@ -1,0 +1,4 @@
+$ printf 'X\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/ds/SYS1.MVSMF.NOSUCH"
+PENDING CAPTURE

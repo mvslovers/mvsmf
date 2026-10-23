@@ -1,0 +1,3 @@
+$ curl -si -X DELETE -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo"
+PENDING CAPTURE

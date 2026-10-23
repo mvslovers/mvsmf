@@ -1,0 +1,4 @@
+$ head -c 5000000 /dev/zero | tr '\0' 'x' | curl -si -X PUT \
+  -u "$MVSMF_USER:$MVSMF_PASS" -H 'Expect:' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/big.txt"
+PENDING CAPTURE

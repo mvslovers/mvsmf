@@ -1,0 +1,5 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.PDS"
+PENDING CAPTURE

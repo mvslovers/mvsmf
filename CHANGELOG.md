@@ -45,6 +45,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **Control characters in a JSON string are escaped** (#215). The JSON builder
+  escaped the quote, the backslash, carriage return, line feed and tab, and
+  wrote every other character below a space raw. One such byte -- console
+  message text can hold any -- made the whole response invalid JSON, so a
+  client could not parse any of it. All of them are escaped now: backspace, form
+  feed, carriage return, line feed and tab in their short form, the rest as
+  `\u00XX`.
 - **The end-of-data estimate for FB data sets is right on a 3380** (#439).
   Binary and record-mode reads of an FB data set are capped at the number of
   records the VTOC says it holds, so a read stops at the last record instead

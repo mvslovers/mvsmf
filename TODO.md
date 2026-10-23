@@ -135,7 +135,7 @@ the next case).
 | 2 | #326 | its trigger has fired | nothing |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
-| 5 | #215 | latent, one place, every caller benefits | nothing |
+| 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
 | 6 | #257, #335 | one class, two tickets | a repro without a proxy |
 | 7 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
@@ -249,7 +249,14 @@ keeps #244's old slot above #215 because it is where #244 already sat and the
 three are one edit's worth of context — not on impact, where #215's unparseable
 response reaches every `consapi.c` caller and this reaches none.
 
-### 5 · #215 — `addJsonStringEsc()` escapes five characters, not the control range
+### 5 · ~~#215~~ — `addJsonStringEsc()` escapes five characters, not the control range
+
+**Fixed on `issue-215-json-control-chars`, awaiting merge:** one shared
+`append_quoted()` in `json.c` serves `addJsonStringEsc()` and
+`addJsonArrayString()`; every byte below `' '` is escaped (short form for
+`\b \f \n \r \t`, else `\u00XX`), tested by `TSTJSON`. The entry below is kept
+for the one point the fix did not take over: `dsapi.c`'s `json_escape_member()`
+still has its own copy, because it names the *translated* byte in the escape.
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.

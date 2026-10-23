@@ -6,7 +6,7 @@
 #idx("status codes", "errors")
 This chapter lists the answers a client meets most often when something does
 not work. Every error report quoted here was returned by a real mvsMF in a
-session of this book, except the report of a JOB card that is too long, which
+session of this book, except the report of a JOB card that cannot be continued, which
 the text takes from the source of mvsMF. The chapter gives the meaning in a few words and points
 to the chapter that explains the task. The _mvsMF Reference_ lists every status
 code and every error report in full.
@@ -103,10 +103,12 @@ Some answers have no body at all.
   [*Status and report*], [*What it means*], [*See*],
   [#cmd("400"), “No valid JOB card found in submitted JCL”], [The JCL does
     not start with a JOB statement.], [@ug-jobs],
-  [#cmd("400"), #cmd("category") 6, #cmd("reason") 12, “JOB card too long: no
-    room left for the NOTIFY, USER and PASSWORD operands mvsMF adds”], [The
-    JOB card leaves no room for the operands that mvsMF adds to it. Shorten
-    the card.], [@ug-jobs],
+  [#cmd("400"), #cmd("category") 6, #cmd("reason") 12, “JOB card cannot be continued: no room for the comma that joins it to the NOTIFY, USER and PASSWORD operands mvsMF adds”], [mvsMF
+    cannot give the last card of the JOB statement the comma that joins it to
+    the card it adds: the card has data behind column 71 and no comma at its
+    end, or it ends in column 71 and has no comma outside quotes and
+    parentheses to cut at, or the operand to move is longer than 59 characters.
+    End the card with a comma or shorten it.], [@ug-jobs],
   [#cmd("400"), “DDID not found for job”], [The job has no output file with
     that id. List the files of the job first.], [@ug-jobs],
   [#cmd("404"), “Job '…' not found”], [No job of that name and id is on the

@@ -151,9 +151,9 @@ Nothing is issued before the last check has passed.
 + It changes the command to upper case, all of it.
 + It takes the console lock (@ref-cons-lock).
 + It issues the command.
-+ With an #cmd("unsol-key"), it counts the table lines that contain the key (case
-  ignored). This is the baseline for the detection. When the copy of the table
-  cannot be taken, there is no baseline, and the request ends with #cmd("500"),
++ With an #cmd("unsol-key"), it takes the anchor of the detection (@ref-cons-detect):
+  the end of the table. When the copy of the table
+  cannot be taken, there is no anchor, and the request ends with #cmd("500"),
   reason code 14 (the command was issued).
 + It builds the response key (@ref-cons-keys).
 + It reads the table until the answer has settled (@ref-cons-capture).
@@ -392,14 +392,47 @@ the key in upper case. The formatted text includes the flags, the time and the
 source, up to 199 characters of the line. So a key can match the prefix of a
 line.
 
-A detection fires when more lines match than at the baseline, which mvsMF took
-right after it issued the command and before it read the answer.
+A detection fires when the table holds a matching line that is newer than the
+anchor. mvsMF takes the anchor right after it issues the command and before it
+reads the answer. The anchor is a place in the table, not a count of lines: the
+table is a window that wraps and is bounded in bytes, so after a burst of other
+messages the oldest lines are gone, and a count of matching lines can fall
+although a new match has arrived. The anchor consists of
+
+- the time of the newest line of the table that carries a time (hours, minutes
+  and seconds), and
+- the number of matching lines that carry exactly that time.
+
+A line without a time of its own, such as the continuation of a multi-line
+message, takes the time of the line before it. A matching line is newer than
+the anchor when its time is later. At the time of the anchor itself, a matching
+line is newer only when there are more of them than the anchor counted; the
+time has a grain of one second, and mvsMF cannot tell the lines of that second
+apart. When the table holds no line with a time at the anchor, every matching
+line counts as newer.
+
+The time carries no date. mvsMF compares it modulo 24 hours: a line is later
+when its time is less than 12 hours ahead of the anchor. A detection that stays
+armed for more than 12 hours (a #cmd("detect-time") of more than about 41000
+ticks) cannot see lines stamped later than that, and a read answers
+#cmd("waiting").
+
+Three consequences:
+
+- *The reply of the command can be a match.* mvsMF takes the anchor after the
+  command was issued, and the reply of the command can land on either side of
+  it. A #cmd("D T") with the #cmd("unsol-key") #cmd("IEE136I") can report
+  #cmd("detected") for its own reply.
+- *A detection is not latched.* Every read, and every look of a synchronous
+  wait, takes the table again. A matching line that has left the table by the
+  time of the next read does not count.
+- *The store can push the detection out* (@ref-cons-store).
 
 === Synchronous <ref-cons-detect-sync>
 
 With #cmd("unsol-detect-sync") set to #cmd("Y") or #cmd("y"), the issue request
-waits after the capture and after the lock was released. It counts the matching
-lines every 0.1 second. When the count is above the baseline, the answer has
+waits after the capture and after the lock was released. It looks for matching
+lines newer than the anchor every 0.1 second. When there is one, the answer has
 #cmd("status") #cmd("detected") and the newest matching line in #cmd("msg") (the
 text from column 24 on, leading blanks removed, trailing blanks removed; mvsMF
 reads the first 199 characters of the formatted line, so at most 175 characters
@@ -414,19 +447,20 @@ answer is #cmd("503") with reason code 15, and the command has been issued.
 === Asynchronous <ref-cons-detect-async>
 
 Without #cmd("unsol-detect-sync"), the issue request stores a detection (the
-key text, the baseline, the window #cmd("detect-time") and the start time) under a
+key text, the anchor, the window #cmd("detect-time") and the start time) under a
 new key and returns it as #cmd("detection-key").
 
 #cmd("GET /zosmf/restconsoles/consoles/{console-name}/detections/{detection-key}")
-counts the matching lines now and answers with status #cmd("200") and two fields:
+looks at the table now and answers with status #cmd("200") and two fields:
 
 #tab(caption: [Fields of the detection answer])[
   #table(columns: (1.0in, 1.4in, 1fr),
     [Field], [Value], [Meaning],
     [#cmd("status")], [#cmd("detected")],
-      [The count is above the baseline. This is tested first, so a detection that
-       has matched stays #cmd("detected") while the count stays above the
-       baseline.],
+      [The table holds a matching line newer than the anchor. This is tested
+       first, so the window does not matter. The status is not kept: when the
+       line has left the table at the next read, the status is #cmd("waiting")
+       or #cmd("expired") again.],
     [], [#cmd("expired")],
       [Not detected, and more than #cmd("detect-time") ticks (about 1.05 seconds
        each) have passed since the start.],
@@ -444,13 +478,10 @@ and not #cmd("waiting") or #cmd("expired"); the detection stays armed. Each read
 refreshes its entry in the store (@ref-cons-store). The request does not check
 the console name.
 
-mvsMF counts lines in a table that drops its oldest lines. If a matching line is
-dropped while a new one arrives, the count does not rise and the detection does
-not fire.
-
-#note[*A defect* (mvsmf\#195): a detection can stay #cmd("waiting") although a
-matching message has been written. The count-based baseline described above is
-the mechanism the source points to. The issue is open.]
+A read of a detection does not wait and does not remember an earlier answer.
+The table holds the lines of a limited time, minutes on a quiet system and
+seconds under heavy console traffic. A client that wants to see a message polls
+within that time.
 
 == The Hardcopy Log <ref-cons-log>
 
@@ -604,7 +635,8 @@ The store compares the first 16 characters of a key, so a key with the same firs
 The cursor of a command holds the time of the issue, the number of lines already
 delivered, the second of the echo (or -1 when the echo was not found before the
 capture ended), and the upper-case command. The detection entry holds the start
-time, the window, the baseline count, and the upper-case key.
+time, the window, the anchor (the time of the end of the table and the number of
+matches at that time), and the upper-case key.
 
 When the echo second is -1, a collect takes the newest echo of the command. This
 is how a collect reaches a slow reply after an issue whose capture ended without
@@ -665,8 +697,8 @@ not the shape of the data set and job requests.
     [#cmd("500")], [8], [14], [issue],
       [Command was issued; the Master Trace Table could not be copied, so
        unsolicited-message detection was not armed. Do not blindly retry --
-       retry re-issues the command. Cause: no baseline of the #cmd("unsol-key")
-       could be counted.],
+       retry re-issues the command. Cause: no anchor for the #cmd("unsol-key")
+       could be taken.],
     [#cmd("500")], [8], [14], [issue],
       [Command was issued; the Master Trace Table could not be copied, so
        unsolicited-message detection could not finish. Do not blindly retry --

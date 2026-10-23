@@ -326,6 +326,15 @@ curl -sS -u $USER:$PASS -o big.bin -H 'X-IBM-Data-Type: binary' \
 
 See [Slow clients](endpoints/README.md#slow-clients).
 
+### Address a name with `%` or `+`
+A name is percent-encoded once: a literal `%` is sent as `%25`, a literal `+` as
+`%2B`. This reads the file `/tmp/a%41` and the file `/tmp/c+d`:
+
+```bash
+curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/a%2541"
+curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/c%2Bd"
+```
+
 ### Write a file
 `PUT /zosmf/restfiles/fs/{filepath}`
 

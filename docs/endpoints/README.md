@@ -130,6 +130,27 @@ characters for a data set or `dslevel`, 8 for a member.
 **USS paths are not folded.** `/zosmf/restfiles/fs` addresses a case-sensitive
 file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 
+## Names in the URL are percent-encoded once
+
+A client sends a name in the URL path percent-encoded **once**. The server
+decodes the path one time and uses the result as the name, so what the client
+meant is what is stored, read or deleted.
+
+- A name that contains a literal `%` is sent as `%25`. A file named `a%41` is
+  addressed as `/zosmf/restfiles/fs/tmp/a%2541`. A name sent as `a%41` is the
+  name `aA`.
+- A name that contains a literal `+` is sent as `%2B`. The server reads `+` in
+  the path as a blank, as it does in a query parameter.
+- A client that encodes every name twice, because an earlier mvsMF decoded the
+  path a second time, must send the name once-encoded. This changed in 1.4.0;
+  before it, a literal `%` followed by two hexadecimal digits was read as an
+  escape, so `a%2541` named the file `aA` instead of `a%41`.
+- Query parameters (`path=`, `pattern=`, `dslevel=`, ...) follow the same rule:
+  they are decoded once, and a literal `%` is sent as `%25`.
+
+Data set and member names cannot contain these characters. The rule matters for
+USS paths.
+
 ## USS Files (`/zosmf/restfiles/fs`)
 
 | Method | Path | Description |

@@ -92,9 +92,10 @@ against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
 stand. Open before the last pass: #372, #425, #428, #436, #452, #453, #454, #449.
-**#426 is new (2026-10-14) and not ranked either**: a job purge answers 200
-while JES2 keeps the job (output held on a device waiting for setup). What the
-reference answers for a purge that is only requested has to be measured first.
+**#426 is done in its PR**: a purge JES2 only accepts (output held on a device)
+stays 200 with `status: 0`, and `message` now says the purge is only requested
+(`internals/zosmf-conformance.md`). What zxp answers for such a purge is not
+measured (a write); `X-IBM-Job-Modify-Version: 2.0` is not implemented.
 **#360 is handled in the libc370 2.25.1 move (#442)**: the `ENOMEM` contract
 (2.0.0) is read in `datasetListHandler()` and `diagnose_open_failure()`, so a
 shortage is a 500 with `MVSMF006E`, no longer an empty 200 or a 404. The

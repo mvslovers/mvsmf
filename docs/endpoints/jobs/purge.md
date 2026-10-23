@@ -26,6 +26,24 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 }
 ```
 
+### A purge that is only requested
+
+`200` means JES2 took the request, not that the job is gone. When a device has
+selected the job's output (a punch or printer waiting for its forms, for
+example) JES2 marks the job for purge and keeps it on the queue until that
+output is released. After JES2 took the request, mvsMF looks at the queue
+again, for up to about two seconds:
+
+| What the queue shows | `message` |
+|----------------------|-----------|
+| the job is gone | `Request was successful.` |
+| the job is still there | `Purge requested. JES2 keeps the job marked for purge until the output it holds is released.` |
+
+The status is `200` and `status` is `0` in both cases: the reference answers an
+asynchronous purge the same way, and a status outside the z/OSMF list is not an
+option. A client that must know the spool is free reads `message`, or lists the
+job again. The second answer is the only one that takes the extra seconds.
+
 `job-correlator` is not emitted — MVS 3.8j has no job correlators.
 
 The job is looked up before it is purged. That lookup is what supplies `owner`
@@ -87,6 +105,7 @@ strings of the request. The job id is compared whole; no wildcard matches. See
 - Cannot purge the currently running HTTPD server
 - Cannot purge active STCs (Started Tasks)
 - Cannot purge active TSO users
+- A job whose output a device holds is only marked for purge (see above); it leaves the queue when that output is released
 - Job must exist and be purgeable by the caller (own job, or UPDATE on its JESSPOOL profile)
 - No support for job correlator IDs
 

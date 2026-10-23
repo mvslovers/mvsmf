@@ -89,6 +89,7 @@ static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, co
                                        JESJOB ***out_joblist, int op, const char *submitter,
                                        int *decision);
 static void send_job_not_found(Session *session, const char *jobname, const char *jobid);
+static int  job_still_queued(Session *session, const char *jobname, const char *jobid);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
 static int open_intrdr(Session *session, VSFILE **intrdr);
@@ -368,6 +369,7 @@ jobPurgeHandler(Session *session)
 	char cancel_name[JWN_PRTSZ] = {0};
 	char cancel_id[JWN_PRTSZ] = {0};
 	int decision = JWN_HIDE;
+	int pending = 0;
 
 	if (!jobname || !jobid) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
@@ -412,10 +414,17 @@ jobPurgeHandler(Session *session)
 
 	switch (rc) {
 	case CANJ_OK:
+		/* CANJ_OK says JES2 took the request, not that the job is gone: output
+		   a device has selected (PUNCH1 waiting for SETUP) leaves it marked
+		   for purge on the queue until that output is released (#426).  Look
+		   again before claiming the spool is free. */
+		pending = job_still_queued(session, cancel_name, cancel_id);
+
 		rc = startJsonObject(builder);
 
 		rc = addJsonString(builder, "jobid", id);
-		rc = addJsonString(builder, "message", "Request was successful.");
+		rc = addJsonString(builder, "message", pending ? MSG_PURGE_PENDING
+		                                              : "Request was successful.");
 		rc = addJsonString(builder, "original-jobid", id);
 		rc = addJsonString(builder, "jobname", name);
 		rc = addJsonString(builder, "owner", owner);
@@ -1399,6 +1408,49 @@ quit:
 	}
 
 	return found_job;
+}
+
+/* Sub-second pause between two looks at the queue; BINTVL is in 0.01 s. */
+__asm__("\n&FUNC	SETC 'PRGNAP'");
+static void purge_nap(void)
+{
+	__asm__("STIMER WAIT,BINTVL==F'20'   0.20 seconds" : : : "0", "1");
+}
+
+/* 1 when the job is still on the queue after a purge JES2 accepted.  JES2
+   works the request on its own task and the checkpoint jesjob() reads trails
+   it, so a job that is going away may still be listed for a moment: look up
+   to PURGE_LOOKS times, PURGE_LOOKS-1 naps apart (about 2 s), and stop at the
+   first look that no longer finds it.  The caller was cleared to purge this
+   job, so the same JWN_OP_PURGE verdict is what hides it here. */
+#define PURGE_LOOKS 5
+
+__asm__("\n&FUNC	SETC 'JOBQUEUD'");
+static int
+job_still_queued(Session *session, const char *jobname, const char *jobid)
+{
+	int look;
+
+	for (look = 0; look < PURGE_LOOKS; look++) {
+		JESJOB **joblist = NULL;
+		JESJOB *job;
+		int decision = JWN_HIDE;
+
+		if (look > 0) {
+			purge_nap();
+		}
+
+		job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+		                              JWN_OP_PURGE, NULL, &decision);
+		if (joblist) {
+			jesjobfr(&joblist);
+		}
+		if (!job) {
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 /* The request's own words, made safe to put between the quotes of a JSON

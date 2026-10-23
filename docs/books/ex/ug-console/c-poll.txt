@@ -1,3 +1,16 @@
 $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restconsoles/consoles/defcn/detections/$DKEY"
-PENDING CAPTURE
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:46:29 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 61
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+
+{"status":"detected","msg":"FTPD099I FTPD SHUTDOWN COMPLETE"}

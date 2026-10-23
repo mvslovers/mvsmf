@@ -1,2 +1,16 @@
 $ curl -si -c cookies.txt -X POST -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/services/authenticate"
-PENDING CAPTURE
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 07:43:34 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Set-Cookie: LtpaToken2=T3nAJSeu1NnK5w1+88oXeS91xtoxiB9u7peQkjJ2jn8=; Path=/; HttpOnly; SameSite=Strict
+Content-Type: application/json
+Content-Length: 52
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=T3nAJSeu1NnK5w1+88oXeS91xtoxiB9u7peQkjJ2jn8=; Path=/; HttpOnly; SameSite=Strict
+
+{"returnCode":0,"reasonCode":0,"message":"Success."}

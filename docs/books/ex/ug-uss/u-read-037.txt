@@ -1,4 +1,4 @@
 $ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
   -H 'X-IBM-Data-Type: text;fileEncoding=IBM-037' \
   "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/code037.txt"
-PENDING CAPTURE
+a[1] = b[2] ^ c

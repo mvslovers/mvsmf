@@ -1,3 +1,16 @@
 $ curl -si -X DELETE -u "$MVSMF_USER:$MVSMF_PASS" \
   "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo"
-PENDING CAPTURE
+HTTP/1.1 400 Bad Request
+Date: Fri, 23 Oct 2026 07:45:47 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 64
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":4,"reason":1,"message":"Directory not empty"}

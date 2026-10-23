@@ -1,3 +1,3 @@
 $ curl -s -u "$MVSMF_USER2:$MVSMF_PASS2" \
   "$MVSMF_URL/zosmf/restjobs/jobs?owner=*&prefix=MVSMFDM*"
-PENDING CAPTURE
+[]

@@ -1,4 +1,17 @@
 $ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
   -H 'X-IBM-Max-Items: 1' \
   "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.PDS/member?pattern=H*"
-PENDING CAPTURE
+HTTP/1.1 404 Not Found
+Date: Fri, 23 Oct 2026 07:45:06 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 62
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=+37qKKa+GGTzaWXCSZmrkE5QTdaC66OCiJ7J0N1CxOQ=; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":6,"reason":4,"message":"Dataset not found"}

@@ -168,14 +168,22 @@ widening the prefix:
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
-### Who may use the console service
+### Who may use the console service and `/zosmf/test`
 
-The console service issues operator commands, and mvsMF checks no authority of
-its own: every user who can log in could stop a started task or vary a device.
-That is why it has the route of its own above, which also needs READ on the
-RAKF resource `FACILITY MVSMF.CONSOLE`. A user without it gets `403` from
-HTTPD on every `/zosmf/restconsoles/...` URL (command, response, detection and
-log); the rest of the API is not affected.
+The console service issues operator commands, and the diagnostic endpoint
+`/zosmf/test` can run them too. Both check the same RAKF resource themselves,
+in the handler: **READ on `FACILITY MVSMF.CONSOLE`**. The check is fail-closed.
+It permits only when RAKF answers "permitted"; a user without READ, a user
+without a session, and **every user while the profile is not defined** get
+`500` (category 4, "Authorization failed") from mvsMF on every
+`/zosmf/restconsoles/...` URL (command, response, detection and log) and on
+every `/zosmf/test` request, including `fn=version`. The rest of the API is not
+affected. The route line of step 4 additionally makes HTTPD answer `403` for the
+console URLs before mvsMF is reached.
+
+**This is the upgrade behaviour, not an error:** after installing this version,
+console and `/zosmf/test` refuse everybody until you have defined the profile
+and granted READ.
 
 Define the profile in `SYS1.SECURE.CNTL(PROFILES)`: the class in columns 1–8,
 the resource in 9–52, a group or user id in 53–60, the access from column 61;
@@ -196,20 +204,22 @@ such as `ADMIN` that exists for other reasons.
 
 Three things to know:
 
-- **Without the profile nothing is gated.** An unprotected resource permits
-  the access, so the route is open to every login and HTTPD only warns at
-  startup: `HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE --
-  /zosmf/restconsoles/* NOT GATED`. Look for it after every start.
+- **Without the profile everybody is refused.** An unprotected resource would
+  permit the access in RAKF, but mvsMF does not take "no profile" for "allowed":
+  the endpoints stay closed until the profile exists. HTTPD still warns at
+  startup (`HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE --
+  /zosmf/restconsoles/* NOT GATED`) about its own route; that warning no longer
+  means the console is open.
 - **The development user needs the profile.** `mbt run restart -- HTTPD` and
   `mbt target console` send `P`, `S` and `D` commands through this service.
-  Without READ they get the `403`; mbt warns and falls back to the target's
+  Without READ they are refused; mbt warns and falls back to the target's
   Hercules console if it has one, and stops with "not delivered" if it has not.
-- **`/zosmf/test` is not covered**
-  ([#460](https://github.com/mvslovers/mvsmf/issues/460)). The diagnostic
-  endpoint has no authorization check of its own and sits under `/zosmf/*`,
-  which carries no profile, so it is a second door past this one. A build with
-  `-DMVSMF_NO_TEST_ENDPOINT` closes it; the default build keeps it, because
-  `fn=version` is how a deploy is confirmed.
+  The same holds for `?fn=version`, the call that confirms a deploy: the user
+  who checks the build id needs READ too.
+- **One profile for both.** There is no separate resource for `/zosmf/test`; a
+  user who may use the console may use the test endpoint, and the other way
+  round. A build with `-DMVSMF_NO_TEST_ENDPOINT` still leaves `/zosmf/test`
+  unregistered, for systems that do not want the endpoint at all.
 
 ## 5. Restart httpd and verify
 
@@ -226,10 +236,13 @@ curl -u USER:PASS 'http://your.host:port/zosmf/test?fn=version'
 
 It answers the version and the git hash the live module was built from. A
 successful install that still reports the previous hash means something else is
-shadowing it — see step 3.
+shadowing it — see step 3. The call needs READ on `FACILITY MVSMF.CONSOLE` (see
+[Who may use the console service and `/zosmf/test`](#who-may-use-the-console-service-and-zosmftest));
+before the profile is defined it answers `500`, category 4, and that is the
+check working.
 
 `GET /zosmf/info` is the ordinary reachability check once a credential is to
-hand.
+hand, with no profile needed.
 
 ## Upgrading
 

@@ -353,7 +353,7 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
 See [internals/storage-probe.md](internals/storage-probe.md).
 
-The endpoint has **no per-function gate and must not grow one back** (#343);
+Every request needs READ on `FACILITY MVSMF.CONSOLE` (`console_authorize()` as the first statement of `testHandler` and `testWildcardHandler`, fail-closed, #460), so the user who checks the build id needs it too. The endpoint has **no per-function gate and must not grow one back** (#343);
 building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered.
 `fn=textsum` / `fn=textdump` and the gate history: `internals/test-endpoint.md`.
 

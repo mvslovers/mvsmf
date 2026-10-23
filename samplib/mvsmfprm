@@ -21,17 +21,13 @@
 *                                to get the z/OSMF-shaped 401 body, so
 *                                httpd must not gate it
 *
-* The third route is the console service, which has a profile check of its own:
-*
-*   /zosmf/restconsoles/*        issues operator commands and checks
-*                                nobody's authority itself, so httpd
-*                                checks READ on the RAKF resource
-*                                FACILITY MVSMF.CONSOLE. Define it
-*                                (docs/installation.md, step 4): with no
-*                                profile the check permits everyone and
-*                                HTTPD425W says so at startup. Listed
-*                                after /zosmf/* it is never reached --
-*                                silently.
+* The third route is the console service. mvsMF checks READ on the RAKF
+* resource FACILITY MVSMF.CONSOLE itself, for the console and for
+* /zosmf/test, and refuses everybody while the profile is not defined
+* (docs/installation.md, step 4). This route is an additional first
+* layer: httpd answers 403 for a user without READ before mvsMF is
+* reached. Listed after /zosmf/* it is never reached, silently; the
+* check in mvsMF still applies.
 *
 * A route line with no AUTH= at all reads as AUTH=NONE (public) in
 * /.dsrv?target=MOD. That is a poor thing for an audit to find, which is

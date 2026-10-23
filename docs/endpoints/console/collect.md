@@ -63,6 +63,12 @@ against this:
 ## Error Responses
 Console error body (`return-code`/`reason-code`/`reason`). A bogus or evicted key yields HTTP 200 with an empty `cmd-response`, not an error.
 
+| HTTP | return-code | reason-code | Cause |
+|------|-------------|-------------|-------|
+| 500 | 8 | 1 | The copy of the Master Trace Table could not be made. The cursor is not advanced and is kept alive: ask again with the same key. |
+
+A copy of the table that could not be made is never reported as an empty `200`: a client stops polling on an empty answer and would take the block for finished. An empty `200` otherwise means "no new lines", or an unknown or evicted key (above). It is also what collect answers when it has no storage for its 32 KB response buffer, before it looks at the table.
+
 ## Implementation (MVS 3.8j)
 Each collect re-correlates the original command in the **Master Trace Table (MTT)** (echo + jobid + command-text + MLWTO-number, same as [Issue Command](issue-command.md)) and returns only the lines beyond what was already delivered. The `cmd-response-key` indexes a cursor in the per-CGI key/value store (`ntstore`, lazy-init in the httpd `cgictx`) holding two things: the **delivered line count** and the **MTT second of the command's own echo**. The MTT has no stable per-line sequence, so the delta is a *count* — lines `[delivered .. total)` — and the second is what pins that count to one block. The count only ever moves forward: a block shorter than what was already delivered is not counted back down, which is what used to leave a mis-anchored key answering empty for good. The cursor is subject to LRU + TTL eviction; after eviction a collect re-correlates from whatever is still in the trace table.
 

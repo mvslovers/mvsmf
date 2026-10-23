@@ -107,6 +107,15 @@ sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
 [test.TSTMTLN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTMTSN: #407 — a failed Master Trace Table snapshot must not read as "no
+# matches": detect_count() turned it into a baseline of 0 and a false
+# "detected", correlate_once() into a cursor that mis-anchors collect. Portable
+# C (`mbt test`); the TU #includes src/mttsnap.c with fakes for MTENTRY and the
+# cmtt_* calls, so it drives the real snapshot and keyword count consapi.c
+# calls — do not list mttsnap.c here.
+[test.TSTMTSN]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
 # #includes src/reclines.c so it drives the real state machine the four write
@@ -172,6 +181,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 # (`mbt test`); the TU #includes src/etag.c so it drives the real stamp dsapi.c
 # uses — do not list etag.c here.
 [test.TSTETAG]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTJSON: #215 — addJsonStringEsc() and addJsonArrayString() escaped five
+# characters and let the rest of the control characters through raw, which makes
+# the whole response invalid JSON. Portable C (`mbt test`); the TU #includes
+# src/json.c so it drives the real builder — do not list json.c here.
+[test.TSTJSON]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # TSTSEND: #298 — the send loop must never advance by the return value without

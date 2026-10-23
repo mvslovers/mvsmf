@@ -5,6 +5,7 @@
 #include "json.h"
 
 static int append_string(JsonBuilder *builder, const char *str);
+static int append_quoted(JsonBuilder *builder, const char *value);
 
 JsonBuilder *
 createJsonBuilder(void) 
@@ -201,9 +202,6 @@ addJsonString(JsonBuilder *builder, const char *key, const char *value)
 int
 addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value)
 {
-    const char *p;
-    char one[2];
-
     if (!builder || !key) {
         return -1;
     }
@@ -221,23 +219,7 @@ addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value)
         return 0;
     }
 
-    /* append one piece at a time (no fixed temp buffer) with the JSON-required
-     * escaping of quote / backslash / control characters */
-    if (append_string(builder, "\"") < 0) return -1;
-    one[1] = '\0';
-    for (p = value; *p; p++) {
-        int rc;
-        switch (*p) {
-        case '"':  rc = append_string(builder, "\\\""); break;
-        case '\\': rc = append_string(builder, "\\\\"); break;
-        case '\r': rc = append_string(builder, "\\r");  break;
-        case '\n': rc = append_string(builder, "\\n");  break;
-        case '\t': rc = append_string(builder, "\\t");  break;
-        default:   one[0] = *p; rc = append_string(builder, one); break;
-        }
-        if (rc < 0) return -1;
-    }
-    if (append_string(builder, "\"") < 0) return -1;
+    if (append_quoted(builder, value) < 0) return -1;
 
     builder->is_first = 0;
     return 0;
@@ -246,9 +228,6 @@ addJsonStringEsc(JsonBuilder *builder, const char *key, const char *value)
 int
 addJsonArrayString(JsonBuilder *builder, const char *value)
 {
-    const char *p;
-    char one[2];
-
     if (!builder) {
         return -1;
     }
@@ -263,23 +242,7 @@ addJsonArrayString(JsonBuilder *builder, const char *value)
         return 0;
     }
 
-    /* Same piecewise escaping as addJsonStringEsc(), and for the same reason:
-     * no fixed temp buffer, so the element length is not capped. */
-    if (append_string(builder, "\"") < 0) return -1;
-    one[1] = '\0';
-    for (p = value; *p; p++) {
-        int rc;
-        switch (*p) {
-        case '"':  rc = append_string(builder, "\\\""); break;
-        case '\\': rc = append_string(builder, "\\\\"); break;
-        case '\r': rc = append_string(builder, "\\r");  break;
-        case '\n': rc = append_string(builder, "\\n");  break;
-        case '\t': rc = append_string(builder, "\\t");  break;
-        default:   one[0] = *p; rc = append_string(builder, one); break;
-        }
-        if (rc < 0) return -1;
-    }
-    if (append_string(builder, "\"") < 0) return -1;
+    if (append_quoted(builder, value) < 0) return -1;
 
     builder->is_first = 0;
     return 0;
@@ -350,7 +313,55 @@ getJsonString(JsonBuilder *builder)
 
 // private functions
 
+#ifdef __MVS__
+__asm__("\n&FUNC    SETC 'append_quoted'");
+#endif
+/* Append value as a quoted JSON string. One piece at a time, so there is no
+ * fixed temp buffer and the length is not capped.
+ *
+ * RFC 8259 forbids every character below U+0020 inside a string. In the
+ * execution character set that is every byte below ' ' -- 0x20 in ASCII, 0x40
+ * in EBCDIC, where the response is translated only after this runs -- so the
+ * test is written against ' ' and not against a number. The five with a short
+ * form use it; the rest become \u00XX, XX being the byte as it stands here
+ * (on MVS the host byte, not its ASCII image; the escape is still valid). */
+static int
+append_quoted(JsonBuilder *builder, const char *value)
+{
+    const char *p;
+    char one[2];
+    char esc[8];
+
+    if (append_string(builder, "\"") < 0) return -1;
+    one[1] = '\0';
+    for (p = value; *p; p++) {
+        int rc;
+        switch (*p) {
+        case '"':  rc = append_string(builder, "\\\""); break;
+        case '\\': rc = append_string(builder, "\\\\"); break;
+        case '\b': rc = append_string(builder, "\\b");  break;
+        case '\f': rc = append_string(builder, "\\f");  break;
+        case '\r': rc = append_string(builder, "\\r");  break;
+        case '\n': rc = append_string(builder, "\\n");  break;
+        case '\t': rc = append_string(builder, "\\t");  break;
+        default:
+            if ((unsigned char)*p < (unsigned char)' ') {
+                snprintf(esc, sizeof(esc), "\\u%04X", (unsigned)(unsigned char)*p);
+                rc = append_string(builder, esc);
+            } else {
+                one[0] = *p;
+                rc = append_string(builder, one);
+            }
+            break;
+        }
+        if (rc < 0) return -1;
+    }
+    return append_string(builder, "\"");
+}
+
+#ifdef __MVS__
 __asm__("\n&FUNC    SETC 'ensure_capacity'");
+#endif
 static int 
 ensure_capacity(JsonBuilder *builder, size_t needed) 
 {
@@ -372,7 +383,9 @@ ensure_capacity(JsonBuilder *builder, size_t needed)
 	return 0;
 }
 
+#ifdef __MVS__
 __asm__("\n&FUNC    SETC 'append_string'");
+#endif
 static int 
 append_string(JsonBuilder *builder, const char *str) 
 {

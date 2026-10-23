@@ -45,6 +45,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **Control characters in a JSON string are escaped** (#215). The JSON builder
+  escaped the quote, the backslash, carriage return, line feed and tab, and
+  wrote every other character below a space raw. One such byte -- console
+  message text can hold any -- made the whole response invalid JSON, so a
+  client could not parse any of it. All of them are escaped now: backspace, form
+  feed, carriage return, line feed and tab in their short form, the rest as
+  `\u00XX`.
 - **The end-of-data estimate for FB data sets is right on a 3380** (#439).
   Binary and record-mode reads of an FB data set are capped at the number of
   records the VTOC says it holds, so a read stops at the last record instead
@@ -73,6 +80,23 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   asynchronous purge, `status` stays 0, and `message` says that the purge is
   requested and the job stays until its output is released. The look costs
   nothing on a purge that completes and about a second when it does not.
+- **Collect, detections and the issue command no longer read a failed copy of
+  the console's message table as "no matches"** (#407). The console endpoints
+  answer from a copy of the Master Trace Table, the in-memory tail of the
+  system log. When that copy could not be made, collect, detections and the
+  issue command took it for an empty table and gave a wrong answer rather than
+  an empty one: a detection could report `detected` for a message that was in
+  the table before the command, and a collect could return the block of a
+  later identical command. The hardcopy log was fixed in 1.2.0 (#251); these
+  three now follow it.
+  A collect or a detection poll whose copy fails answers `500` with reason
+  code 8/1 and keeps its cursor or its armed detection, so asking again works.
+  The issue command answers `500` with reason code 8/14 when no poll of its
+  response capture got a copy, when the baseline of an `unsol-key` could not
+  be taken, or when the last look of a synchronous `unsol-key` wait failed.
+  The command **was issued** in all three, so a retry re-issues it. None of
+  them writes an operator message: the console API reads the table back, and a
+  polling client would flood it.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
@@ -272,7 +296,7 @@ Built against **libc370 2.10.3**, **httpd 4.2.0**, **ufsd 1.4.0** and
   (#407). Under a storage shortage a detection can report `detected` for a
   message that was there before the command, and a collect can return the
   block of a later identical command. The hardcopy log is fixed (above); these
-  two need a change of convention and come later.
+  two need a change of convention and come later. Fixed in 1.4.0.
 
 ## [1.1.0] - 2026-09-14
 

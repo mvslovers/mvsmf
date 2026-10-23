@@ -17,6 +17,7 @@
 #include "httpcgi.h"
 #include "ntstore.h"
 #include "mvsmfctx.h"
+#include "mttsnap.h"
 
 /*
  * z/OSMF Console services -- Issue command (endpoint 1).
@@ -31,6 +32,8 @@
 #define POLL_SECONDS   3          /* sync capture window (~ TOD high-word ticks)*/
 
 #define CONS_POLL_INTERRUPTED (-1)     /* capture_response(): quiesced mid-poll  */
+#define CONS_CAPTURE_FAILED   (-2)     /* capture_response(): no poll got a      */
+                                       /* snapshot of the table (#407)           */
 
 /* Console correlation lock (#214). One mvsMF response block may be open in the
  * MTT at a time; the bracket runs from just before SVC 34 to the end of
@@ -40,41 +43,6 @@
 #define CONS_LOCK_TRIES  50
 #define CONS_LOCK_BUSY      (-1)   /* budget exhausted -> 429                   */
 #define CONS_LOCK_QUIESCED  (-2)   /* server going down -> 503, NOT issued      */
-
-/* Column layout of a formatted MTT line (see /zosmf/test?fn=mtt output):
- *   "0000  9.24.38 STC  320  IEE136I ..."
- *    flags^   time^    jobtype+num^    message^
- * Offsets are first-cut and tuned against live data.                         */
-#define MTT_SRC_OFF    14         /* jobtype+number field ("STC  320")        */
-#define MTT_SRC_LEN    8
-#define MTT_MSG_OFF    24         /* message text start                       */
-
-/* An MTT entry is one console line; nothing in the record bounds it for us.  */
-#define MTT_ENTRY_MAX  256
-
-/* mtentlen is a signed halfword (ieezb806.h) over a flexible mtentdat[], so a
- * bogus or over-read entry presents a negative or absurd length and any use of
- * it as a scan bound walks off the record -- #176.
- *
- * That fix clamped the two consumers known at the time (the echo search and
- * detect_count) and left the rest of this file reading the field raw. The
- * MODIFY correlation in #174 then started processing entries that the source
- * predicate had previously skipped, which turned one of those raw reads into a
- * live S0C4. Every length goes through here now, so there is one place to be
- * right rather than six. Callers still clamp to their own buffer on top. */
-__asm__("\n&FUNC	SETC 'mtt_len'");
-static int mtt_len(const MTENTRY *e)
-{
-	int len;
-
-	if (!e) return 0;
-
-	len = (int) e->mtentlen;
-	if (len < 0) return 0;
-	if (len > MTT_ENTRY_MAX) return MTT_ENTRY_MAX;
-
-	return len;
-}
 
 /* ------------------------------------------------------------------ */
 /* small helpers                                                       */
@@ -241,14 +209,6 @@ static void issue_command(const char *cmd, unsigned cmdlen)
 	__asm__("MODESET MODE=PROB,KEY=NZERO");
 }
 
-/* Trim trailing blanks; return logical length. */
-__asm__("\n&FUNC	SETC 'rstrip_len'");
-static int rstrip_len(const char *s, int len)
-{
-	while (len > 0 && s[len - 1] == ' ') len--;
-	return len;
-}
-
 /* Last whitespace-delimited token, if it is all digits -> the MLWTO number.
  * Copies it into num (NUL-terminated) and returns its length, else 0.        */
 __asm__("\n&FUNC	SETC 'mlwto_num'");
@@ -335,8 +295,11 @@ static void key_to_name(const char *key, char name[MVSMF_KVS_NAMELEN])
 /* correlate ONE MTT snapshot: find the command's echo, walk its       */
 /* response block, append the lines with block-index >= skip to out,   */
 /* and set *total to the block's total line count. Returns the number  */
-/* of lines appended.  (session: array_count() routes through the      */
-/* httpd httpx vector, which needs session->httpd.)                    */
+/* of lines appended, or MTT_SNAP_FAILED when the snapshot could not   */
+/* be taken -- then out, *total and *echo_secs_out are left as they    */
+/* were, so a caller keeping the last good poll keeps all three from   */
+/* the same poll.  (session: array_count() routes through the httpd    */
+/* httpx vector, which needs session->httpd.)                          */
 /* ------------------------------------------------------------------ */
 static int mtt_secs_of_day(const char *dat, int len);
 
@@ -399,9 +362,9 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
                           size_t outsz, unsigned skip, unsigned *total,
                           int want_secs, int *echo_secs_out)
 {
-	CMTT *cmtt = cmtt_new();
-	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
-	unsigned n = arr ? array_count(&arr) : 0;
+	CMTT *cmtt;
+	MTENTRY **arr;
+	unsigned n;
 	int ei = -1;
 	unsigned i, line_idx = 0;
 	int appended = 0;
@@ -413,9 +376,17 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 	int echo_secs = -1;	/* hh.mm.ss of the echo, for the adoption below */
 	int adopted = 0;	/* the block's source was taken from the target  */
 
+	/* A snapshot that could not be taken is a failure, not a block of 0 lines
+	 * (#407): 0 lines with an echo second of -1 is what a cursor is stored
+	 * from, and collect then anchors on the newest echo of the command. The
+	 * outputs below are not touched on this path -- see the header. */
+	if (mtt_snap_open(session, &cmtt, &arr, &n) != 0)
+		return MTT_SNAP_FAILED;
+
 	out[0] = '\0';
-	/* set on EVERY path: a later poll that finds no echo must not leave an
-	 * earlier poll's second standing in the caller's variable. */
+	/* set on every path past the snapshot: a later poll that finds no echo
+	 * must not leave an earlier poll's second standing in the caller's
+	 * variable. */
 	if (echo_secs_out) *echo_secs_out = -1;
 
 	/* find OUR echo. want_secs picks between the two callers:
@@ -631,7 +602,7 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
 
 	out[used < outsz ? used : outsz - 1] = '\0';
 	if (total) *total = line_idx;
-	if (cmtt) cmtt_free(&cmtt);
+	cmtt_free(&cmtt);
 	return appended;
 }
 
@@ -639,7 +610,15 @@ static int correlate_once(Session *session, const char *cmd_upper, char *out,
  * in out; the return value is the number of lines it contains. echo_secs_out
  * receives the MTT second of the echo the LAST poll correlated -- the same poll
  * the returned line count comes from, so the cursor stored from the two of them
- * describes one block. */
+ * describes one block.
+ *
+ * A poll that could not take its snapshot is not a poll (#407): it adds nothing
+ * to the stability count and leaves out, the line count and the echo second as
+ * the last good poll set them, so the three still come from one poll. The next
+ * poll may well succeed -- a copy of the table that fails once need not fail
+ * again. Only when NO poll got a snapshot is the capture a failure,
+ * CONS_CAPTURE_FAILED: returning 0 lines with an echo second of -1 would store a
+ * cursor that anchors collect on the newest echo of the command. */
 __asm__("\n&FUNC	SETC 'capture_response'");
 static int capture_response(Session *session, const char *cmd_upper, char *out,
                             size_t outsz, int *echo_secs_out)
@@ -648,23 +627,27 @@ static int capture_response(Session *session, const char *cmd_upper, char *out,
 	int stable = 0;
 	unsigned prev_total = 0;
 	unsigned total = 0;
+	int looked = 0;		/* some poll got a snapshot */
 
 	for (;;) {
 		if (server_quiescing(session)) return CONS_POLL_INTERRUPTED;
-		correlate_once(session, cmd_upper, out, outsz, 0, &total, -1,
-		               echo_secs_out);
-		if (total > 0) {
-			if (total == prev_total) {
-				if (++stable >= 3) break;
-			} else {
-				stable = 0;
+		if (correlate_once(session, cmd_upper, out, outsz, 0, &total, -1,
+		                   echo_secs_out) != MTT_SNAP_FAILED) {
+			looked = 1;
+			if (total > 0) {
+				if (total == prev_total) {
+					if (++stable >= 3) break;
+				} else {
+					stable = 0;
+				}
 			}
+			prev_total = total;
 		}
-		prev_total = total;
 		if (tod_hi() - start >= (unsigned)POLL_SECONDS) break;
 		cons_poll_nap();
 	}
 
+	if (!looked) return CONS_CAPTURE_FAILED;
 	return (int)total;
 }
 
@@ -680,51 +663,6 @@ typedef struct sol_detection {
 	unsigned char   keylen;
 	char            key[126];     /* uppercased unsol-key                 */
 } SOL_DETECTION;
-
-/* Count MTT entries whose (uppercased) text contains keyword_upper; record the
- * newest matching line into latest (rstripped, NUL-terminated). */
-__asm__("\n&FUNC	SETC 'detect_count'");
-static int detect_count(Session *session, const char *keyword_upper,
-                        char *latest, size_t lsz)
-{
-	CMTT *cmtt = cmtt_new();
-	MTENTRY **arr = cmtt ? cmtt_get_array(cmtt) : NULL;
-	unsigned n = arr ? array_count(&arr) : 0;
-	unsigned i;
-	int count = 0;
-
-	if (latest && lsz) latest[0] = '\0';
-
-	for (i = 0; i < n; i++) {
-		MTENTRY *e = arr[i];
-		char up[200];
-		int len = mtt_len(e);
-		int k;
-		if (!e) continue;
-		if (len > (int)sizeof(up) - 1) len = sizeof(up) - 1;
-		for (k = 0; k < len; k++)
-			up[k] = (char)toupper((unsigned char)e->mtentdat[k]);
-		up[len] = '\0';
-		if (strstr(up, keyword_upper)) {
-			count++;
-			if (latest && lsz) {
-				/* return just the message text, not the raw MTT line:
-				 * skip the flags+time+jobtype/num prefix (cols 0..23)
-				 * and any leading blanks, then rstrip. */
-				int off = (len > MTT_MSG_OFF) ? MTT_MSG_OFF : 0;
-				int mlen;
-				while (off < len && e->mtentdat[off] == ' ') off++;
-				mlen = rstrip_len(e->mtentdat + off, len - off);
-				if (mlen > (int)lsz - 1) mlen = (int)lsz - 1;
-				memcpy(latest, e->mtentdat + off, mlen);
-				latest[mlen] = '\0';
-			}
-		}
-	}
-
-	if (cmtt) cmtt_free(&cmtt);
-	return count;
-}
 
 /* ------------------------------------------------------------------ */
 /* PUT /zosmf/restconsoles/consoles/{console-name}                     */
@@ -911,7 +849,21 @@ int consoleIssueHandler(Session *session)
 		for (j = 0; unsolkey[j] && j < (int)sizeof(unsol_upper) - 1; j++)
 			unsol_upper[j] = (char)toupper((unsigned char)unsolkey[j]);
 		unsol_upper[j] = '\0';
-		unsol_base = detect_count(session, unsol_upper, (char *)0, 0);
+		unsol_base = mtt_detect_count(session, unsol_upper, (char *)0, 0);
+		if (unsol_base < 0) {
+			/* No baseline is not a baseline of 0 (#407): with 0, every message
+			 * already in the table counts as new and the first healthy poll
+			 * reports "detected" with an old line. The command has been
+			 * ISSUED, so say that -- 8/14 is the post-issue "cannot get the
+			 * response" code, 8/15 is the quiescing 503. No WTO: the client
+			 * would write one line per retry into the table it is reading. */
+			send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, 8, 14,
+			    "Command was issued; the Master Trace Table could not be "
+			    "copied, so unsolicited-message detection was not armed. Do "
+			    "not blindly retry -- retry re-issues the command.");
+			rc = -1;
+			goto quit;
+		}
 	}
 
 	/* opaque 16-byte response key (a unique handle; the correlation context
@@ -942,6 +894,18 @@ int consoleIssueHandler(Session *session)
 		 * has nothing to do with our block. */
 		console_lock_release(session);
 
+		if (captured == CONS_CAPTURE_FAILED) {
+			/* ISSUED, and the table could not be read on any poll (#407).
+			 * Not an empty response: that is 200, and the cursor stored from
+			 * it would carry no echo second. Same code as the allocation
+			 * failure below; same advice as 8/15 about a retry. */
+			send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, 8, 14,
+			    "Command was issued; the Master Trace Table could not be "
+			    "copied, so the response could not be read. Do not blindly "
+			    "retry -- retry re-issues the command.");
+			rc = -1;
+			goto quit;
+		}
 		if (captured == CONS_POLL_INTERRUPTED) {
 			/* The command has already been ISSUED (issue_command/MGCR above);
 			 * only the response capture was abandoned. This is NOT a pre-issue
@@ -983,10 +947,11 @@ int consoleIssueHandler(Session *session)
 	/* unsolicited-keyword detection */
 	if (has_unsol && unsol_sync) {
 		/* block up to unsol-detect-timeout, polling the MTT for a new match.
-		 * NOTE: a tight poll (each detect_count re-snapshots the MTT); the
+		 * NOTE: a tight poll (each mtt_detect_count re-snapshots the MTT); the
 		 * async path is preferred for long waits. */
 		unsigned to = unsoltimeout[0] ? (unsigned)atoi(unsoltimeout) : 20;
 		unsigned start = tod_hi();
+		int cnt;
 		if (to == 0 || to > 60) to = 20;            /* sane bound */
 		strcpy(det_status, "timeout");
 		for (;;) {
@@ -1003,12 +968,30 @@ int consoleIssueHandler(Session *session)
 				rc = -1;
 				goto quit;
 			}
-			if (detect_count(session, unsol_upper, det_msg, sizeof(det_msg))
-			    > unsol_base) {
+			cnt = mtt_detect_count(session, unsol_upper, det_msg,
+			                       sizeof(det_msg));
+			if (cnt > unsol_base) {
 				strcpy(det_status, "detected");
 				break;
 			}
-			if (tod_hi() - start >= to) break;
+			if (tod_hi() - start >= to) {
+				if (cnt < 0) {
+					/* "timeout" says the keyword did not appear; the last
+					 * look at the table failed, so that is not known (#407).
+					 * An earlier failed poll does not matter: the count is
+					 * against a baseline, so a later good poll sees whatever
+					 * an earlier one missed. */
+					send_console_error(session,
+					    HTTP_STATUS_INTERNAL_SERVER_ERROR, 8, 14,
+					    "Command was issued; the Master Trace Table could "
+					    "not be copied, so unsolicited-message detection "
+					    "could not finish. Do not blindly retry -- retry "
+					    "re-issues the command.");
+					rc = -1;
+					goto quit;
+				}
+				break;
+			}
 			cons_poll_nap();
 		}
 		if (strcmp(det_status, "detected") != 0) det_msg[0] = '\0';
@@ -1118,7 +1101,7 @@ int consoleCollectHandler(Session *session)
 	unsigned curlen = 0;
 	unsigned total = 0;
 	char *resp;
-	int rc;
+	int rc, r;
 
 	store = mvsmf_kvstore(session->httpd);
 
@@ -1145,11 +1128,24 @@ int consoleCollectHandler(Session *session)
 	 * what we already delivered is not ours to count against, and writing its
 	 * length back is what used to leave a key answering empty for good after a
 	 * mis-anchor (watched going 10 -> 5). The entry is rewritten either way, so
-	 * a polling client keeps it alive against the store's LRU and TTL. */
-	correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total,
-	               cur.echo_secs, (int *)0);
-	if (total > cur.delivered) cur.delivered = total;
+	 * a polling client keeps it alive against the store's LRU and TTL.
+	 *
+	 * A snapshot that could not be taken is not a block of 0 lines (#407): it
+	 * answers 500, like the hardcopy log, and the cursor is rewritten as it
+	 * was -- not advanced, and kept alive for the retry. An empty 200 would
+	 * tell the client the block is finished. No WTO: a client polling through
+	 * a shortage would write one line per poll into the table it is reading. */
+	r = correlate_once(session, cur.cmd, resp, RESP_CAP, cur.delivered, &total,
+	                   cur.echo_secs, (int *)0);
+	if (r != MTT_SNAP_FAILED && total > cur.delivered) cur.delivered = total;
 	nt_set(store, name, &cur, sizeof(cur));
+
+	if (r == MTT_SNAP_FAILED) {
+		free(resp);
+		return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		    8, 1, "An error occurred during the retrieval of the command "
+		    "response.");
+	}
 
 	rc = send_collect(session, resp);
 	free(resp);
@@ -1172,7 +1168,7 @@ int consoleDetectHandler(Session *session)
 	char msg[200];
 	const char *status;
 	JsonBuilder *b;
-	int rc;
+	int rc, count;
 
 	store = mvsmf_kvstore(session->httpd);
 	if (!dkey || !store ||
@@ -1184,7 +1180,17 @@ int consoleDetectHandler(Session *session)
 	}
 
 	msg[0] = '\0';
-	if (detect_count(session, det.key, msg, sizeof(msg)) > (int)det.base_count) {
+	count = mtt_detect_count(session, det.key, msg, sizeof(msg));
+	if (count == MTT_SNAP_FAILED) {
+		/* Not "waiting" and not "expired" (#407): both say the keyword is not
+		 * there, and the table could not be looked at. A 500 lets the client
+		 * ask again while the detection is still armed. No WTO, as in
+		 * consoleCollectHandler(). */
+		return send_console_error(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
+		    8, 1, "An error occurred during the retrieval of the detection "
+		    "result.");
+	}
+	if (count > (int)det.base_count) {
 		status = "detected";
 	} else if (tod_hi() - det.anchor_hi > det.detect_secs) {
 		status = "expired";

@@ -29,6 +29,49 @@ consoleDetectHandler   GET  /restconsoles/consoles/{name}/detections/{key}  asm(
 consoleLogHandler      GET  /restconsoles/v1/log                            asm("CAPI0004")
 ```
 
+### A failed MTT snapshot is a failure, not "no matches" (#251, #407)
+
+`cmtt_new()` returns NULL when it cannot allocate the copy of the table, and
+the copy is the largest allocation on these paths. An empty table still gives
+an array with no entries (`cmtt_get_array()` returns NULL only for a NULL handle
+or table), so **no array is the failure and zero entries is an answer**.
+`mtt_snap_open()` (`src/mttsnap.c`) draws that line once; its failure value is
+`MTT_SNAP_FAILED` (-1), which `correlate_once()` and `mtt_detect_count()` return
+in place of a count. Folding it into 0 does not just answer emptily, it answers
+*wrongly*:
+
+- a detection baseline of 0 makes the first healthy poll report `detected` with
+  a message that was in the table before the command;
+- a cursor stored with 0 lines and `echo_secs = -1` makes collect anchor on the
+  newest echo of the command — #214's mis-anchor, reopened by an allocation
+  failure.
+
+What each caller does with it:
+
+| Caller | On `MTT_SNAP_FAILED` |
+|---|---|
+| `capture_response()` | skips that poll (no stability step, outputs left as the last good poll set them); `CONS_CAPTURE_FAILED` only if no poll got a copy |
+| issue, capture failed | 500 `8/14`, the command **was issued** |
+| issue, `unsol-key` baseline | 500 `8/14`; nothing is armed |
+| issue, sync `unsol-key` wait | a failed poll is retried; 500 `8/14` if the **last** look at the deadline failed (`timeout` would claim absence) |
+| `consoleCollectHandler` | 500 `8/1`; cursor rewritten unchanged (kept alive, not advanced) |
+| `consoleDetectHandler` | 500 `8/1`; the detection stays armed |
+| `consoleLogHandler` | 500 `8/1` (#251) |
+
+`8/14` is the issue command's post-issue "cannot get the response" code (the
+allocation failure for the response buffer already used it); `8/15` stays
+"issued, poll abandoned" and is a 503 for a server that is quiescing. `8/1` is
+the retrieval error the log uses.
+
+**No WTO**, for any of them: the console API reads the MTT back out, and a
+client polling through a storage shortage would write one line per poll into
+the table it is reading.
+
+The failure cannot be provoked on MVS. `test/host/tstmtsn.c` runs the real
+`mtt_snap_open()` and `mtt_detect_count()` against a fake `cmtt_new()` that
+fails; what `correlate_once()` and the handlers do with the result is checked
+by review (the handlers do not compile on the host).
+
 ### Notes
 
 - MTT lines carry only `hh.mm.ss` (no date); the hardcopy log reconstructs the

@@ -36,16 +36,16 @@ explains who may see, read and purge which job.
 > to purge), and without profiles nobody sees the jobs of others, see
 > [docs/jesspool.md](docs/jesspool.md) and
 > [#440](https://github.com/mvslovers/mvsmf/issues/440). `restconsoles`
-> is gated by httpd, not by mvsMF: the shipped route
-> `/zosmf/restconsoles/*` needs READ on the RAKF resource
+> is authorized by an httpd route, not by mvsMF: the shipped route
+> `/zosmf/restconsoles/*` requires READ on the RAKF resource
 > `FACILITY MVSMF.CONSOLE`, and a user without it gets `403`. **Define that
 > profile** — without it the route is open to every login and httpd only warns
 > (`HTTPD425W`), see
 > [Who may use the console service](docs/installation.md#who-may-use-the-console-service)
-> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). A user with READ can
-> issue **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
+> ([#347](https://github.com/mvslovers/mvsmf/issues/347)). READ on that resource
+> allows **any** operator command through `PUT /zosmf/restconsoles/consoles/{name}`
 > — it goes out by SVC 34 from console 0, the master console, with the text
-> unfiltered — and read the whole Master Trace Table through
+> unfiltered — and reading the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
 > diagnostic endpoint `/zosmf/test` can issue commands too, through a second
 > door that the profile does not cover, and it is compiled in by default.

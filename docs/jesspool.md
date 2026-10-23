@@ -422,9 +422,9 @@ JESSPOOL decides the job services only: list, status, files, records and purge
 under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
 `fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
 
-- **Console services** (`/zosmf/restconsoles`). A user with READ on the RAKF
-  resource `FACILITY MVSMF.CONSOLE` can issue an operator command, including
-  `$P` or `$C` for the job of somebody else, and read the Master Trace Table,
+- **Console services** (`/zosmf/restconsoles`). READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` allows issuing an operator command, including
+  `$P` or `$C` for the job of somebody else, and reading the Master Trace Table,
   whose message texts name jobs (for example `$HASP395 jobname ENDED`) and carry
   job numbers, whatever their owner. `consapi.c` makes no authorization call;
   httpd's route does. Without the profile every user who can log in has that

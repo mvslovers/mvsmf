@@ -6,9 +6,9 @@ Issues an MVS operator command and returns the captured command response. Part o
 >
 > `consapi.c` makes no authorization call. The shipped HTTPD route
 > `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
-> (listed **before** `/zosmf/*`) lets only users with READ on that RAKF
-> resource through; everyone else gets `403 Forbidden` from HTTPD, a plain-text
-> body, before mvsMF is reached. Measured on MVS/CE with RAKF: a userid in group
+> (listed **before** `/zosmf/*`) requires READ on that RAKF resource; a user
+> without it gets `403 Forbidden` from HTTPD, a plain-text body, before mvsMF
+> is reached. Measured on MVS/CE with RAKF: a userid in group
 > `USER` was refused (`403`) with Basic and with a token, a userid in `ADMIN`
 > with READ ran `D T`, and the other `/zosmf/` endpoints stayed open to both.
 > Set up, with the traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service).

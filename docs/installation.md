@@ -174,7 +174,7 @@ The console service issues operator commands, and mvsMF checks no authority of
 its own: every user who can log in could stop a started task or vary a device.
 That is why it has the route of its own above, which also needs READ on the
 RAKF resource `FACILITY MVSMF.CONSOLE`. A user without it gets `403` from
-HTTPD on every `/zosmf/restconsoles/...` URL (command, response, detection and
+HTTPD on `/zosmf/restconsoles/...` (command, response, detection and
 log); the rest of the API is not affected.
 
 Define the profile in `SYS1.SECURE.CNTL(PROFILES)`: the class in columns 1–8,

@@ -9,6 +9,7 @@
 #include <mvs/lock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
 #include "router.h"
+#include "dsapi.h"      /* DSLIST_LOCK_RNAME -- list lock recovery (#436) */
 #include "common.h"
 #include "httpcgi.h"
 #include "abendmsg.h"
@@ -381,6 +382,15 @@ static int safe_unlock_thunk(void *anchor)
     return 0;
 }
 
+// Same for the data set list ENQ, which is named, not addressed (#436).
+__asm__("\n&FUNC    SETC 'safe_unlkres'");
+static int safe_unlock_dslist_thunk(void *unused)
+{
+    (void)unused;
+    unlock_res(DSLIST_LOCK_RNAME, LOCK_EXC);
+    return 0;
+}
+
 __asm__("\n&FUNC    SETC 'ses_cleanup'");
 void session_cleanup(Session *session)
 {
@@ -428,6 +438,16 @@ void session_cleanup(Session *session)
         wtof(MSG_RECOVERY_CONSLK);
         if (try(safe_unlock_thunk, anchor) != 0) {
             wtof(MSG_RECOVERY_CONSLK_ABEND);
+        }
+    }
+
+    // The data set list ENQ (#436), for the reason the console one is above:
+    // left held, every later list waits for it for the life of the STC.
+    if (session->dslist_lock) {
+        session->dslist_lock = 0;
+        wtof(MSG_RECOVERY_DSLSTLK);
+        if (try(safe_unlock_dslist_thunk, NULL) != 0) {
+            wtof(MSG_RECOVERY_DSLSTLK_ABEND);
         }
     }
 

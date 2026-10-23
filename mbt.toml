@@ -42,7 +42,7 @@ mbt = "3.0"
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"
 "mvslovers/httpd" = ">=4.2.0"
-"mvslovers/ufsd" = ">=1.4.0"
+"mvslovers/ufsd" = ">=1.5.0"
 
 # `mbt run restart -- HTTPD` compresses MVSMF.DEV.LINKLIB and restarts HTTPD.
 # That is what activates a deploy: HTTPD loads MVSMF when it starts, and every
@@ -107,6 +107,15 @@ sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
 [test.TSTMTLN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTMTSN: #407 — a failed Master Trace Table snapshot must not read as "no
+# matches": detect_count() turned it into a baseline of 0 and a false
+# "detected", correlate_once() into a cursor that mis-anchors collect. Portable
+# C (`mbt test`); the TU #includes src/mttsnap.c with fakes for MTENTRY and the
+# cmtt_* calls, so it drives the real snapshot and keyword count consapi.c
+# calls — do not list mttsnap.c here.
+[test.TSTMTSN]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
 # #includes src/reclines.c so it drives the real state machine the four write
@@ -119,6 +128,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 # src/blkptrk.c so it drives the real function dsapi.c calls — do not list
 # blkptrk.c here.
 [test.TSTBLKT]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTDSEXT: #370 — the allocated size of a data set with more than three
+# extents. The listing summed the format-1 DSCB's three extents and never read
+# the format-3 DSCB, so sizex was short and used too high. Portable C (`mbt
+# test`); the TU #includes src/dsextent.c so it drives the real function
+# dsapi.c calls — do not list dsextent.c here.
+[test.TSTDSEXT]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # TSTJCLN: #220 — a failed realloc while growing the JCL line table must leave
@@ -166,6 +183,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTETAG]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTJSON: #215 — addJsonStringEsc() and addJsonArrayString() escaped five
+# characters and let the rest of the control characters through raw, which makes
+# the whole response invalid JSON. Portable C (`mbt test`); the TU #includes
+# src/json.c so it drives the real builder — do not list json.c here.
+[test.TSTJSON]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTSEND: #298 — the send loop must never advance by the return value without
 # checking it. A 0 from http_send() means "socket send buffer full, retry", and
 # `pos += rc` on it spins a worker at 100% CPU forever. Portable C (`mbt test`);
@@ -203,6 +227,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 # TU #includes src/jobreq.c so it drives the real parser jobsapi.c calls — do
 # not list jobreq.c here.
 [test.TSTJREQ]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTSUBDS: #477 — the data set name in the "file" member of a job submit was
+# copied into a 45-byte stack buffer with a length from the request, so
+# //'<45 characters>' overflowed it. The TU #includes src/subdsn.c so it drives
+# the real function submit_file() calls — do not list subdsn.c here.
+[test.TSTSUBDS]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # TSTJWN: #440 — who may see, read and purge which job on the JES2 spool. An

@@ -512,6 +512,14 @@ test_list_jobs_exec_data() {
 	assert_json_field "$output" '[.data[] | has("exec-ended")] | all' "true" \
 		"--exec-data: every job has exec-ended"
 
+	# the exec-system and exec-member columns must not be blank (#209)
+	assert_json_field "$output" \
+		'[.data[] | .["exec-system"] | type == "string" and length > 0] | all' "true" \
+		"--exec-data: exec-system is a non-empty string"
+	assert_json_field "$output" \
+		'[.data[] | .["exec-member"] | type == "string" and length > 0] | all' "true" \
+		"--exec-data: exec-member is a non-empty string"
+
 	# what the user actually sees: the exec-started column must not be blank for
 	# a job that has run.  This is the regression #208 reported.
 	local started

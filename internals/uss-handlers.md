@@ -83,8 +83,12 @@ list. It could not be settled by measurement — a read-only file system is a UF
 condition and the reference has no equivalent state to provoke — so it was
 decided together with the 410 that used to come back for purged spool output,
 and both followed the list rather than becoming sanctioned exceptions. Category
-4 still separates it. The row is unreachable in practice: UFSD has no read-only
-mount, so nothing produces this rc today.
+4 still separates it. The row is reachable: a UFSD mount is read-only unless
+`MODE=RW` is given (`ufsd#cmd.c`, `ufsd#cfg.c`), and every write on it (mkdir,
+rmdir, remove, open for write, write) answers 68 from `ufsd_check_write()`
+(`ufsd#fil.c`). That function also answers 72 (`UFSD_RC_EACCES`) when the session
+owner is not the owner of a RW mount; the table below has no row for it, so it
+takes the default row, 500.
 
 | UFSD RC | Constant | HTTP | Category | Description |
 |---------|----------|------|----------|-------------|

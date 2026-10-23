@@ -64,17 +64,27 @@ typedef struct send_ops {
 	void (*pause)(void *ctx);
 
 	/**
-	 * Non-zero when no further progress is possible at all: the client is
-	 * already finished or dead, or the server is quiescing/shutting down.
-	 * Polled on every no-progress turn, never cached -- a stopping server
-	 * must not sit out the stall budget in each of its workers.
+	 * Non-zero when the client is already finished or a failed send marked it
+	 * dead: nothing can be delivered and nothing is worth waiting for. Checked
+	 * on entry and on every no-progress turn.
 	 */
-	int  (*aborted)(void *ctx);
+	int  (*dead)(void *ctx);
+
+	/**
+	 * Non-zero when the server is quiescing or shutting down. Checked ONLY on
+	 * a no-progress turn, never on entry: a response the socket accepts at
+	 * once costs a stopping server nothing, and refusing it is how the
+	 * answer to a console `P HTTPD` lost its body (#398) -- the worker's own
+	 * error report was dropped by the very quiesce the command had caused.
+	 * What a stopping server must not do is sit out the stall budget, so a
+	 * stalled send gives up on the next turn. Polled every turn, never cached.
+	 */
+	int  (*stopping)(void *ctx);
 
 	/**
 	 * Called once when the stall budget runs out, with the number of
 	 * consecutive no-progress sends. Reports it; the failure itself is the
-	 * caller's to act on. Not called for a dead socket or for @c aborted --
+	 * caller's to act on. Not called for a dead socket, a dead client or a stopping server --
 	 * those are expected events with nothing for an operator to do.
 	 */
 	void (*giveup)(void *ctx, int stall);

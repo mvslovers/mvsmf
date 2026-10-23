@@ -21,6 +21,7 @@
 #include "jobauth.h"
 #include "jobcard.h"
 #include "jobreq.h"
+#include "subdsn.h"
 #include "jobsapi.h"
 #include "jobsapi_msg.h"
 #include "mvsmfmsg.h"
@@ -45,7 +46,7 @@
 #define RECFM_STR_SIZE   4 + 1
 #define JOBNAME_STR_SIZE 8      // the +1 for null termination will be added on initialization
 #define JOBID_STR_SIZE   8      // the +1 for null termination will be added on initialization
-#define DSNAME_STR_SIZE  44     // the +1 for null termination will be added on initialization
+#define DSNAME_STR_SIZE  (SUBDSN_SIZE - 1) // DSN(MEMBER) in full; the +1 for null termination will be added on initialization
 
 /* process_jobcard() failure codes. Both are reported as 400, but with
    different messages: the two conditions were indistinguishable to the client
@@ -91,6 +92,7 @@ static JESJOB* find_job_by_name_and_id(Session *session, const char *jobname, co
                                        int *decision);
 static void send_job_not_found(Session *session, const char *jobname, const char *jobid);
 static int cancel_job(Session *session, int purge);
+static int  job_still_queued(Session *session, const char *jobname, const char *jobid);
 static int process_job_files(Session *session, JESJOB *job, const char *host, JsonBuilder *builder);
 static int validate_intrdr_headers(Session *session);
 static int open_intrdr(Session *session, VSFILE **intrdr);
@@ -441,6 +443,7 @@ cancel_job(Session *session, int purge)
 	char cancel_name[JWN_PRTSZ] = {0};
 	char cancel_id[JWN_PRTSZ] = {0};
 	int decision = JWN_HIDE;
+	int pending = 0;
 
 	if (!jobname || !jobid) {
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_UNEXPECTED,
@@ -464,9 +467,9 @@ cancel_job(Session *session, int purge)
 	}
 
 	/* A job the caller may read but not purge (or cancel: the same rule, #417)
-	   is visible by definition, so
-	   saying so leaks nothing.  500 with category 4 is the shape of every
-	   refusal in this API: 403 is not in z/OSMF's list of statuses. */
+	   is visible by definition, so saying so leaks nothing.  500 with
+	   category 4 is the shape of every refusal in this API: 403 is not in
+	   z/OSMF's list of statuses. */
 	if (decision != JWN_ALLOW) {
 		send_not_authorized(session, purge ? ERR_MSG_JOB_PURGE_DENIED
 										   : ERR_MSG_JOB_CANCEL_DENIED);
@@ -487,10 +490,18 @@ cancel_job(Session *session, int purge)
 
 	switch (rc) {
 	case CANJ_OK:
+		/* CANJ_OK says JES2 took the request, not that the job is gone: output
+		   a device has selected (PUNCH1 waiting for SETUP) leaves it marked
+		   for purge on the queue until that output is released (#426).  Look
+		   again before claiming the spool is free.  A cancel keeps the output
+		   on the spool by design, so there is nothing to wait for (#417). */
+		pending = purge && job_still_queued(session, cancel_name, cancel_id);
+
 		rc = startJsonObject(builder);
 
 		rc = addJsonString(builder, "jobid", id);
-		rc = addJsonString(builder, "message", "Request was successful.");
+		rc = addJsonString(builder, "message", pending ? MSG_PURGE_PENDING
+		                                              : "Request was successful.");
 		rc = addJsonString(builder, "original-jobid", id);
 		rc = addJsonString(builder, "jobname", name);
 		rc = addJsonString(builder, "owner", owner);
@@ -1238,6 +1249,7 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 	char jobname_p[JWN_PRTSZ];
 	char jobid_p[JWN_PRTSZ];
 	char owner_p[JWN_PRTSZ];
+	char sysid_p[JWN_PRTSZ];
 	const char *stat_str = job_status_str(job);
 
 	if (should_skip_job(job, owner, status)) {
@@ -1256,6 +1268,7 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 	jwn_printable(jobname_p, sizeof(jobname_p), (const char *)job->jobname);
 	jwn_printable(jobid_p, sizeof(jobid_p), (const char *)job->jobid);
 	jwn_printable(owner_p, sizeof(owner_p), (const char *)job->owner);
+	jwn_printable(sysid_p, sizeof(sysid_p), (const char *)job->sysid);
 
 	// type is the first 3 characters of the jobid
 	rc = snprintf(type_str, sizeof(type_str), "%.3s", jobid_p);
@@ -1368,9 +1381,16 @@ process_job(JsonBuilder *builder, JESJOB *job, JOBAUTH *ja, const char *owner,
 		int  tzadjust = __tzget() * -1;
 		char exec_time[EXEC_TIME_STR_SIZE];
 
-		/* exec-submitted is deliberately absent: JES2 records it as
-		   JCTRDRON/JCTRDTON (time/date on the input processor), which libc370's
-		   JESJOB does not carry -- see mvslovers/libc370#79. */
+		/* exec-system and exec-member: z/OSMF names the system and the JES2
+		   member that ran the job.  MVS 3.8j has no sysplex and no CVTSNAME
+		   (CVT+154 is reserved in its CVT), and JES2 is a single member, so the
+		   system id JES2 recorded for the job (JCTRDSID, JESJOB.sysid) names
+		   both.  Measured equal to the SMF id (__smfid()) on jobs and TSO
+		   sessions.
+		   exec-submitted is not emitted: JESJOB.submit_time64 carries it, but
+		   it is a change of its own. */
+		rc = addJsonString(builder, "exec-system", sysid_p);
+		rc = addJsonString(builder, "exec-member", sysid_p);
 		rc = addJsonString(builder, "exec-started",
 			format_exec_time(&job->start_time64, tzadjust,
 				exec_time, sizeof(exec_time)));
@@ -1494,6 +1514,49 @@ quit:
 	}
 
 	return found_job;
+}
+
+/* Sub-second pause between two looks at the queue; BINTVL is in 0.01 s. */
+__asm__("\n&FUNC	SETC 'PRGNAP'");
+static void purge_nap(void)
+{
+	__asm__("STIMER WAIT,BINTVL==F'20'   0.20 seconds" : : : "0", "1");
+}
+
+/* 1 when the job is still on the queue after a purge JES2 accepted.  JES2
+   works the request on its own task and the checkpoint jesjob() reads trails
+   it, so a job that is going away may still be listed for a moment: look up
+   to PURGE_LOOKS times, PURGE_LOOKS-1 naps apart (about a second), and stop at the
+   first look that no longer finds it.  The caller was cleared to purge this
+   job, so the same JWN_OP_PURGE verdict is what hides it here. */
+#define PURGE_LOOKS 5
+
+__asm__("\n&FUNC	SETC 'JOBQUEUD'");
+static int
+job_still_queued(Session *session, const char *jobname, const char *jobid)
+{
+	int look;
+
+	for (look = 0; look < PURGE_LOOKS; look++) {
+		JESJOB **joblist = NULL;
+		JESJOB *job;
+		int decision = JWN_HIDE;
+
+		if (look > 0) {
+			purge_nap();
+		}
+
+		job = find_job_by_name_and_id(session, jobname, jobid, &joblist,
+		                              JWN_OP_PURGE, NULL, &decision);
+		if (joblist) {
+			jesjobfr(&joblist);
+		}
+		if (!job) {
+			return 0;
+		}
+	}
+
+	return 1;
 }
 
 /* The request's own words, made safe to put between the quotes of a JSON
@@ -1789,12 +1852,7 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	memset(jobid, 0, JOBID_STR_SIZE + 1);
 
 	/* strip //'DSN' → DSN */
-	size_t len = strlen(filename);
-	if (len > 4 && filename[0] == '/' && filename[1] == '/' &&
-		filename[2] == '\'' && filename[len - 1] == '\'') {
-		strncpy(dsname, &filename[3], len - 4);
-		dsname[len - 4] = '\0';
-	} else {
+	if (submit_dsname(filename, dsname, sizeof(dsname)) != 0) {
 		char msg[MAX_ERR_MSG_LENGTH] = {0};
 		snprintf(msg, sizeof(msg), ERR_MSG_SUBMIT_FILE_OPEN, filename);
 		sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
@@ -1889,8 +1947,8 @@ submit_file(Session *session, VSFILE *intrdr, const char *filename,
 	session_fclose(session, fp);
 	fp = NULL;
 
-	/* ensure room for the extra line added by process_jobcard */
-	if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 1) < 0) {
+	/* ensure room for the two lines process_jobcard may add */
+	if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 2) < 0) {
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 						CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
 						ERR_MSG_SERVER_ERROR, NULL, 0);
@@ -2373,6 +2431,8 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
     int end_idx = -1;
     int notify_replaced = 0;
     int notify_present = 0;
+    int extra = 1;                  /* cards added behind the last JOB line */
+    char moved_card[81] = {0};
 
     if (!lines || num_lines <= 0 || !jobname || !jobclass || !user) {
         return JOBCARD_ERR_NO_CARD;
@@ -2516,27 +2576,31 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
             }
         }
 
-        // For last job card line, ensure it ends with comma
+        /* The last JOB card line must continue onto the card added below. A
+           comma is data only up to column 71; a line that ends there gives
+           its last operand to a continuation card of its own (#395). */
         if (ii == end_idx) {
-            size_t len = strlen(lines[ii]);
-            while (len > 0 && lines[ii][len-1] == ' ') {
-                len--;
+            int cont = jobcard_continue(lines[ii], moved_card, sizeof(moved_card));
+
+            if (cont < 0) {
+                return JOBCARD_ERR_TOO_LONG;
             }
-            if (len > 0 && lines[ii][len-1] != ',') {
-                if (len >= 70) {
-                    return JOBCARD_ERR_TOO_LONG;
-                }
-                lines[ii][len++] = ',';
-                lines[ii][len] = '\0';
+            if (cont == 2) {
+                extra = 2;
             }
         }
     }
 
-    // Shift remaining lines (after job card) down by 1 to make room for the
-    // USER/PASSWORD continuation card
+    // Shift remaining lines (after job card) down to make room for the cards
+    // added behind it
     for (ii = num_lines - 1; ii > end_idx; ii--) {
-        strncpy(lines[ii + 1], lines[ii], 80);
-        lines[ii + 1][80] = '\0';
+        strncpy(lines[ii + extra], lines[ii], 80);
+        lines[ii + extra][80] = '\0';
+    }
+
+    if (extra == 2) {
+        strncpy(lines[end_idx + 1], moved_card, 80);
+        lines[end_idx + 1][80] = '\0';
     }
 
     /* Insert USER and PASSWORD on a single continuation card, plus a trailing
@@ -2601,11 +2665,11 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
             }
         }
 
-        rc = snprintf(lines[end_idx + 1], 72,
+        rc = snprintf(lines[end_idx + extra], 72,
                       "//         %sUSER=%s,PASSWORD=%s   GENERATED BY MVSMF",
                       notify, user, password);
         if (rc < 0 || rc >= 72) {
-            rc = snprintf(lines[end_idx + 1], 72,
+            rc = snprintf(lines[end_idx + extra], 72,
                           "//         %sUSER=%s,PASSWORD=%s   BY MVSMF",
                           notify, user, password);
         }
@@ -2614,7 +2678,7 @@ process_jobcard(char **lines, int num_lines, char *jobname, char *jobclass,
         }
     }
 
-    return num_lines + 1;
+    return num_lines + extra;
 }
 
 __asm__("\n&FUNC    SETC 'submit_jcl_content'");
@@ -2685,8 +2749,8 @@ int submit_jcl_content(Session *session, VSFILE *intrdr, char *content, size_t c
         line = tokenize(NULL, delimiter, &saveptr);
     }
 
-    /* ensure room for the extra line added by process_jobcard */
-    if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 1) < 0) {
+    /* ensure room for the two lines process_jobcard may add */
+    if (grow_lines_arrays(&lines, &lines_buf, &capacity, num_lines + 2) < 0) {
         wtof(MSG_STORAGE_FAILED, ALLOC_JCL_LINES);
         rc = -1;
         goto quit;

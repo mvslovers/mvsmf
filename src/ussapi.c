@@ -51,8 +51,12 @@ static int uss_extract_json_string(const char *json, const char *key,
 // settled by measurement -- a read-only file system is a UFSD condition, and
 // the reference has no equivalent state to provoke -- so it followed the rule
 // the other rows follow rather than becoming a second exception. Category 4
-// still separates it from the other bad requests. The row is unreachable in
-// practice today: UFSD has no read-only mount, so nothing produces this rc.
+// still separates it from the other bad requests. The row is reachable: a UFSD
+// mount is read-only unless MODE=RW is given (ufsd#cmd.c, ufsd#cfg.c), and every
+// write on it (mkdir, rmdir, remove, open for write, write) answers 68 from
+// ufsd_check_write() (ufsd#fil.c). The same function answers 72, an owner
+// mismatch on a RW mount, which this table does not know: it takes the default
+// row, 500.
 //
 
 __asm__("\n&FUNC    SETC 'ufsd_rc_to_http'");

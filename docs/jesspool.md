@@ -23,6 +23,12 @@ That is the state of mvsMF 1.4.0 without any action.
 The authorization needs **RAKF 2.0.0 or later**, the release whose class table
 contains `JESSPOOL`.
 
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+> Create the profiles with `RDEFINE` and `PERMIT`, then reload with
+> `S RAKFPROF` (section "Create the profiles with the RAKF commands" below).
+> The section "Writing `PROFILES` by hand" below is a reference for reading an
+> existing file and repairing a broken one.
+
 ## Change from mvsMF 1.3.0
 
 > **Change from mvsMF 1.3.0:** any authenticated user could list, read and purge
@@ -179,8 +185,13 @@ Do not raise the JESSPOOL entity maximum above 8 without adjusting the mvsMF key
 ## Create the profiles with the RAKF commands
 
 Create the profiles with the RAKF commands `RDEFINE` and `PERMIT` and reload the
-in-core tables with `S RAKFPROF`, rather than editing
-`SYS1.SECURE.CNTL(PROFILES)` by hand. The commands come with RAKF 2.0.0.
+in-core tables with `S RAKFPROF`. The commands come with RAKF 2.0.0.
+
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+> The commands keep the file sorted, refuse a group line that has no universal
+> line, and do not write a profile twice. A hand-edited file that is wrong
+> aborts the reload (`U0300`, `U0400`, `U0500`) and, on RAKF 2.0.0, keeps JES2
+> from starting at the next IPL.
 
 ```
 RDEFINE 'resource' CLASS(class) UACC(NONE|READ|UPDATE|CONTROL|ALTER)      (alias RDEF)
@@ -222,7 +233,8 @@ Keep a copy of `PROFILES` before the first change.
 ### Examples
 
 Each example is a sequence of commands; the lines below it show what `PROFILES`
-contains afterwards. The commands and the lines are the same for FTPD and mvsMF:
+contains afterwards, so that you can check the result. They are not lines to
+type. The commands and the lines are the same for FTPD and mvsMF:
 the profiles belong to RAKF, not to the server.
 
 **A. Auditors read all jobs except the started tasks; everyone else only their
@@ -354,10 +366,12 @@ see. In the `profiles.txt` that ships with RAKF the classes are in the order
 `DASDVOL`, `DATASET`, `FACILITY`, `TAPEVOL`, `TERMINAL`; `JESSPOOL` sorts between
 `FACILITY` and `TAPEVOL`.
 
-### Writing `PROFILES` by hand
+### Writing `PROFILES` by hand — reference only
 
-If you edit the member instead of using the commands, the rules of the RAKF
-`PROFILES` table apply, and one more: **a line with an id needs a line without
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+
+This section is for reading an existing file and for repairing a broken one. The rules of the RAKF `PROFILES` table
+apply to a hand-written file, and one more: **a line with an id needs a line without
 an id for the same entity, also for `*` itself.** If it is missing, for example
 `JESSPOOL*  ADMIN UPDATE` without `JESSPOOL*  NONE`, `S RAKFPROF` reports
 

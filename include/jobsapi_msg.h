@@ -40,6 +40,9 @@
 #define ERR_MSG_JOB_REQUEST_UNKNOWN "Update request is not 'cancel', 'hold' or 'release'"
 #define ERR_MSG_JOB_REQUEST_NOT_IMPLEMENTED "Update request '%s' is not implemented"
 
+/** @brief Purge feedback `message` when JES2 accepted the purge but the job is still on the queue (#426) */
+#define MSG_PURGE_PENDING "Purge requested. JES2 keeps the job marked for purge until the output it holds is released."
+
 /** @brief Error message for incorrect JES VSAM handle */
 #define ERR_MSG_INCORRECT_JES_VSAM_HANDLE "Unable to open JES2 checkpoint and spool datasets"
 
@@ -79,15 +82,19 @@
 #define ERR_MSG_SPOOL_GONE                                                     \
   "Spool output for job '%.8s(%.8s)' DD id %u is no longer on the spool"
 
-/** @brief Error message for a JOB card the injected operands no longer fit on
+/** @brief Error message for a JOB card mvsMF cannot continue
 
-    mvsMF rewrites the JOB card of every submitted job: NOTIFY= (when the card
-    carries none), USER= and PASSWORD=. A card whose own operands leave under
-    72 columns for those is rejected. Before #307 this was reported as "no
-    valid JOB card found", which sent people looking for a missing card (#130). */
+    mvsMF adds NOTIFY= (when the card carries none), USER= and PASSWORD= on a
+    continuation card of its own, so the last line of the submitted card must
+    end with a comma. A line that ends before column 71 takes one; a line that
+    ends in column 71 gives its last operand to a card of its own (#395). What
+    is still refused is a line with no operand separator to cut at, one past
+    column 71, or an operand too wide for a continuation card. Before #307 this
+    was reported as "no valid JOB card found", which sent people looking for a
+    missing card (#130). */
 #define ERR_MSG_JOBCARD_TOO_LONG                                               \
-  "JOB card too long: no room left for the NOTIFY, USER and PASSWORD "         \
-  "operands mvsMF adds"
+  "JOB card cannot be continued: no room for the comma that joins it to the " \
+  "NOTIFY, USER and PASSWORD operands mvsMF adds"
 
 /** @brief Error message for a spool read that failed or was truncated */
 #define ERR_MSG_SPOOL_READ                                                     \

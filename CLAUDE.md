@@ -290,13 +290,14 @@ Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, 
 Test suites live in `tests/` and `mbt/lua/`, and run through mbt:
 
 ```bash
-mbt run rest-tests                        # everything but curl-diag, curl-nospace and curl-jesspool
+mbt run rest-tests                        # everything but curl-diag, curl-nospace, curl-jesspool and curl-quiesce
 mbt run rest-tests -- curl-jobs zowe      # one suite, a group (lua, curl, zowe, all)
 mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each suite
 ```
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh`, `curl-nospace.sh` and `curl-jesspool.sh` by name only (`curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`, `curl-dslist-parallel.sh` (400 list requests, 4 at a time; `DSLIST_REQUESTS` and `DSLIST_PARALLEL` change that, #436); `curl-diag.sh`, `curl-nospace.sh`, `curl-jesspool.sh` and `curl-quiesce.sh` by name only (`curl-quiesce` stops HTTPD with `P HTTPD`, so it is for a throwaway container and the last thing it does; `curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
+- **Load run**: `load-452.sh`, by name only -- the combined stability run of #452 (member reads, job status polls, large PUTs, concurrent listings), for a local throwaway container; its header lists the knobs
 - **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`
 

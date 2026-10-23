@@ -18,7 +18,7 @@ the RAKF class `JESSPOOL` every user sees only their own jobs. Read the first
 item below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
-4.2.0**, **ufsd 1.4.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
+4.2.0**, **ufsd 1.5.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
 (see 1.2.0).
 
 ### Read this first
@@ -45,6 +45,44 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Fixed
 
+- **A JOB card that fills its last line is accepted** (#395). mvsMF adds
+  `NOTIFY`, `USER` and `PASSWORD` on a continuation card, which needs a comma
+  behind the last operand of the submitted card, and a comma is data only up to
+  column 71. A card ending in column 70 or 71 was refused with reason 12 although
+  z/OSMF accepts it. A column-70 card now simply gets its comma; a column-71 card
+  hands its last operand to a continuation card of its own, so the same operands
+  reach JES2 in the same order. A card that cannot be cut anywhere is still
+  refused, with the new text `JOB card cannot be continued`.
+- **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the
+  job object now carries both, as z/OSMF does. MVS 3.8j has no sysplex and one
+  JES2 member, so both hold the system id JES2 recorded for the job (the SMF
+  id). `exec-submitted` is still missing (#481).
+- **A data set name over 44 characters no longer overruns a buffer on job submit** (#477).
+  Submitting a job from a data set copied the quoted name into a 45-byte stack
+  buffer using a length taken from the request, so a longer name wrote past it.
+  The data set name (44 characters) and the member (8) are now checked
+  separately, and a name over either limit is refused with the same 400 as a
+  value that is not written `//'DSN'`.
+- **Control characters in a JSON string are escaped** (#215). The JSON builder
+  escaped the quote, the backslash, carriage return, line feed and tab, and
+  wrote every other character below a space raw. One such byte -- console
+  message text can hold any -- made the whole response invalid JSON, so a
+  client could not parse any of it. All of them are escaped now: backspace, form
+  feed, carriage return, line feed and tab in their short form, the rest as
+  `\u00XX`.
+
+- **Data set lists no longer fail with HTTP 500 under parallel requests**
+  (#436). `GET /zosmf/restfiles/ds` has IDCAMS write the catalog listing into a
+  temporary data set. Its name carries nothing that differs from one request
+  to the next, so two lists that started in the same second used the same data
+  set: one scratched it while the other opened it, the open abended `S213-04`,
+  and the client got a 500 with `MVSMF901E` on the console (11 of 600 and 14 of
+  400 requests, four at a time). Lists now take turns on a lock, so a list can
+  wait for another one that is still running. In 800 requests at four at a time
+  and 800 at eight at a time, every one answered 200 with the right entry. If a
+  list abends while it holds the lock, recovery releases it and says so
+  (`MVSMF915I`).
+
 - **The end-of-data estimate for FB data sets is right on a 3380** (#439).
   Binary and record-mode reads of an FB data set are capped at the number of
   records the VTOC says it holds, so a read stops at the last record instead
@@ -63,9 +101,47 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   list; an empty level is still a 200 with no items. Only the open of a PDS
   member can reach the 500: a sequential data set never looks at a member
   list.
+- **A purge that JES2 only accepts no longer answers "Request was successful."**
+  (#426). When a device has selected the job's output (a punch waiting for its
+  forms, for example), JES2 marks the job for purge and keeps it on the queue
+  until that output is released; the request answered 200 as if the spool were
+  free. `DELETE /zosmf/restjobs/jobs/{name}/{id}` now looks at the queue again
+  after JES2 took the request. If the job is gone the answer is unchanged. If
+  it is still there the status stays 200, as the reference answers an
+  asynchronous purge, `status` stays 0, and `message` says that the purge is
+  requested and the job stays until its output is released. The look costs
+  nothing on a purge that completes and about a second when it does not.
+- **Collect, detections and the issue command no longer read a failed copy of
+  the console's message table as "no matches"** (#407). The console endpoints
+  answer from a copy of the Master Trace Table, the in-memory tail of the
+  system log. When that copy could not be made, collect, detections and the
+  issue command took it for an empty table and gave a wrong answer rather than
+  an empty one: a detection could report `detected` for a message that was in
+  the table before the command, and a collect could return the block of a
+  later identical command. The hardcopy log was fixed in 1.2.0 (#251); these
+  three now follow it.
+  A collect or a detection poll whose copy fails answers `500` with reason
+  code 8/1 and keeps its cursor or its armed detection, so asking again works.
+  The issue command answers `500` with reason code 8/14 when no poll of its
+  response capture got a copy, when the baseline of an `unsol-key` could not
+  be taken, or when the last look of a synchronous `unsol-key` wait failed.
+  The command **was issued** in all three, so a retry re-issues it. None of
+  them writes an operator message: the console API reads the table back, and a
+  polling client would flood it.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
+- **`P HTTPD` through the console API now returns its answer** (#398). The
+  command stops the server that is answering it, so the request is answered
+  503 with `return-code` 8 and `reason-code` 15 ("issued, response capture
+  abandoned"). That answer left the server as a status line and headers
+  announcing a body that never followed, so a client got an empty 503 (curl:
+  exit 18) and could not tell whether the command had run. The body now
+  arrives. A console command sent while the server is stopping is refused
+  with 503 / 8 / 17 and not issued, or the connection is reset once the
+  server has stopped accepting. The answer to the `P` itself closes the
+  connection, as every console answer does. See
+  `docs/endpoints/console/issue-command.md`.
 
 ### Added
 
@@ -274,7 +350,7 @@ Built against **libc370 2.10.3**, **httpd 4.2.0**, **ufsd 1.4.0** and
   (#407). Under a storage shortage a detection can report `detected` for a
   message that was there before the command, and a collect can return the
   block of a later identical command. The hardcopy log is fixed (above); these
-  two need a change of convention and come later.
+  two need a change of convention and come later. Fixed in 1.4.0.
 
 ## [1.1.0] - 2026-09-14
 

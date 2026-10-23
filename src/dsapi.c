@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -12,12 +13,14 @@
 #include <ibm/mvs/dcbd.h>
 #include <errno.h>
 #include <mvs/racf.h>
+#include <mvs/lock.h>
 
 #include "dsapi.h"
 #include "dsapi_err.h"
 #include "mvsmfmsg.h"
 #include "common.h"
 #include "blkptrk.h"
+#include "dsextent.h"
 #include "datatype.h"
 #include "etag.h"
 #include "httpcgi.h"
@@ -136,6 +139,94 @@ dsn44_len(const char *dsname)
 	return len > MAX_DATASET_NAME ? (size_t) MAX_DATASET_NAME : len;
 }
 
+/* The format-3 DSCB as OBTAIN (SEEK) returns it is the layout dsextent.h
+   reads by offset; a libc370 header that moved a field would break that
+   silently, so the offsets are checked where both are visible. */
+typedef char dsx_f3_len_ok[sizeof(DSCB) == DSX_F3_LEN ? 1 : -1];
+typedef char dsx_f3_ext4_ok[offsetof(DSCB3, extent4) == DSX_F3_EXT4_OFF ? 1 : -1];
+typedef char dsx_f3_fmtid_ok[offsetof(DSCB3, fmtid) == DSX_F3_FMTID_OFF ? 1 : -1];
+typedef char dsx_f3_ext9_ok[offsetof(DSCB3, extent9) == DSX_F3_EXT9_OFF ? 1 : -1];
+typedef char dsx_f3_ptr_ok[offsetof(DSCB3, ptrds) == DSX_F3_PTR_OFF ? 1 : -1];
+
+/* Tracks per cylinder of a volume, from its format-4 DSCB. 30 is the 3350
+   fallback the listing uses when the volume DSCB cannot be read. */
+__asm__("\n&FUNC    SETC 'vol_tpc'");
+static unsigned
+vol_tpc(const char *vol)
+{
+	DSCB		dscb4buf;
+	unsigned	tpc = 0;
+
+	memset(&dscb4buf, 0, sizeof(dscb4buf));
+	if (__dscbv(vol, &dscb4buf) == 0) {
+		tpc = dscb4buf.dscb4.dstrk;
+	}
+	return tpc ? tpc : 30;
+}
+
+/* dscb_alloc_tracks() reader: the format-3 DSCB at cchhr on the volume ctx. */
+__asm__("\n&FUNC    SETC 'read_dscb3'");
+static int
+read_dscb3(const unsigned char cchhr[DSX_PTR_LEN],
+	   unsigned char area[DSX_F3_LEN], void *ctx)
+{
+	DSCB	dscb;
+
+	memset(&dscb, 0, sizeof(dscb));
+	if (__dscbav((const char *)cchhr, (const char *)ctx, &dscb) != 0) {
+		return 1;
+	}
+	memcpy(area, dscb.work, DSX_F3_LEN);
+	return 0;
+}
+
+/* Tracks allocated to the data set whose format-1 DSCB this is, on volume
+   vol: all of its extents, the format-3 DSCB's included (#370). Returns 0 and
+   sets *trks, or non-zero with *trks untouched. */
+__asm__("\n&FUNC    SETC 'dscb1_trks'");
+static int
+dscb1_trks(const DSCB1 *dscb1, char *vol, unsigned tpc, unsigned *trks)
+{
+	return dscb_alloc_tracks((const unsigned char *)dscb1->extent,
+		dscb1->ptrds, dscb1->noepv, tpc, read_dscb3, vol, trks);
+}
+
+/* __listds() adds up the three extents of the format-1 DSCB (its own source
+   says so), which is right up to three extents and short from the fourth. For
+   an entry with more, the allocation is read again here, the format-3 DSCB
+   included, and alloc_trks replaced. 0 left in alloc_trks means it could not
+   be determined; the listing then says "?" and does not print the old partial
+   sum as if it were a size. */
+__asm__("\n&FUNC    SETC 'fix_alloc'");
+static void
+fix_alloc(DSLIST *ds)
+{
+	DSCB		dscb;
+	char		dsn44[44];
+	unsigned	trks;
+
+	if (ds->extents <= DSX_F1_EXTENTS) return;
+
+	ds->alloc_trks = 0;
+	memset(&dscb, 0, sizeof(dscb));
+	memset(dsn44, ' ', sizeof(dsn44));
+	memcpy(dsn44, ds->dsn, dsn44_len(ds->dsn));
+
+	if (__dscbdv(dsn44, ds->volser, &dscb) != 0) return;
+	if (dscb1_trks(&dscb.dscb1, ds->volser, vol_tpc(ds->volser), &trks) != 0) return;
+	if (trks > 0xFFFF) return;
+
+	ds->alloc_trks = (unsigned short)trks;
+}
+
+/* An entry past the third extent whose allocation could not be read. */
+__asm__("\n&FUNC    SETC 'space_unk'");
+static int
+space_unknown(const DSLIST *ds)
+{
+	return ds->extents > DSX_F1_EXTENTS && ds->alloc_trks == 0;
+}
+
 /* Read a `like` model's space allocation off its DSCB, for a create that names
    one (#338).
 
@@ -154,10 +245,10 @@ dsn44_len(const char *dsname)
    allocated in cylinders -- one unit end to end is what keeps a CYL model from
    silently producing a 15-times-too-small target.
 
-   Only the first three extents are visible in the DSCB1 (the rest live in
-   format-3 DSCBs), so a heavily fragmented model reports short. That
-   under-reports the primary rather than over-reporting it, and the secondary
-   still covers the rest, which is the safe direction for the failure.
+   The extents come from dscb_alloc_tracks(), which follows the format-3 DSCB
+   of a model with more than three. A chain that cannot be read fails the
+   lookup: a primary derived from a partial sum would be a quiet under-
+   allocation of the target.
 
    Returns 0 on success. */
 __asm__("\n&FUNC    SETC 'model_alloc'");
@@ -167,17 +258,14 @@ model_alloc(const char *dsname, unsigned *pri_trks, unsigned *sec_trks)
 	LOCWORK		locwork;
 	DSCB		dscb;
 	DSCB1		*dscb1 = &dscb.dscb1;
-	DSCB		dscb4buf;
 	char		vol[7] = {0};
 	char		dsn44[44];
-	unsigned short	tpc = 0;
+	unsigned	tpc;
 	unsigned	trks = 0;
 	unsigned	sec;
-	int		e;
 
 	memset(&locwork, 0, sizeof(locwork));
 	memset(&dscb, 0, sizeof(dscb));
-	memset(&dscb4buf, 0, sizeof(dscb4buf));
 
 	*pri_trks = 0;
 	*sec_trks = 0;
@@ -193,24 +281,10 @@ model_alloc(const char *dsname, unsigned *pri_trks, unsigned *sec_trks)
 		return -1;
 	}
 
-	/* tracks per cylinder, as the listing reads it. 30 is the 3350 fallback
-	   the listing uses when the volume DSCB cannot be read. */
-	if (__dscbv(vol, &dscb4buf) == 0) {
-		tpc = dscb4buf.dscb4.dstrk;
-	}
-	if (tpc == 0) tpc = 30;
+	tpc = vol_tpc(vol);
 
-	for (e = 0; e < 3 && e < dscb1->noepv; e++) {
-		unsigned short lc, lh, hc, hh;
-		lc = ((unsigned)dscb1->extent[e].lower[0] << 8)
-		   |  (unsigned)dscb1->extent[e].lower[1];
-		lh = ((unsigned)dscb1->extent[e].lower[2] << 8)
-		   |  (unsigned)dscb1->extent[e].lower[3];
-		hc = ((unsigned)dscb1->extent[e].upper[0] << 8)
-		   |  (unsigned)dscb1->extent[e].upper[1];
-		hh = ((unsigned)dscb1->extent[e].upper[2] << 8)
-		   |  (unsigned)dscb1->extent[e].upper[3];
-		trks += (unsigned)((hc - lc) * tpc + (hh - lh) + 1);
+	if (dscb1_trks(dscb1, vol, tpc, &trks) != 0) {
+		return -1;
 	}
 
 	sec = ((unsigned)dscb1->scal3[0] << 16)
@@ -1353,6 +1427,36 @@ dslist_in_page(const DSLIST *ds, const char *start_key, int have_start,
 	return !(cmp < 0 || (start_after && cmp == 0));
 }
 
+/* __listds() under the ENQ that keeps two requests from naming the same
+   temporary data set (#436, dsapi.h). Blocking, no budget: __listc() already
+   runs IDCAMS one request at a time, so a waiter waits for what it would have
+   waited for anyway.
+
+   errno is read before the DEQ and put back after it: it is how a caller tells
+   a storage shortage (ENOMEM, #360) from an empty level.
+
+   If the ENQ is not granted (it returns 8 only when this task already holds
+   it, which no path does), the list goes ahead unlocked as it always did, and
+   nothing is released that was not taken. */
+DSLIST **dslist_locked(Session *session, const char *level, const char *filter)
+{
+	DSLIST	**dslist;
+	int	saved_errno;
+
+	session->dslist_lock = (lock_res(DSLIST_LOCK_RNAME, LOCK_EXC) == 0);
+
+	dslist = __listds(level, "NONVSAM VOLUME", filter);
+	saved_errno = errno;
+
+	if (session->dslist_lock) {
+		session->dslist_lock = 0;
+		unlock_res(DSLIST_LOCK_RNAME, LOCK_EXC);
+	}
+
+	errno = saved_errno;
+	return dslist;
+}
+
 int datasetListHandler(Session *session)
 {
 	/* signed, and that is the whole point: `if ((rc = http_printf(...)) < 0)`
@@ -1417,7 +1521,7 @@ int datasetListHandler(Session *session)
 	}
 
 	extract_level_prefix(dslevel, level_buf, sizeof(level_buf), &filter);
-	dslist = __listds(level_buf, "NONVSAM VOLUME", filter);
+	dslist = dslist_locked(session, level_buf, filter);
 
 	/* NULL with errno ENOMEM is a storage shortage, not an empty level: an
 	   empty items array would tell the client the catalog has nothing there
@@ -1486,15 +1590,9 @@ int datasetListHandler(Session *session)
 					ds->used_trks = (((unsigned)dscb1->lstar[0] << 8)
 					              |  (unsigned)dscb1->lstar[1]) + 1;
 					{
-						int e, dscbrc;
-						unsigned short trks = 0;
-						DSCB dscb4buf;
-						unsigned short tpc = 0;
-						memset(&dscb4buf, 0, sizeof(dscb4buf));
-						dscbrc = __dscbv(vol, &dscb4buf);
-						if (dscbrc == 0)
-							tpc = dscb4buf.dscb4.dstrk;
-						if (tpc == 0) tpc = 30;
+						unsigned tpc = vol_tpc(vol);
+						unsigned trks = 0;
+
 						switch (tpc) {
 						case 30: strcpy(ds->dev, "3350"); break;
 						case 12: strcpy(ds->dev, "3375"); break;
@@ -1502,19 +1600,9 @@ int datasetListHandler(Session *session)
 						case 15: strcpy(ds->dev, "3390"); break;
 						default: strcpy(ds->dev, "3390"); break;
 						}
-						for (e = 0; e < 3 && e < dscb1->noepv; e++) {
-							unsigned short lc, lh, hc, hh;
-							lc = ((unsigned)dscb1->extent[e].lower[0] << 8)
-							   |  (unsigned)dscb1->extent[e].lower[1];
-							lh = ((unsigned)dscb1->extent[e].lower[2] << 8)
-							   |  (unsigned)dscb1->extent[e].lower[3];
-							hc = ((unsigned)dscb1->extent[e].upper[0] << 8)
-							   |  (unsigned)dscb1->extent[e].upper[1];
-							hh = ((unsigned)dscb1->extent[e].upper[2] << 8)
-							   |  (unsigned)dscb1->extent[e].upper[3];
-							trks += (hc - lc) * tpc + (hh - lh) + 1;
-						}
-						ds->alloc_trks = trks;
+						if (dscb1_trks(dscb1, vol, tpc, &trks) == 0
+						    && trks <= 0xFFFF)
+							ds->alloc_trks = (unsigned short)trks;
 					}
 					ds->cryear  = 1900 + dscb1->credt[0];
 					if (ds->cryear < 1980) ds->cryear += 100;
@@ -1607,6 +1695,8 @@ int datasetListHandler(Session *session)
 		const char *dsntp;
 		unsigned pct;
 
+		fix_alloc(ds);
+
 		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
 
 		if (strcmp(ds->dsorg, "PO") == 0) dsntp = "PDS";
@@ -1627,11 +1717,19 @@ int datasetListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "      \"ovf\": \"NO\",\n")) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"rdate\": \"%u/%02u/%02u\",\n", ds->rfyear, ds->rfmon, ds->rfday)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"recfm\": \"%.4s\",\n", ds->recfm)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"sizex\": \"%u\",\n", ds->alloc_trks)) < 0) goto quit;
+		if (space_unknown(ds)) {
+			if ((rc = http_printf(session->httpc, "      \"sizex\": \"?\",\n")) < 0) goto quit;
+		} else {
+			if ((rc = http_printf(session->httpc, "      \"sizex\": \"%u\",\n", ds->alloc_trks)) < 0) goto quit;
+		}
 		if ((rc = http_printf(session->httpc, "      \"spacu\": \"%s\",\n",
 			ds->spacu == 'C' ? "CYLINDERS" : "TRACKS")) < 0) goto quit;
 		pct = ds->alloc_trks ? (ds->used_trks * 100 / ds->alloc_trks) : 0;
-		if ((rc = http_printf(session->httpc, "      \"used\": \"%u\",\n", pct)) < 0) goto quit;
+		if (space_unknown(ds)) {
+			if ((rc = http_printf(session->httpc, "      \"used\": \"?\",\n")) < 0) goto quit;
+		} else {
+			if ((rc = http_printf(session->httpc, "      \"used\": \"%u\",\n", pct)) < 0) goto quit;
+		}
 		if ((rc = http_printf(session->httpc, "      \"vol\": \"%.6s\",\n", ds->volser)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"vols\": \"%.6s\"\n", ds->volser)) < 0) goto quit;
 		}

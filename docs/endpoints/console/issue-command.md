@@ -152,9 +152,9 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 413 | 1 | 12 | `Content-Length` of 16 MB or more; nothing is read and the connection is closed. Shares 1 / 12 with the 400 above: both are a body that cannot be used, and the status tells them apart. |
 | 429 | 8 | 16 | Another console command is in progress; the command was **not** issued. |
 | 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
-| 500 | 8 | 14 | Cannot get command response (MTT/SVC unavailable) |
+| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the baseline for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
-| 503 | 8 | 17 | Server quiescing; the command was **not** issued. |
+| 503 | 8 | 17 | Server quiescing; the command was **not** issued. Checked before the command goes out, whether or not another command is in progress. |
 
 > **`429 / 8 / 16` and `503 / 8 / 17` are safe to retry; `503 / 8 / 15` is not.**
 > The first two are refusals *before* SVC 34 — nothing executed. Only `8 / 15`
@@ -162,12 +162,46 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > separate reason codes: it decides whether an operator may re-send an `S`, `V`
 > or `$P`.
 
+> **`500 / 8 / 14` is post-issue as well.** The command ran; what failed is
+> reading the table afterwards, so a blind retry re-issues it exactly as after
+> `8 / 15`. It differs from `8 / 15` in the cause: the server could not make
+> the copy it reads from, not a server that is going down. No key is returned,
+> so there is nothing to collect.
+> A single poll that cannot copy the table is skipped and the next one tried;
+> the error is answered only when no poll of the capture got a copy, when the
+> `unsol-key` baseline could not be taken (a baseline of 0 would report every
+> message already in the table as new), or when the last look of a synchronous
+> `unsol-key` wait failed (`timeout` would claim the keyword did not appear).
+
 > **`503 / 8 / 15` is a post-issue outcome, not a pre-issue failure.** The command
 > has already executed (SVC 34 / MGCR) when the server begins quiescing; only the
 > synchronous response capture or unsolicited-message detection is abandoned. A
 > blind retry **re-issues the command** — harmless for a display (`D T`) but not
 > for a state-changing command (`S`, `V`, `$P`). Treat it as "issued, result
 > unavailable," not "not issued."
+
+> **`P HTTPD` through this endpoint normally ends in `503 / 8 / 15` with a
+> body.** The command stops the server that is answering it, so the response
+> capture is abandoned and the report above is what comes back: status 503 and
+> the `{return-code, reason-code, reason}` body. If the response is complete
+> before the server notices the command, the answer is the ordinary `200`.
+> (Until [#398](https://github.com/mvslovers/mvsmf/issues/398) the body was
+> lost: the status line and headers went out, the body was refused because the
+> server was already quiescing, and the client saw a 503 with an empty body.) A
+> client reads the 503 as "the command ran; the server is going away" and does
+> not send it again.
+>
+> **Ordering.** The answer carries `Connection: close`, so the connection is not
+> reused. That is httpd's rule for a request whose body the server did not read,
+> not an effect of the quiesce: the answers measured, a `D T` included, all
+> carry it. A console command sent while the server is stopping is never
+> answered `200` after the `P` has been answered. Measured in one run, a `P HTTPD`
+> and seven `D T` sent in parallel 20 to 300 ms later: the two earliest were
+> executed and answered `200`, three in the middle were refused `503 / 8 / 17`
+> with a body (not issued), and the two latest were issued and answered
+> `503 / 8 / 15`. Which one a request gets depends on when it arrives. A request
+> sent after the answer to the `P` is reset (curl exit 56) and never reaches
+> the handler; the command did not run.
 
 ## Implementation (MVS 3.8j)
 mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.

@@ -24,8 +24,9 @@
  * @brief Finds which request a PUT body makes
  *
  * Only a member of the top-level object counts; the word inside a value or a
- * nested object does not. A body that is not one complete JSON object is
- * JOBREQ_NONE, so a truncated body can never be taken for a cancel. The
+ * nested object does not. A body that is not exactly one complete JSON object
+ * (truncated, a comma before the closing brace, anything but white space after
+ * it) is JOBREQ_NONE, so a damaged body can never be taken for a cancel. The
  * value is compared whole and case-sensitively.
  *
  * @param body NUL-terminated request body, may be NULL

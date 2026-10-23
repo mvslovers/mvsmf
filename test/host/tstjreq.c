@@ -80,6 +80,16 @@ main(void)
 	check("{\"request", JOBREQ_NONE);
 	check("{", JOBREQ_NONE);
 	check("{\"x\":\"unterminated,\"request\":\"cancel\"}", JOBREQ_NONE);
+	check("{\"request\":\"cancel\",}", JOBREQ_NONE);
+	check("{\"request\":\"cancel\" ,  }", JOBREQ_NONE);
+	check("{,\"request\":\"cancel\"}", JOBREQ_NONE);
+	check("{\"request\":\"cancel\"} junk", JOBREQ_NONE);
+	check("{\"request\":\"cancel\"}{", JOBREQ_NONE);
+	check("{\"request\":\"cancel\"}{\"request\":\"hold\"}", JOBREQ_NONE);
+
+	/* --- white space after the object is fine -------------------------- */
+	check("{\"request\":\"cancel\"}   ", JOBREQ_CANCEL);
+	check("{\"request\":\"cancel\"}\r\n", JOBREQ_CANCEL);
 
 	/* --- the last duplicate wins, as in every JSON parser -------------- */
 	check("{\"request\":\"hold\",\"request\":\"cancel\"}", JOBREQ_CANCEL);

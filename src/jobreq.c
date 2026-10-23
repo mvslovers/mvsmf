@@ -150,9 +150,16 @@ jobreq_parse(const char *body)
 		p = skip_ws(p);
 		if (*p == ',') {
 			p = skip_ws(p + 1);
+			if (*p != '"') {
+				return JOBREQ_NONE;
+			}
 		} else if (*p != '}') {
 			return JOBREQ_NONE;
 		}
+	}
+
+	if (*skip_ws(p + 1)) {
+		return JOBREQ_NONE;
 	}
 
 	return found;

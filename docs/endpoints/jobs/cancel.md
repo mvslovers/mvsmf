@@ -33,7 +33,9 @@ they answer HTTP 400, reason 15. Any other member of the body is ignored.
 
 The body is a JSON object in CP037; only the top-level `request` member
 counts. A `"request"` nested in another object, or inside a string, is not the
-request.
+request. A body that is not exactly one complete JSON object (cut off, a comma
+before the closing brace, anything but white space after it) carries no
+request and answers 400, reason 4.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a

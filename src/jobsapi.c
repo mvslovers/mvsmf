@@ -527,17 +527,19 @@ cancel_job(Session *session, int purge)
 							NULL, 0);
 		break;
 	case CANJ_OUTP:
-		/* a cancel (not a purge) of a job that has finished: nothing is
-		   running to stop, and the output is already where it stays */
-		{
+		/* a cancel of a job that has finished: nothing is running to stop,
+		   and the output is already where it stays. A purge never got this
+		   answer before #417 and still takes the default below. */
+		if (!purge) {
 			char msg[MAX_ERR_MSG_LENGTH] = {0};
 
 			snprintf(msg, sizeof(msg), ERR_MSG_JOB_ON_OUTPUT_QUEUE, name, id);
 			sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST, CATEGORY_SERVICE,
 								RC_WARNING, REASON_JOB_ON_OUTPUT_QUEUE, msg,
 								NULL, 0);
+			break;
 		}
-		break;
+		/* fall through */
 	default:
 		wtof(MSG_JESCANJ_RC, rc);
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,

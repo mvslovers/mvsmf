@@ -1,0 +1,3 @@
+$ curl -si -u "$MVSMF_USER3:$MVSMF_PASS3" \
+  "$MVSMF_URL/zosmf/restjobs/jobs"
+PENDING CAPTURE

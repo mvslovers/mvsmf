@@ -1,0 +1,5 @@
+$ curl -si -X POST -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  -H 'Content-Type: application/json' \
+  -d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"primary":1,"alcunit":"TRK"}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.SECDEMO.DENIED"
+PENDING CAPTURE

@@ -107,6 +107,15 @@ sources = ["test/mvs/tstntst.c", "src/ntstore.c"]
 [test.TSTMTLN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTMTSN: #407 — a failed Master Trace Table snapshot must not read as "no
+# matches": detect_count() turned it into a baseline of 0 and a false
+# "detected", correlate_once() into a cursor that mis-anchors collect. Portable
+# C (`mbt test`); the TU #includes src/mttsnap.c with fakes for MTENTRY and the
+# cmtt_* calls, so it drives the real snapshot and keyword count consapi.c
+# calls — do not list mttsnap.c here.
+[test.TSTMTSN]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
 # #includes src/reclines.c so it drives the real state machine the four write

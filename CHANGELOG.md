@@ -246,6 +246,17 @@ Built against **libc370 2.10.3**, **httpd 4.2.0**, **ufsd 1.4.0** and
   Master Trace Table could not be allocated, the log answered `200` with no
   items. It answers `500` with reason code 8/1 now. An empty window is still
   `200`.
+- **Collect, detections and the issue command report a failed snapshot**
+  (#407). The same failure, in the three other places that copy the Master
+  Trace Table, was read as "no matches" and gave a wrong answer rather than an
+  empty one: a detection could report `detected` for a message that was in the
+  table before the command, and a collect could return the block of a later
+  identical command. A collect or a detection poll whose copy fails answers
+  `500` with reason code 8/1 and keeps its cursor or its armed detection, so
+  asking again works. The issue command answers `500` with 8/14 when no poll of
+  its response capture got a copy, when the baseline of an `unsol-key` could
+  not be taken, or when the last look of a synchronous `unsol-key` wait failed;
+  the command **was issued** in all three, so a retry re-issues it.
 - **A request body is allocated once, at its size, and a failure is answered**
   (#412). A body with a `Content-Length` (a job submitted as JCL, a USS file,
   a console command) started in a 4 KB buffer that doubled, so a 72 KB body
@@ -265,14 +276,6 @@ Built against **libc370 2.10.3**, **httpd 4.2.0**, **ufsd 1.4.0** and
   The failure reported in #412 has not been reproduced: on a test system the
   largest free block stayed whole through a 28 MB upload and the submits that
   followed it. #412 stays open until it is checked again where it was seen.
-
-### Known limitations
-
-- **Collect and detections still read a failed snapshot as "no matches"**
-  (#407). Under a storage shortage a detection can report `detected` for a
-  message that was there before the command, and a collect can return the
-  block of a later identical command. The hardcopy log is fixed (above); these
-  two need a change of convention and come later.
 
 ## [1.1.0] - 2026-09-14
 

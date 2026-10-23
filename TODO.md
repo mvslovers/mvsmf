@@ -21,9 +21,9 @@ a client cannot tell whether the command ran.
 `curl-nospace`, `curl-datasets` hangs on its first sequential read, and the
 data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 0 of 3 on 2026-10-13, on libc370 2.10.2 and 2.10.3 alike (comments on #405);
-the cause is open. **#407 is new (2026-10-13) and not ranked either**: the two
+the cause is open. ~~**#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
-false `detected`, and #214's mis-anchor reopened.
+false `detected`, and #214's mis-anchor reopened.~~ Fixed in PR #470.
 **#417 and #418 are new (2026-10-13) and not ranked either**, both from a
 client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|release`
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
@@ -569,6 +569,13 @@ empty window stays 200. The failure path cannot be provoked; on mvsdev,
 `curl-console` passed 66 of 66 on the deployed build `58b4f9b`. The other two
 snapshot sites went to #407.
 
+**PR #470, open** — #407: `correlate_once()` and `detect_count()` read a failed
+MTT snapshot as no matches — a false `detected` from a baseline of 0, and
+collect re-anchored on the newest echo (#214 reopened). A failed snapshot is
+`MTT_SNAP_FAILED` now: collect and detections answer 500 8/1, the issue command
+500 8/14. The failure path cannot be provoked; `TSTMTSN` drives the real
+snapshot and count against a failing `cmtt_new()`. Not run on MVS.
+
 **PR #403 and PR #404, merged 2026-10-13** — #371: a PUT whose last, partial
 block did not fit answered 204, because `session_fclose()` discarded the
 `EOF`/`ENOSPC` that `fclose()` reports since `libc370#182`. It returns the
@@ -766,15 +773,15 @@ Pointers only — the reasoning lives in the closing comments.
 
 ## Campaigns, not twenty tickets
 
-- **Console correctness** — **#195 and #407 are what is left**, with #346,
-  #214 and #251 (PR #408) closed out of it. One subsystem and one reading of `consapi.c`, but
+- **Console correctness** — **#195 is what is left**, with #346,
+  #214, #251 (PR #408) and #407 (PR #470) closed out of it. One subsystem and one reading of `consapi.c`, but
   four separate bugs, and the two that closed were the two that shared a
   premise: "MVS gives no end-of-response signal, so both ends of the block are
   guessed". #346 was the *end* guessed too early (by design, closed as
   documentation plus a test); #214 was the *start* guessed wrong and then no end
   guessed at all. #195 was ranked with #214 on the guess that it might not
   survive #214's first measurement, and that premise died before #214 did — see
-  #195's entry. #251 was always independent of all three, and so is #407, the
+  #195's entry. #251 was always independent of all three, and so was #407, the
   rest of it.
 - **The endpoint advertises what it does not do** — **#245 and #361 are what is
   left**, with #248 and now #336 as the worked examples of how it ends. #361 is
@@ -787,8 +794,8 @@ Pointers only — the reasoning lives in the closing comments.
   #245's doc-only half — the routes themselves are withdrawn (PR #358), and the
   six suite assertions that covered them turned out to have been green
   throughout, because they were measuring the cataloged path.
-- **Checked, then swallowed** — **#215 and #407 are what is left**, with #267
-  and #251 closed out of it as the worked examples: the return code is inspected and the
+- **Checked, then swallowed** — **#215 is what is left**, with #267, #251 and
+  #407 closed out of it as the worked examples: the return code is inspected and the
   failure goes nowhere. One convention, not three decisions. #267 also says how
   to find the rest of the class mechanically rather than by reading — see its
   entry under *Recently closed*.

@@ -258,7 +258,7 @@ the third type, #cmd("record"), which puts a length of four bytes before each
 record.
 
 *Change from mvsMF 1.3.0:* a read with the type #cmd("record") of a data set or
-member of the record format V, VB or VBS is refused with #cmd("400"). Version
+member of the record format V, VB, VS or VBS is refused with #cmd("400"). Version
 1.3.0 answered #cmd("200") with data that did not match the records. Read such
 data with the type #cmd("text") or #cmd("binary"). The formats F and FB are not
 affected.

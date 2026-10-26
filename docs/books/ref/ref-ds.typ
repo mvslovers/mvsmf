@@ -333,7 +333,7 @@ semicolon: a blank around the word makes it text.
     [Type], [Content type of a read], [Transfer],
     [#cmd("text")], [#cmd("text/plain")], [Read: one line for each record, translated from EBCDIC to ASCII with the chosen table. For F and FB records the trailing blanks are removed first, and each line ends with a line feed. Records of other formats keep their blanks. Write: see @ref-ds-write.],
     [#cmd("binary")], [#cmd("application/octet-stream")], [Read: the records as they are, one after another, with no separator and no translation. Write: the bytes are cut into records (@ref-ds-write).],
-    [#cmd("record")], [#cmd("application/octet-stream")], [Read: each record is preceded by four bytes, a big-endian binary length. A read is possible for the record formats F and FB only. A data set or member of the format V, VB or VBS is refused (@ref-ds-record). Write: not usable. Use #cmd("text") or #cmd("binary").],
+    [#cmd("record")], [#cmd("application/octet-stream")], [Read: each record is preceded by four bytes, a big-endian binary length. A read is possible for the record formats F and FB only. A data set or member of the format V, VB, VS or VBS is refused (@ref-ds-record). Write: not usable. Use #cmd("text") or #cmd("binary").],
   )
 ]
 
@@ -363,10 +363,11 @@ truncated.
 
 #idx("record mode")#idx("RECFM=V")
 A read with the type #cmd("record") of a data set or a member with the record
-format V, VB or VBS answers #cmd("400") with category 6, return code 8 and reason
-code 12, and the message #cmd("Record mode (X-IBM-Data-Type: record) is not
-supported for RECFM=V data sets"). mvsMF checks this before the headers go out
-and before the first record is read, so no data is sent. Before 1.4.0 such a
+format V, VB, VS or VBS answers #cmd("400") with category 6, return code 8 and
+reason code 12, and the message #cmd("Record mode (X-IBM-Data-Type: record) is
+not supported for RECFM=V data sets; use X-IBM-Data-Type: binary or text").
+mvsMF checks this before the headers go out and before the first record is
+read, so no data is sent. Before 1.4.0 such a
 read answered #cmd("200") with chunks of the length LRECL that ran across the
 record boundaries, each with a length prefix that matched no record. Text and
 binary reads of the same data set are not affected, and neither are the formats
@@ -677,7 +678,7 @@ column "Cat/rc" gives category and rc.
     [400], [6/8], [1], [#cmd("Dataset name is too long"), #cmd("Member name is too long"), #cmd("Dataset level is too long")], [A name over the limit (@ref-ds-names).],
     [400], [6/8], [1], [#cmd("Missing Content-Length or Transfer-Encoding header")], [A write with neither header.],
     [400], [6/8], [3], [#cmd("Invalid or missing allocation parameters")], [@ref-ds-create.],
-    [400], [6/8], [12], [#cmd("Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets")], [A record read of a V, VB or VBS data set or member (@ref-ds-record).],
+    [400], [6/8], [12], [#cmd("Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets; use X-IBM-Data-Type: binary or text")], [A record read of a V, VB, VS or VBS data set or member (@ref-ds-record).],
     [400], [6/8], [6], [#cmd("Unsupported request; only 'rename' is supported")], [@ref-ds-rename.],
     [400], [6/8], [7], [#cmd("Rename target already exists")], [A member rename.],
     [400], [6/8], [9], [#cmd("Member pattern is too long")], [The member list.],

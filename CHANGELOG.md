@@ -289,6 +289,14 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `GET /zosmf/info`**, field `zosmf_full_version`, instead of `?fn=version`, and
   `fn=version`, `fn=storage` and `fn=textsum` exist on development builds only.
   `docs/installation.md`, step 5.
+- **A refused login no longer hands out a session cookie** (#520). When
+  `POST /zosmf/services/authenticate` could not open a session of its own, for
+  example because RACF no longer accepted a password that HTTPD still had
+  cached from an earlier request, the `500` carried a `Set-Cookie:
+  LtpaToken2` header, and the next request accepted that cookie. The token was
+  the shared Basic credential's, the one a logout ends for every client that
+  logged on the same way. Only a successful login sets the cookie now, and it
+  sets it once: a login used to send it twice.
 
 ## [1.3.0] - 2026-10-15
 

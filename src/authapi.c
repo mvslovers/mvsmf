@@ -132,7 +132,12 @@ auth_send(Session *session, int status, const char *set_cookie, const char *json
 		return rc;
 	}
 
-	rc = send_common_headers(session);
+	/* Not send_common_headers(): its implicit cookie hands out whatever token
+	   httpc->cred resolves to. After a refused http_new_session() that is the
+	   shared Basic credential's, on a response that says the login failed
+	   (#520); after a good one it would repeat the cookie sent above. This
+	   function decides about the cookie itself. */
+	rc = send_plain_headers(session);
 	if (rc < 0) {
 		return rc;
 	}

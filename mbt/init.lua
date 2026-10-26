@@ -13,8 +13,13 @@ local restauth = require("restauth")
 local LUA_SUITES = {
   ["auth"]        = restauth.auth,
   ["info-cookie"] = restauth.info_cookie,
+  ["auth-refused"] = restauth.auth_refused,
 }
 local LUA_ORDER = { "auth", "info-cookie" }
+
+-- auth-refused is in LUA_SUITES but not in LUA_ORDER: it adds and removes a
+-- RAKF user and reloads the user table, so it is run by name, on a throwaway
+-- container (#520).
 
 -- Shell suites a full run leaves out: they are run by name, on purpose.
 --   curl-diag     faults a worker on purpose, several times

@@ -104,9 +104,10 @@ Which jobs a caller sees, reads, cancels and purges is decided per job by RACF, 
 | GET | [`/zosmf/restfiles/ds/{name}`](datasets/get.md) | Read sequential dataset |
 | PUT | [`/zosmf/restfiles/ds/{name}`](datasets/put.md) | Write sequential dataset |
 
-There are no volume-specific variants. The
-`/zosmf/restfiles/ds/-({volser})/{name}` routes were withdrawn in #336 — they
-captured the volume and discarded it — and are answered 404.
+Each of these, and each of the PDS member routes below, also exists with a
+volume serial: `/zosmf/restfiles/ds/-({volser})/{name}`. The request is served
+only when the data set is cataloged on that volume, and is answered 404
+otherwise; see [volume-serial.md](datasets/volume-serial.md).
 
 ## PDS Members (`/zosmf/restfiles/ds`)
 

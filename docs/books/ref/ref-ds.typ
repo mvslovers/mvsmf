@@ -46,11 +46,24 @@ No other method and path pair is routed. A request for one of the nine paths
 with a method that the path does not offer (a POST to a member, a PUT to the
 member list) gets #cmd("405") with the report #cmd("Http method POST is not
 supported by this URL") (category 6, rc 4, reason 7). A request that matches
-none of the paths (a GET below #cmd("/member"), a path that names a volume
-serial in parentheses after the data set name) gets #cmd("404") with the
+none of the paths (a GET below #cmd("/member")) gets #cmd("404") with the
 report #cmd("Not Found") (category 6, rc 4, reason 7). An HTTP method that
-mvsMF does not know at all gets #cmd("405") with no body. The routes that named
-a volume serial were withdrawn in mvsMF 1.4.0: they ignored the serial.
+mvsMF does not know at all gets #cmd("405") with no body.
+
+Seven of the paths also exist with a volume serial in front of the data set
+name, as #cmd("/zosmf/restfiles/ds/-(VOLSER)/{dataset-name}"): GET, PUT and
+DELETE of a data set, the member list, and GET, PUT and DELETE of a member. The
+volume serial is a check. The request is served as the cataloged form when the
+catalog entry of the data set is on that volume. A data set cataloged on another
+volume gets #cmd("404") with the report #cmd("Dataset not found on the
+requested volume") (category 6, rc 8, reason 13). A data set that is not
+cataloged gets #cmd("404") with the report #cmd("Dataset is not cataloged; only
+a cataloged dataset can be addressed by volume") (category 6, rc 8, reason 14),
+because mvsMF cannot reach a data set that is not in the catalog. A volume
+serial of more than six characters, or with a character other than a letter, a
+digit, #cmd("$"), #cmd("#") or #cmd("@"), gets #cmd("400") with the report
+#cmd("Invalid volume serial") (category 6, rc 8, reason 1). Of a multi-volume
+data set only the first volume is compared.
 
 == Names and Case <ref-ds-names>
 

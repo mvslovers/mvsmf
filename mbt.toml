@@ -292,6 +292,15 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTAUTHD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTVOLSR: #336 — the -({volume-serial}) routes captured the volume and read
+# nothing, so a request naming the wrong volume was answered as if it had named
+# the right one. A cataloged data set on exactly that volume is served like the
+# cataloged form; another volume, an uncataloged name and a malformed volume
+# serial are refused. Portable C (`mbt test`); the TU #includes src/volser.c so
+# it drives the real decision dsapi.c asks — do not list volser.c here.
+[test.TSTVOLSR]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # ── SMP4 distribution ────────────────────────────────────
 # `mbt package` renders the install package from this; `mbt dist` alone
 # re-renders it. ufsd is the reference implementation -- this block follows it

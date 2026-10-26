@@ -24,6 +24,7 @@
 #include "dsextent.h"
 #include "datatype.h"
 #include "etag.h"
+#include "volser.h"
 #include "httpcgi.h"
 #include "reclines.h"
 
@@ -62,6 +63,7 @@ static int dataset_etag(Session *session, const char *dataset,
 static int check_if_match(Session *session, const char *dataset,
                           long max_records);
 static int require_access(Session *session, const char *dsname, int attr);
+static int volume_gate(Session *session, const char *dsname);
 static int normalize_dsn(const char *value, char *out, size_t outlen);
 static size_t dsn44_len(const char *dsname);
 
@@ -826,6 +828,58 @@ dataset_cataloged(const char *dsname)
     memset(&locwork, 0, sizeof(locwork));
 
     return __locate(dsn44, &locwork) == 0;
+}
+
+/* The -({volume-serial}) routes (#336).
+ *
+ * Reads HTTP_volume-serial, which the router fills only on those seven routes,
+ * and decides whether the request may go on as the cataloged form: only when
+ * the catalog entry for dsname is on exactly the volume named. Another volume
+ * and a name the catalog cannot resolve are 404 with a reason of their own --
+ * never an answer from the cataloged data set the client did not ask for.
+ * Reaching an uncataloged data set by volume is not implemented.
+ *
+ * Called right after require_access(), so the answer is no existence oracle
+ * for a caller without authority; dsname has been folded. Returns 0 when the
+ * caller may go ahead (also when the request names no volume); otherwise the
+ * response has already been sent. */
+__asm__("\n&FUNC    SETC 'volume_gate'");
+static int
+volume_gate(Session *session, const char *dsname)
+{
+    const char *volser;
+    LOCWORK    locwork;
+    char       dsn44[44];
+    int        located;
+
+    volser = (const char *) http_get_env(session->httpc,
+        (const UCHAR *) "HTTP_volume-serial");
+    if (!volser) {
+        return 0;
+    }
+
+    memset(dsn44, ' ', sizeof(dsn44));
+    memcpy(dsn44, dsname, dsn44_len(dsname));
+    memset(&locwork, 0, sizeof(locwork));
+    located = (__locate(dsn44, &locwork) == 0);
+
+    switch (volser_verdict(volser, located, locwork.volser)) {
+    case VOLSER_ON_VOLUME:
+        return 0;
+    case VOLSER_BAD:
+        handle_error(session, ERR_INVALID_PARAM, ERR_MSG_INVALID_VOLSER);
+        return -1;
+    case VOLSER_OTHER_VOLUME:
+        sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+            RC_ERROR, REASON_DATASET_NOT_ON_VOLUME,
+            ERR_MSG_DATASET_NOT_ON_VOLUME, NULL, 0);
+        return -1;
+    }
+
+    sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
+        RC_ERROR, REASON_VOLUME_NOT_CATALOGED,
+        ERR_MSG_VOLUME_NOT_CATALOGED, NULL, 0);
+    return -1;
 }
 
 __asm__("\n&FUNC    SETC 'diagnose_open_failure'");
@@ -1853,6 +1907,9 @@ int datasetGetHandler(Session *session)
     if (require_access(session, dsname, RACF_ATTR_READ) != 0) {
         return 0;
     }
+    if (volume_gate(session, dsname) != 0) {
+        return 0;
+    }
 
     // Reject PDS - this endpoint is for sequential datasets only
     if (is_pds(dsname)) {
@@ -1977,6 +2034,9 @@ int datasetPutHandler(Session *session)
        hash -- and neither is an operation of its own, so neither gets a READ
        check of its own. One request, one decision. */
     if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+        return 0;
+    }
+    if (volume_gate(session, dsname) != 0) {
         return 0;
     }
 
@@ -2647,6 +2707,10 @@ int memberListHandler(Session *session)
 		rc = 0;
 		goto quit;
 	}
+	if (volume_gate(session, dsname) != 0) {
+		rc = 0;
+		goto quit;
+	}
 
 	method	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_METHOD");
 	path	= (char *) http_get_env(session->httpc, (const UCHAR *) "REQUEST_PATH");
@@ -2814,6 +2878,9 @@ int memberGetHandler(Session *session)
     if (require_access(session, dsname, RACF_ATTR_READ) != 0) {
         return 0;
     }
+    if (volume_gate(session, dsname) != 0) {
+        return 0;
+    }
 
     // Parse X-IBM-Data-Type header
     data_type_str = (char *) http_get_env(session->httpc,
@@ -2934,6 +3001,9 @@ int memberPutHandler(Session *session)
     /* UPDATE on the library (issue #228). Writing a member -- new or existing --
        is an update of the PDS; there is no member-level profile to ask about. */
     if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+        return 0;
+    }
+    if (volume_gate(session, dsname) != 0) {
         return 0;
     }
 
@@ -3457,6 +3527,9 @@ process_rename(Session *session, const char *target_dsn,
 		if (require_access(session, target_dsn, RACF_ATTR_UPDATE) != 0) {
 			return 0;
 		}
+		if (volume_gate(session, target_dsn) != 0) {
+			return 0;
+		}
 
 		rc = __renmem(target_dsn, from_member, target_member);
 		if (rc == 0) {
@@ -3509,6 +3582,10 @@ process_rename(Session *session, const char *target_dsn,
 			return 0;
 		}
 		if (require_access(session, target_dsn, RACF_ATTR_ALTER) != 0) {
+			return 0;
+		}
+		/* The volume names the data set that exists, the one being renamed. */
+		if (volume_gate(session, from_dsn) != 0) {
 			return 0;
 		}
 
@@ -3892,6 +3969,9 @@ int datasetDeleteHandler(Session *session)
 	if (require_access(session, dsname, RACF_ATTR_ALTER) != 0) {
 		return 0;
 	}
+	if (volume_gate(session, dsname) != 0) {
+		return 0;
+	}
 
 	/* Check if dataset exists via catalog locate */
 	memset(dsn44, ' ', sizeof(dsn44));
@@ -3962,6 +4042,9 @@ int memberDeleteHandler(Session *session)
 	   itself (issue #228). Before the existence probe, same oracle argument as
 	   datasetDeleteHandler. */
 	if (require_access(session, dsname, RACF_ATTR_UPDATE) != 0) {
+		return 0;
+	}
+	if (volume_gate(session, dsname) != 0) {
 		return 0;
 	}
 

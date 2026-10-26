@@ -12,7 +12,7 @@
 #   7. PUT    /zosmf/restfiles/ds/{dsn}({member})          (write member)
 #   8. GET    /zosmf/restfiles/ds/{dsn}({member})          (read member)
 #   9. DELETE /zosmf/restfiles/ds/{dsn}({member})          (delete member)
-#  10. Volume prefix variants: -(vol)/...
+#  10. Volume prefix variants: -(vol)/... (right volume, wrong volume, uncataloged)
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -174,6 +174,7 @@ cleanup_datasets() {
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.TESTENC" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_HYPH}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.VOLDEL" >/dev/null 2>&1 || true
 }
 
 # =========================================================================
@@ -615,88 +616,188 @@ else
 	fi
 fi
 
-# --- The withdrawn -(volume-serial) routes ---
+# --- The -(volume-serial) routes ---
 echo ""
-echo "--- Volume Prefix Routes Are Withdrawn ---"
+echo "--- Volume Prefix Routes (#336) ---"
 
-# All seven -(VOLSER) routes were withdrawn in #336. Until then they were
-# registered against the same handlers as the cataloged forms and no handler
-# ever read the operand, so the six assertions that used to live here passed
-# while the feature did not exist -- they were measuring the cataloged path.
+# The seven -(VOLSER) routes read the volume. A cataloged data set whose
+# catalog entry is on exactly that volume is served like the cataloged form;
+# another volume and an uncataloged name are 404 with a reason of their own
+# (13 and 14), never an answer from the cataloged data set. Reason 7 would be
+# the router's own "no such route", i.e. the routes missing again.
 #
-# Each case asserts 404 *and* reason 7. That pairing is what makes the test
-# mean something: 7 is the router's own "Not Found" (router.c), while a
-# handler that reached a missing data set answers reason 4. Without the reason
-# these assertions would go green for a route that still exists and merely
-# failed to find its target.
+# $VOLUME is the volume the listing reported for $TEST_SEQ, i.e. the right one.
+# NOVOL1 is a well-formed volume serial no stand mounts.
 #
-# $VOLUME is the volume the listing reported for $TEST_SEQ, i.e. the *correct*
-# one. That is the point: routing never reaches a volume lookup, so a right
-# volser is refused exactly like a wrong one. The same value is used for the
-# PDS routes; which volume it names cannot matter to a router 404.
-#
-# It also proves there is no fallthrough: {dataset-name} stops at '/', '(' and
-# ')', so "-(VOL)/X.Y" must not be served as a data set literally named
-# "-(VOL)" -- that would arrive as reason 4, or as a 200.
-#
-# The two PUT cases send a body to a route that answers before draining it,
+# The PUT cases send a body to a route that may answer before draining it,
 # which is #257/#335's exact shape. ~25 bytes fits one segment, so they pass.
-# If either ever fails with a transport error rather than a status mismatch,
-# that is #257 and not the withdrawal.
-assert_route_withdrawn() {
-	local what="$1"; shift
-	local body code content
+# A transport error rather than a status mismatch would be #257.
+VOLDEL="${MVSMF_USER}.CURL.VOLDEL"
+WRONGVOL="NOVOL1"
 
-	body=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$@")
-	code=$(echo "$body" | tail -1)
-	content=$(echo "$body" | sed '$d')
+# status and body of one request, in $VCODE / $VBODY
+vcall() {
+	local out
+	out=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" "$@")
+	VCODE=$(echo "$out" | tail -1)
+	VBODY=$(echo "$out" | sed '$d')
+}
 
-	assert_http_status "404" "$code" "$what is withdrawn"
-	assert_json_field "$content" '.reason' "7" "$what: reason 7 (no such route)"
+assert_not_on_volume() {
+	local what="$1" reason="$2"
+	assert_http_status "404" "$VCODE" "$what"
+	assert_json_field "$VBODY" '.reason' "$reason" "$what: reason $reason"
 }
 
 if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 	VP="-(${VOLUME})"
+	WP="-(${WRONGVOL})"
+	VPL="-($(echo "$VOLUME" | tr 'A-Z' 'a-z'))"
 
-	assert_route_withdrawn "GET dataset with volume prefix" \
-		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+	# the PDS need not be on the volume of the sequential data set
+	vcall "${BASE_URL}/zosmf/restfiles/ds?dslevel=${TEST_PDS}"
+	PDSVOL=$(echo "$VBODY" | jq -r --arg dsn "$TEST_PDS" '.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || PDSVOL=""
+	PP="-(${PDSVOL:-$VOLUME})"
 
-	assert_route_withdrawn "PUT dataset with volume prefix" \
-		-X PUT -H "Content-Type: application/octet-stream" \
-		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
-		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+	# a member of our own: TESTMBR does not exist yet at this point of the run
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
+		-H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLBASE LINE\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLBASE)"
 
-	assert_route_withdrawn "DELETE dataset with volume prefix" \
-		-X DELETE "${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
-
-	assert_route_withdrawn "member list with volume prefix" \
-		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}/member"
-
-	assert_route_withdrawn "GET member with volume prefix" \
-		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(TESTMBR)"
-
-	assert_route_withdrawn "PUT member with volume prefix" \
-		-X PUT -H "Content-Type: application/octet-stream" \
-		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
-		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(VOLMBR)"
-
-	assert_route_withdrawn "DELETE member with volume prefix" \
-		-X DELETE "${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_PDS}(TESTMBR)"
-
-	# The refused writes must not have created anything -- a 404 that still
-	# wrote would be the old bug wearing a new status.
-	BODY=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}")
-	if echo "$BODY" | grep -q "VOLUME PREFIX WRITE TEST"; then
-		fail "a withdrawn PUT writes nothing" "the refused PUT reached ${TEST_SEQ}"
+	# -- the right volume is the cataloged form --
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+	assert_http_status "200" "$VCODE" "GET dataset on its volume"
+	if echo "$VBODY" | grep -q "LINE 1 TEST DATA"; then
+		pass "GET dataset on its volume returns the data"
 	else
-		pass "a withdrawn PUT writes nothing"
+		fail "GET dataset on its volume returns the data" "got: $VBODY"
 	fi
 
-	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -K "$MVSMF_CURLRC" \
-		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)")
-	assert_http_status "404" "$HTTP_CODE" "a withdrawn PUT creates no member"
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${VPL}/${TEST_SEQ}"
+	assert_http_status "200" "$VCODE" "the volume serial is case-insensitive"
+
+	# -- another volume: 404 reason 13, nothing read, nothing changed --
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_SEQ}"
+	assert_not_on_volume "GET dataset on the wrong volume" 13
+	if echo "$VBODY" | grep -q "LINE 1 TEST DATA"; then
+		fail "GET on the wrong volume returns no data" "the cataloged data set was read"
+	else
+		pass "GET on the wrong volume returns no data"
+	fi
+
+	vcall -X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_SEQ}"
+	assert_not_on_volume "PUT dataset on the wrong volume" 13
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"
+	if echo "$VBODY" | grep -q "VOLUME PREFIX WRITE TEST"; then
+		fail "PUT on the wrong volume writes nothing" "the refused PUT reached ${TEST_SEQ}"
+	else
+		pass "PUT on the wrong volume writes nothing"
+	fi
+
+	vcall -X DELETE "${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_SEQ}"
+	assert_not_on_volume "DELETE dataset on the wrong volume" 13
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"
+	assert_http_status "200" "$VCODE" "DELETE on the wrong volume deletes nothing"
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_PDS}/member"
+	assert_not_on_volume "member list on the wrong volume" 13
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_PDS}(VOLBASE)"
+	assert_not_on_volume "GET member on the wrong volume" 13
+
+	vcall -X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_PDS}(VOLMBR)"
+	assert_not_on_volume "PUT member on the wrong volume" 13
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)"
+	assert_http_status "404" "$VCODE" "PUT member on the wrong volume creates no member"
+
+	vcall -X DELETE "${BASE_URL}/zosmf/restfiles/ds/${WP}/${TEST_PDS}(VOLBASE)"
+	assert_not_on_volume "DELETE member on the wrong volume" 13
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLBASE)"
+	assert_http_status "200" "$VCODE" "DELETE member on the wrong volume deletes nothing"
+
+	# -- not cataloged: 404 reason 14, whatever the volume --
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH"
+	assert_not_on_volume "GET an uncataloged name by volume" 14
+
+	vcall -X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH"
+	assert_not_on_volume "PUT an uncataloged name by volume" 14
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.NOSUCH"
+	assert_http_status "404" "$VCODE" "PUT by volume creates no data set"
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH/member"
+	assert_not_on_volume "member list of an uncataloged name by volume" 14
+
+	# -- a malformed volume serial is a client error, not a guess --
+	vcall "${BASE_URL}/zosmf/restfiles/ds/-(TOOLONG1)/${TEST_SEQ}"
+	assert_http_status "400" "$VCODE" "a volume serial over six characters"
+	vcall "${BASE_URL}/zosmf/restfiles/ds/-(BAD.VL)/${TEST_SEQ}"
+	assert_http_status "400" "$VCODE" "a volume serial with a period"
+
+	# -- the right volume writes and deletes --
+	vcall -X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${TEST_SEQ}"
+	assert_http_status "204" "$VCODE" "PUT dataset on its volume"
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"
+	if echo "$VBODY" | grep -q "VOLUME PREFIX WRITE TEST"; then
+		pass "PUT on its volume wrote the data"
+	else
+		fail "PUT on its volume wrote the data" "got: $VBODY"
+	fi
+	# the later sections read the original content back
+	curl -s -o /dev/null -X PUT -K "$MVSMF_CURLRC" \
+		-H "Content-Type: application/octet-stream" \
+		--data-binary $'LINE 1 TEST DATA\nLINE 2 TEST DATA\nLINE 3 TEST DATA\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_SEQ}"
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${PP}/${TEST_PDS}/member"
+	assert_http_status "200" "$VCODE" "member list on its volume"
+	assert_json_field_exists "$VBODY" '.items' "member list on its volume has items"
+
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${PP}/${TEST_PDS}(VOLBASE)"
+	assert_http_status "200" "$VCODE" "GET member on its volume"
+
+	vcall -X PUT -H "Content-Type: application/octet-stream" \
+		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
+		"${BASE_URL}/zosmf/restfiles/ds/${PP}/${TEST_PDS}(VOLMBR)"
+	assert_http_status "204" "$VCODE" "PUT member on its volume"
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)"
+	assert_http_status "200" "$VCODE" "PUT member on its volume created the member"
+
+	vcall -X DELETE "${BASE_URL}/zosmf/restfiles/ds/${PP}/${TEST_PDS}(VOLMBR)"
+	assert_http_status "204" "$VCODE" "DELETE member on its volume"
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLMBR)"
+	assert_http_status "404" "$VCODE" "DELETE member on its volume removed the member"
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLBASE)"
+
+	# DELETE dataset on its volume: a data set of its own, so the sections
+	# below keep theirs
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${VOLDEL}"
+	vcall -X POST -H "Content-Type: application/json" \
+		-d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}' \
+		"${BASE_URL}/zosmf/restfiles/ds/${VOLDEL}"
+	assert_http_status "201" "$VCODE" "create the data set for the volume delete"
+	vcall "${BASE_URL}/zosmf/restfiles/ds?dslevel=${VOLDEL}"
+	DELVOL=$(echo "$VBODY" | jq -r --arg dsn "$VOLDEL" '.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || DELVOL=""
+	if [ -n "$DELVOL" ]; then
+		vcall -X DELETE "${BASE_URL}/zosmf/restfiles/ds/-(${DELVOL})/${VOLDEL}"
+		assert_http_status "204" "$VCODE" "DELETE dataset on its volume"
+		vcall "${BASE_URL}/zosmf/restfiles/ds/${VOLDEL}"
+		assert_http_status "404" "$VCODE" "DELETE on its volume removed the data set"
+	else
+		fail "DELETE dataset on its volume" "the listing reported no volume for ${VOLDEL}"
+		curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${VOLDEL}"
+	fi
 else
-	fail "volume prefix routes are withdrawn" "the listing reported no volume for ${TEST_SEQ} -- the value comes from the API under test"
+	fail "volume prefix routes" "the listing reported no volume for ${TEST_SEQ} -- the value comes from the API under test"
 fi
 
 # --- Delete sequential dataset ---

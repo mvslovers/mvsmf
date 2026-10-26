@@ -52,8 +52,9 @@ und Zowe Explorer genutzt werden können.
 **Gesamt:** 24 Routen (davon 2 Utility, 6 Jobs, 16 Datasets)
 
 > Snapshot as of USS Phase 1 planning, kept as written. Rows 11, 13, 16,
-> 18, 20, 22 and 24 — the seven `-({volume-serial})` routes — were
-> withdrawn in #336 and are no longer registered.
+> 18, 20, 22 and 24 — the seven `-({volume-serial})` routes — were withdrawn in
+> 1.0.0 because no handler read the volume, and registered again in 1.4.0 (#336)
+> with `volume_gate()` in `dsapi.c`.
 
 ### 2.2 libufs — Verfügbare API-Funktionen (aus libufs.h)
 

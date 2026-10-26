@@ -75,12 +75,13 @@ writes and deletes nothing.
     [Status], [Reason], [Message], [Cause],
     [any], [], [], [The catalog entry is on that volume: the answer of the cataloged form.],
     [404], [13], [#cmd("Dataset not found on the requested volume")], [The data set is cataloged, but on another volume.],
-    [404], [14], [#cmd("Dataset is not cataloged; only a cataloged dataset can be addressed by volume")], [The catalog has no entry for the name. A data set that is on a volume but not in the catalog cannot be reached.],
+    [404], [4], [#cmd("Dataset not found")], [The catalog has no entry for the name: the answer of the route without a volume. A data set that is on a volume but not in the catalog cannot be reached.],
     [400], [1], [#cmd("Invalid volume serial")], [The volume serial is empty, longer than six characters, or has a character other than a letter, a digit, #cmd("$"), #cmd("#") or #cmd("@").],
   )
 ]
 
-The category is 6 and the rc is 8 in the three reports. The volume serial is
+The category is 6 and the rc is 8 in the three reports. A volume serial that
+no volume carries is the same case as a wrong one and gets reason 13. The volume serial is
 folded to upper case. The catalog lookup returns one volume serial, and the path
 is compared with that one: a request that names any other volume of a
 multi-volume data set gets reason 13. The query parameter #cmd("volser") of the
@@ -721,10 +722,9 @@ column "Cat/rc" gives category and rc.
     [400], [6/8], [7], [#cmd("Rename target already exists")], [A member rename.],
     [400], [6/8], [9], [#cmd("Member pattern is too long")], [The member list.],
     [401], [none], [none], [no body], [HTTPD has not resolved a user.],
-    [404], [6/8], [4], [#cmd("Dataset not found")], [The data set is not cataloged, or the model of a create.],
+    [404], [6/8], [4], [#cmd("Dataset not found")], [The data set is not cataloged (also on a path with a volume serial, @ref-ds-volume), or the model of a create.],
     [404], [6/8], [5], [#cmd("PDS member not found")], [The library has no such member.],
     [404], [6/8], [13], [#cmd("Dataset not found on the requested volume")], [A path with a volume serial, and the data set is cataloged on another volume (@ref-ds-volume).],
-    [404], [6/8], [14], [#cmd("Dataset is not cataloged; only a cataloged dataset can be addressed by volume")], [A path with a volume serial, and the name is not cataloged (@ref-ds-volume).],
     [404], [7/8], [4], [#cmd("Dataset not found")], [The directory for a member list could not be opened.],
     [404], [6/4], [7], [#cmd("Not Found")], [No route (@ref-ds-sum).],
     [412], [6/8], [10], [#cmd("The resource was modified since the supplied ETag was created")], [@ref-ds-etag.],

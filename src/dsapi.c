@@ -835,8 +835,9 @@ dataset_cataloged(const char *dsname)
  * Reads HTTP_volume-serial, which the router fills only on those seven routes,
  * and decides whether the request may go on as the cataloged form: only when
  * the catalog entry for dsname is on exactly the volume named. Another volume
- * and a name the catalog cannot resolve are 404 with a reason of their own --
- * never an answer from the cataloged data set the client did not ask for.
+ * is 404 with a reason of its own; a name the catalog cannot resolve gets the
+ * answer of the route without a volume (as the reference does, measured). Never
+ * an answer from the cataloged data set the client did not ask for.
  * Reaching an uncataloged data set by volume is not implemented.
  *
  * Called right after require_access(), so the answer is no existence oracle
@@ -877,8 +878,8 @@ volume_gate(Session *session, const char *dsname)
     }
 
     sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, CATEGORY_SERVICE,
-        RC_ERROR, REASON_VOLUME_NOT_CATALOGED,
-        ERR_MSG_VOLUME_NOT_CATALOGED, NULL, 0);
+        RC_ERROR, REASON_DATASET_NOT_FOUND,
+        ERR_MSG_DATASET_NOT_FOUND, NULL, 0);
     return -1;
 }
 

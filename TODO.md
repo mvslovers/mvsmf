@@ -480,13 +480,9 @@ belong in `docs/endpoints/console/hardcopy-log.md`, and mvsMF can issue
 **Part 1 is in 1.4.0.** The seven routes are registered again and `volume_gate()`
 in `dsapi.c` reads the volser: a data set whose catalog entry (first volume
 only) is on that volume is served like the cataloged form, a catalog entry on
-another volume is 404 reason 13, an uncataloged name 404 reason 14, a malformed
-volser 400. Status and text are chosen, not measured: the Zowe CLI is not
-installed on the machine that wrote it, so `zxp` has not been asked what
-z/OSMF answers for a wrong volume. Checking that read-only (`zowe files view ds
-<name> --volume-serial <wrong>` against `zxp`, status line through the SDK, see
-`internals/zosmf-conformance.md`) is the open point; the answer is centralised
-in `volume_gate()` and `dsapi_err.h` and changes in two places.
+another volume is 404 reason 13, an uncataloged name the plain not-found answer
+(404 reason 4), a malformed volser 400. Status and text follow a read-only
+measurement against the reference z/OSMF (`internals/zosmf-conformance.md`).
 
 **What is left is the half the issue was filed for: reaching a data set that is
 not in the catalog.** Out of scope for part 1, and still real:

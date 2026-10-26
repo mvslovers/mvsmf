@@ -649,6 +649,12 @@ assert_not_on_volume() {
 	assert_json_field "$VBODY" '.reason' "$reason" "$what: reason $reason"
 }
 
+assert_not_cataloged() {
+	assert_http_status "404" "$VCODE" "$1"
+	assert_json_field "$VBODY" '.reason' "4" "$1: reason 4, as without a volume"
+	assert_json_field "$VBODY" '.message' "Dataset not found" "$1: message as without a volume"
+}
+
 if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 	VP="-(${VOLUME})"
 	WP="-(${WRONGVOL})"
@@ -721,19 +727,30 @@ if [ -n "$VOLUME" ] && [ "$VOLUME" != "null" ]; then
 	vcall "${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}(VOLBASE)"
 	assert_http_status "200" "$VCODE" "DELETE member on the wrong volume deletes nothing"
 
-	# -- not cataloged: 404 reason 14, whatever the volume --
+	# -- not cataloged: the answer of the route without a volume, whatever
+	# the volume (the reference does the same, measured) --
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.NOSUCH"
+	NOVOLCODE="$VCODE"; NOVOLBODY="$VBODY"
+	assert_http_status "404" "$NOVOLCODE" "GET an uncataloged name without a volume"
 	vcall "${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH"
-	assert_not_on_volume "GET an uncataloged name by volume" 14
+	assert_not_cataloged "GET an uncataloged name by volume"
+	if [ "$NOVOLBODY" = "$VBODY" ]; then
+		pass "GET an uncataloged name by volume: same body as without a volume"
+	else
+		fail "GET an uncataloged name by volume: same body as without a volume" "without: $NOVOLBODY / with: $VBODY"
+	fi
+	vcall "${BASE_URL}/zosmf/restfiles/ds/${WP}/${MVSMF_USER}.CURL.NOSUCH"
+	assert_not_cataloged "GET an uncataloged name by another volume"
 
 	vcall -X PUT -H "Content-Type: application/octet-stream" \
 		--data-binary $'VOLUME PREFIX WRITE TEST\n' \
 		"${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH"
-	assert_not_on_volume "PUT an uncataloged name by volume" 14
+	assert_not_cataloged "PUT an uncataloged name by volume"
 	vcall "${BASE_URL}/zosmf/restfiles/ds/${MVSMF_USER}.CURL.NOSUCH"
 	assert_http_status "404" "$VCODE" "PUT by volume creates no data set"
 
 	vcall "${BASE_URL}/zosmf/restfiles/ds/${VP}/${MVSMF_USER}.CURL.NOSUCH/member"
-	assert_not_on_volume "member list of an uncataloged name by volume" 14
+	assert_not_cataloged "member list of an uncataloged name by volume"
 
 	# -- a malformed volume serial is a client error, not a guess --
 	vcall "${BASE_URL}/zosmf/restfiles/ds/-(TOOLONG1)/${TEST_SEQ}"

@@ -28,11 +28,18 @@ served silently.
 |------|--------|----------|-----------|
 | Cataloged on the volume named | as the cataloged form | | |
 | Cataloged on another volume | 404 | 13 | Dataset not found on the requested volume |
-| Not cataloged | 404 | 14 | Dataset is not cataloged; only a cataloged dataset can be addressed by volume |
+| Not cataloged | 404 | 4 | Dataset not found (the answer of the route without a volume) |
 | Volume serial malformed | 400 | 1 | Invalid volume serial |
 
-`category` is 6 and `rc` 8 in all three refusals. A refused request reads,
-writes and deletes nothing.
+`category` is 6 and `rc` 8 in all three. A refused request reads, writes and
+deletes nothing.
+
+A volume serial that no volume carries is the same case as a wrong one: 404 with
+reason 13. The reference z/OSMF answers a read of it with 500; mvsMF does not
+copy that, because a wrong operand is not a server fault. `category` and
+`reason` of the reference's own reports are ISPF library-management codes that
+mvsMF does not have, so the numbers differ; the status and the sense of the
+message agree (see `internals/zosmf-conformance.md`).
 
 A volume serial is one to six characters from `A-Z`, `0-9`, `$`, `#` and `@`,
 and is case-insensitive. Anything else, including a seventh character or a
@@ -45,7 +52,7 @@ data set gets the usual denial and learns nothing about where it lives.
 
 - **Uncataloged data sets cannot be reached.** Reading or writing a data set
   that is on a volume but not in the catalog needs OBTAIN and an open by volume,
-  which mvsMF does not do. Such a request is 404 with reason 14.
+  which mvsMF does not do. Such a request gets the same 404 as a name that exists nowhere.
 - **One volume serial is compared.** The catalog lookup returns a single volume
   serial, and that is the one the volume in the path is compared with. A request
   that names any other volume of a multi-volume data set is 404 with reason 13.

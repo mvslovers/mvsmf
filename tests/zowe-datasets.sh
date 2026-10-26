@@ -303,8 +303,8 @@ assert_rc 0 "$RC" "rename sequential dataset TESTSEQ2 -> TESTSEQ (restore)"
 
 # --- Volume serial addressing (#336) ---
 # A cataloged data set is served by -(VOLSER) only when its catalog entry is on
-# that volume; another volume is a 404 (reason 13) and an uncataloged name 404
-# (reason 14). Zowe appends the volume as --volume-serial (view, download,
+# that volume; another volume is a 404 (reason 13) and an uncataloged name gets
+# the not-found answer of the route without a volume (404, reason 4). Zowe appends the volume as --volume-serial (view, download,
 # upload) and --volume (delete). The data set is a throwaway of its own so the
 # sections around it keep their state.
 echo ""

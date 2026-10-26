@@ -26,7 +26,6 @@
 #define REASON_DELETE_FAILED			11	// Scratch/uncatalog or STOW delete failed (issue #319)
 #define REASON_RECORD_MODE_RECFM_V		12	// X-IBM-Data-Type: record on a RECFM=V data set (issue #455)
 #define REASON_DATASET_NOT_ON_VOLUME		13	// -(volser): cataloged, but on another volume (issue #336)
-#define REASON_VOLUME_NOT_CATALOGED		14	// -(volser): not cataloged; access by volume is not implemented (issue #336)
 
 /* Dynamic allocation failure -- the reference's own report, measured (#317).
  *
@@ -66,7 +65,6 @@
 #define ERR_MSG_LIST_NOMEM		"Storage for the list could not be obtained"
 #define ERR_MSG_RECORD_MODE_RECFM_V	"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets"
 #define ERR_MSG_DATASET_NOT_ON_VOLUME	"Dataset not found on the requested volume"
-#define ERR_MSG_VOLUME_NOT_CATALOGED	"Dataset is not cataloged; only a cataloged dataset can be addressed by volume"
 #define ERR_MSG_INVALID_VOLSER		"Invalid volume serial"
 #define ERR_MSG_ETAG_MISMATCH		"The resource was modified since the supplied ETag was created"
 

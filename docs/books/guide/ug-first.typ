@@ -170,8 +170,9 @@ say that the login worked. The token is in the header #cmd("Set-Cookie"):
 #screen(raw("Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict"))
 
 The cookie has the name #cmd("LtpaToken2"). It has no #cmd("Secure") attribute,
-so a client sends it over a connection without encryption, too. The header may
-appear twice in the response, with the same value, as the session shows. The option #cmd("-c") of
+so a client sends it over a connection without encryption, too. The response
+has this header once. Before 1.4.0 a successful login sent it twice, with the
+same value. The option #cmd("-c") of
 #cmd("curl") writes the cookie to the file #cmd("cookies.txt"). Every login
 returns a new token, also for the same user ID. HTTPD accepts a token only from
 the address that logged in.
@@ -277,8 +278,15 @@ say which of the checks failed.
 
 If the password is right and the login still fails with a status 500 and the
 message #cmd("The request failed because an internal error occurred."), the
-credential was good but HTTPD could not create a session for it. Ask the
-administrator to look at the console of HTTPD.
+credential was good but HTTPD could not create a session for it. One cause is a
+password that the security product no longer accepts while HTTPD still has it in
+its store from an earlier request. Ask the administrator to look at the console
+of HTTPD.
+
+A failed login sets no cookie, neither the 401 nor the 500, so the client has no
+token after it. Before 1.4.0 the 500 carried a #cmd("Set-Cookie") header with
+the token of the credential that HTTPD had stored, and the next request that
+sent it was accepted.
 
 === A user without access <ug-first-denied>
 

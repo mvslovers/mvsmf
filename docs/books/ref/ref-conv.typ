@@ -203,7 +203,10 @@ the credential, the response carries a cookie:
 The cookie has no #cmd("Secure") attribute. The token stands for the credential
 that HTTPD keeps for the user, the password and the client address.
 @ref-auth-cookie describes it. A request that carries no #cmd("Authorization")
-header, for example one that sends the token in a cookie, gets no cookie.
+header, for example one that sends the token in a cookie, gets no cookie. The
+routes #cmd("POST") and #cmd("DELETE /zosmf/services/authenticate") are the
+exception: they set only the cookie that @ref-auth-login and @ref-auth-logout
+describe, or none.
 
 == Status Codes <ref-conv-status>
 

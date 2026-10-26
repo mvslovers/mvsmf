@@ -243,9 +243,11 @@ end
 -- CHANGES THE SYSTEM UNDER TEST: it adds the RAKF user AUTH520, changes its
 -- password, reloads the RAKF user table (RAKFUSER) twice more and removes the
 -- user again. Run it by name, on a throwaway container, with a target whose
--- main user is a RAKF administrator (group RAKFADM):
+-- main user is a RAKF administrator (group RAKFADM). It does nothing, and says
+-- so, unless MVSMF_AUTH_REFUSED_WRITE_USER=yes is set in the environment, as
+-- curl-jesspool does with MVSMF_JESSPOOL_WRITE_PROFILES:
 --
---   mbt run rest-tests -- auth-refused
+--   MVSMF_AUTH_REFUSED_WRITE_USER=yes mbt run rest-tests -- auth-refused
 --
 -- The new user is not one of the target's, so its Basic requests go through
 -- curl with a password this test makes up and owns; nothing of the target's
@@ -321,8 +323,22 @@ local function rf_curl(ctx, method, path, password)
   return status, body, h
 end
 
+-- The Lua of mbt has no os library; ctx.exec hands mbt's environment on, and
+-- check = false returns the exit code instead of raising.
+local function rf_write_allowed(ctx)
+  local _, code = ctx.exec{ "sh", "-c",
+    'test "${MVSMF_AUTH_REFUSED_WRITE_USER:-}" = yes', check = false }
+  return code == 0
+end
+
 function M.auth_refused(ctx)
   local t = check.new(ctx, "mvsMF Authentication API, refused new session - mbt (Lua) suite")
+
+  if not rf_write_allowed(ctx) then
+    t.skip("auth-refused: adds and removes the RAKF user " .. RF_USER ..
+           " and reloads RAKFUSER; set MVSMF_AUTH_REFUSED_WRITE_USER=yes for a throwaway container")
+    return t.summary()
+  end
 
   t.section("fixture: the user " .. RF_USER)
   rf_tso(ctx, "DELUSER " .. RF_USER)   -- left over from a crashed run; may fail

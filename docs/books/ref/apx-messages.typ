@@ -219,23 +219,22 @@ record that is too long, produces no console message.
 
 == UNIX Files: MVSMF3xx <ref-msg-uss>
 
-#idx("messages", "MVSMF3xx")
+#idx("messages", "MVSMF3xx")#idx("MVSMF301E")
 
 #tab(caption: [Message MVSMF301E])[
   #table(columns: (0.9in, 1.6in, 1fr),
     [Id], [Text], [Meaning and action],
     [#cmd("MVSMF301E")], [#cmd("I/O ERROR READING %s RC=%d")],
-      [The read of a UNIX file failed after the reply had started, so the file
-       was not delivered whole. The first field is the absolute path as UFSD
-       sees it, in the case in which it was written. The second is the return
-       code of UFSD: 52 for an I/O error (also when a failed request carried
-       no code of its own), 56 for a bad file descriptor, and -1 when UFSD
-       cannot be reached because it was stopped during the read. The status
-       200 and the headers had gone out already, so mvsMF breaks off the body
-       without the last chunk. The client sees the connection close in the
-       middle of the answer (#cmd("curl") ends with 18). Check UFSD and the
-       volume behind the file system. The next read of the file may
-       succeed (@ref-uss-read).],
+      [The read of a UNIX file failed after the answer had started, so the file
+       was not delivered whole. #cmd("%s") is the absolute path of the file as
+       UFSD sees it, in the case the client sent. #cmd("%d") is the return code
+       of UFSD for the failed read, or 52 (I/O error) when the handle of the
+       file holds no code. The code #cmd("-1") means that the request to UFSD
+       itself failed, as it does when UFSD is stopped while the file is read.
+       The status 200 and the headers are on the wire already, so the client
+       sees the connection close in the middle of the body, without the last
+       chunk. The bytes that were read before are sent. Check UFSD and the
+       volume behind the file system. A new read of the file may succeed.],
   )
 ]
 

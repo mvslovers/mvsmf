@@ -95,6 +95,10 @@ Some answers have no body at all.
 )
 ]
 
+A read of a file that fails after the answer has started has no status and no
+report. The connection closes in the middle of the body, and curl exits with
+18. The operator gets #cmd("MVSMF301E") (@ug-uss-readfail).
+
 == Jobs <ug-errors-jobs>
 
 #tab(caption: [Errors of the job services])[

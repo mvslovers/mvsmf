@@ -243,7 +243,7 @@ with #cmd("RES=") needs an identity to check, so it authenticates.
   )
 ]
 
-#note[*A missing profile opens the route.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
+#note[*A missing profile opens the route of HTTPD.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
 and no profile for #cmd("MVSMF.ACCESS") in the class #cmd("FACILITY"), HTTPD
 starts, writes #cmd("HTTPD425W"), and lets every authenticated caller through.
 This holds for the route of the whole API. The console services are the

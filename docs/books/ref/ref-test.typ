@@ -39,7 +39,7 @@ The value of #cmd("filepath") is the rest of the path after
 #cmd("/zosmf/test/wildcard/"), or the text #cmd("(null)") if the variable is
 empty.
 
-== The Build Option <ref-test-build>
+== Which Builds Have It <ref-test-build>
 
 #idx("MVSMF_NO_TEST_ENDPOINT")#idx("development build")#idx("release", "diagnostic endpoint")
 mvsMF registers both routes only in a *development build*, a build whose version
@@ -188,7 +188,9 @@ The function exists on a development build only. The answer is
 The #cmd("version") is the version of the build, with the suffix #cmd("-dev"). The #cmd("build") is the short
 identifier of the source commit that the module was built from. It ends with
 #cmd("-dirty") if a tracked file differed from the commit at build time. After a
-deploy, the value shows which build is loaded.
+deploy of a development build, the value shows which build is loaded. On a
+release the request answers 404 (@ref-test-build); read
+#cmd("zosmf_full_version") instead.
 
 === listds <ref-test-listds>
 

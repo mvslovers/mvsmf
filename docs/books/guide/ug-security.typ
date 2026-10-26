@@ -551,10 +551,18 @@ keeps the groups of the logon, so the connection to #cmd("CONSOPS") does not
 reach that user until HTTPD has dropped the credential
 (@ug-security-connect).
 
+#note[*Change from mvsMF 1.3.0.* Version 1.3.0 made no check of its own for the
+console services. From 1.4.0 on, the console services and the diagnostic
+endpoint refuse every user, administrators included, until the profile is
+defined and READ is granted. This is the behaviour after an upgrade, not an
+error. Define the profile before you start the new version
+(@ug-install-upgrade).]
+
 === What a User without Access Sees <ug-security-console-refused>
 
 #idx("403")#idx("MVSMF.CONSOLE", "refusal")
-A user who has a valid password but no READ access to #cmd("MVSMF.CONSOLE")
+With the route line of @ug-security-console in place, a user who has a valid
+password but no READ access to #cmd("MVSMF.CONSOLE")
 gets HTTP 403 from HTTPD on every request below
 #cmd("/zosmf/restconsoles/"). The body is the plain text #cmd("403 Forbidden"),
 as for #cmd("MVSMF.ACCESS") (@ug-security-access-refused). mvsMF does not
@@ -591,13 +599,15 @@ The route of HTTPD is gated only while a profile covers the resource. Without
 a profile, RAKF cannot tell a protected resource from an unprotected one, and
 HTTPD lets everyone through its route. HTTPD checks once at its start and writes
 the message #cmd("HTTPD425W") for a route whose resource has no profile.
-The following session reads the line from the log of the console service:
+The log is read through the console service, so it can be read only once the
+profile is defined. The following session was taken after that and reads the
+line that the earlier start wrote:
 
 #screen(raw(read("../ex/ug-security/g-warn.txt"), block: true))
 
 The message no longer means that the console services are open. mvsMF does not
 take a missing profile for permission: without the profile its own check
-refuses every user, as the session shows. The user #cmd("SMITH") belongs to the
+refuses every user, as the next session shows. The user #cmd("SMITH") belongs to the
 group that is later given the permission, and the session was recorded before
 the profile existed:
 

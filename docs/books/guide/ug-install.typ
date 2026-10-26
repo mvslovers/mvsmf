@@ -401,6 +401,11 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 *Change from mvsMF 1.3.0.* The class #cmd("JESSPOOL") is new in 1.4.0. Version
 1.3.0 does not check it.
 
+*Change from mvsMF 1.3.0.* Version 1.3.0 let every user who could log on issue
+operator commands. Version 1.4.0 asks for READ access to #cmd("MVSMF.CONSOLE")
+in every console request. A system that has not defined the profile answers
+every console request with the 500 of @ug-errors.
+
 *Change from mvsMF 1.3.0.* The data definitions #cmd("HASPCKPT") and
 #cmd("HASPACE1") in the HTTPD procedure are no longer needed for a standard JES2
 (@ug-install-jes). You can leave them in the procedure.

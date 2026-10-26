@@ -43,13 +43,13 @@ The console name in the path is any text of two to eight characters. The issue
 request uses it only to build the addresses it returns. The other requests do
 not look at it. All names reach the same table.
 
-#note[*The console services check nothing themselves.* mvsMF makes no
-authorization check of its own for them: any caller that mvsMF lets in can
-issue any operator command. The administrator protects the console services in
-the HTTPD configuration, in front of mvsMF. See @ug-security-console, which
-defines the route and the profile and shows what a user without the permission
-gets. Until that is done, treat every user ID that can log on to mvsMF as an
-operator.]
+#note[*The console services need the permission #cmd("MVSMF.CONSOLE").* mvsMF
+asks RAKF for READ access to the resource #cmd("MVSMF.CONSOLE") in the class
+#cmd("FACILITY") at the start of every console request. A user without the
+access, and every user while the profile does not exist, is refused and issues
+no command. The permission covers every operator command, so give it only to
+the people who may issue every one. See @ug-security-console, which defines the profile and the route and shows
+what a user without the permission gets.]
 
 == Issuing a Command <ug-console-issue>
 
@@ -99,7 +99,8 @@ it:
 
 The error body of the console requests has the fields #cmd("return-code"),
 #cmd("reason-code") and #cmd("reason"). The data set and job requests of mvsMF
-use other field names (@ug-errors).
+use other field names (@ug-errors). A refusal for lack of the permission has the
+fields of the data set services.
 
 The _mvsMF Reference_, chapter "Console Services", lists every field of the body
 and of the answer.

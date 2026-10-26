@@ -133,5 +133,11 @@ Some answers have no body at all.
   [#cmd("400"), #cmd("reason-code") 22, “The parameter timeRange is
     invalid”], [The #cmd("timeRange") of a hardcopy log request is not a
     number with a unit, such as #cmd("10m").], [@ug-console],
+  [#cmd("500"), #cmd("category") 4, “LMOPEN error”, detail “Authorization
+    failed - You may not use this service.”], [The user has no READ access to
+    #cmd("MVSMF.CONSOLE"), or the profile does not exist. The report has the
+    fields of the data set services, not those of the other console errors.
+    The diagnostic endpoint of a development build answers the same.],
+    [@ug-security-console],
 )
 ]

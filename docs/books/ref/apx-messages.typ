@@ -103,7 +103,7 @@ this appendix. They are in the chapters of the routes (@ref-ds, @ref-uss,
        sets the answer is status 500, not an empty list. The address space is
        short of storage. Check the region of HTTPD and look for a leak. The
        function #cmd("storage") of the diagnostic endpoint shows the free
-       storage (@ref-test-storage).],
+       storage of a development build (@ref-test-storage).],
     [#cmd("MVSMF007W")], [#cmd("RECEIVE TIMED OUT AFTER %d RETRIES")],
       [A client stopped sending in the middle of a request body, and the read
        gave up after the waiting time (10 seconds, in steps of 50 ms). The
@@ -261,7 +261,8 @@ work.
        exception is S913, a refusal by the security product to open a data set.
        It is answered with the authorization report, and MVSMF901E is still
        written. Any other abend points to a fault. Report it with the lines
-       MVSMF913I and MVSMF914I and the build (@ref-test-version).],
+       MVSMF913I and MVSMF914I and the build (@ref-test-version). The build of a
+       release is its version.],
     [#cmd("MVSMF902W")], [#cmd("HEADERS ALREADY SENT, NO ERROR RESPONSE POSSIBLE")],
       [The abend came after the response had begun. The client sees a body that
        ends too soon and not an error report. It always follows MVSMF901E.],
@@ -280,7 +281,8 @@ work.
     [#cmd("MVSMF906W")], [#cmd("FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY")],
       [The functions #cmd("abend") and #cmd("jesabend") of the diagnostic
        endpoint (@ref-test) cause an abend on purpose. This is not a fault. The
-       message does not occur in a build without the endpoint (@ref-test-build).],
+       message does not occur in a release or in a build without the endpoint
+       (@ref-test-build).],
     [#cmd("MVSMF907I")], [#cmd("ENV[%u] \"%s\"=\"%s\"")],
       [A dump of the CGI environment, one line for each variable. The message is
        written only if the logging middleware is registered. The shipped build

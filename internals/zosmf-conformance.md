@@ -211,3 +211,9 @@ not have, so they are not copied.
 
 Not measured: a data set that is on a volume but not in the catalog (it could
 not be created read-only), and a hyphen in the volume serial.
+
+`volume_gate()` reads `HTTP_volume-serial` with `http_get_env()`, and httpd's
+env lookup is case-insensitive. A request header `Volume-Serial: X` therefore
+switches the gate on for the cataloged routes too (only stricter, never looser;
+on the `-(VOL)` routes the path wins). This holds until the router can tell
+path variables from headers.

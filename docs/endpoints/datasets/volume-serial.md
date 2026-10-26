@@ -56,6 +56,10 @@ data set gets the usual denial and learns nothing about where it lives.
 - **One volume serial is compared.** The catalog lookup returns a single volume
   serial, and that is the one the volume in the path is compared with. A request
   that names any other volume of a multi-volume data set is 404 with reason 13.
+- **The volume serial is a consistency check, not an access control.** The
+  check and the operation look up the catalog separately. If the data set is
+  recataloged in between, the operation can hit a different volume than the one
+  that was checked. Authorization hangs on the data set name.
 - The `volser` query parameter of the list request is a separate matter and is
   unchanged: the list reads it and ignores it; see [list.md](list.md).
 

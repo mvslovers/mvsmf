@@ -50,8 +50,10 @@ struct client {
 	int        attempts;      /* sends issued */
 	int        pauses;        /* pauses taken */
 	int        sent;          /* bytes accepted */
-	int        aborted;       /* what aborted() reports */
-	int        abort_after;   /* start reporting aborted at this attempt */
+	int        aborted;       /* what dead() reports */
+	int        abort_after;   /* start reporting dead at this attempt */
+	int        stopping;      /* what stopping() reports */
+	int        stop_after;    /* start reporting stopping at this attempt */
 	int        giveups;       /* giveup() calls */
 	int        giveup_stall;  /* stall count it was given */
 	unsigned char got[PAYLOAD];
@@ -74,6 +76,9 @@ op_send(void *ctx, const unsigned char *buf, int len)
 
 	if (c->attempts >= c->abort_after) {
 		c->aborted = 1;
+	}
+	if (c->stop_after && c->attempts >= c->stop_after) {
+		c->stopping = 1;
 	}
 
 	if (want <= 0) {
@@ -99,9 +104,15 @@ op_pause(void *ctx)
 }
 
 static int
-op_aborted(void *ctx)
+op_dead(void *ctx)
 {
 	return ((struct client *)ctx)->aborted;
+}
+
+static int
+op_stopping(void *ctx)
+{
+	return ((struct client *)ctx)->stopping;
 }
 
 static void
@@ -113,7 +124,7 @@ op_giveup(void *ctx, int stall)
 	c->giveup_stall = stall;
 }
 
-static const SEND_OPS ops = { op_send, op_pause, op_aborted, op_giveup };
+static const SEND_OPS ops = { op_send, op_pause, op_dead, op_stopping, op_giveup };
 
 /* Run one scripted client over `len` bytes of a known payload. */
 static int
@@ -257,9 +268,7 @@ main(void)
 		/* The entry guard. After one send fails the handler's error path
 		   comes straight back here through sendErrorResponse(); without
 		   this it would pay the whole budget a second time for a peer that
-		   is already gone (httpd#203). The same guard covers a quiescing
-		   server: P HTTPD waits for its workers, so no worker may sit out
-		   10 seconds per response in flight. */
+		   is already gone (httpd#203). */
 		const int stalled[] = { 0 };
 
 		rc = run(&c, stalled, 1, PAYLOAD);   /* seed the struct */
@@ -281,14 +290,12 @@ main(void)
 
 	printf("\n--- #298: a client that goes away mid-stall stops the wait ---\n");
 	{
-		/* Quiesce arriving while a response is stalled: the loop must
-		   notice on the next turn, not finish the 10 seconds first. */
 		const int stalled[] = { 0 };
 
 		memset(&c, 0, sizeof(c));
 		c.script = stalled;
 		c.script_len = 1;
-		c.abort_after = 3;     /* aborted() turns true after 3 sends */
+		c.abort_after = 3;     /* dead() turns true after 3 sends */
 
 		rc = send_bytes(&c, &ops, (const unsigned char *)"HELLO", 5);
 
@@ -297,6 +304,69 @@ main(void)
 		CHECK(c.pauses < SEND_STALL_MAX,
 			"without sitting out the rest of the budget");
 		CHECK_EQ(c.giveups, 0, "an expected shutdown is not reported as a timeout");
+	}
+
+	printf("\n--- #398: a quiescing server still delivers what the socket takes ---\n");
+	{
+		/* P HTTPD sets the quiesce flag, then the console handler answers
+		   its own request with the 8/15 error report. That answer used to be
+		   refused on entry: the headers were out, the body never was, and the
+		   client saw an empty 503. A healthy socket accepts the buffer at
+		   once, so quiesce changes nothing about it. */
+		const int any[] = { 64 };
+
+		memset(&c, 0, sizeof(c));
+		c.script = any;
+		c.script_len = 1;
+		c.abort_after = ATTEMPT_CAP;
+		c.stopping = 1;
+
+		rc = send_bytes(&c, &ops, (const unsigned char *)"HELLO", 5);
+
+		CHECK_EQ(rc, 0, "the response is sent");
+		CHECK_EQ(c.sent, 5, "all of it");
+		CHECK_EQ(c.pauses, 0, "without any wait");
+		CHECK_EQ(c.giveups, 0, "and nothing is reported");
+	}
+
+	printf("\n--- #398: ... but never sits out the stall budget ---\n");
+	{
+		/* The reason quiesce is tested at all (httpd#122, #205): shutdown
+		   waits for its workers. A send that stalls while the server is
+		   stopping gives up on the next turn. */
+		const int stalled[] = { 0 };
+
+		memset(&c, 0, sizeof(c));
+		c.script = stalled;
+		c.script_len = 1;
+		c.abort_after = ATTEMPT_CAP;
+		c.stopping = 1;
+
+		rc = send_bytes(&c, &ops, (const unsigned char *)"HELLO", 5);
+
+		CHECK_EQ(rc, -1, "the stalled send fails");
+		CHECK_EQ(c.attempts, 1, "after the first no-progress turn");
+		CHECK_EQ(c.pauses, 0, "with no pause");
+		CHECK_EQ(c.giveups, 0, "and not as a stall timeout");
+	}
+
+	printf("\n--- #398: quiesce arriving mid-stall stops the wait ---\n");
+	{
+		const int stalled[] = { 0 };
+
+		memset(&c, 0, sizeof(c));
+		c.script = stalled;
+		c.script_len = 1;
+		c.abort_after = ATTEMPT_CAP;
+		c.stop_after = 3;
+
+		rc = send_bytes(&c, &ops, (const unsigned char *)"HELLO", 5);
+
+		CHECK_EQ(rc, -1, "the send fails");
+		CHECK_EQ(c.attempts, 3, "on the turn the server began to stop");
+		CHECK(c.pauses < SEND_STALL_MAX,
+			"without sitting out the rest of the budget");
+		CHECK_EQ(c.giveups, 0, "an expected shutdown is not a timeout");
 	}
 
 	printf("\n--- #298: nothing to send is not a failure ---\n");

@@ -25,6 +25,23 @@ working.
 `POST /zosmf/services/authenticate` remains the explicit way in, and the only
 way to get the cookie without also making an API call.
 
+## Unknown path, wrong method
+
+A path no endpoint serves answers `404`. A path an endpoint serves, requested
+with a method that endpoint does not offer (for example `DELETE /zosmf/info`),
+answers `405` with the usual error report
+(`"message":"Http method DELETE is not supported by this URL"`). Like the
+reference z/OSMF, the response carries no `Allow` header. Authentication comes
+first: a request without credentials is a `401`. The one path mvsMF's
+authentication check lets through to its handler is
+`/zosmf/services/authenticate` (it is how a client logs in), so the method check
+applies there like anywhere else.
+
+Methods other than `GET`, `POST`, `PUT` and `DELETE` are not decided by the
+endpoint. HTTPD answers `PATCH`, `OPTIONS` and any other method it does not know
+itself with a `405` and the plain text `405 Method Not Allowed`. A `HEAD` request
+reaches mvsMF, which answers `405` with no body.
+
 ## `X-MVSMF-Client` — for browser clients only
 
 A `401` carries `WWW-Authenticate: Basic realm="<SMF ID>"`, as the reference
@@ -113,6 +130,27 @@ characters for a data set or `dslevel`, 8 for a member.
 **USS paths are not folded.** `/zosmf/restfiles/fs` addresses a case-sensitive
 file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 
+## Names in the URL are percent-encoded once
+
+A client sends a name in the URL path percent-encoded **once**. The server
+decodes the path one time and uses the result as the name, so what the client
+meant is what is stored, read or deleted.
+
+- A name that contains a literal `%` is sent as `%25`. A file named `a%41` is
+  addressed as `/zosmf/restfiles/fs/tmp/a%2541`. A name sent as `a%41` is the
+  name `aA`.
+- A name that contains a literal `+` is sent as `%2B`. The server reads `+` in
+  the path as a blank, as it does in a query parameter.
+- A client that encodes every name twice, because an earlier mvsMF decoded the
+  path a second time, must send the name once-encoded. This changed in 1.4.0;
+  before it, a literal `%` followed by two hexadecimal digits was read as an
+  escape, so `a%2541` named the file `aA` instead of `a%41`.
+- Query parameters (`path=`, `pattern=`, `dslevel=`, ...) follow the same rule:
+  they are decoded once, and a literal `%` is sent as `%25`.
+
+Data set and member names cannot contain these characters. The rule matters for
+USS paths.
+
 ## USS Files (`/zosmf/restfiles/fs`)
 
 | Method | Path | Description |
@@ -132,11 +170,65 @@ file system, where `/tmp/Foo` and `/tmp/foo` are different files.
 | GET | [`/zosmf/restconsoles/consoles/{name}/detections/{key}`](console/detections.md) | Detect keyword in unsolicited messages |
 | GET | [`/zosmf/restconsoles/v1/log`](console/hardcopy-log.md) | Get messages from the hardcopy log |
 
+## Slow clients
+
+This applies to every download: a USS file, a data set, a PDS member and the
+records of a job spool file. These responses carry no `Content-Length`. An
+HTTP/1.1 client receives them as `Transfer-Encoding: chunked`; an HTTP/1.0
+client receives the body bare, and the end of the connection ends it.
+
+The server sends as long as the client takes data. When the client stops
+reading and its TCP receive window is closed, the server waits for the window
+to open. If it stays closed for about **10 seconds** in a row (100 tries of
+100 ms) and not one byte is accepted in that time, the server gives up and
+closes the connection. Any progress starts the count again, so this is neither
+a limit on the total time nor on the size of a download.
+
+What the client sees:
+
+- The status line was already sent, so the status is **200**, and there is no
+  error body. The connection ends in the middle of the body, and the closing
+  zero-length chunk (`0`, CRLF, CRLF) never arrives. A client that checks for it
+  reports an incomplete body — curl ends with **exit code 18**.
+- An HTTP/1.0 client, which has no closing chunk to look for, cannot tell the
+  cut-off from a complete file.
+- There is **no message on the operator console** when a chunked download is
+  cut off. An HTTP/1.0 download is cut off by the same rule and does leave
+  `MVSMF008W` (see [messages](../messages.md)); so does a response that carries
+  a `Content-Length`, such as every JSON reply, which then ends short of the
+  announced length.
+
+When it happens:
+
+- A client that does not read at all for more than about 10 seconds. In a
+  test, pauses of up to 9.5 seconds were survived and pauses of 11 seconds and
+  more were not.
+- A client that reads at a very low rate. What counts is the longest stretch
+  in which the client's TCP stack leaves the window closed, not the average
+  rate, so it cannot be predicted from the rate alone. In a test, a Linux
+  client with the default receive buffer reading 887 KB at 4 KB/s
+  (`curl --limit-rate 4k`) was cut off after about three minutes, at a
+  different byte count each time. The same client at the same rate with a
+  16 KB receive buffer received the whole file.
+
+What to do:
+
+- Do not throttle the transfer below what the client can keep up with, and do
+  not stop reading while the data is processed. Read the response to a file or
+  to memory first, then work on it.
+- For a client that has to read slowly, set a small receive buffer on its
+  socket (`SO_RCVBUF`), so that it announces window updates often.
+- Check that the download is complete. Use a client that reports an incomplete
+  chunked body. For a file, compare the number of bytes received with the
+  size from the listing.
+- Repeat the request. A download is a read and can be repeated safely, but it
+  starts from the beginning: file and data set reads accept no byte range.
+
 ## Common Headers
 
 | Header | Used By | Description |
 |--------|---------|-------------|
-| `X-IBM-Data-Type` | Dataset/member GET | `text` (default), `binary`, `record` |
+| `X-IBM-Data-Type` | Dataset/member GET | `text` (default), `binary`, `record`. `record` is answered `400` for RECFM=V, VB and VBS data sets (#455) |
 | `X-IBM-Data-Type` | Dataset/member PUT | `text` (default), `binary`. `record` is accepted and **not implemented** — the write path frames no length prefix (#245) |
 | `X-IBM-Intrdr-Mode` | Job submit | Validated but fixed to `TEXT` |
 | `X-IBM-Intrdr-Lrecl` | Job submit | Validated but fixed to `80` |

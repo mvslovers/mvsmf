@@ -316,6 +316,8 @@ hidden_for_U() {   # fixture label
 	req U GET "/zosmf/test?fn=job&jobname=JW440A"
 	if [ "$HTTP_STATUS" = 404 ]; then
 		skip "$l: /zosmf/test is not in this build"
+	elif [ "$HTTP_STATUS" = 500 ] && echo "$BODY" | jq -e '.category == 4' > /dev/null 2>&1; then
+		skip "$l: /zosmf/test is refused for this user (FACILITY MVSMF.CONSOLE)"
 	elif echo "$BODY" | jq -e '.count == 0' > /dev/null 2>&1; then
 		pass "$l: the test endpoint's job probe hides the foreign job"
 	else
@@ -395,6 +397,8 @@ if install_fixture R; then
 	req U GET "/zosmf/test?fn=job&jobname=JW440A"
 	if [ "$HTTP_STATUS" = 404 ]; then
 		skip "READ: /zosmf/test is not in this build"
+	elif [ "$HTTP_STATUS" = 500 ] && echo "$BODY" | jq -e '.category == 4' > /dev/null 2>&1; then
+		skip "READ: /zosmf/test is refused for this user (FACILITY MVSMF.CONSOLE)"
 	elif echo "$BODY" | jq -e '.count == 1' > /dev/null 2>&1; then
 		pass "READ: the test endpoint's job probe shows the readable job"
 	else

@@ -13,7 +13,7 @@ GET
 - `jobid`: ID of the job (e.g. JOB00123)
 
 ## Query Parameters
-- `exec-data` (optional): `Y` adds `exec-started` and `exec-ended` to the job object, exactly as for [list](list.md#execution-timestamps). Any other value (or omitting the parameter) returns the object unchanged.
+- `exec-data` (optional): `Y` adds `exec-system`, `exec-member`, `exec-started` and `exec-ended` to the job object, exactly as for [list](list.md#execution-timestamps). Any other value (or omitting the parameter) returns the object unchanged.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and a JSON object with the following properties:
@@ -33,15 +33,18 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 }
 ```
 
-With `exec-data=Y`, two further fields follow `retcode`:
+With `exec-data=Y`, four further fields follow `retcode`:
 
 ```json
+    "exec-system": "MVSC",
+    "exec-member": "MVSC",
     "exec-started": "2026-08-07T18:57:10.000Z",
     "exec-ended": "2026-08-07T18:57:10.000Z"
 ```
 
 Format, `null` semantics and the missing `exec-submitted` are described under
-[Execution timestamps](list.md#execution-timestamps).
+[Execution timestamps](list.md#execution-timestamps), the two system fields
+under [Execution system and member](list.md#execution-system-and-member).
 
 `owner` comes from `JCTUSEID`, which JES2 writes during conversion, so it is
 empty for the second or two between a job being read in and being converted.
@@ -186,7 +189,7 @@ Measured on MVS 3.8j, all with `NOTIFY`:
 | `IEF452I JOB NOT RUN - JCL ERROR` (converter) | `00000004` | `00` | `JCL ERROR` |
 | `IEF452I JOB NOT RUN - JCL ERROR` (job select, `IEF633I`) | `00000000` | `80` | `JCL ERROR` |
 
-`/zosmf/test?fn=job&jobname=NAME` reports these fields directly.
+`/zosmf/test?fn=job&jobname=NAME` reports these fields directly (it needs READ on `FACILITY MVSMF.CONSOLE`, like every `/zosmf/test` request).
 
 ## Examples
 

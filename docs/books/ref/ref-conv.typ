@@ -50,8 +50,9 @@ it accepts. The last column names the chapter that describes the route.
 ] <ref-conv-routes>
 
 The table has 29 routes, counting each method. The two routes under
-#cmd("/zosmf/test") exist only in a build without
-#cmd("-DMVSMF_NO_TEST_ENDPOINT") (@ref-test-build). The HTTPD route lines that
+#cmd("/zosmf/test") exist only in a development build, whose version ends in
+#cmd("-dev"), and not in a build with #cmd("-DMVSMF_NO_TEST_ENDPOINT")
+(@ref-test-build). A release does not register them. The HTTPD route lines that
 decide who may reach the routes are in @ref-httpd.
 
 A part of the path in braces is a variable. #cmd("{name}") takes the text up to
@@ -66,12 +67,33 @@ request for one is a request for an unknown route (@ref-conv-errors).
 === Path decoding <ref-conv-path>
 
 #idx("percent escape")
-The router copies the path into a buffer of 1024 bytes, so it keeps at most
-1023 characters. It decodes the percent escapes. HTTPD hands over the path in
-EBCDIC, and the router translates each byte that a percent escape gives from
-ASCII to EBCDIC. A path variable can hold up to 1023 characters. The router
-does not look at the query string. Each handler reads the parameters that it
-knows.
+HTTPD decodes the path of the request once, before it starts mvsMF. It turns
+each percent escape into the byte that the escape names, translated from ASCII
+to EBCDIC, and it turns a plus sign into a blank. The router does not decode
+again: it copies the path into a buffer of 1024 bytes, so it keeps at most 1023
+characters, and it matches the route, fills the path variables and hands the
+name to the handler from that copy. A path variable can hold up to 1023
+characters. The router does not look at the query string. Each handler reads
+the parameters that it knows. HTTPD decodes the values of the query parameters
+once too.
+
+A client therefore sends the name that it means, percent-encoded once:
+
+- A name with a literal percent sign is sent as #cmd("%25"). The file
+  #cmd("a%41") is addressed as #cmd("/zosmf/restfiles/fs/tmp/a%2541"). The URL
+  #cmd("/zosmf/restfiles/fs/tmp/a%41") names the file #cmd("aA").
+- A name with a literal plus sign is sent as #cmd("%2B"), because a plus sign in
+  the path is read as a blank.
+- A name that a client encodes twice is not found under that name.
+
+A name of a data set, a member, a job contains none of these
+characters, so the rule matters for the paths of files in UFS.
+
+#note[*Change from mvsMF 1.3.0.* Version 1.3.0 decoded the path a second time in
+the router. A percent sign in a name was read as the start of an escape, and a
+path that a client had encoded twice was decoded twice, so it gave the name that
+the client meant. In 1.4.0 the path is decoded once. A client that encodes every
+name twice has to send the name encoded once.]
 
 === Query parameters <ref-conv-query>
 
@@ -85,15 +107,20 @@ lists the parameters of its routes.
 mvsMF knows four methods: GET, POST, PUT and DELETE. A route has one method
 (@ref-conv-routes). Two rules follow from the router:
 
-- A request with any other method, such as HEAD, OPTIONS or PATCH, gets status
-  405 and no body. The router answers it before it looks at the credential, so
-  a client that sent no credential gets the 405 and not a 401.
-- A request with a known method for a path that is registered only under other
-  methods, such as a PUT to #cmd("/zosmf/restfiles/ds"), gets 404 and the
-  report of an unknown route (@ref-conv-fixed), not 405.
-
-#note[*A defect* (mvsmf\#418): a method that is wrong for a known path answers
-404 and not 405, and the 405 for an unknown method has no body.]
+- A request for a path that a route serves, with a method that the route does
+  not offer, such as a PUT to #cmd("/zosmf/restfiles/ds") or a DELETE to
+  #cmd("/zosmf/info"), gets status 405 and the error report with #cmd("rc") 4,
+  #cmd("category") 6 and #cmd("reason") 7. The message names the method of the
+  request: #cmd("Http method DELETE is not supported by this URL"). There is no
+  #cmd("Allow") header, as in z/OSMF. A path that no route serves gets 404 and
+  the report of an unknown route (@ref-conv-fixed). The credential comes first:
+  a request without one gets the 401 and not the 405.
+- A request whose method mvsMF cannot parse, such as HEAD, gets status 405 and
+  no body. The router answers it before it looks at the credential, so a client
+  that sent no credential gets the 405 and not a 401. HTTPD answers the methods
+  PATCH, OPTIONS and TRACE itself, before mvsMF runs: the status is 405, the
+  body is the plain text #cmd("405 Method Not Allowed"), and the connection is
+  closed.
 
 == Request Headers <ref-conv-headers>
 
@@ -204,9 +231,11 @@ file or of a directory.
       directory that is not empty are also 400.],
     [401], [No credential, or a credential that RACF refuses
       (@ref-conv-401).],
-    [404], [The object does not exist, the route does not exist, or the method
-      is wrong for the route (@ref-conv-methods).],
-    [405], [A method other than GET, POST, PUT or DELETE. No body.],
+    [404], [The object does not exist, or the route does not exist
+      (@ref-conv-methods).],
+    [405], [A method that the route does not offer: the error report of
+      @ref-conv-methods. A method that mvsMF cannot parse, such as HEAD, gets
+      no body.],
     [412], [An #cmd("If-Match") that does not match the ETag.],
     [413], [A request body of 16 MB or more (@ref-conv-limits). The body of a
       chunked request counts when its chunks add up to 16 MB.],
@@ -297,12 +326,18 @@ Some conditions have the same report in every area:
 #tab(caption: [Reports that every area shares])[
   #table(columns: (1.45in, 0.5in, 0.4in, 0.35in, 0.6in, 1fr),
     [Condition], [Status], [Cat.], [rc], [Reason], [Message and details],
-    [Unknown route, or wrong method for the route], [404], [6], [4], [7],
+    [Unknown route], [404], [6], [4], [7],
       [#cmd("Not Found")],
+    [A route that does not offer the method], [405], [6], [4], [7],
+      [#cmd("Http method DELETE is not supported by this URL"), with the method
+      of the request],
     [Authorization refused: a protected data set, or the abend S913], [500], [4], [8],
       [0], [#cmd("LMOPEN error"). #cmd("details") has one sentence:
       #cmd("Authorization failed - You may not use this protected data set."),
       and for the abend the same sentence followed by #cmd("Open 913 abend.")],
+    [Authorization refused: the console services, or the diagnostic endpoint], [500], [4], [8],
+      [0], [#cmd("LMOPEN error"). #cmd("details") has one sentence:
+      #cmd("Authorization failed - You may not use this service.") (@ref-cons-auth)],
     [Encoding not supported], [500], [16], [121], [-1037303780],
       [#cmd("iconv_open() failed."), and a sentence in #cmd("details") that
       names the encoding from #cmd("X-IBM-Data-Type")],

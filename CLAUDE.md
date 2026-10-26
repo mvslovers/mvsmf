@@ -86,7 +86,9 @@ mbt distclean      # clean + remove all of .mbt/ (incl. staged deps)
 
 The build id `?fn=version` reports is `MBT_COMMIT` from mbt's generated
 `<buildstamp.h>`: the short HEAD, with `-dirty` when a tracked file differed
-from it at build time.
+from it at build time. `/zosmf/test` exists only in a development build (a
+version ending in `-dev`, #508); a release deploy is checked with
+`GET /zosmf/info`, field `zosmf_full_version`.
 
 The Desktop is uploaded with `mbt run deploy-desktop` (`mbt/init.lua`, which
 calls `tools/deploy-desktop.sh`).
@@ -103,7 +105,8 @@ compresses the library -- every replaced member leaves its old space dead,
 and mbt refuses a deploy that would not fit -- and restarts HTTPD. Then check:
 
 ```
-GET /zosmf/test?fn=version        # "build" must equal the HEAD you built
+GET /zosmf/test?fn=version        # "build" must equal the HEAD you built (dev builds)
+GET /zosmf/info                   # zosmf_full_version, the only check on a release
 ```
 
 On mvsdev a deploy or an MVS test run needs a slot from the MBT session.
@@ -167,6 +170,11 @@ HTTP Request → cgistart (@@START, autocalled from httpd's libhttpd.a) → mvsm
 - **infoapi.c**: `/zosmf/info` endpoint. Authenticated like every other route — the "unauthenticated liveness probe" it was documented as until #324 never existed: `identity_middleware` exempts only `/zosmf/services/authenticate`, and the reference z/OSMF gates its own `/zosmf/info` too (measured — 401 with `WWW-Authenticate: Basic`, on every endpoint, even for a client sending `X-CSRF-ZOSMF-HEADER`). The 401 is the conformant answer; do not add an exemption for it.
 - **json.c**: JSON response builder with dynamic buffer management (`addJsonString`/`Esc`/`Number`/`Raw`, keyed arrays).
 - **common.c**: Shared utilities for parameter extraction, HTTP responses, and z/OSMF-compatible error formatting.
+- **abendmsg.c**: What a handler abend tells the client and the console, as pure functions (RENT-safe: the caller supplies the buffer). `abend_message()` builds the 500 body text with the abend code and names SB37/SD37/SE37 (#256); `abend_denial_detail()` returns the `details[]` sentence for S913 only, an authorization denial (#315) -- S213 must not fall in. Both are called from the abend recovery in `router.c`, as are `abend_instr_addr()`, `abend_ep_offset()` and `abend_in_range()` for the MVSMF913I/914I console messages (#425); `abend_in_range()` also gates `fn=textsum` / `fn=textdump` in `testapi.c`. Host test: `test/host/tstabnd.c`.
+- **hostparse.c**: Splits a `Host` header value into a host name and a port (`parse_host_name()`, `parse_port_string()`) and checks a port (`validate_port()`: digits only, 1..65535). Used by `infoapi.c` for `zosmf_hostname` / `zosmf_port` of `/zosmf/info` (#175, #260) and for its `X-Forwarded-Port` fallback; a non-zero return means the caller must fall back to its default. An IPv6 literal is not handled (see `hostparse.h`). Host test: `test/host/tsthost.c`.
+- **jclines.c**: `grow_lines_arrays()` grows the JCL line table (a buffer of 81-byte slots plus the pointer array over it) for the submit paths in `jobsapi.c` (`submit_file()`, `submit_jcl_content()`). The order of its two reallocs is the fix for #220: on failure the caller's table is still valid at its old capacity. Host test: `test/host/tstjcln.c`, with a fault-injecting `realloc`.
+- **reclines.c**: The byte-stream-to-record state machine of the text PUT paths in `dsapi.c` (`datasetPutHandler()` and `memberPutHandler()`, each for Content-Length and chunked): `recline_init()`, `recline_put()`, `recline_flush()`. LF, CR and CRLF end a record, a blank line becomes one blank record (#233), an overlong line is truncated and flagged instead of failing (#243), and the state survives a chunk boundary. It works on ASCII bytes, before `write_record()` translates. Host test: `test/host/tstrecl.c`.
+- **spoolln.c**: `spool_line_action()`, the per-record decision of the spool walk in `jobsapi.c` (`do_print_sysout_line()`): stop at the record-count cap (#158), and in JESJCLIN skip records that are not card images (JES2's pointer record behind every in-stream `DD *`, #314). A skipped record must not count toward the cap. Host test: `test/host/tstspln.c`.
 - *(No `xlate.c`)* — the EBCDIC/ASCII tables live in libhttpd and are reached via `httpx->xlate_*`. See **Codepage Override**.
 - **testapi.c**: Internal `/zosmf/test` endpoint for exercising libc370 functions in isolation (`fn=version`, `fn=mtt`, `fn=cmd`, catalog/DSCB probes, …). The CGI launcher (`cgistart`, providing `@@START`) is autocalled from httpd's `libhttpd.a`; this repo carries no launcher of its own.
 
@@ -290,13 +298,16 @@ Whenever working on an endpoint handler (in `dsapi.c`, `jobsapi.c`, `ussapi.c`, 
 Test suites live in `tests/` and `mbt/lua/`, and run through mbt:
 
 ```bash
-mbt run rest-tests                        # everything but curl-diag, curl-nospace and curl-jesspool
+mbt run rest-tests                        # everything but curl-diag, curl-nospace, curl-jesspool, curl-quiesce and curl-consgate
 mbt run rest-tests -- curl-jobs zowe      # one suite, a group (lua, curl, zowe, all)
 mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each suite
 ```
 
-- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`; `curl-diag.sh`, `curl-nospace.sh` and `curl-jesspool.sh` by name only (`curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
+- **curl tests**: `curl-datasets.sh`, `curl-jobs.sh`, `curl-binary.sh`, `curl-uss.sh`, `curl-console.sh`, `curl-info.sh`, `curl-dslist-parallel.sh` (400 list requests, 4 at a time; `DSLIST_REQUESTS` and `DSLIST_PARALLEL` change that, #436); `curl-diag.sh`, `curl-nospace.sh`, `curl-jesspool.sh`, `curl-quiesce.sh` and `curl-consgate.sh` by name only (`curl-consgate` rewrites `SYS1.SECURE.CNTL(PROFILES)` like `curl-jesspool` and needs `MVSMF_CONSGATE_WRITE_PROFILES=yes`; `curl-quiesce` stops HTTPD with `P HTTPD`, so it is for a throwaway container and the last thing it does; `curl-jesspool` rewrites `SYS1.SECURE.CNTL(PROFILES)`: it needs a throwaway system, a RAKF administrator, the second userid, and does nothing unless `MVSMF_JESSPOOL_WRITE_PROFILES=yes` is set)
 - **Zowe CLI tests**: `zowe-datasets.sh`, `zowe-jobs.sh`, `zowe-binary.sh`, `zowe-uss.sh`, `zowe-console.sh`
+- **Load run**: `load-452.sh`, by name only -- the combined stability run of #452 (member reads, job status polls, large PUTs, concurrent listings), for a local throwaway container; its header lists the knobs
+- **Measurement run**: `poll-425.sh` (by name only) -- status polls on a running read-only job from several clients, with `fn=textsum` sampling, `fn=storage` before/after and a console check, for #425. Not part of `all`; it needs a restartable HTTPD.
+- **Soak, by name only**: `reads-372.sh` sends `READS` (default 50000) strictly sequential member GETs and samples `fn=storage` every `EVERY` reads (`internals/storage-probe.md`); run it in a throwaway container: `READS=50000 mbt run rest-tests --target env -- reads-372`. It writes `storage.csv` and `summary.txt` (bytes lost per read) to `OUT`
 - **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`
 
@@ -346,8 +357,11 @@ the next request S80As before mvsMF's ESTAE exists. `&total=1` briefly holds
 *all* free storage, so it must be sampled between load runs, never during one.
 See [internals/storage-probe.md](internals/storage-probe.md).
 
-The endpoint has **no per-function gate and must not grow one back** (#343);
-building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered.
+Every request needs READ on `FACILITY MVSMF.CONSOLE` (`console_authorize()` as the first statement of `testHandler` and `testWildcardHandler`, fail-closed, #460), so the user who checks the build id needs it too. The endpoint has **no per-function gate and must not grow one back** (#343);
+building with `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and
+so does any version that does not end in `-dev` (#508): a release answers 404.
+No function of it returns session data. Suites that need a probe ask
+`mvsmf_dev_build` (`tests/lib/conn.sh`) and skip on a release.
 `fn=textsum` / `fn=textdump` and the gate history: `internals/test-endpoint.md`.
 
 ### Known Platform Bugs

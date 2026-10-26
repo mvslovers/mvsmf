@@ -14,9 +14,10 @@ of three** (#244 → #361 → #245, entry 4), and **#360 and #363 are not ranked
 yet** — `errno` unread after a NULL from `__listpd()`/`__listds()`, and the
 unguarded `http_realm()` call that abends the CGI on a pre-4.0.1 httpd. Both
 need a place in the order; #363 is the lower of the two, since no maintained
-stand runs a server that old. **#398 is new (2026-10-10) and not ranked
+stand runs a server that old. ~~**#398 is new (2026-10-10) and not ranked
 either**: `P HTTPD` through the console API answers 503 with an empty body, so
-a client cannot tell whether the command ran.
+a client cannot tell whether the command ran.~~ Fixed: `send_bytes()` refused
+every send once the server quiesced, the 8/15 report's body included.
 **#405 is new (2026-10-13) and not ranked either**: run right after
 `curl-nospace`, `curl-datasets` hangs on its first sequential read, and the
 data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
@@ -29,13 +30,12 @@ client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|rele
 is not implemented and answers 404 (a hung job had to be `$C`'d from the
 console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
 **#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
-SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method should
-perhaps be 405 — measure the reference first.
-**#423 is new (2026-10-13) and not ranked either**: the USS file GET has no
-`ufs_ferror()` check after its read loop, so a failed read ends as a clean 200
-there too. #422 (merged) made `abort_response()` able to say so; it needs a
-first `MVSMF3xx` id; the hard part is
-provoking a mid-file UFSD read error at all.
+SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method. Measured on `zxp` (2026-10-23): the reference answers 405 without `Allow`; implemented on `issue-418-router-405`, in review.
+**#423** (USS file GET: no `ufs_ferror()` check after the read loop) is fixed in
+its PR: the loop is `src/ussread.c` (host test `TSTUSSRD`), the failure is
+`MVSMF301E` plus `abort_response()`. A mid-file UFSD read error *can* be
+provoked: a client that stops reading holds the handler in `send_all()`
+between two reads, and `P UFSD` then fails the next `ufs_fread()` (`RC=-1`).
 **#425 is new (2026-10-14) and not ranked either**: S0C7/S0C1 *at function
 entries* -- the loaded MVSMF code was overwritten (m38b dump: the 6-byte
 instruction executed at `find_and_send_job_status`'s entry is not the linked
@@ -91,7 +91,7 @@ CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
 against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
-stand. Open before the last pass: #372, #425, #428, #436, #452, #453, #454, #449.
+stand. Open before the last pass: #372, #425, #428, #452, #453, #454, #449.
 **#426 is done in its PR**: a purge JES2 only accepts (output held on a device)
 stays 200 with `status: 0`, and `message` now says the purge is only requested
 (`internals/zosmf-conformance.md`). What zxp answers for such a purge is not
@@ -100,8 +100,12 @@ measured (a write); `X-IBM-Job-Modify-Version: 2.0` is not implemented.
 (2.0.0) is read in `datasetListHandler()` and `diagnose_open_failure()`, so a
 shortage is a 500 with `MVSMF006E`, no longer an empty 200 or a 404. The
 `__listds()` half never needed `libc370#157` for that: NULL with `ENOMEM` was
-already there. The unreachable path is untested on MVS (`fn=listds` reports it
-as `"nomem"`). #360 stays open until a shortage has been provoked on MVS. #361 is new (2026-09-06) and moved
+already there. The decision is `list_outcome()` (`src/listfail.c`), pinned by
+the host test TSTLSFL; the shortage itself has not been provoked on MVS
+(`fn=listds` reports it as `"nomem"`). Still open, now #514: an unreadable
+directory (`__listpd()` NULL with `errno` other than 0 and `ENOMEM`) answers
+404 "member not found" like an empty one; making it a 500 needs a run on MVS
+showing that a successful empty walk leaves `errno` 0. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is
 empty again** — #406 landed in PR #409 and #371 in PR #403, both on
 2026-10-13, and before them #336's
@@ -114,11 +118,9 @@ handed its list over). In hand, in this order:
   with it.
 - **#417** (cancel) right after #440 -- it widens the same gap and takes the
   purge rule (UPDATE on the JESSPOOL entity).
-- **#418** waits on a read-only zxp measurement (404 or 405 for a known path
-  with an unregistered method).
-- **#423**: the hard part is provoking a mid-file UFSD read error.
+- **#418** (405 for a known path with an unregistered method, no `Allow`; measured
+  on zxp 2026-10-23) is implemented on `issue-418-router-405`, in review.
 - **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
-- **#443** is new (2026-10-22, found in #442): the listing's `dev` names a 3380 volume "3390".
 
 Passive: **#425** (MVSMF913I/914I and `fn=textsum` ship in 1.3.0, which runs
 on all four M38 stands since 2026-10-15),
@@ -131,13 +133,13 @@ the next case).
 
 | | Issue | Kind | Waiting on |
 |---|---|---|---|
-| 1 | #209 | client-visible, cheap on 3.8j | nothing |
-| 2 | #326 | its trigger has fired | nothing |
+| 1 | ~~#209~~ | fixed in PR #482, merged | — |
+| 2 | ~~#326~~ | fixed in the PR for #326, awaiting merge | — |
 | 3 | #76 | the one externally reported defect | nothing |
 | 4 | #244 → #361 → #245 | **one block, strict order** | #245 alone: reader-vs-400 decision |
 | 5 | ~~#215~~ | fixed in the PR for #215, awaiting merge | — |
 | 6 | #257, #335 | one class, two tickets | a repro without a proxy |
-| 7 | #347 | an authenticated user can stop the system | **a policy** — measured, nothing to delegate to |
+| 7 | ~~#347~~ | fixed in PR #459 and PR #505, merged: **who** is gated (fail-closed check in the handlers, `FACILITY MVSMF.CONSOLE`, console and `/zosmf/test`; #460) | **which commands** stays a policy — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
 | 10 | #345 | superseded by #440 | done with #440 (in review); #417 cancel follows |
@@ -151,26 +153,23 @@ the next case).
 ## Tier 1 — now
 
 **Empty.** #406 was its only entry and landed in PR #409, and #412 landed in
-PR #413 the same day (see *Recently closed*). The top of the queue is Tier 2's
-#209.
+PR #413 the same day (see *Recently closed*). The top of the queue is Tier 3's
+#76.
 
 ---
 
 ## Tier 2 — cheap and client-visible
 
-### 1 · #209 — `exec-system` and `exec-member` are never emitted
+### 1 · ~~#209~~ — `exec-system` and `exec-member` are never emitted
 
-3.8j has no sysplex, so `CVTSNAME` is a correct constant answer and needs no
-libc370 change. `JCTRDSID` is right in principle and re-opens the relink chain
-(`libc370#79`) for no gain here. Take the cheap one deliberately, and say so in
-the code.
+Fixed in PR #482 (merged): both fields carry `JESJOB.sysid`
+(`JCTRDSID`), measured equal to `__smfid()`. `exec-submitted` is split out as
+#481 (libc370#79 is delivered; `JESJOB.submit_time64`).
 
-### 2 · #326 — five sources missing from the CLAUDE.md list
+### 2 · ~~#326~~ — five sources missing from the CLAUDE.md list
 
-`abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c`, `spoolln.c`. The issue said
-"next time `CLAUDE.md` is touched", so fold it into the next edit of that file
-rather than spending a PR on it. Read each file rather than inferring from the name,
-which is how the list drifted in the first place.
+Fixed in the PR for #326: `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c` and
+`spoolln.c` are in the Key Source Files list, each written from the source and its callers.
 
 ---
 
@@ -218,6 +217,11 @@ against z/OSMF 29 on 2026-09-06 (`SYS1.ADFQPSRC(DFQDCAGA)`, VB/255): one 4-byte
 big-endian length per **logical** record, the data length without the RDW, nothing
 padded, the prefixes tiling the response exactly — and the same resource in binary
 mode is those bytes with the prefixes removed, byte for byte.
+
+Until then the read is refused (#455, 400, category 6, reason 12, in
+`read_and_send_dataset()`): record mode on a V data set no longer returns data.
+#361 replaces that refusal with the real thing; its tests are the VB cases in
+`curl-binary.sh` and `zowe-binary.sh`, which expect the 400 today.
 
 That second half matters as much as the first: **binary mode on a V data set is not
 a bug.** The reference concatenates there too, exactly as we do. It looks like the
@@ -283,9 +287,22 @@ Draining probably closes #257 and reduces #335 to the proxy question.
 
 ## Tier 4 — decisions before code
 
-### 7 · #347 — restconsoles authorizes nothing at all
+### 7 · ~~#347~~ — restconsoles authorizes nothing at all
 
 *an authenticated user can stop the system*
+
+**Status, 2026-10-23: the gate on *who* is merged** (PR #459, PR #505; #347 and #460 are closed). Every console handler
+and both `/zosmf/test` handlers start with `console_authorize()`
+(`consauth.c`): READ on `FACILITY MVSMF.CONSOLE`, fail-closed (no profile, no
+READ, no ACEE: refused), the decision in `authdec.c`, host test
+`tstauthd.c`, MVS matrix `tests/curl-consgate.sh` (#460). The httpd route
+(httpd#335; its PR httpd#338 is merged, the issue is still open) stays as an
+extra first layer. Docs: `docs/installation.md`, *Who may use the console
+service and `/zosmf/test`*; `internals/authorization.md`.
+The endpoint is not registered in a release build, and no function of it returns
+session data (#508). What stays open: a **per-command policy** (below,
+unchanged). The text below is
+the analysis that led here; its `grep` count is of the state before the check.
 
 `grep -c 'http_check_auth\|require_access\|racf' src/consapi.c` → **0**, against
 25 in `dsapi.c`. `issue_command()` leaves the SVC 34 buffer's bytes +2/+3 zero,
@@ -806,11 +823,12 @@ Pointers only — the reasoning lives in the closing comments.
   failure goes nowhere. One convention, not three decisions. #267 also says how
   to find the rest of the class mechanically rather than by reading — see its
   entry under *Recently closed*.
-- **The authorization endgame** — #347, #329, #345, with `httpd#176` behind
+- **The authorization endgame** — ~~#347~~, #329, #345, with `httpd#176` behind
   them. #347 looked like the least blocked until its measurement came back
-  empty: there is no console authority to delegate to, so all three now wait on
-  policy that has to be invented here. #347 is the one to settle first — it
-  outranks the other two on impact by a wide margin.
+  empty: there is no console authority to delegate to, so the gate on *who* went
+  into the handlers and a RAKF resource instead (PR #459, PR #505, merged); which
+  *commands* a permitted user may issue is still a policy that would have to be
+  invented here.
 
 ## Cross-repo
 

@@ -10,7 +10,32 @@
  * reading, writing, and member operations for MVS datasets.
  */
 
+#include <mvs/dslist.h>
 #include "router.h"
+
+/** Resource name of the ENQ that serializes __listds() across requests (#436) */
+#define DSLIST_LOCK_RNAME "MVSMF.LISTDS"
+
+/**
+ * @brief __listds() for one request at a time
+ *
+ * libc370's __listds() has IDCAMS write LISTC output into a temporary data
+ * set named by tmpnam(), whose counter starts again at 1 in every request. Two
+ * requests that start in the same second get the same system name,
+ * SYSyyddd.Thhmmss.RA000.<job>.TMP00001: one scratches it while the other
+ * opens it, S213-04. The ENQ keeps a second request out until the first one
+ * has closed its temporary data set. IDCAMS was already one at a time inside
+ * __listc(), so this costs no concurrency worth having.
+ *
+ * Same return and errno as __listds(). The router's recovery releases the ENQ
+ * if the call abends (session_cleanup).
+ *
+ * @param session Current session context
+ * @param level   Catalog level, as for __listds()
+ * @param filter  Name pattern or NULL, as for __listds()
+ */
+DSLIST **dslist_locked(Session *session, const char *level, const char *filter)
+	asm("DSLSTLK");
 
 /**
  * @brief Lists datasets matching specified criteria

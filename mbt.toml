@@ -42,7 +42,7 @@ mbt = "3.0"
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"
 "mvslovers/httpd" = ">=4.2.0"
-"mvslovers/ufsd" = ">=1.4.0"
+"mvslovers/ufsd" = ">=1.5.0"
 
 # `mbt run restart -- HTTPD` compresses MVSMF.DEV.LINKLIB and restarts HTTPD.
 # That is what activates a deploy: HTTPD loads MVSMF when it starts, and every
@@ -116,6 +116,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTMTSN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTCOLPL: #475 — a collect poll that cannot allocate its response buffer
+# answered an empty block, which a polling client takes for finished. Portable
+# C (`mbt test`); the TU #includes src/collpoll.c with a malloc that can fail and
+# a fake correlator, so it drives the real poll consoleCollectHandler calls —
+# do not list collpoll.c here.
+[test.TSTCOLPL]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTRECL: #233 — framing a text upload into data set records. Blank lines must
 # survive, and a line of exactly LRECL columns must be accepted. The TU
 # #includes src/reclines.c so it drives the real state machine the four write
@@ -159,11 +167,32 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTTXSM]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTLSFL: #360 — a NULL from __listds()/__listpd() is an empty result, a
+# storage shortage (ENOMEM) or a failed directory read, and errno says which.
+# Portable C (`mbt test`); the TU #includes src/listfail.c so it drives the
+# real decision dsapi.c and testapi.c call — do not list listfail.c here.
+[test.TSTLSFL]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTHOST: #260 — a Host header with no name in front of the colon parsed as
 # success with an empty string, so /zosmf/info's fallback never ran. Portable C
 # (`mbt test`); the TU #includes src/hostparse.c so it drives the real parser
 # infoapi.c calls — do not list hostparse.c here.
 [test.TSTHOST]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTBKND: #508 — /zosmf/test is registered only when the stamped version ends
+# in "-dev", and everything else must fail closed. Portable C (`mbt test`); the
+# TU #includes src/buildkind.c so it drives the real function mvsmf.c calls — do
+# not list buildkind.c here.
+[test.TSTBKND]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTRQPTH: #507 — the router decoded REQUEST_PATH a second time after httpd had
+# already done it, so a name with a literal percent sign was read as an escape.
+# Portable C (`mbt test`); the TU #includes src/reqpath.c so it drives the real
+# function router.c calls — do not list reqpath.c here.
+[test.TSTRQPTH]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # TSTDTYP: #391 — X-IBM-Data-Type must carry fileEncoding through to the
@@ -198,6 +227,14 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTSEND]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTUSSRD: #423 — a USS file GET whose read fails part-way must not end as a
+# complete reply. The read loop stopped on a failed read exactly as on the end of
+# the file, and nothing looked at ufs_ferror(), so the client got a clean 200
+# with a truncated file. Portable C (`mbt test`); the TU #includes src/ussread.c
+# so it drives the real loop ussGetHandler runs — do not list ussread.c here.
+[test.TSTUSSRD]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTBODY: #412 — a request body with a Content-Length is allocated once, at
 # its size; doubling asked a fragmented region for 128 KB to hold 72 KB. And a
 # failure the server caused drains the body, or TCP resets the answer away.
@@ -221,6 +258,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTJCARD]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTSUBDS: #477 — the data set name in the "file" member of a job submit was
+# copied into a 45-byte stack buffer with a length from the request, so
+# //'<45 characters>' overflowed it. The TU #includes src/subdsn.c so it drives
+# the real function submit_file() calls — do not list subdsn.c here.
+[test.TSTSUBDS]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTJWN: #440 — who may see, read and purge which job on the JES2 spool. An
 # own job is always allowed; a foreign one follows RACF class JESSPOOL (no
 # profile and NONE hide it, READ lists and reads, UPDATE also purges); a name
@@ -229,6 +273,15 @@ rent = false          # mbtcheck.h keeps file-static counters
 # Portable C (`mbt test`); the TU #includes src/jwn.c so it drives the real
 # policy jobsapi.c asks — do not list jwn.c here.
 [test.TSTJWN]
+rent = false          # mbtcheck.h keeps file-static counters
+
+# TSTAUTHD: #460 — the console service and /zosmf/test refuse every request
+# unless RACF answers rc 0 for READ on FACILITY MVSMF.CONSOLE. rc 4 (no
+# profile), rc 8, any other code and a request with no ACEE are all refusals;
+# RACF is not asked without an ACEE. Portable C (`mbt test`); the TU #includes
+# src/authdec.c so it drives the real decision consauth.c asks — do not list
+# authdec.c here.
+[test.TSTAUTHD]
 rent = false          # mbtcheck.h keeps file-static counters
 
 # ── SMP4 distribution ────────────────────────────────────

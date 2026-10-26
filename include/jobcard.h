@@ -3,6 +3,9 @@
 
 #include <stddef.h>
 
+/** The last column JCL data may occupy; column 72 is the continuation column. */
+#define JOBCARD_LAST_COL 71
+
 /**
  * @file jobcard.h
  * @brief Clearing a submitted JOB card of credentials mvsMF will supply itself.
@@ -103,5 +106,35 @@ int jobcard_operands_empty(const char *line)
  */
 int jobcard_strip_credentials(char **lines, int start_idx, int end_idx)
 	asm("JCRD0004");
+
+/**
+ * Make the last line of a JOB card continue onto the card mvsMF adds.
+ *
+ * mvsMF puts NOTIFY=, USER= and PASSWORD= on a continuation card of its own,
+ * so the last line of the submitted card has to end with a comma -- and a
+ * comma is only data up to column 71 (column 72 is the continuation column).
+ * What this does depends on how full the line is:
+ *
+ *   - already ends with a comma, or is empty: left alone (0)
+ *   - ends before column 71: the comma is appended (1)
+ *   - ends in column 71, so no comma fits: the last operand, from the last
+ *     comma outside quotes and parentheses, moves to a continuation card of
+ *     its own, returned in @p moved, and the comma in front of it now ends the
+ *     line (2). The operands are the same ones in the same order; the caller
+ *     inserts @p moved right behind @p line.
+ *
+ * Trailing blanks of the fixed 80-column record are dropped first. A line that
+ * runs past column 71 (sequence numbers in 73-80, say) is not touched here.
+ *
+ * @param line        the last line of the card, writable; it is only ever
+ *                    shortened or grown by one character.
+ * @param moved       receives the continuation card in the case above.
+ * @param moved_size  size of @p moved.
+ * @return 0, 1 or 2 as described, or -1 when the card cannot be continued:
+ *         the line runs past column 71, has no operand to move, or the
+ *         operand would not fit on a continuation card.
+ */
+int jobcard_continue(char *line, char *moved, size_t moved_size)
+	asm("JCRD0005");
 
 #endif /* JOBCARD_H */

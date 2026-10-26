@@ -1522,6 +1522,35 @@ for USS_M in GET PUT POST DELETE; do
 done
 
 # =========================================================================
+# Path is decoded once (issue #507)
+# =========================================================================
+# httpd decodes the path before the CGI sees it. The router used to decode it
+# again, so a name with a literal percent sign was stored under another name.
+
+echo ""
+echo "--- The path is decoded once (issue #507) ---"
+
+for USS_PAIR in 'once%2541:once%41' 'once%25b1:once%b1' 'once%25:once%' 'once%41:onceA'; do
+	USS_URL_NAME="${USS_PAIR%%:*}"
+	USS_WANT_NAME="${USS_PAIR#*:}"
+
+	HTTP_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -K "$MVSMF_CURLRC" \
+		-H "Expect:" --data-binary 'x' \
+		"${BASE_URL}/zosmf/restfiles/fs${WORK_DIR}/${USS_URL_NAME}")
+	assert_http_status "204" "$HTTP_CODE" "PUT .../${USS_URL_NAME}"
+
+	BODY=$(curl -s -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/fs?path=${WORK_DIR}")
+	if echo "$BODY" | jq -e --arg n "$USS_WANT_NAME" \
+		'[.items[].name] | index($n) != null' >/dev/null 2>&1; then
+		pass "${USS_URL_NAME} is stored as ${USS_WANT_NAME}"
+	else
+		fail "${USS_URL_NAME} is stored as ${USS_WANT_NAME}" \
+			"names: $(echo "$BODY" | jq -c '[.items[].name]' 2>/dev/null)"
+	fi
+done
+
+# =========================================================================
 # Summary
 # =========================================================================
 

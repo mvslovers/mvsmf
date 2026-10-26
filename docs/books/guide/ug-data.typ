@@ -197,6 +197,13 @@ which could be empty. It answers #cmd("500") with the message
 #cmd("MVSMF006E") on the console. An empty level is still a #cmd("200") with no
 items.
 
+*Change from mvsMF 1.3.0:* the field #cmd("dev") names the device of the volume
+from the track capacity in its format-4 DSCB: #cmd("3330"), #cmd("3350"),
+#cmd("3375"), #cmd("3380") or #cmd("3390"). A volume of another capacity, and a
+volume whose DSCB cannot be read, give #cmd("????"). Version 1.3.0 took the number
+of tracks per cylinder, which a 3380 and a 3390 share, and listed a 3380 as
+#cmd("3390").
+
 === Members of a PDS <ug-data-list-mbr>
 
 The address of the member list is the name of the PDS followed by
@@ -249,6 +256,12 @@ first two lines, 32 bytes, because the bytes are not text. The answer has the
 content type #cmd("application/octet-stream"). The _mvsMF Reference_ describes
 the third type, #cmd("record"), which puts a length of four bytes before each
 record.
+
+*Change from mvsMF 1.3.0:* a read with the type #cmd("record") of a data set or
+member of the record format V, VB or VBS is refused with #cmd("400"). Version
+1.3.0 answered #cmd("200") with data that did not match the records. Read such
+data with the type #cmd("text") or #cmd("binary"). The formats F and FB are not
+affected.
 
 *Change from mvsMF 1.3.0:* a binary read of a fixed-block data set, and the
 ETag, stop at the last block that holds data. mvsMF works out that block count

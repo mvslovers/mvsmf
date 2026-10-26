@@ -15,9 +15,8 @@ HTTPD lets in (@ug-security).
 
 #idx("session")
 Every session in this book was run with the command line client #cmd("curl")
-(version 8.14.1) against a build of mvsMF 1.4.0 on a test system. That build
-still carried the version #cmd("1.4.0-dev"), and the sessions show it; a
-release prints #cmd("1.4.0"). Four things hold for all of them:
+(version 8.14.1) against the release build of mvsMF 1.4.0 on a test system.
+Four things hold for all of them:
 
 - The address of mvsMF, the user ID and the password are in three shell
   variables, and the sessions show the variables, not their values:
@@ -98,8 +97,8 @@ JSON object with these fields, in this order:
     mvsMF takes the header #cmd("X-Forwarded-Port") of a proxy, and otherwise
     80 (443 for a request with the scheme https).],
   [#cmd("zosmf_version")], [Always #cmd("1").],
-  [#cmd("zosmf_full_version")], [The version of mvsMF: #cmd("1.4.0-dev") in the session
-    above, #cmd("1.4.0") in a release.],
+  [#cmd("zosmf_full_version")], [The version of mvsMF: #cmd("1.4.0") in the session
+    above. A development build ends in #cmd("-dev").],
   [#cmd("plugins")], [Always an empty array.],
   [#cmd("zosmf_saf_realm")], [Always #cmd("SAFRealm").],
   [#cmd("api_version")], [Always #cmd("1").],
@@ -119,18 +118,14 @@ server is up has to send a credential, too.]
 
 === Which build runs <ug-first-build>
 
-#idx("fn=version")
-#idx("build id")
-The version in the response of #cmd("/zosmf/info") is the release. To find the
-build that is loaded, ask the diagnostic endpoint:
-
-#screen(raw(read("../ex/ug-first/version.txt"), block: true))
-
-The field #cmd("version") is the release, and #cmd("build") is the short
-identifier of the source commit. It ends with #cmd("-dirty") if the build was
-made from a changed tree. Give both when you report a problem. If a build
-leaves the diagnostic endpoint out, the request answers 404. The _mvsMF
-Reference_ describes the endpoint in "The Diagnostic Endpoint".
+#idx("build id")#idx("zosmf_full_version")
+The field #cmd("zosmf_full_version") of the response is the way to see which
+version is loaded. It has the version only, with no commit, and the request
+needs no profile besides the credential. A release answers #cmd("1.4.0"), as in
+the session above. A version that ends in #cmd("-dev") means that a development
+build is installed. Give the version when you report a problem. The _mvsMF
+Reference_ describes the diagnostic endpoint that shows the commit of a
+development build, in "The Diagnostic Endpoint". A release does not have it.
 
 == Connecting and Logging In <ug-first-login>
 
@@ -307,9 +302,17 @@ Which requests get it depends on the route lines:
   #cmd("MVSMF.ACCESS") as well. A user ID without the access to the catch-all gets the
   403 on every path under #cmd("/zosmf/") that the other lines do not cover. A
   user ID without access to #cmd("MVSMF.CONSOLE") gets it only under
-  #cmd("/zosmf/restconsoles/").
-- A route line whose profile does not exist is not checked at all. HTTPD
-  reports that when it starts, and every user that got in passes.
+  #cmd("/zosmf/restconsoles/"). The session above was typed with a user ID
+  that has READ access to #cmd("MVSMF.CONSOLE") only, and it asked for a job
+  list, so that the catch-all line answered.
+- A route line whose profile does not exist is not checked by HTTPD at all.
+  HTTPD reports that when it starts, and every user that got in passes that
+  line. The console services are the exception: mvsMF checks
+  #cmd("MVSMF.CONSOLE") itself, and without the profile it refuses every
+  request for them with a 500 (@ug-security-console).
+- A user ID that HTTPD lets through to the console services but that has no
+  READ access to #cmd("MVSMF.CONSOLE") gets the 500 of mvsMF, an error report
+  in JSON, and not this 403.
 
 Ask the administrator for access to the profile that your 403 belongs to. A
 user ID that has access does not meet this 403. It meets the checks of the data

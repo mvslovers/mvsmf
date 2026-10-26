@@ -9,7 +9,9 @@
 #include <mvs/lock.h>   /* unlock, LOCK_EXC -- console lock recovery (#214) */
 
 #include "router.h"
+#include "dsapi.h"      /* DSLIST_LOCK_RNAME -- list lock recovery (#436) */
 #include "common.h"
+#include "reqpath.h"
 #include "httpcgi.h"
 #include "abendmsg.h"
 #include "mvsmfmsg.h"
@@ -37,12 +39,9 @@ static int safe_fclose_thunk(FILE *fp);
 static int route_matching_middleware(Session *session);
 static int path_vars_extracting_middleware(Session *session);
 
-static unsigned char hex_nibble(char c);
-static int is_hex_digit(char c);
-static void percent_decode(Session *session, char *str);
-
 static HttpMethod parseMethod(const char *method);
 static Route *find_route(Router *router, HttpMethod method, const char *path);
+static int path_is_known(Router *router, const char *path);
 static int is_pattern_match(const char *pattern, const char *path);
 static int extract_path_vars(Session *session, const char *pattern, const char *path);
 
@@ -110,10 +109,12 @@ int handle_request(Router *router, Session *session)
     char *raw_path = (char *) http_get_env(httpc, (const UCHAR *) "REQUEST_PATH");
     char path[1024];
 
-    // Percent-decode the request path (e.g. %28/%29 -> parentheses)
-    strncpy(path, raw_path, sizeof(path) - 1);
-    path[sizeof(path) - 1] = '\0';
-    percent_decode(session, path);
+    // httpd has already percent-decoded REQUEST_PATH (httppars.c); decoding
+    // it again would read a literal '%' in a name as an escape (#507).
+    if (request_path_copy(raw_path, path, sizeof(path)) != 0) {
+        http_resp(httpc, 400);
+        return -1;
+    }
 
     HttpMethod reqMethod = parseMethod(method);
     if ((int)reqMethod == -1) {
@@ -135,6 +136,16 @@ int handle_request(Router *router, Session *session)
     Route *route = find_route(router, reqMethod, path);
 
     if (route == NULL) {
+        // A path some route serves, asked with a method none registered for
+        // it, is a 405 -- not a 404 (#418). Like the reference, no Allow.
+        if (path_is_known(router, path)) {
+            char msg[64];
+
+            snprintf(msg, sizeof(msg),
+                     "Http method %s is not supported by this URL", method);
+            sendErrorResponse(session, HTTP_STATUS_METHOD_NOT_ALLOWED, 6, 4, 7, msg, NULL, 0);
+            return -1;
+        }
         sendErrorResponse(session, HTTP_STATUS_NOT_FOUND, 6, 4, 7, "Not Found", NULL, 0);
         return -1;
     }
@@ -381,6 +392,15 @@ static int safe_unlock_thunk(void *anchor)
     return 0;
 }
 
+// Same for the data set list ENQ, which is named, not addressed (#436).
+__asm__("\n&FUNC    SETC 'safe_unlkres'");
+static int safe_unlock_dslist_thunk(void *unused)
+{
+    (void)unused;
+    unlock_res(DSLIST_LOCK_RNAME, LOCK_EXC);
+    return 0;
+}
+
 __asm__("\n&FUNC    SETC 'ses_cleanup'");
 void session_cleanup(Session *session)
 {
@@ -431,6 +451,16 @@ void session_cleanup(Session *session)
         }
     }
 
+    // The data set list ENQ (#436), for the reason the console one is above:
+    // left held, every later list waits for it for the life of the STC.
+    if (session->dslist_lock) {
+        session->dslist_lock = 0;
+        wtof(MSG_RECOVERY_DSLSTLK);
+        if (try(safe_unlock_dslist_thunk, NULL) != 0) {
+            wtof(MSG_RECOVERY_DSLSTLK_ABEND);
+        }
+    }
+
     // UFS session lifecycle is managed by HTTPD (http_get_ufs).
     // HTTPD's worker ESTAE handles cleanup on abend.
 }
@@ -438,50 +468,6 @@ void session_cleanup(Session *session)
 //
 // private functions
 //
-
-__asm__("\n&FUNC    SETC 'hex_nibble'");
-static unsigned char
-hex_nibble(char c)
-{
-	if (c >= '0' && c <= '9') return c - '0';
-	if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-	if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-	return 0;
-}
-
-__asm__("\n&FUNC    SETC 'is_hex_digit'");
-static int
-is_hex_digit(char c)
-{
-	return (c >= '0' && c <= '9') ||
-	       (c >= 'A' && c <= 'F') ||
-	       (c >= 'a' && c <= 'f');
-}
-
-// Decode percent-encoded characters in-place.
-// URL percent-encoding uses ASCII byte values (e.g. %28 = ASCII '(').
-// Since we run on EBCDIC, decoded bytes must be converted from ASCII to EBCDIC.
-__asm__("\n&FUNC    SETC 'percent_decode'");
-static void
-percent_decode(Session *session, char *str)
-{
-	char *src = str;
-	char *dst = str;
-
-	while (*src) {
-		if (*src == '%' && is_hex_digit(src[1]) && is_hex_digit(src[2])) {
-			unsigned char ascii_val = (hex_nibble(src[1]) << 4) | hex_nibble(src[2]);
-			http_atoe(&ascii_val, 1);
-			*dst = (char)ascii_val;
-			src += 3;
-		} else {
-			*dst = *src;
-			src++;
-		}
-		dst++;
-	}
-	*dst = '\0';
-}
 
 __asm__("\n&FUNC	SETC 'route_matching_middleware'");
 static 
@@ -528,6 +514,19 @@ Route *find_route(Router *router, HttpMethod method, const char *path)
         }
     }
     return NULL;
+}
+
+__asm__("\n&FUNC	SETC 'path_is_known'");
+static
+int path_is_known(Router *router, const char *path)
+{
+    int i = 0;
+    for (i = 0; i < (int)router->route_count; i++) {
+        if (is_pattern_match(router->routes[i].pattern, path)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 __asm__("\n&FUNC	SETC 'is_pattern_match'");

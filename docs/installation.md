@@ -16,6 +16,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 |---|---|
 | **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
 | **RAKF 2.0.0 or later** | Only to see jobs of other users: the class `JESSPOOL` that decides this is in the class table of RAKF 2.0.0 and later. Without the class every user sees only their own jobs. See [Job spool authorization](jesspool.md). |
+| **RAKF** | For the console service and `/zosmf/test`, in every case: they are open only to a user that RAKF reports as holding READ on `FACILITY MVSMF.CONSOLE` (see step 4). mvsMF asks the system's RACHECK service through libc370's `racf_auth()` and permits only the answer 0, so a system where that service answers anything else, "not protected" (4) included, refuses everybody. It has not been run on a system without RAKF. |
 | **UFSD** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. |
 | **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See [The `SYZJ201` usermod](https://github.com/mvslovers/mvsmf/blob/main/README.md#the-syzj201-usermod) in the project README. |
 
@@ -140,17 +141,19 @@ copy.
 
 ## 4. Register the routes
 
-See `MVSMF.SAMPLIB(MVSMFPRM)`. Add these three lines to the member your HTTPD
+See `MVSMF.SAMPLIB(MVSMFPRM)`. Add these four lines to the member your HTTPD
 started task names on its `//HTTPPRM` DD:
 
 ```
 MOD=MVSMF /zosmf/info                    AUTH=NONE
 MOD=MVSMF /zosmf/services/authenticate   AUTH=NONE
+MOD=MVSMF /zosmf/restconsoles/*          AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE
 MOD=MVSMF /zosmf/*                       AUTH=TOKEN
 ```
 
-**Order matters — first match wins.** The two specific routes must precede the
-catch-all.
+**Order matters — first match wins.** The three specific routes must precede
+the catch-all. Listed after it, the console route is never reached and nothing
+says so.
 
 `AUTH=NONE` on the first two is not a hole. Both endpoints resolve the caller
 themselves and answer 401 without a credential: `/zosmf/info` is authenticated
@@ -166,6 +169,87 @@ widening the prefix:
 MOD=MVSMF /zosmf/*  AUTH=TOKEN RES=FACILITY:MVSMF.ACCESS
 ```
 
+### Who may use the console service and `/zosmf/test`
+
+The console service issues operator commands, and the diagnostic endpoint
+`/zosmf/test` can run them too. Both check the same RAKF resource themselves,
+in the handler: **READ on `FACILITY MVSMF.CONSOLE`**. The check is fail-closed.
+It permits only when RAKF answers "permitted". A user without READ, and
+**every user while the profile is not defined**, get `500` (category 4,
+"Authorization failed") from mvsMF on every `/zosmf/restconsoles/...` URL
+(command, response, detection and log) and on every `/zosmf/test` request,
+including `fn=version` in a development build (a release does not have the
+endpoint, see step 5). A request that carries no resolved user gets `401`. The
+rest of the API is not affected. The route line of step 4 additionally requires
+READ in HTTPD: a user without it gets `403` from HTTPD on
+`/zosmf/restconsoles/...`, before mvsMF is reached.
+
+**This is the upgrade behaviour, not an error:** after installing this version,
+console and `/zosmf/test` refuse everybody until you have defined the profile
+and granted READ.
+
+**Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+Define the profile with the RAKF commands `RDEFINE` and `PERMIT`, then reload
+the profiles. The commands keep `PROFILES` sorted and refuse a group line that
+has no universal line (the reasons are in [Job spool
+authorization](jesspool.md), *Create the profiles with the RAKF commands*, which
+also says who may run the commands). Start each command in column 1:
+
+```
+RDEF MVSMF.CONSOLE CL(FACILITY) UACC(NONE)
+PE MVSMF.CONSOLE CL(FACILITY) ID(MVSCONS) ACCESS(READ)
+```
+
+The commands answer:
+
+```
+RDEFINE: FACILITY profile defined: MVSMF.CONSOLE
+RDEFINE: Run RAKFPROF to activate the changes
+PERMIT:  access READ    granted to FACILITY/MVSMF.CONSOLE
+PERMIT: ID = MVSCONS
+PERMIT: Run RAKFPROF to activate the changes
+```
+
+Then reload with `S RAKFPROF`; the console acknowledges it with
+`RAKFPROF7  RAKF PROFILES UPDATED`. `PROFILES` contains these two lines
+afterwards, shown so that you can check the result (class in columns 1-8,
+resource from column 9, group from column 53, access from column 61):
+
+```
+FACILITYMVSMF.CONSOLE                                       NONE
+FACILITYMVSMF.CONSOLE                               MVSCONS READ
+```
+
+The universal line (`UACC(NONE)`) closes the resource for everybody; the
+`PERMIT` line lets the group `MVSCONS` in, a name chosen for this example.
+READ is the only level that matters, and it means every operator command, from
+console 0 and without a `UCMAUTH` filter: nothing narrows it per command. Use a
+group of its own that holds just the people who may do that, not a broad one
+such as `ADMIN` that exists for other reasons.
+
+Three things to know:
+
+- **Without the profile everybody is refused.** An unprotected resource would
+  permit the access in RAKF, but mvsMF does not take "no profile" for "allowed":
+  the endpoints stay closed until the profile exists. HTTPD still warns at
+  startup (`HTTPD425W NO PROFILE FOR FACILITY:MVSMF.CONSOLE --
+  /zosmf/restconsoles/* NOT GATED`) about its own route; that warning no longer
+  means the console is open.
+- **The deploy user needs the profile.** `mbt run restart -- HTTPD` and
+  `mbt target console` send `P`, `S` and `D` commands through this service. A
+  user without READ is refused with the `500` above. With such a user
+  `mbt run restart -- HTTPD` prints `WARNING: P HTTPD went out but its answer
+  was lost` (naming the HTTP 500 and "Authorization failed") and then `ERROR:
+  restart: HTTPD is still active after P -- not started again`. The restart is
+  abandoned and HTTPD keeps running. The same holds for `?fn=version` on a development build, the call that
+  confirms a deploy there: the user who checks the build id needs READ too.
+  A release deploy is checked with `GET /zosmf/info`, which needs no profile
+  (step 5).
+- **One profile for both.** There is no separate resource for `/zosmf/test`; a
+  user who may use the console may use the test endpoint, and the other way
+  round. A release does not register `/zosmf/test` at all, and a build with
+  `-DMVSMF_NO_TEST_ENDPOINT` leaves it out of a development build too.
+
 ## 5. Restart httpd and verify
 
 ```
@@ -173,18 +257,36 @@ P HTTPD
 S HTTPD
 ```
 
-Then ask the server what it is actually running:
+Then ask the server what it is actually running. On a **release** (the
+package from a GitHub release, version `1.4.0` and the like):
+
+```
+curl -u USER:PASS 'http://your.host:port/zosmf/info'
+```
+
+The field `zosmf_full_version` is the release the live module was built as. A
+successful install that still reports the previous version means something else
+is shadowing it — see step 3. The call needs no profile; a release does not
+register `/zosmf/test`, and `GET /zosmf/test?fn=version` answers `404`. The
+release carries no git hash in its answer: the version is the identity of a
+tagged build.
+
+On a **development build** (version ending in `-dev`, deployed by `mbt deploy`)
+`/zosmf/test` exists, and its `fn=version` also names the git hash the module
+was built from:
 
 ```
 curl -u USER:PASS 'http://your.host:port/zosmf/test?fn=version'
 ```
 
-It answers the version and the git hash the live module was built from. A
-successful install that still reports the previous hash means something else is
-shadowing it — see step 3.
+That call needs READ on `FACILITY MVSMF.CONSOLE` (see
+[Who may use the console service and `/zosmf/test`](#who-may-use-the-console-service-and-zosmftest));
+before the profile is defined it answers `500`, category 4, and that is the
+check working.
 
-`GET /zosmf/info` is the ordinary reachability check once a credential is to
-hand.
+A `-dev` version in `zosmf_full_version` on a system that should run a release
+means the module is a development build: it has the diagnostic endpoint. Install
+the release package.
 
 ## Upgrading
 
@@ -225,13 +327,31 @@ in a new extent may not be visible to the running server. Neither has been
 measured; stopping first avoids both. Upgrading HTTPD in the same window needs
 only the one stop and start. Then check the level as in step 5.
 
-**Upgrading from 1.3.0 to 1.4.0: define the JESSPOOL profiles first.** 1.4.0
+**Upgrading from 1.3.0 to 1.4.0: define the console profile and add the route.**
+1.4.0 checks READ on the RAKF resource `FACILITY MVSMF.CONSOLE` for every
+console request and every `/zosmf/test` request, and refuses all users, an
+administrator included, until the profile is defined and READ granted. Before
+you start the new level:
+
+- define the profile and grant READ to those who may issue operator commands,
+  **the deploy user included** (step 4, *Who may use the console service*);
+- add the fourth route line of step 4 to the HTTPD parmlib member, before
+  `/zosmf/*`. An existing system has the three lines of 1.3.0. The check in
+  mvsMF does not depend on the line, but the line makes HTTPD refuse a user
+  without READ one layer earlier.
+
+After the restart, `?fn=version` answers `500` until the caller has READ; that
+is the check working (step 5).
+
+**Upgrading from 1.3.0 to 1.4.0: define the JESSPOOL profiles too.** 1.4.0
 decides for every job who may see, read and purge it. Without a profile in the
 RAKF class `JESSPOOL` every user, an administrator included, sees only their own
 jobs, and `owner=*` lists only those. If a client or a tool relied on seeing the
 jobs of others, for example a started task found with `owner=*`, create the
-profiles before you start the new level. The rules, the commands and examples
-are in [Job spool authorization](jesspool.md).
+profiles before you start the new level. Create them with the RAKF commands
+`RDEFINE` and `PERMIT`, then reload with `S RAKFPROF`: **do not edit `PROFILES`
+by hand; RAKF's maintainer recommends the commands.** The rules, the commands
+and examples are in [Job spool authorization](jesspool.md).
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same
@@ -254,7 +374,7 @@ copy:
    id as spent, and an uninstall has to name it.
 2. **Put `MVSMF.LINKLIB` first in the STEPLIB** (step 3). While the
    hand-copied module sits in a library ahead of it, that copy is what runs.
-3. **Replace the old route lines** with the three of step 4. A `MOD=MVSMF`
+3. **Replace the old route lines** with the four of step 4. A `MOD=MVSMF`
    line without `AUTH=` is public to HTTPD. After the restart an
    unauthenticated request must be refused:
 
@@ -262,7 +382,7 @@ copy:
    curl -i 'http://your.host:port/zosmf/restjobs/jobs'      # expect 401
    ```
 
-4. **Restart and check the level** with `?fn=version` (step 5). Once it
+4. **Restart and check the level** with `GET /zosmf/info` (step 5). Once it
    reports the release you installed, retire the old library, so the copy
    cannot come back to the front of a concatenation later. A library of its own
    can simply be scratched.

@@ -27,8 +27,12 @@ send_bytes(void *ctx, const SEND_OPS *ops, const unsigned char *buf, int len)
 	/* Entry guard, not just a loop guard: once a send has failed, the
 	   handler's error path comes straight back here through
 	   sendErrorResponse(). Without this it would pay the full stall budget
-	   a second time for a client that is already gone (httpd#203). */
-	if (ops->aborted(ctx)) {
+	   a second time for a client that is already gone (httpd#203).
+
+	   Only a dead client is refused here. A quiescing server still sends
+	   what the socket takes at once; the quiesce test is on the stall path
+	   below (#398). */
+	if (ops->dead(ctx)) {
 		return -1;
 	}
 
@@ -51,7 +55,7 @@ send_bytes(void *ctx, const SEND_OPS *ops, const unsigned char *buf, int len)
 		/* rc == 0: the receive window is closed. Wait it out -- but only
 		   while waiting can still pay off, and only within the budget.
 		   Never advance pos here; that is the whole defect. */
-		if (ops->aborted(ctx)) {
+		if (ops->dead(ctx) || ops->stopping(ctx)) {
 			return -1;
 		}
 

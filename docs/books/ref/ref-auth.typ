@@ -98,7 +98,9 @@ come in this order:
     [#cmd("zosmf_version")], [string], [#cmd("1"). The major version of mvsMF.
       Real z/OSMF sends its own level here, such as #cmd("29").],
     [#cmd("zosmf_full_version")], [string], [The version of the build of mvsMF,
-      for example #cmd("1.4.0").],
+      for example #cmd("1.4.0"). It has the version only, no commit and no
+      profile is needed. A development build ends in #cmd("-dev"). This
+      field is the check of a release that has been deployed.],
     [#cmd("plugins")], [array], [Always empty: #cmd("[]").],
     [#cmd("zosmf_saf_realm")], [string], [Always #cmd("SAFRealm").],
     [#cmd("api_version")], [string], [Always #cmd("1").],
@@ -248,9 +250,10 @@ tries that header next (@ref-auth-cred).
     [204], [The logout.],
     [401], [No credential (@ref-auth-cred), a failed login, a logout without a
       credential.],
-    [405], [A method other than GET, POST, PUT or DELETE (@ref-conv-methods).],
-    [404], [A known method that the route does not have, such as a POST to
-      #cmd("/zosmf/info") (@ref-conv-methods).],
+    [405], [A method that the route does not have, such as a POST to
+      #cmd("/zosmf/info"), with the error report of @ref-conv-methods. A method
+      that mvsMF cannot parse gets no body.],
+    [404], [A path that no route serves.],
     [500], [The module could not create its JSON builder, or the login could not
       create a session.],
   )

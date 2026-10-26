@@ -23,7 +23,9 @@ GET
       the code page is CP037 unless `text;fileEncoding=IBM-1047` asks for
       IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
-    - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
+    - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`.
+      **RECFM=F and FB only**: on a RECFM=V, VB or VBS data set it is refused
+      (see [Error Responses](#error-responses)).
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the dataset, for
   use as `If-Match` on a later write. Identical in behaviour to the member
   endpoint — see [members-get.md](members-get.md#etag).
@@ -37,11 +39,15 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
 
 - **Text mode**: Each record is sent after EBCDIC-to-ASCII conversion. For F/FB datasets, trailing space padding (added by MVS to fill each record to LRECL) is stripped so the output matches VB-style line endings.
 - **Binary mode**: Raw record data without conversion. For FB datasets, the exact record count is calculated from VTOC (DSCB1/DSCB4) to avoid reading past logical end-of-data.
-- **Record mode**: Each record is preceded by a 4-byte big-endian length prefix
+- **Record mode**: Each record is preceded by a 4-byte big-endian length prefix. Only for fixed-length data sets (RECFM=F, FB); see the limitation below.
 
 ## Error Responses
 - HTTP 400 (Bad Request)
     - Dataset is a PDS (use the member endpoint instead)
+    - `X-IBM-Data-Type: record` on a RECFM=V data set (V, VB or VBS), `category`
+      6, `rc` 8, `reason` 12: `{"rc":8,"category":6,"reason":12,"message":"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets"}`.
+      The check runs before the first byte of the answer, so no data is sent.
+      Text and binary reads of the same data set are unaffected.
 - HTTP 404 (Not Found)
     - Dataset not cataloged (`reason` 4)
 - HTTP 500 (Internal Server Error)
@@ -53,7 +59,12 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
 - Binary/record mode for FB datasets uses DSCB-based record count calculation to determine exact end-of-data
+- Record mode is refused for RECFM=V data sets (issue #455). Framing one record
+  per length prefix needs the logical records, and the read used here returns
+  LRECL-sized chunks that cross record boundaries on variable-length data. A
+  correct variable-length record mode is not available yet (#361).
 - Binary/record mode for PDS members reads until fread returns 0 (no DSCB-based limit)
+- A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 
 ## Authorization
 

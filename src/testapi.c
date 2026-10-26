@@ -21,8 +21,11 @@
 #include "common.h"
 #include "httpcgi.h"
 #include "testapi.h"
+#include "dsapi.h"            /* dslist_locked -- fn=listds (#436) */
 #include "blkptrk.h"          /* blocks_per_track -- fn=dscb (#439) */
+#include "listfail.h"         /* list_outcome -- fn=listds (#360) */
 #include "jobauth.h"
+#include "consauth.h"
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
 #include "mvsmfmsg.h"
 #include "zosmferr.h"          /* CATEGORY_SERVICE, REASON_SERVER_ERROR */
@@ -93,7 +96,8 @@ static const char *jespr_reason_name(int reason) {
  * function here: fn=cmd issues operator commands through SVC 34 in
  * supervisor state and never had one, and every caller is authenticated
  * anyway.  The boundary that means something is the route -- see
- * MVSMF_NO_TEST_ENDPOINT in mvsmf.c (issue #343).
+ * MVSMF_NO_TEST_ENDPOINT and the -dev version test in mvsmf.c (issues #343,
+ * #508).
  */
 /* --- fn=denyopen (issue #315) -------------------------------------------
  * Take a real S913 through the real ESTAE, to check that the router answers a
@@ -404,6 +408,13 @@ int testHandler(Session *session) {
   int rc = 0;
   char *fn = NULL;
 
+  /* The whole endpoint is one surface behind one profile (#460): fn=cmd and
+   * fn=mtt reach the console, fn=abend and fn=denyopen fault the worker, and a
+   * function added later is covered without anyone remembering to. Before any
+   * output, and before fn=abend, which must run with headers_sent still 0. */
+  if (console_authorize(session) != 0)
+    return -1;
+
   fn = (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_FN");
   if (!fn)
     fn = "help";
@@ -448,9 +459,9 @@ int testHandler(Session *session) {
     if (!level)
       level = "SYS1";
 
-    dslist = __listds(level, "NONVSAM VOLUME", filter);
+    dslist = dslist_locked(session, level, filter);
     /* NULL with ENOMEM is a storage shortage, not an empty level (#360) */
-    nomem = (!dslist && errno == ENOMEM);
+    nomem = (list_outcome(dslist, errno) == LIST_NOSTOR);
 
     rc = http_printf(
         session->httpc,
@@ -920,36 +931,6 @@ int testHandler(Session *session) {
         " \"note\": \"token value withheld on purpose\" }\n",
         toklen, toklen > 0 ? "true" : "false",
         authz ? "true" : "false", cookie ? "true" : "false");
-
-    /* --- fn=password (exercise http_get_password()) ---------------- */
-    /* Verifies httpd's HTTPX http_get_password() export (mvslovers/httpd#111),
-     * which decrypts the caller's password from the session credential -- the
-     * value job submission puts on the JOB card. The plaintext is a secret, so
-     * it is shown only with &reveal=1; otherwise it is masked. Auth-gated: a
-     * caller only ever sees their own password (which they already know). */
-  } else if (strcmp(fn, "password") == 0) {
-    UCHAR buf[64] = {0};
-    UCHAR *ret;
-    char *reveal =
-        (char *)http_get_env(session->httpc, (const UCHAR *)"QUERY_REVEAL");
-    int len;
-    char masked[64] = {0};
-    int i;
-
-    ret = http_get_password(session->httpc, buf, sizeof(buf));
-    len = (int)strlen((char *)buf);
-
-    for (i = 0; i < len && i < (int)sizeof(masked) - 1; i++) {
-      masked[i] = '*';
-    }
-
-    rc = http_printf(
-        session->httpc,
-        "{ \"fn\": \"password\","
-        " \"http_get_password_ret\": \"%s\", \"strlen\": %d,"
-        " \"value\": \"%s\" }\n",
-        ret ? "non-null" : "NULL", len,
-        (reveal && strcmp(reveal, "1") == 0) ? (char *)buf : masked);
 
     /* --- fn=env (what environment did this CGI load?) -------------- */
     /* httpd and the CGI do NOT share an environment, despite what this
@@ -1643,7 +1624,6 @@ int testHandler(Session *session) {
         " \"?fn=userid              (http_get_userid() vs. direct ACEE decode)\","
         " \"?fn=token               (session token length; value withheld)\","
         " \"?fn=checkauth&dsn=DS&attr=read|update|control|alter&via=raw|vector|both  (RACHECK probe; mvsmf#228)\","
-        " \"?fn=password&reveal=0|1 (http_get_password() export; reveal=1 = plaintext)\","
         " \"?fn=textsum             (load point + FNV-1a per 4K block of the loaded MVSMF; mvsmf#425)\","
         " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF, off from the load point = entry-load + MVSMF913I EP offset; mvsmf#425)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","
@@ -1658,6 +1638,9 @@ quit:
 int testWildcardHandler(Session *session) {
   int rc = 0;
   char *filepath = NULL;
+
+  if (console_authorize(session) != 0)
+    return -1;
 
   filepath =
       (char *)http_get_env(session->httpc, (const UCHAR *)"HTTP_filepath");

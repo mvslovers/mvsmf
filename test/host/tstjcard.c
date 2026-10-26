@@ -255,5 +255,86 @@ main(void)
 		      "an inverted range is refused");
 	}
 
+	/* --- continuing the last line of the card (#395) ------------------ */
+	/* The card mvsMF adds is a continuation, so the last submitted line must
+	   end with a comma -- which is data only up to column 71. A line that
+	   ends in 71 has no room for it. */
+	{
+		char	line[90];
+		char	moved[90];
+		int	rc;
+
+		snprintf(line, sizeof(line), "//J        JOB (1),CLASS=A");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 1 && strcmp(line, "//J        JOB (1),CLASS=A,") == 0,
+		      "a short line gets its comma in place");
+
+		snprintf(line, sizeof(line), "//J        JOB (1),CLASS=A,    ");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 0 && strcmp(line, "//J        JOB (1),CLASS=A,") == 0,
+		      "a line that already ends with a comma is left alone");
+
+		snprintf(line, sizeof(line), "%s", "");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 0 && line[0] == '\0', "an emptied line needs no comma");
+
+		/* 70 columns: the comma lands in column 71, which is still data */
+		snprintf(line, sizeof(line), "%s", "//OVRFLOW  JOB (ACCT),'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',CLASS=A");
+		CHECK(strlen(line) == 70, "fixture is 70 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 1 && strlen(line) == 71 && line[70] == ',',
+		      "a 70-column line takes its comma in column 71");
+
+		/* 71 columns, the card of #395: the last operand moves */
+		snprintf(line, sizeof(line), "%s",
+		         "//MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1)");
+		CHECK(strlen(line) == 71, "fixture is 71 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 2, "a 71-column line moves its last operand");
+		snprintf(msg, sizeof(msg), "first line is \"%s\"", line);
+		CHECK(strcmp(line, "//MBTENQD JOB (1),'ENQ PROBE CLEANUP',CLASS=A,MSGCLASS=H,") == 0, msg);
+		snprintf(msg, sizeof(msg), "moved card is \"%s\"", moved);
+		CHECK(strcmp(moved, "//         MSGLEVEL=(1,1),") == 0, msg);
+
+		/* the comma inside parentheses or quotes is not a separator */
+		snprintf(line, sizeof(line), "%s", "//J        JOB (1),CLASSX=AAAAAAAAAAAAAAAA,MSGLEVEL=(1,1),'A,B,C,D,E,F'");
+		CHECK(strlen(line) == 71, "quoted-comma fixture is 71 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 2 && strcmp(moved, "//         'A,B,C,D,E,F',") == 0,
+		      "commas inside quotes do not separate operands");
+		CHECK(strcmp(line, "//J        JOB (1),CLASSX=AAAAAAAAAAAAAAAA,MSGLEVEL=(1,1),") == 0,
+		      "the cut line ends on the separator in front of the moved operand");
+
+		snprintf(line, sizeof(line), "%s",
+		         "//J        JOB (ACCT),'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'");
+		CHECK(strlen(line) == 71, "single-operand fixture is 71 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == 2 && strcmp(moved, "//         'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX',") == 0,
+		      "the programmer name alone can move");
+
+		/* nothing to cut at: no operand separator outside quotes and parens */
+		snprintf(line, sizeof(line), "%s",
+		         "//OVRFLOW  JOB 'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'");
+		CHECK(strlen(line) == 71, "no-separator fixture is 71 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == -1, "a 71-column line with nothing to cut at is refused");
+
+		/* a moved operand that would not fit on a continuation card */
+		snprintf(line, sizeof(line), "%s",
+		         "//J JOB A,'XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX'");
+		CHECK(strlen(line) == 71, "wide-operand fixture is 71 columns");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == -1, "an operand too wide for a continuation card is refused");
+
+		/* past column 71 is not ours to cut */
+		snprintf(line, sizeof(line), "%s",
+		         "//J        JOB (1),CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1),REGION=1024K  00000100");
+		rc = jobcard_continue(line, moved, sizeof(moved));
+		CHECK(rc == -1, "a line past column 71 is refused");
+
+		CHECK(jobcard_continue(NULL, moved, sizeof(moved)) == -1,
+		      "a NULL line is refused");
+	}
+
 	return mbt_test_summary("tstjcard");
 }

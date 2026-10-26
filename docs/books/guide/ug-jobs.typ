@@ -203,7 +203,7 @@ The cases of the submit request are:
       [400], [#cmd("JOB card cannot be continued: no room for the comma that joins it to the NOTIFY, USER and PASSWORD operands mvsMF adds")],
     [JSON without a usable #cmd("file") field],
       [400], [#cmd("Missing or invalid 'file' field in request body")],
-    [A #cmd("file") value that is not of the form #cmd("//'name'")],
+    [A #cmd("file") value that is not of the form #cmd("//'name'"), with a data set name of more than 44 characters or a member of more than 8],
       [400], [#cmd("Cannot open dataset:") and the value],
     [The data set cannot be opened],
       [404], [#cmd("Cannot open dataset:") and the name],
@@ -298,10 +298,13 @@ output queue reports #cmd("ACTIVE") with a value. The value is a text:
   )
 ]
 
-A request with the query parameter #cmd("exec-data=Y") adds two fields to the
-object: #cmd("exec-started") and #cmd("exec-ended"). Each is a time in UTC,
-in the form #cmd("2026-01-31T12:00:00.000Z"), or #cmd("null") when JES2 holds no
-time. Any value that starts with #cmd("Y") or #cmd("y") switches the fields on.
+A request with the query parameter #cmd("exec-data=Y") adds four fields to the
+object: #cmd("exec-system"), #cmd("exec-member"), #cmd("exec-started") and
+#cmd("exec-ended"). The first two name the system that ran the job. MVS 3.8j has
+no sysplex and one JES2 member, so both have the same value, the system ID that
+JES2 recorded for the job. The last two are a time in UTC, in the form
+#cmd("2026-01-31T12:00:00.000Z"), or #cmd("null") when JES2 holds no time. Any
+value that starts with #cmd("Y") or #cmd("y") switches the fields on.
 
 #screen(raw(read("../ex/ug-jobs/j-status-exec.txt"), block: true))
 
@@ -427,7 +430,8 @@ job must check that it has received all of the lines it expects.
 mvsMF offers one request to end a job: DELETE. It purges the job. mvsMF has no
 request to cancel a job and keep its output, and none to hold or release one.
 The z/OSMF request for this is a PUT on the job with a JSON body that names the
-request. mvsMF answers it as it answers any unknown route, with 404:
+request. The path of the job exists, but it has no PUT. mvsMF answers with 405 and
+an error report:
 
 #screen(raw(read("../ex/ug-jobs/j-cancel.txt"), block: true))
 
@@ -450,7 +454,7 @@ at the queue for about a second after the request. If the job is still there,
 the answer is still 200, and the field #cmd("message") says
 #cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
 instead. A client that must know that the spool is free reads the message or
-lists the job again. This book has no session for it.
+lists the job again (sessions in @ug-jobs-purge-pending).
 
 A started task cannot be purged. The answer is 400 with the message
 #cmd("Cannot purge a started task"). A user who may see a job of another user

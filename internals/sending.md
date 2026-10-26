@@ -20,10 +20,19 @@ Both flags are cleared by `abort_response()` (`common.c`), together with
 `0\r\n\r\n`, and a read error mid-body reaches the client as a complete-looking
 200 (#421 — every data set GET is chunked). httpd's own send path already
 clears `chunked` when a send fails; the read-error callers in `dsapi.c` had
-nothing that did.
+nothing that did. The USS file GET has the same caller shape since #423
+(`src/ussread.c`, `internals/uss-handlers.md`).
 
 The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
 the real one on the host; its four MVS/httpd services are injected through
 `SEND_OPS`. Until the Hercules X'75' fix (`mvslovers/hyperion` `1a599b0d`) a
 full send buffer froze the emulated CPU rather than returning `EWOULDBLOCK`,
 which is the only reason this never fired before 2026-08-18.
+
+Quiesce is asked on a **stalled** send only (`SEND_OPS.stopping`), never on entry;
+the entry guard is the dead-client test (`SEND_OPS.dead`) alone. The two were
+one test until #398, and a quiescing server then refused every send, so the 503
+that answers a console `P HTTPD` went out as headers announcing a body that
+never followed. A buffer the socket takes at once costs a stopping server
+nothing; what it must not do is wait out the 10 s budget with shutdown waiting
+for the worker. `test/host/tstsend.c` pins both halves.

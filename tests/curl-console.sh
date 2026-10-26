@@ -312,11 +312,14 @@ fi
 echo ""
 echo "--- detection ---"
 
-# async DETECTED: snapshot the baseline, THEN emit a fresh IEE136I from a
-# separate command so the match count grows past the baseline.  Issuing the
-# key together with D T does NOT detect -- the command's own IEE136I lands
-# before the baseline snapshot; detection is for *unsolicited* messages that
-# arrive after the trigger.
+# async DETECTED: the detection is armed with an anchor on the end of the
+# table, taken right after the command is issued.  The command's own IEE136I
+# can land on either side of that anchor, so the first D T alone may already
+# report "detected"; the second D T, issued after the anchor, makes sure a
+# fresh IEE136I exists whichever it was (#195).  What must never happen is
+# "waiting" while an IEE136I newer than the anchor is in the table -- which a
+# match COUNT against a baseline did whenever older matches left the wrapping
+# MTT window in between.
 RESP=$(issue '{"cmd":"D T","unsol-key":"IEE136I"}')
 BODY=$(echo "$RESP" | sed '$d')
 DKEY=$(echo "$BODY" | jq -r '.["detection-key"]' 2>/dev/null)

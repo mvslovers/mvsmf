@@ -33,7 +33,7 @@
  *   MVSMF0xx   router, CGI entry, shared request handling
  *   MVSMF1xx   data sets      (restfiles/ds)
  *   MVSMF2xx   jobs           (restjobs)
- *   MVSMF3xx   USS            (restfiles/fs)   -- none yet
+ *   MVSMF3xx   USS            (restfiles/fs)
  *   MVSMF4xx   consoles       (restconsoles)   -- none yet
  *   MVSMF9xx   abend recovery and diagnostics
  *
@@ -134,6 +134,17 @@
 #define MSG_JESCANJ_RC		"MVSMF207E JESCANJ RETURNED RC=%d"
 
 /*
+ * MVSMF3xx -- USS (restfiles/fs)
+ */
+
+/** MVSMF301E a USS file read failed after the reply had started; the body is
+ * short (#423). %s is the absolute path, %d the UFSD return code of the
+ * failed read. The status and headers are already on the wire, so the client
+ * is told by the connection dropping mid-body (abort_response()); this line
+ * is the only thing that says why. */
+#define MSG_USS_READ_ERROR	"MVSMF301E I/O ERROR READING %s RC=%d"
+
+/*
  * MVSMF9xx -- abend recovery and diagnostics
  */
 
@@ -186,6 +197,13 @@
     Code that was overwritten shows what overwrote it (#425) */
 #define MSG_HANDLER_CODE \
 	"MVSMF914I STORAGE AT INSTRUCTION-8: %08X %08X *%08X %08X"
+
+/** MVSMF915I recovery is releasing the data set list lock (#436) */
+#define MSG_RECOVERY_DSLSTLK	"MVSMF915I RECOVERY RELEASING THE DATA SET LIST LOCK"
+
+/** MVSMF916W the recovery DEQ abended; data set lists will wait until restart */
+#define MSG_RECOVERY_DSLSTLK_ABEND \
+	"MVSMF916W RECOVERY DEQ ABENDED, DATA SET LISTS WILL WAIT"
 
 /*
  * Arguments for MSG_STORAGE_FAILED -- uppercase, since they are substituted

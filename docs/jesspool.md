@@ -2,7 +2,8 @@
 
 mvsMF 1.4.0 decides for every job whether the caller may list it, read its
 output and purge it. The jobs endpoints (`/zosmf/restjobs/jobs/...`) apply this,
-and so does the job lookup of the `/zosmf/test` endpoint. The RAKF class
+and so does the job lookup of the `/zosmf/test` endpoint, which in addition
+needs READ on `FACILITY MVSMF.CONSOLE` for every request. The RAKF class
 `JESSPOOL` holds the rules. They are the rules FTPD 1.3.0 applies to its JES
 mode, so one set of profiles governs both servers.
 
@@ -22,6 +23,12 @@ That is the state of mvsMF 1.4.0 without any action.
 
 The authorization needs **RAKF 2.0.0 or later**, the release whose class table
 contains `JESSPOOL`.
+
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+> Create the profiles with `RDEFINE` and `PERMIT`, then reload with
+> `S RAKFPROF` (section "Create the profiles with the RAKF commands" below).
+> The section "Writing `PROFILES` by hand" below is a reference for reading an
+> existing file and repairing a broken one.
 
 ## Change from mvsMF 1.3.0
 
@@ -175,8 +182,13 @@ Do not raise the JESSPOOL entity maximum above 8 without adjusting the mvsMF key
 ## Create the profiles with the RAKF commands
 
 Create the profiles with the RAKF commands `RDEFINE` and `PERMIT` and reload the
-in-core tables with `S RAKFPROF`, rather than editing
-`SYS1.SECURE.CNTL(PROFILES)` by hand. The commands come with RAKF 2.0.0.
+in-core tables with `S RAKFPROF`. The commands come with RAKF 2.0.0.
+
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+> The commands keep the file sorted, refuse a group line that has no universal
+> line, and do not write a profile twice. A hand-edited file that is wrong
+> aborts the reload (`U0300`, `U0400`, `U0500`) and, on RAKF 2.0.0, keeps JES2
+> from starting at the next IPL.
 
 ```
 RDEFINE 'resource' CLASS(class) UACC(NONE|READ|UPDATE|CONTROL|ALTER)      (alias RDEF)
@@ -218,7 +230,8 @@ Keep a copy of `PROFILES` before the first change.
 ### Examples
 
 Each example is a sequence of commands; the lines below it show what `PROFILES`
-contains afterwards. The commands and the lines are the same for FTPD and mvsMF:
+contains afterwards, so that you can check the result. They are not lines to
+type. The commands and the lines are the same for FTPD and mvsMF:
 the profiles belong to RAKF, not to the server.
 
 **A. Auditors read all jobs except the started tasks; everyone else only their
@@ -350,10 +363,12 @@ see. In the `profiles.txt` that ships with RAKF the classes are in the order
 `DASDVOL`, `DATASET`, `FACILITY`, `TAPEVOL`, `TERMINAL`; `JESSPOOL` sorts between
 `FACILITY` and `TAPEVOL`.
 
-### Writing `PROFILES` by hand
+### Writing `PROFILES` by hand — reference only
 
-If you edit the member instead of using the commands, the rules of the RAKF
-`PROFILES` table apply, and one more: **a line with an id needs a line without
+> **Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+
+This section is for reading an existing file and for repairing a broken one. The rules of the RAKF `PROFILES` table
+apply to a hand-written file, and one more: **a line with an id needs a line without
 an id for the same entity, also for `*` itself.** If it is missing, for example
 `JESSPOOL*  ADMIN UPDATE` without `JESSPOOL*  NONE`, `S RAKFPROF` reports
 
@@ -406,24 +421,28 @@ after `S RAKFPROF`.
 
 JESSPOOL decides the job services only: list, status, files, records and purge
 under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
-`fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
+`fn=syslog`) of `/zosmf/test`, after the check of `FACILITY MVSMF.CONSOLE` that
+every `/zosmf/test` request passes first. Two other surfaces reach jobs without
+it.
 
-- **Console services** (`/zosmf/restconsoles`). Any authenticated user can issue
-  an operator command, including `$P` or `$C` for the job of somebody else,
-  and read the Master Trace Table, whose message texts name jobs (for example
-  `$HASP395 jobname ENDED`) and carry job numbers, whatever their owner.
-  `consapi.c` makes no authorization call. See [Issue Command](endpoints/console/issue-command.md) and
+- **Console services** (`/zosmf/restconsoles`). READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` allows issuing an operator command, including
+  `$P` or `$C` for the job of somebody else, and reading the Master Trace Table,
+  whose message texts name jobs (for example `$HASP395 jobname ENDED`) and carry
+  job numbers, whatever their owner. mvsMF checks that profile in every console
+  handler and refuses everybody while it is not defined. See [Issue Command](endpoints/console/issue-command.md) and
   [#347](https://github.com/mvslovers/mvsmf/issues/347).
-- **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way. The
-  endpoint is registered in the default build. A build with
-  `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and it answers
-  404.
+- **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way, and
+  needs the same READ on `FACILITY MVSMF.CONSOLE` (the whole endpoint does). A
+  release does not register the endpoint and answers 404; a development build
+  (version ending in `-dev`) does, unless it was built with
+  `-DMVSMF_NO_TEST_ENDPOINT`.
 
 A JESSPOOL profile does not keep a user from reaching a job through these two.
-To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
-services, a `RES=FACILITY:MVSMF.ACCESS` check on the catch-all route decides who
-may use mvsMF at all, not who may use the console services alone; see
-[Register the routes](installation.md#4-register-the-routes).
+A release has no `/zosmf/test`. For the console
+services and `/zosmf/test`, READ on `FACILITY MVSMF.CONSOLE` decides who may use
+them; see
+[Who may use the console service](installation.md#who-may-use-the-console-service-and-zosmftest).
 
 ## Check it
 

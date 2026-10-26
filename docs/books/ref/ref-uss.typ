@@ -27,18 +27,20 @@ HTTPD 4.2.0 or later.
   )
 ]
 
-Every other method on these paths gets the error report with #cmd("rc") 4,
-#cmd("category") 6 and #cmd("reason") 7, the message #cmd("Not Found") and the
-status 404. A request whose method mvsMF cannot parse gets a 405 without a
-body.
+Every other method on these paths gets the status 405 and the error report with
+#cmd("rc") 4, #cmd("category") 6 and #cmd("reason") 7. The message names the
+method: #cmd("Http method PATCH is not supported by this URL"). A request whose
+method mvsMF cannot parse gets a 405 without a body (@ref-conv-methods).
 
 == Paths <ref-uss-path>
 
 #idx("path", "UFS")
 The path of a file or a directory is absolute. In the URL of the single-file
 endpoints, the path follows the service path: for #cmd("/tmp/a.txt") the URL
-is #cmd("/zosmf/restfiles/fs/tmp/a.txt"). mvsMF decodes the URL, takes the part
-after #cmd("/zosmf/restfiles/fs/") and puts a slash in front of it. The listing
+is #cmd("/zosmf/restfiles/fs/tmp/a.txt"). HTTPD decodes the URL once (@ref-conv-path). mvsMF takes the part
+after #cmd("/zosmf/restfiles/fs/") and puts a slash in front of it. A literal
+percent sign in a name is sent as #cmd("%25"), and a literal plus sign as
+#cmd("%2B"). The listing
 takes the path in the query parameter #cmd("path").
 
 #tab(caption: [Rules for paths])[

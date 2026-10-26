@@ -34,13 +34,14 @@ request without one gets the 401 of @ref-conv-401. The job services need no
   )
 ]
 
-Any other method or path under #cmd("/zosmf/restjobs") gets the 404 of
-@ref-conv-fixed (category 6, rc 4, reason 7, message #cmd("Not Found")).
+Any other path under #cmd("/zosmf/restjobs") gets the 404 of
+@ref-conv-fixed (category 6, rc 4, reason 7, message #cmd("Not Found")). A path
+of the table requested with another method gets the 405 of @ref-conv-methods.
 @ref-jobs-absent lists the z/OSMF requests that mvsMF does not have.
 
 A path variable ends at a slash, an opening parenthesis or a closing
-parenthesis. The router decodes the percent escapes of the path before it
-matches the route (@ref-conv-path). The job name of a request is compared
+parenthesis. HTTPD decodes the percent escapes of the path once, before the
+router matches the route (@ref-conv-path). The job name of a request is compared
 without regard to case. The job ID is compared as it is written, so it must be
 in upper case.
 
@@ -85,8 +86,8 @@ matches.
       counts the jobs that go into the answer. It does not limit the jobs
       that mvsMF looks at.],
     [#cmd("exec-data")], [A value that starts with #cmd("Y") or #cmd("y") adds
-      the fields #cmd("exec-started") and #cmd("exec-ended") to every job
-      object.],
+      the fields #cmd("exec-system"), #cmd("exec-member"), #cmd("exec-started")
+      and #cmd("exec-ended") to every job object.],
   )
 ]
 
@@ -145,6 +146,10 @@ The fields come in this order:
     [#cmd("status")], [See @ref-jobs-statustab.],
     [#cmd("retcode")], [See @ref-jobs-retcode. #cmd("null") when the job has
       no return code.],
+    [#cmd("exec-system")], [With #cmd("exec-data"): the system ID that JES2
+      recorded for the job (the SMF ID). MVS 3.8j has no sysplex.],
+    [#cmd("exec-member")], [With #cmd("exec-data"): the JES2 member. There is one
+      member, so the value is the same as in #cmd("exec-system").],
     [#cmd("exec-started")], [With #cmd("exec-data"): the time the job started,
       in UTC, as #cmd("YYYY-MM-DDTHH:MM:SS.000Z"). #cmd("null") when JES2
       holds no time.],
@@ -372,6 +377,9 @@ The body is a JSON object with the field #cmd("file"), for example:
 mvsMF finds the text #cmd("\"file\"") in the body, then a colon, then a quoted
 string. The value must have the form #cmd("//'name'"), with the data set name
 or the data set name and a member in parentheses between the apostrophes. The
+data set name has at most 44 characters and the member at most 8, so the text
+between the apostrophes has at most 54. A longer name is refused like a value
+that is not written in this form. The
 body is not parsed as JSON beyond this. The data set is opened with the
 rights of the caller, and its lines are read as text: a line is cut at 80
 columns and loses its line end.
@@ -465,7 +473,7 @@ gets #cmd("MVSMF203I") for every submitted job.
       [#cmd("Unsupported Content-Type for job submission. Use application/json or text/plain")],
     [No field #cmd("file"), or an empty one], [400], [6], [8], [7],
       [#cmd("Missing or invalid 'file' field in request body")],
-    [The value is not of the form #cmd("//'name'")], [400], [6], [8], [8],
+    [The value is not of the form #cmd("//'name'"), the data set name has more than 44 characters, or the member is empty, has more than 8 characters or lacks its closing parenthesis], [400], [6], [8], [8],
       [#cmd("Cannot open dataset: ") and the value],
     [The data set cannot be opened], [404], [6], [8], [8],
       [#cmd("Cannot open dataset: ") and the name],
@@ -587,7 +595,10 @@ and every request for it gets the 404 of @ref-jobs-purge.
 
 #idx("job", "cancel")#idx("job", "hold")#idx("job", "release")
 These requests of the z/OSMF jobs service are not in mvsMF. The routes do not
-exist, and the answer is the 404 of @ref-conv-fixed:
+exist. A request for a path that no route serves gets the 404 of
+@ref-conv-fixed, and a request for a path that another route serves, with a
+method that route does not offer (the PUT on a job, for example), gets the 405
+of @ref-conv-methods:
 
 - the PUT request on a job that carries a JSON body with the field
   #cmd("request") to cancel, hold or release the job (and the class change
@@ -603,7 +614,7 @@ exist, and the answer is the 404 of @ref-conv-fixed:
 mvsMF 1.4.0 decides for every job whether the caller may see it, read it or
 purge it. The decision uses the RACF class #cmd("JESSPOOL") (RAKF). The rules are in the module that decides, which
 has no MVS headers and also runs on the host in the tests. The test endpoint
-(@ref-test) applies the same policy.
+(@ref-test) of a development build applies the same policy.
 
 === The Entity <ref-jobs-auth-entity>
 

@@ -43,13 +43,13 @@ The console name in the path is any text of two to eight characters. The issue
 request uses it only to build the addresses it returns. The other requests do
 not look at it. All names reach the same table.
 
-#note[*The console services check nothing themselves.* mvsMF makes no
-authorization check of its own for them: any caller that mvsMF lets in can
-issue any operator command. The administrator protects the console services in
-the HTTPD configuration, in front of mvsMF. See @ug-security-console, which
-defines the route and the profile and shows what a user without the permission
-gets. Until that is done, treat every user ID that can log on to mvsMF as an
-operator.]
+#note[*The console services need the permission #cmd("MVSMF.CONSOLE").* mvsMF
+asks RAKF for READ access to the resource #cmd("MVSMF.CONSOLE") in the class
+#cmd("FACILITY") at the start of every console request. A user without the
+access, and every user while the profile does not exist, is refused and issues
+no command. The permission covers every operator command, so give it only to
+the people who may issue every one. See @ug-security-console, which defines the profile and the route and shows
+what a user without the permission gets.]
 
 == Issuing a Command <ug-console-issue>
 
@@ -99,7 +99,8 @@ it:
 
 The error body of the console requests has the fields #cmd("return-code"),
 #cmd("reason-code") and #cmd("reason"). The data set and job requests of mvsMF
-use other field names (@ug-errors).
+use other field names (@ug-errors). A refusal for lack of the permission has the
+fields of the data set services.
 
 The _mvsMF Reference_, chapter "Console Services", lists every field of the body
 and of the answer.
@@ -205,8 +206,9 @@ answer holds only the first message of the stop (compare @ug-console-late). Set
 #screen(raw(read("../ex/ug-console/c-poll.txt"), block: true))
 
 The #cmd("status") is one of three words. #cmd("detected") comes with the
-message in #cmd("msg"). #cmd("waiting") means that nothing has matched yet and
-the window is open. #cmd("expired") means that nothing has matched and the
+message in #cmd("msg"): the table holds a matching message that is newer than
+the start, and the window does not matter. #cmd("waiting") means that it holds
+none and the window is open. #cmd("expired") means that it holds none and the
 window has closed. A key that mvsMF does not know gets the status #cmd("500")
 and a console error with #cmd("return-code") 5 and #cmd("reason-code") 9.
 
@@ -216,25 +218,34 @@ What to keep in mind:
   the whole line of the table, with the time and the originator in front of the
   message, up to 199 characters of it, and it ignores case. A short word matches
   many lines.
-- *It counts new matches.* Right after it has issued the command, mvsMF counts
-  the lines that contain the text, and it reports a detection when the count is
-  higher later. The echo of your command and its reply can arrive after that
-  count. Text that the command itself contains, such as #cmd("FTPD") in
-  #cmd("S FTPD"), can therefore be reported as detected at once. Choose text
-  that only the message you wait for contains.
-- *A detection stays detected.* Each ask counts again. The key reports
-  #cmd("detected") for as long as more lines match than at the start, also after
-  the window has closed. #cmd("expired") only means that this is not so now.
-- *The table is a window.* It holds a limited number of recent lines, and the
-  oldest are dropped as new ones come. When matching lines are dropped as fast
-  as new ones arrive, the count does not rise.
+- *It looks for new matches.* Right after it has issued the command, mvsMF notes
+  where the table ends: the time of its newest line. A detection reports a
+  match that is stamped later than that. The echo of your command and its reply
+  can land on either side of that point. Text that the command itself contains,
+  such as #cmd("FTPD") in #cmd("S FTPD"), can therefore be reported as detected
+  at once, by the reply of the command. Choose text that only the message you
+  wait for contains.
+- *A detection is not kept.* Each ask looks at the table again, and
+  #cmd("detected") is not remembered. The table is a window: it holds a limited
+  number of recent lines, and the oldest are dropped as new ones come. A message
+  that has left the table before the next ask no longer counts, and the status
+  goes back to #cmd("waiting"), or to #cmd("expired") when the window has closed.
+  Ask soon after the message is expected: minutes later on a quiet system,
+  seconds later under heavy console traffic. A client that has seen
+  #cmd("detected") keeps the result itself.
+- *The time has a grain of one second.* The stamp of a line has no finer grain.
+  A second match in the very second at which the table was noted is seen only
+  when it raises the number of matches in that second above the number noted.
+- *A detection can be pushed out.* The 32 places for keys and detections are
+  shared (@ug-console-collect), and every command takes a place for its own key.
+  After about 30 further commands, an armed detection that nobody has asked about
+  in the meantime can be pushed out, and the next ask gets the status #cmd("500")
+  with #cmd("return-code") 5 and #cmd("reason-code") 9. Asking now and then keeps
+  the detection in its place.
 
-#note[*A defect* (mvsmf\#195): a detection can report #cmd("waiting") for a
-message that has been written. The detection compares a count of lines over a
-table that drops its oldest lines, and the count does not rise when a matching
-line is dropped as a new one arrives. Do not take #cmd("waiting") as proof that
-the message has not come. Ask again, and look at the log (@ug-console-log) if
-the message matters.]
+A #cmd("detect-time") of more than about 41000 ticks (12 hours) is not useful. A
+message that is stamped more than 12 hours after the start is not seen, and the
+status stays #cmd("waiting").
 
 A text of more than 63 characters is cut at 63, and a regular expression is not
 supported: the field #cmd("unsolKeyReg") with the value #cmd("Y") is refused with
@@ -343,10 +354,23 @@ client that issues commands:
       [mvsMF had no storage for the answer, or could not copy the table that
        holds it. The command *was* issued. Do not send it again blindly.],
     [#cmd("500")], [#cmd("1")],
-      [A collect or a poll of a detection could not copy the table. Nothing is
-       lost: mvsMF keeps the key or the armed detection, so ask again.],
+      [A collect could not copy the table or had no storage for its answer
+       buffer, or a poll of a detection could not copy the table. Nothing is
+       lost: mvsMF keeps the key or the armed detection, so ask again. An empty
+       #cmd("200") is not the answer to a shortage. It means that no line is
+       new.],
   )
 ]
+
+*Stopping HTTPD through the console API.* The command #cmd("P HTTPD") stops the
+server that answers it. The answer is normally the #cmd("503") with reason code
+15 and its JSON body. A client sees the status and the body, and learns that the
+command ran. Before 1.4.0 the body was lost and the client saw an empty #cmd("503"),
+with #cmd("curl") ending with the exit code 18. The answer closes the
+connection, as the answer to every request that carries a body does. A command
+sent while the server is stopping is either refused with #cmd("503") and reason
+code 17, and not issued, or the connection is reset once HTTPD no longer accepts
+requests. Do not send the #cmd("P") again.
 
 The other failures of the console requests, and the status that goes with each,
 are in the _mvsMF Reference_, chapter "Console Services", section "Console

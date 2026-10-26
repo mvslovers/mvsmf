@@ -16,8 +16,8 @@
 #     authentication and no session token).
 #   - nothing from other chapters, and nothing is written.
 #
-# The output of i-version carries the version and the build of the module on
-# the system under test; the chapter shows the shape, not the value.
+# The field zosmf_full_version of i-info is the version of the module on the
+# system under test; the chapter shows the shape, not the value.
 
 . "$(dirname "$0")/lib.sh"
 
@@ -29,6 +29,3 @@ ses ug-install/i-noauth.txt 'curl -si "$MVSMF_URL/zosmf/info"'
 
 ses ug-install/i-info.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/info"'
 
-# ---- 3. the build that runs -------------------------------------------------
-
-ses ug-install/i-version.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'

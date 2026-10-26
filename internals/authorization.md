@@ -164,3 +164,27 @@ httpd 4.3.0, 2026-10-23:
 - The path `restconsoles//consoles` is refused with `403` as well.
 
 **Not decided:** a per-command policy (out of scope for #347, see `TODO.md`).
+
+### The path is decoded once (#507)
+
+Every decision above is made on a name, and it has to be the name the client
+meant. httpd percent-decodes the path once, in `http_decode()` while it parses
+the request line (`httppars.c`), and hands it over as `REQUEST_PATH`; query
+values are decoded once there too (`QUERY_*`). Up to 1.3.0 `handle_request()`
+decoded `REQUEST_PATH` a second time before it matched a route and extracted
+the path variables, so `%25b1` in a URL (the name `%b1`) reached the handler as
+a different character, and a path encoded twice was decoded twice. The route
+match, the `HTTP_<name>` path variables and the authorization check were
+therefore working on a name other than the one in the request.
+
+Since #507 the router takes `REQUEST_PATH` as it is (`request_path_copy()`,
+`src/reqpath.c`). **Do not decode it again, and do not add a decode step to a
+handler.** Measured on a throwaway system with the USS file API, before and
+after: `PUT .../lit%2541` stored `litA` and `.../lit%25b1` stored `lit` plus
+the byte `X'B1'`; both now store `lit%41` and `lit%b1`. A name that was
+once-encoded (`ctl%41`) and one with a trailing `%25` are unchanged. Host test
+`test/host/tstrqpth.c`; REST test: the "decoded once" block in
+`tests/curl-uss.sh`.
+
+What this does not change: httpd still maps `+` to a blank in the path as well
+as in the query, so a literal `+` in a USS name has to be sent as `%2B`.

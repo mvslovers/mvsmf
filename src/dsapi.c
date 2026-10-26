@@ -20,6 +20,7 @@
 #include "mvsmfmsg.h"
 #include "common.h"
 #include "blkptrk.h"
+#include "listfail.h"
 #include "dsextent.h"
 #include "datatype.h"
 #include "etag.h"
@@ -832,6 +833,7 @@ static int
 diagnose_open_failure(const char *dsname, const char *member)
 {
     PDSLIST  **pdslist;
+    int      outcome;
 
     if (!dsname) {
         return OPEN_FAIL_IO;
@@ -852,14 +854,17 @@ diagnose_open_failure(const char *dsname, const char *member)
         return OPEN_FAIL_NOTPDS;
     }
 
-    /* NULL is an empty result (errno 0) or a storage shortage (ENOMEM): the
-       first is a member that is not there, the second says nothing about it */
+    /* errno is read before the WTO can touch it (listfail.h). LIST_FAILED, an
+       unreadable directory, still answers like a missing member: splitting it
+       off into a 500 needs a run on MVS showing that a successful empty walk
+       leaves errno 0, which is not measured (#360). */
     pdslist = __listpd(dsname, member);
-    if (!pdslist) {
-        if (errno == ENOMEM) {
-            wtof(MSG_STORAGE_FAILED, ALLOC_MEMBER_LIST);
-            return OPEN_FAIL_NOSTOR;
-        }
+    outcome = list_outcome(pdslist, errno);
+    if (outcome == LIST_NOSTOR) {
+        wtof(MSG_STORAGE_FAILED, ALLOC_MEMBER_LIST);
+        return OPEN_FAIL_NOSTOR;
+    }
+    if (outcome != LIST_FOUND) {
         return OPEN_FAIL_NOMEM;
     }
     __freepd(&pdslist);
@@ -1575,7 +1580,7 @@ int datasetListHandler(Session *session)
 	   empty items array would tell the client the catalog has nothing there
 	   (#360). errno is only meaningful on NULL, and the exact-name lookup
 	   below would overwrite it, so it is read here. */
-	if (!dslist && errno == ENOMEM) {
+	if (list_outcome(dslist, errno) == LIST_NOSTOR) {
 		wtof(MSG_STORAGE_FAILED, ALLOC_DATASET_LIST);
 		rc = sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 			CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,

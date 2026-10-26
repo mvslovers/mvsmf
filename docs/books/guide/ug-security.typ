@@ -35,8 +35,8 @@ commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
 #cmd("ADDSD"), then reload with #cmd("RAKFPROF"). The commands keep the file
 sorted, refuse a group line that has no universal line, and do not write a
 profile twice. A hand-edited file that is wrong aborts the reload and, on
-RAKF 2.0.0, keeps JES2 from starting at the next IPL. The section
-"Writing PROFILES by Hand" is a reference for reading an existing file and for
+RAKF 2.0.0, keeps JES2 from starting at the next IPL.
+@ug-security-jp-byhand is a reference for reading an existing file and for
 repairing a broken one.]
 
 #note[*Read the console after every reload.* A profile is in effect only after
@@ -1082,15 +1082,18 @@ The loader reads #cmd("SYS1.SECURE.CNTL(PROFILES)") when the procedure
 #cmd("RAKFPROF") runs. It holds 2000 records. The layout is the one of the
 lines above: the class in columns 1 to 8, the entity from column 9, the ID in
 columns 53 to 60 and the access from column 61. A star in column 1 makes a
-comment. The lines must be in strictly ascending order of class, entity and
-ID; the commands keep them so.
+comment. The order of the lines does not matter: the loader sorts them itself.
+The commands keep the member in ascending order anyway, which makes it easier to
+read and a duplicate easier to see.
 
 If you edit the member by hand, these abends reject it:
 
 #tab(caption: [Abends of the reload of PROFILES])[
   #table(columns: (0.9in, 1fr),
     [Abend], [Cause],
-    [#cmd("U0300")], [A line is out of order, or a line is a duplicate.],
+    [#cmd("U0300")], [Two lines have the same class, entity and ID. The message is
+      #cmd("RAKFPROF3  I/P RECORDS OUT OF ORDER"); the line before it,
+      #cmd("RAKFPROF8"), names one of the two lines.],
     [#cmd("U0400")], [A line with an ID has no line without an ID for the same
       entity, also for #cmd("*") itself. The message is
       #cmd("RAKFPROF4  PERMIT RECORD WITHOUT UNIVERSAL ACCESS RECORD").],

@@ -54,9 +54,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 - **Stop HTTPD around the install job** (#434). The install replaces the
   module the running server loads from; see `docs/installation.md`.
 - **A record-mode read of a RECFM=V data set now fails** (#455). A client that
-  sends `X-IBM-Data-Type: record` for a V, VB or VBS data set or member
-  used to get `200` with wrong data and now gets `400`. Read
-  such data with `text` or `binary`. RECFM=F and FB are unchanged.
+  sends `X-IBM-Data-Type: record` for a V, VB, VS or VBS data set or member
+  used to get `200` with wrong data and now gets `400`; the message says to
+  read such data with `X-IBM-Data-Type: binary` or `text` (#524).
+  RECFM=F and FB are unchanged.
 
 ### Fixed
 
@@ -84,10 +85,11 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   reach JES2 in the same order. A card that cannot be cut anywhere is still
   refused, with the new text `JOB card cannot be continued`.
 - **A record-mode read of a RECFM=V data set is refused instead of returning
-  wrong data** (#455). `X-IBM-Data-Type: record` on a V, VB or VBS data set or
-  member answered 200 with LRECL-sized chunks that ran across record
+  wrong data** (#455, #524). `X-IBM-Data-Type: record` on a V, VB, VS or VBS data
+  set or member answered 200 with LRECL-sized chunks that ran across record
   boundaries, each with a length prefix that matched no record. It now answers
-  `400` with `category` 6, `rc` 8, `reason` 12 and sends no data. RECFM=F and
+  `400` with `category` 6, `rc` 8, `reason` 12 and sends no data; the message
+  tells the client to use `binary` or `text`. RECFM=F and
   FB, and text and binary reads of any data set, are unchanged. A correct
   variable-length record mode is still to come (#361).
 - **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the

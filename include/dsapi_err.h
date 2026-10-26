@@ -62,7 +62,7 @@
 #define ERR_MSG_RENAME_FAILED		"Rename operation failed"
 #define ERR_MSG_PATTERN_TOO_LONG	"Member pattern is too long"
 #define ERR_MSG_LIST_NOMEM		"Storage for the list could not be obtained"
-#define ERR_MSG_RECORD_MODE_RECFM_V	"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets"
+#define ERR_MSG_RECORD_MODE_RECFM_V	"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets; use X-IBM-Data-Type: binary or text"
 #define ERR_MSG_ETAG_MISMATCH		"The resource was modified since the supplied ETag was created"
 
 #endif // DSAPI_ERR_H

@@ -25,8 +25,8 @@ GET
       IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
     - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`.
-      **RECFM=F and FB only**: on a member of a RECFM=V, VB or VBS library it is
-      refused (see [Error Responses](#error-responses)).
+      **RECFM=F and FB only**: on a member of a RECFM=V, VB, VS or VBS library it is
+      refused (see [Error Responses](#error-responses)); use `binary` or `text` there.
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the member. Any
   other value, or an absent header, returns none.
 - `If-None-Match` (optional): makes the read conditional — a member that still
@@ -104,9 +104,9 @@ diagnosis (404, or 500 on an I/O error), which is the more specific answer.
 
 ## Error Responses
 - HTTP 400 (Bad Request)
-    - `X-IBM-Data-Type: record` on a member of a RECFM=V library (V, VB or
+    - `X-IBM-Data-Type: record` on a member of a RECFM=V library (V, VB, VS or
       VBS), `category` 6, `rc` 8, `reason` 12:
-      `{"rc":8,"category":6,"reason":12,"message":"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets"}`.
+      `{"rc":8,"category":6,"reason":12,"message":"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets; use X-IBM-Data-Type: binary or text"}`.
       The check runs before the first byte of the answer, so no data is sent.
       Text and binary reads of the same member are unaffected.
 - HTTP 404 (Not Found)
@@ -129,7 +129,8 @@ now told apart by a catalog lookup and a filtered directory read.
 - Record mode is refused for RECFM=V libraries (issue #455). Framing one record
   per length prefix needs the logical records, and the read used here returns
   LRECL-sized chunks that cross record boundaries on variable-length data. A
-  correct variable-length record mode is not available yet (#361).
+  correct variable-length record mode is not available yet (#361). Read such a
+  member with `X-IBM-Data-Type: binary` or `text`.
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.
 - A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 

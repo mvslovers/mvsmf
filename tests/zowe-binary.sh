@@ -121,6 +121,12 @@ assert_record_refused() {
 	else
 		fail "$label: the message says record mode is not supported for RECFM=V" "output: $(echo "$out" | head -c 300)"
 	fi
+	# ... and what to use instead (issue #524)
+	if echo "$out" | grep -q "binary" && echo "$out" | grep -q "text"; then
+		pass "$label: the message says to use binary or text"
+	else
+		fail "$label: the message says to use binary or text" "output: $(echo "$out" | head -c 300)"
+	fi
 	if [ -s "$DOWNLOAD_FILE" ]; then
 		fail "$label: no data is written" "$(wc -c < "$DOWNLOAD_FILE" | tr -d ' ') bytes in the output file"
 	else

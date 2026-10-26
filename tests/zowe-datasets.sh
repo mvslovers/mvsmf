@@ -301,6 +301,123 @@ RC=0
 OUTPUT=$(run_zowe files rename ds "$TEST_SEQ2" "$TEST_SEQ") || RC=$?
 assert_rc 0 "$RC" "rename sequential dataset TESTSEQ2 -> TESTSEQ (restore)"
 
+# --- Volume serial addressing (#336) ---
+# A cataloged data set is served by -(VOLSER) only when its catalog entry is on
+# that volume; another volume is a 404 (reason 13) and an uncataloged name gets
+# the not-found answer of the route without a volume (404, reason 4). Zowe appends the volume as --volume-serial (view, download,
+# upload) and --volume (delete). The data set is a throwaway of its own so the
+# sections around it keep their state.
+echo ""
+echo "--- Volume serial addressing (#336) ---"
+
+TEST_VOL="${MVS_USER}.ZOWE.TESTVOL"
+WRONGVOL="NOVOL1"
+
+run_zowe files delete ds "$TEST_VOL" -f >/dev/null 2>&1 || true
+RC=0
+OUTPUT=$(run_zowe files create ps "$TEST_VOL" --recfm FB --lrecl 80 --blksize 3120 --size 1TRK) || RC=$?
+assert_rc 0 "$RC" "volume: create the data set"
+
+RC=0
+OUTPUT=$(run_zowe_json files list ds "$TEST_VOL" -a) || RC=$?
+VOLSER=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items[0].vol' 2>/dev/null) || VOLSER=""
+
+if [ "$RC" -ne 0 ] || [ -z "$VOLSER" ] || [ "$VOLSER" = "null" ]; then
+	skip "volume serial addressing: the listing reported no volume for ${TEST_VOL}"
+else
+	OUTPUT=$(run_zowe_json files list ds "$TEST_PDS" -a) || true
+	PDSVOL=$(echo "$OUTPUT" | jq -r '.data.apiResponse.items[0].vol' 2>/dev/null) || PDSVOL=""
+	[ -n "$PDSVOL" ] && [ "$PDSVOL" != "null" ] || PDSVOL="$VOLSER"
+
+	TMPFILE=$(mktemp)
+	printf 'VOLUME LINE 1\nVOLUME LINE 2\n' > "$TMPFILE"
+
+	RC=0
+	OUTPUT=$(run_zowe files upload ftds "$TMPFILE" "$TEST_VOL" --volume-serial "$VOLSER") || RC=$?
+	assert_rc 0 "$RC" "volume: write on the right volume"
+
+	RC=0
+	OUTPUT=$(run_zowe files view ds "$TEST_VOL" --volume-serial "$VOLSER") || RC=$?
+	assert_rc 0 "$RC" "volume: read on the right volume"
+	if echo "$OUTPUT" | grep -q "VOLUME LINE 1"; then
+		pass "volume: read on the right volume returns the data"
+	else
+		fail "volume: read on the right volume returns the data" "expected 'VOLUME LINE 1' in output"
+	fi
+
+	RC=0
+	OUTPUT=$(run_zowe files upload ftds "$TMPFILE" "${TEST_PDS}(VOLMBR)" --volume-serial "$PDSVOL") || RC=$?
+	assert_rc 0 "$RC" "volume: write a member on the right volume"
+
+	RC=0
+	OUTPUT=$(run_zowe files view ds "${TEST_PDS}(VOLMBR)" --volume-serial "$PDSVOL") || RC=$?
+	assert_rc 0 "$RC" "volume: read a member on the right volume"
+	if echo "$OUTPUT" | grep -q "VOLUME LINE 2"; then
+		pass "volume: read a member on the right volume returns the data"
+	else
+		fail "volume: read a member on the right volume returns the data" "expected 'VOLUME LINE 2' in output"
+	fi
+
+	RC=0
+	OUTPUT=$(run_zowe files view ds "$TEST_VOL" --volume-serial "$WRONGVOL") || RC=$?
+	if [ "$RC" -ne 0 ]; then
+		pass "volume: read on the wrong volume fails (rc=$RC)"
+	else
+		fail "volume: read on the wrong volume fails" "rc=0, the cataloged data set was served"
+	fi
+	if echo "$OUTPUT" | grep -q "VOLUME LINE 1"; then
+		fail "volume: read on the wrong volume returns no data" "the cataloged data set was read"
+	else
+		pass "volume: read on the wrong volume returns no data"
+	fi
+
+	printf 'WRONG VOLUME WRITE\n' > "$TMPFILE"
+	RC=0
+	OUTPUT=$(run_zowe files upload ftds "$TMPFILE" "$TEST_VOL" --volume-serial "$WRONGVOL") || RC=$?
+	if [ "$RC" -ne 0 ]; then
+		pass "volume: write on the wrong volume fails (rc=$RC)"
+	else
+		fail "volume: write on the wrong volume fails" "rc=0, the cataloged data set was written"
+	fi
+	RC=0
+	OUTPUT=$(run_zowe files view ds "$TEST_VOL") || RC=$?
+	if echo "$OUTPUT" | grep -q "WRONG VOLUME WRITE"; then
+		fail "volume: the refused write changed nothing" "the refused upload reached ${TEST_VOL}"
+	else
+		pass "volume: the refused write changed nothing"
+	fi
+
+	RC=0
+	OUTPUT=$(run_zowe files delete ds "$TEST_VOL" --volume "$WRONGVOL" -f) || RC=$?
+	if [ "$RC" -ne 0 ]; then
+		pass "volume: delete on the wrong volume fails (rc=$RC)"
+	else
+		fail "volume: delete on the wrong volume fails" "rc=0, the cataloged data set was deleted"
+	fi
+	RC=0
+	OUTPUT=$(run_zowe files view ds "$TEST_VOL") || RC=$?
+	assert_rc 0 "$RC" "volume: the data set survived the refused delete"
+
+	RC=0
+	OUTPUT=$(run_zowe files view ds "${MVS_USER}.ZOWE.NOSUCH" --volume-serial "$VOLSER") || RC=$?
+	if [ "$RC" -ne 0 ]; then
+		pass "volume: an uncataloged name by volume fails (rc=$RC)"
+	else
+		fail "volume: an uncataloged name by volume fails" "rc=0"
+	fi
+
+	RC=0
+	OUTPUT=$(run_zowe files delete ds "${TEST_PDS}(VOLMBR)" --volume "$PDSVOL" -f) || RC=$?
+	assert_rc 0 "$RC" "volume: delete a member on the right volume"
+
+	RC=0
+	OUTPUT=$(run_zowe files delete ds "$TEST_VOL" --volume "$VOLSER" -f) || RC=$?
+	assert_rc 0 "$RC" "volume: delete on the right volume"
+
+	rm -f "$TMPFILE"
+fi
+run_zowe files delete ds "$TEST_VOL" -f >/dev/null 2>&1 || true
+
 # --- Delete sequential dataset ---
 echo ""
 echo "--- Delete Sequential Dataset ---"

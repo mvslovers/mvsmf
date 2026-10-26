@@ -25,6 +25,7 @@
 #define REASON_ETAG_MISMATCH			10	// If-Match precondition failed (issue #152)
 #define REASON_DELETE_FAILED			11	// Scratch/uncatalog or STOW delete failed (issue #319)
 #define REASON_RECORD_MODE_RECFM_V		12	// X-IBM-Data-Type: record on a RECFM=V data set (issue #455)
+#define REASON_DATASET_NOT_ON_VOLUME		13	// -(volser): cataloged, but on another volume (issue #336)
 
 /* Dynamic allocation failure -- the reference's own report, measured (#317).
  *
@@ -63,6 +64,8 @@
 #define ERR_MSG_PATTERN_TOO_LONG	"Member pattern is too long"
 #define ERR_MSG_LIST_NOMEM		"Storage for the list could not be obtained"
 #define ERR_MSG_RECORD_MODE_RECFM_V	"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets; use X-IBM-Data-Type: binary or text"
+#define ERR_MSG_DATASET_NOT_ON_VOLUME	"Dataset not found on the requested volume"
+#define ERR_MSG_INVALID_VOLSER		"Invalid volume serial"
 #define ERR_MSG_ETAG_MISMATCH		"The resource was modified since the supplied ETag was created"
 
 #endif // DSAPI_ERR_H

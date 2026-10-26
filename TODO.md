@@ -152,7 +152,7 @@ the next case).
 | 11 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
 | 12 | #291 | reclassified — hygiene, not stability | nothing |
 | 13 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |
-| 14 | #336 | routes withdrawn; now a feature request | nothing: `libc370#143` is in libc370 2.24.0 (`__scratch()`/`__renamev()`) |
+| 14 | #336 | part 1 (cataloged data sets by volume) landed; part 2 is uncataloged access | nothing: `libc370#143` is in libc370 2.24.0 (`__scratch()`/`__renamev()`) |
 
 ---
 
@@ -475,36 +475,33 @@ operational requirements (`VARY SYSLOG,HARDCPY`, and spinning to a held class)
 belong in `docs/endpoints/console/hardcopy-log.md`, and mvsMF can issue
 `WRITELOG H` through the console API it already has.
 
-### 14 · #336 — `-({volume-serial})` addressing, now a feature rather than a lie
+### 14 · #336 — `-({volume-serial})` addressing, part 2: uncataloged data sets
 
-**The routes are gone (PR #358), so this no longer misleads anyone** — that is
-the whole reason it fell from rank 1 to last. Until then seven routes accepted
-`-(VOLSER)`, discarded the operand and answered a wrong volume as if it were
-right. They are withdrawn, not commented out: `{dataset-name}` stops at `/`,
-`(` and `)` in `is_pattern_match()`, so the form reaches the router's own 404
-and cannot be served as a data set literally named `-(VOL)`.
+**Part 1 is in 1.4.0.** The seven routes are registered again and `volume_gate()`
+in `dsapi.c` reads the volser: a data set whose catalog entry (first volume
+only) is on that volume is served like the cataloged form, a catalog entry on
+another volume is 404 reason 13, an uncataloged name the plain not-found answer
+(404 reason 4), a malformed volser 400. Status and text follow a read-only
+measurement against the reference z/OSMF (`internals/zosmf-conformance.md`).
 
-Ranked here rather than dropped because the capability is real and half of it
-is already sitting in libc370:
+**What is left is the half the issue was filed for: reaching a data set that is
+not in the catalog.** Out of scope for part 1, and still real:
 
-- **Read and write need nothing new.** `__dsalc` parses `VOLSER=` and emits
-  DALVLSER via `__txvols()`; `fopen("DD:ddname")` and `"DD:ddname(MEMBER)"`
-  open the result; `__dscbdv(dsn, vol, &dscb)` always took a volume — mvsMF
-  merely feeds it `__locate()`'s answer. Roughly six `fopen()` call sites.
-- **DELETE and rename cannot be expressed at all.** `remove()`/`rename()` go
-  through IDCAMS DELETE/ALTER, i.e. the catalog, and ALTER operates on catalog
-  entries — an uncataloged rename has no spelling. That is **`libc370#143`**
-  (volume-addressed SCRATCH/RENAME). Reaching for IDCAMS instead walks back
-  into #342's SYSDSN ENQ escalation, which is why `__delmem()` is a
-  STOW-under-SHR path in the first place.
-
-Two things to carry into any attempt. `__dsalc` is verified to **parse**
-`VOLSER=`, not that SVC 99 **accepts** DALVLSER without DALUNIT for an
-uncataloged data set — the JCL rule says the pair is required, dynalloc may
-differ, and `__listvl()` has the `cuu` if it does not. And the catalog-based
-diagnosis (`why_open_failed()`, `dataset_cataloged()`) has to become
-OBTAIN-by-volume on these routes, or an uncataloged data set comes back with
-the wrong reason for its 404.
+- **Read and write need nothing new in libc370.** `__dsalc` parses `VOLSER=` and
+  emits DALVLSER via `__txvols()`; `fopen("DD:ddname")` and `"DD:ddname(MEMBER)"`
+  open the result; `__dscbdv(dsn, vol, &dscb)` always took a volume. Roughly six
+  `fopen()` call sites.
+- **DELETE and rename** need `libc370#143`'s volume-addressed SCRATCH/RENAME,
+  which shipped in libc370 2.24.0 (`__scratch()`/`__renamev()`). Reaching for
+  IDCAMS instead walks back into #342's SYSDSN ENQ escalation.
+- `__dsalc` is verified to **parse** `VOLSER=`, not that SVC 99 **accepts**
+  DALVLSER without DALUNIT for an uncataloged data set; `__listvl()` has the
+  `cuu` if it does not.
+- The catalog-based diagnosis (`why_open_failed()`, `dataset_cataloged()`) has to
+  become OBTAIN-by-volume on these routes, or an uncataloged data set comes back
+  with the wrong reason for its 404.
+- A multi-volume entry is compared by its first volume only (`__locate()`
+  returns one); the full list is `__listvl()`/the catalog volume list.
 
 ---
 

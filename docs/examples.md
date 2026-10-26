@@ -106,11 +106,14 @@ curl -s -u $USER:$PASS -X DELETE "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.DATA"
 zowe files delete ds "IBMUSER.TEST.DATA" -f
 ```
 
-> **There is no volume-qualified variant.** The
-> `/zosmf/restfiles/ds/-(<volser>)/{dataset-name}` routes were withdrawn in
-> #336 — they accepted the volume and discarded it, so an uncataloged data set
-> was never reached and a wrong volume was answered as if it were right. Such a
-> URL is answered 404.
+With a volume serial: `DELETE /zosmf/restfiles/ds/-(<volser>)/{dataset-name}`.
+The data set is deleted only if it is cataloged on that volume; any other
+volume is a 404 and nothing is deleted. The same prefix works on every data set
+and member route (see [volume-serial.md](endpoints/datasets/volume-serial.md)).
+
+```bash
+curl -s -u $USER:$PASS -X DELETE "$BASE/zosmf/restfiles/ds/-(MVSRES)/IBMUSER.TEST.DATA"
+```
 
 ---
 

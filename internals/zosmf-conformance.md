@@ -182,3 +182,38 @@ complete data set or member list it emits neither `totalRows` nor `moreRows` —
 measured, keys `["JSONversion","items","returnedRows"]`. mvsMF matches that
 today by accident rather than by decision; the open TODOs sit at `dsapi.c:1284`
 and `dsapi.c:2145` and are about `X-IBM-Attributes` `,total`.
+
+### A data set addressed with `-(VOLSER)` (#336)
+
+Measured read-only against the reference z/OSMF: GET only, the calls that
+`zowe files view ds --volume-serial` and the member list send. Nothing was
+created or written. The data set was cataloged on volume A; volume B exists;
+volume C does not.
+
+| Request | Status | category / rc / reason | message |
+|---|---|---|---|
+| read a member, cataloged on A, path names B | 500 | 4 / 8 / 0 | `LMINIT error`; ISRZ002 "not on volume" |
+| member list, same case | 404 | 4 / 8 / 0 | same text |
+| read a member, path names C (no such volume) | 500 | 6 / 8 / 75760138 | `Dynamic allocation failed`; IKJ56883I |
+| member list, path names C | 500 | 4 / 8 / 0 | ISRZ002 "Volume not available" |
+| name that exists nowhere, with or without a volume | 404 | 6 / 8 / 386400778 | `Data set not found.`; IKJ56228I |
+| member list of that name, with a volume | 404 | 4 / 8 / 0 | ISRZ002 "not cataloged" |
+| path names A, the right volume | 200 | | identical to the form without a volume |
+
+What mvsMF does with it: the reference is not uniform for "not on this volume"
+(500 on a read, 404 on a member list), so mvsMF takes the 404, which is in the
+closed list, agrees with the member list, and is not a server fault: 404,
+category 6, rc 8, reason 13, in `volume_gate()` and `dsapi_err.h`. A volume
+that does not exist is the same case. A name that is not cataloged gets exactly
+the answer of the route without a volume, as the reference does. The reference's
+category and reason numbers are ISPF library-management codes that mvsMF does
+not have, so they are not copied.
+
+Not measured: a data set that is on a volume but not in the catalog (it could
+not be created read-only), and a hyphen in the volume serial.
+
+`volume_gate()` reads `HTTP_volume-serial` with `http_get_env()`, and httpd's
+env lookup is case-insensitive. A request header `Volume-Serial: X` therefore
+switches the gate on for the cataloged routes too (only stricter, never looser;
+on the `-(VOL)` routes the path wins). This holds until the router can tell
+path variables from headers.

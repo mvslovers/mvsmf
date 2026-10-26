@@ -36,6 +36,9 @@ it accepts. The last column names the chapter that describes the route.
     [GET, PUT, POST, DELETE], [#cmd("/zosmf/restfiles/ds/{dataset-name}")], [@ref-ds],
     [GET], [#cmd("/zosmf/restfiles/ds/{dataset-name}/member")], [@ref-ds],
     [GET, PUT, DELETE], [#cmd("/zosmf/restfiles/ds/{dataset-name}({member-name})")], [@ref-ds],
+    [GET, PUT, DELETE], [#cmd("/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}")], [@ref-ds-volume],
+    [GET], [#cmd("/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}/member")], [@ref-ds-volume],
+    [GET, PUT, DELETE], [#cmd("/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})")], [@ref-ds-volume],
     [GET], [#cmd("/zosmf/restfiles/fs")], [@ref-uss],
     [GET, PUT, POST, DELETE], [#cmd("/zosmf/restfiles/fs/{*filepath}")], [@ref-uss],
     [GET, PUT], [#cmd("/zosmf/restjobs/jobs")], [@ref-jobs],
@@ -49,7 +52,7 @@ it accepts. The last column names the chapter that describes the route.
   )
 ] <ref-conv-routes>
 
-The table has 29 routes, counting each method. The two routes under
+The table has 36 routes, counting each method. The two routes under
 #cmd("/zosmf/test") exist only in a development build, whose version ends in
 #cmd("-dev"), and not in a build with #cmd("-DMVSMF_NO_TEST_ENDPOINT")
 (@ref-test-build). A release does not register them. The HTTPD route lines that
@@ -60,9 +63,9 @@ the next #cmd("/"), #cmd("(") or #cmd(")"). #cmd("{*name}") takes the rest of
 the path, slashes included. Trailing blanks are cut from the value of a
 variable.
 
-The routes with a volume serial, such as
-#cmd("/zosmf/restfiles/ds/-(volser)/{dataset-name}"), are not registered. A
-request for one is a request for an unknown route (@ref-conv-errors).
+The seven routes with a volume serial are registered. A method that one of them
+does not offer, such as a POST, gets the 405 of every other route
+(@ref-conv-methods).
 
 === Path decoding <ref-conv-path>
 

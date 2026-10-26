@@ -8,11 +8,10 @@ PUT
 ## URL Path
 `/zosmf/restfiles/ds/{dataset-name}({member-name})`
 
-> **There is no `-({volume-serial})` form.** That route was withdrawn in #336:
-> it accepted the volume operand and discarded it, so a request naming the
-> wrong volume was answered as if it had named the right one. Such a URL is
-> answered 404. Restoring it is #336. The volume-addressed SCRATCH/RENAME it
-> needs for the delete and rename paths has been in libc370 since 2.24.0.
+Also available with a volume serial: `/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})`.
+The request is served only when the data set is cataloged on that volume;
+otherwise it is answered 404 (or 400 for a malformed volume serial). See
+[volume-serial.md](volume-serial.md).
 
 ## Path Parameters
 - `dataset-name`: Name of the partitioned dataset

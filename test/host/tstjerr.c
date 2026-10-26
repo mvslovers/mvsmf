@@ -49,9 +49,7 @@ init_table(void)
 static void
 translate_n(char *s, size_t n)
 {
-	size_t i;
-
-	for (i = 0; i < n; i++) s[i] = (char) xl[(unsigned char) s[i]];
+	for (size_t i = 0; i < n; i++) s[i] = (char) xl[(unsigned char) s[i]];
 }
 
 static void

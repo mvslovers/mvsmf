@@ -118,6 +118,16 @@ assert_record_refused() {
 	else
 		fail "$label: error report is category 6, rc 8, reason 12" "body: $(body_head "$DOWNLOAD_FILE")"
 	fi
+	# The message tells the client what to use instead (issue #524).
+	local msg
+	msg=$(jq -r '.message // ""' "$DOWNLOAD_FILE" 2>/dev/null)
+	if echo "$msg" | grep -q "RECFM=V" \
+		&& echo "$msg" | grep -q "binary" \
+		&& echo "$msg" | grep -q "text"; then
+		pass "$label: the message names RECFM=V and says to use binary or text"
+	else
+		fail "$label: the message names RECFM=V and says to use binary or text" "message: $msg"
+	fi
 	# The data reaches the client as it is stored, EBCDIC: look for both.
 	if LC_ALL=C grep -qa "$marker" "$DOWNLOAD_FILE" \
 		|| LC_ALL=C grep -qa "$(printf '\345\302\331\305\303\326\331\304')" "$DOWNLOAD_FILE"; then

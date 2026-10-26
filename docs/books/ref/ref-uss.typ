@@ -37,8 +37,10 @@ method mvsMF cannot parse gets a 405 without a body (@ref-conv-methods).
 #idx("path", "UFS")
 The path of a file or a directory is absolute. In the URL of the single-file
 endpoints, the path follows the service path: for #cmd("/tmp/a.txt") the URL
-is #cmd("/zosmf/restfiles/fs/tmp/a.txt"). mvsMF decodes the URL, takes the part
-after #cmd("/zosmf/restfiles/fs/") and puts a slash in front of it. The listing
+is #cmd("/zosmf/restfiles/fs/tmp/a.txt"). HTTPD decodes the URL once (@ref-conv-path). mvsMF takes the part
+after #cmd("/zosmf/restfiles/fs/") and puts a slash in front of it. A literal
+percent sign in a name is sent as #cmd("%25"), and a literal plus sign as
+#cmd("%2B"). The listing
 takes the path in the query parameter #cmd("path").
 
 #tab(caption: [Rules for paths])[

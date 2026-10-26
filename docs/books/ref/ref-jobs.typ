@@ -40,8 +40,8 @@ of the table requested with another method gets the 405 of @ref-conv-methods.
 @ref-jobs-absent lists the z/OSMF requests that mvsMF does not have.
 
 A path variable ends at a slash, an opening parenthesis or a closing
-parenthesis. The router decodes the percent escapes of the path before it
-matches the route (@ref-conv-path). The job name of a request is compared
+parenthesis. HTTPD decodes the percent escapes of the path once, before the
+router matches the route (@ref-conv-path). The job name of a request is compared
 without regard to case. The job ID is compared as it is written, so it must be
 in upper case.
 

@@ -460,8 +460,8 @@ message, takes the time of the line before it. A matching line is newer than
 the anchor when its time is later. At the time of the anchor itself, a matching
 line is newer only when there are more of them than the anchor counted; the
 time has a grain of one second, and mvsMF cannot tell the lines of that second
-apart. When the table holds no line with a time at the anchor, every matching
-line counts as newer.
+apart. When the table held no line with a time when mvsMF took the anchor, every
+matching line counts as newer.
 
 The time carries no date. mvsMF compares it modulo 24 hours: a line is later
 when its time is less than 12 hours ahead of the anchor. A detection that stays

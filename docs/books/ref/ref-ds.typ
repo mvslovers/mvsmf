@@ -55,7 +55,7 @@ a volume serial were withdrawn in mvsMF 1.4.0: they ignored the serial.
 == Names and Case <ref-ds-names>
 
 #idx("data set name")#idx("member name")#idx("case")
-The path is percent-decoded before it is matched. A client may send the
+HTTPD percent-decodes the path once before it is matched. A client may send the
 parentheses of a member name as #cmd("%28") and #cmd("%29"). The value of
 #var("dataset-name") ends at a slash and at a parenthesis.
 

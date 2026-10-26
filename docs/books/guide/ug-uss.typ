@@ -30,6 +30,20 @@ followed by that path. For the file #cmd("/tmp/mvsmf-demo/hello.txt") the URL is
 directory is the exception: it names the directory in the query parameter
 #cmd("path"), as in #cmd("MVSMF_URL/zosmf/restfiles/fs?path=/tmp/mvsmf-demo").
 
+A name is percent-encoded once in the URL. The server decodes the path one
+time and uses the result as the name. A file with a literal percent sign in its
+name, such as #cmd("a%41"), is addressed as
+#cmd("MVSMF_URL/zosmf/restfiles/fs/tmp/a%2541"), and a literal plus sign is
+sent as #cmd("%2B"). The URL with #cmd("a%41") names the file #cmd("aA"). The
+names in the sessions of this chapter need no encoding.
+
+#note[*Change from mvsMF 1.3.0.* Version 1.3.0 decoded the path a second time.
+A percent sign in a name was read as the start of an escape, and a client could
+get one through only by encoding every name twice. In 1.4.0 that client must send
+the name encoded once. A name that is encoded twice is not found under the name
+that the client meant. The _mvsMF Reference_ (chapter "Conventions",
+section "Path decoding") has the rules.]
+
 The sessions work in the directory #cmd("/tmp/mvsmf-demo"). Before the
 sessions, the directory #cmd("/tmp") must be on a UFSD file system that is
 mounted for reading and writing, and the user must be allowed to write to it

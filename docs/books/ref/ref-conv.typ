@@ -67,12 +67,33 @@ request for one is a request for an unknown route (@ref-conv-errors).
 === Path decoding <ref-conv-path>
 
 #idx("percent escape")
-The router copies the path into a buffer of 1024 bytes, so it keeps at most
-1023 characters. It decodes the percent escapes. HTTPD hands over the path in
-EBCDIC, and the router translates each byte that a percent escape gives from
-ASCII to EBCDIC. A path variable can hold up to 1023 characters. The router
-does not look at the query string. Each handler reads the parameters that it
-knows.
+HTTPD decodes the path of the request once, before it starts mvsMF. It turns
+each percent escape into the byte that the escape names, translated from ASCII
+to EBCDIC, and it turns a plus sign into a blank. The router does not decode
+again: it copies the path into a buffer of 1024 bytes, so it keeps at most 1023
+characters, and it matches the route, fills the path variables and hands the
+name to the handler from that copy. A path variable can hold up to 1023
+characters. The router does not look at the query string. Each handler reads
+the parameters that it knows. HTTPD decodes the values of the query parameters
+once too.
+
+A client therefore sends the name that it means, percent-encoded once:
+
+- A name with a literal percent sign is sent as #cmd("%25"). The file
+  #cmd("a%41") is addressed as #cmd("/zosmf/restfiles/fs/tmp/a%2541"). The URL
+  #cmd("/zosmf/restfiles/fs/tmp/a%41") names the file #cmd("aA").
+- A name with a literal plus sign is sent as #cmd("%2B"), because a plus sign in
+  the path is read as a blank.
+- A name that a client encodes twice is not found under that name.
+
+A name of a data set, a member, a job contains none of these
+characters, so the rule matters for the paths of files in UFS.
+
+#note[*Change from mvsMF 1.3.0.* Version 1.3.0 decoded the path a second time in
+the router. A percent sign in a name was read as the start of an escape, and a
+path that a client had encoded twice was decoded twice, so it gave the name that
+the client meant. In 1.4.0 the path is decoded once. A client that encodes every
+name twice has to send the name encoded once.]
 
 === Query parameters <ref-conv-query>
 

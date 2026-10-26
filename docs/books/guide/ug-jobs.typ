@@ -454,7 +454,7 @@ at the queue for about a second after the request. If the job is still there,
 the answer is still 200, and the field #cmd("message") says
 #cmd("Purge requested. JES2 keeps the job marked for purge until the output it holds is released.")
 instead. A client that must know that the spool is free reads the message or
-lists the job again. This book has no session for it.
+lists the job again (sessions in @ug-jobs-purge-pending).
 
 A started task cannot be purged. The answer is 400 with the message
 #cmd("Cannot purge a started task"). A user who may see a job of another user

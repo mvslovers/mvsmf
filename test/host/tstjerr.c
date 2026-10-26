@@ -96,7 +96,7 @@ parse_report(const char *doc, char *out, size_t outsz, int *rc)
 static char *
 report_text(const char *message, int *build_rc)
 {
-	JsonBuilder *b = createJsonBuilder();
+	JsonBuilder *b = createJsonBuilder(NULL);
 	char *doc = NULL;
 
 	*build_rc = -1;
@@ -210,7 +210,7 @@ main(void)
 
 	/* 4. The value does not swallow what comes after it. */
 	{
-		JsonBuilder *b = createJsonBuilder();
+		JsonBuilder *b = createJsonBuilder(NULL);
 		char *big = make_msg(5000);
 		char *text = NULL;
 		size_t len;

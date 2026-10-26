@@ -16,6 +16,9 @@
 # A refusal is HTTP 500 with category 4 (the report the data set handlers send
 # for a denied OPEN); the same for "no profile" and "no READ".
 #
+# On a release build the /zosmf/test rows are left out: that endpoint is
+# registered only by development builds (#508).
+#
 # Every route is asked with its normal path and with path variants. A variant
 # that does not reach a handler is a 404 and serves nothing; one that does is
 # refused like the normal path. The suite fails on anything else.
@@ -97,9 +100,20 @@ ROUTES=(
 	"test help|GET|/zosmf/test"
 	"test version|GET|/zosmf/test?fn=version"
 	"test cmd|GET|/zosmf/test?fn=cmd&cmd=D%20T"
-	"test password|GET|/zosmf/test?fn=password"
+	"test env|GET|/zosmf/test?fn=env"
 	"test wildcard|GET|/zosmf/test/wildcard/x"
 )
+
+# A release build does not register /zosmf/test (#508): there is nothing to
+# gate, and the routes would answer 404 instead of the refusal asked for.
+if ! mvsmf_dev_build "${BASE_URL}/zosmf/info"; then
+	echo "  NOTE: not a development build, /zosmf/test is not registered -- its routes are left out"
+	KEEP=()
+	for r in "${ROUTES[@]}"; do
+		case "$r" in "test "*) ;; *) KEEP+=("$r") ;; esac
+	done
+	ROUTES=("${KEEP[@]}")
+fi
 
 # The path variants of a route, in the order they are asked.
 variants() {   # PATH

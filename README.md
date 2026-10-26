@@ -47,11 +47,10 @@ explains who may see, read and purge which job.
 > — it goes out by SVC 34 from console 0, the master console, with the text
 > unfiltered — and reading the whole Master Trace Table through
 > `GET /zosmf/restconsoles/v1/log`; there is no per-command policy. The
-> diagnostic endpoint `/zosmf/test` can issue commands too and is compiled in
-> by default.
->
-> On a system where not every userid is trusted at the operator console, build
-> with `-DMVSMF_NO_TEST_ENDPOINT` to leave `/zosmf/test` unregistered.
+> diagnostic endpoint `/zosmf/test` can issue commands too, but only a
+> development build (version ending in `-dev`) registers it; a release answers
+> `404`. A source build with `-DMVSMF_NO_TEST_ENDPOINT` leaves it out in
+> development builds too.
 
 ### Prerequisites
 

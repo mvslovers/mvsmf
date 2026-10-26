@@ -298,7 +298,9 @@ The third line protects the console services, which issue operator commands.
 HTTPD lets a user through only if the user has READ access to the resource
 #cmd("MVSMF.CONSOLE"). Define the profile before you start HTTPD with this
 line (@ug-security-console). With no profile, HTTPD writes #cmd("HTTPD425W")
-and does not gate the route.
+and does not gate the route. This line is the first of two layers: mvsMF asks
+RAKF for the same permission in every console request and in the diagnostic
+endpoint, and it refuses every user while the profile does not exist.
 
 To let only some users into mvsMF, add a check of a RACF resource to the last
 line:
@@ -370,6 +372,12 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   jobs of their own, and a started task that a client found with
   #cmd("owner=*") disappears from the list. @ug-security describes the profiles
   and the setup step by step.
++ *Prepare the console profile.* Version 1.4.0 refuses the console services,
+  and the diagnostic endpoint of a development build, to every user until the
+  profile #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY") exists and READ is
+  granted. Administrators are refused too. Define the profile and grant READ to
+  the users and to the tools that issue commands, as in
+  @ug-security-console.
 + *Stop HTTPD.* Send #cmd("P HTTPD") and wait for #cmd("HTTPD099I"). Stopped, no
   request reaches the library while SMP replaces the module.
 + *Do not run the allocation job* and do not scratch any data set. The libraries
@@ -394,6 +402,11 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 
 *Change from mvsMF 1.3.0.* The class #cmd("JESSPOOL") is new in 1.4.0. Version
 1.3.0 does not check it.
+
+*Change from mvsMF 1.3.0.* Version 1.3.0 let every user who could log on issue
+operator commands. Version 1.4.0 asks for READ access to #cmd("MVSMF.CONSOLE")
+in every console request. A system that has not defined the profile answers
+every console request with the 500 of @ug-errors.
 
 *Change from mvsMF 1.3.0.* The data definitions #cmd("HASPCKPT") and
 #cmd("HASPACE1") in the HTTPD procedure are no longer needed for a standard JES2

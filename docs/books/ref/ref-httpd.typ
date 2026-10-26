@@ -66,7 +66,8 @@ The three specific lines come before the line with the wild card.
       which issue operator commands under the identity of the caller. HTTPD asks
       RAKF for READ access to #cmd("MVSMF.CONSOLE") in the class
       #cmd("FACILITY") (@ref-httpd-opts). A user without the access gets the
-      plain text 403 of HTTPD, and mvsMF does not run.],
+      plain text 403 of HTTPD, and mvsMF does not run. mvsMF asks for the same
+      access again in its own handlers (@ref-cons-auth).],
     [#cmd("/zosmf/*")], [#cmd("TOKEN")], [Every other path of mvsMF. A request
       without a valid credential gets a plain 401 from HTTPD (a text body, no challenge), before mvsMF runs.],
   )
@@ -240,12 +241,14 @@ with #cmd("RES=") needs an identity to check, so it authenticates.
   )
 ]
 
-#note[*A missing profile opens the route.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
+#note[*A missing profile opens the route of HTTPD.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
 and no profile for #cmd("MVSMF.ACCESS") in the class #cmd("FACILITY"), HTTPD
 starts, writes #cmd("HTTPD425W"), and lets every authenticated caller through.
 Check the start messages after you add a #cmd("RES=") option. HTTPD asks RAKF
 on every request, so a profile that is defined later gates the route from the
-next request on, without a restart of HTTPD.]
+next request on, without a restart of HTTPD. This does not open the console
+services: mvsMF refuses them to every user while the profile of
+#cmd("MVSMF.CONSOLE") does not exist (@ref-cons-auth).]
 
 == Loading the Module: RESIDENT <ref-httpd-resident>
 

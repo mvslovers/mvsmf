@@ -47,20 +47,29 @@ init_table(void)
 }
 
 static void
+translate_n(char *s, size_t n)
+{
+	size_t i;
+
+	for (i = 0; i < n; i++) s[i] = (char) xl[(unsigned char) s[i]];
+}
+
+static void
 translate(char *s)
 {
-	for (; *s != '\0'; s++) *s = (char) xl[(unsigned char) *s];
+	translate_n(s, strlen(s));
 }
 
 /* a malloc'd ASCII copy of a host-spelled string */
 static char *
 ascii_dup(const char *src)
 {
-	char *d = malloc(strlen(src) + 1);
+	size_t len = strlen(src);
+	char *d = malloc(len + 1);
 
 	if (d) {
-		strcpy(d, src);
-		translate(d);
+		memcpy(d, src, len + 1);
+		translate_n(d, len);
 	}
 	return d;
 }
@@ -205,8 +214,12 @@ done:
 static int
 report_roundtrips(const char *message)
 {
-	char *doc, *out, *want;
-	int build_rc, rc = 0, ok = 0;
+	char *doc;
+	char *out;
+	char *want;
+	int build_rc;
+	int rc = 0;
+	int ok = 0;
 
 	out = malloc(MSG_MAX + 16);
 	want = ascii_dup(message);

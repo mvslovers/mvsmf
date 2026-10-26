@@ -93,9 +93,9 @@ hexval(char c)
 {
 	unsigned char u = (unsigned char) c;
 
-	if (u >= 0x30 && u <= 0x39) return (int) (u - 0x30);
-	if (u >= 0x61 && u <= 0x66) return (int) (u - 0x61 + 10);
-	if (u >= 0x41 && u <= 0x46) return (int) (u - 0x41 + 10);
+	if (u >= 0x30 && u <= 0x39) return u - 0x30;
+	if (u >= 0x61 && u <= 0x66) return u - 0x61 + 10;
+	if (u >= 0x41 && u <= 0x46) return u - 0x41 + 10;
 	return -1;
 }
 
@@ -178,10 +178,11 @@ roundtrip_object(const char *value, char *out, size_t outsz)
 	if (!doc) goto done;
 	translate(doc);
 
-	if (strncmp(doc, pre, 5) == 0 &&
-	    (p = read_json_string(doc + 5, out, outsz)) != NULL &&
-	    p[0] == xl[(unsigned char) '}'] && p[1] == '\0') {
-		ok = 1;
+	if (strncmp(doc, pre, 5) == 0) {
+		p = read_json_string(doc + 5, out, outsz);
+		if (p != NULL && p[0] == xl[(unsigned char) '}'] && p[1] == '\0') {
+			ok = 1;
+		}
 	}
 	free(doc);
 done:

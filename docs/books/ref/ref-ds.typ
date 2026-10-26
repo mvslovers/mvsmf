@@ -57,8 +57,9 @@ name (@ref-ds-volume).
 
 #idx("volume serial")#idx("-(VOLSER)")
 The seven paths have the form
-#cmd("/zosmf/restfiles/ds/-(VOLSER)/{dataset-name}"). They are GET, PUT and DELETE of a data set\; the member list\; and GET, PUT and DELETE of
-a member. The create request has no such path. A rename takes the prefix too:
+#cmd("/zosmf/restfiles/ds/-(VOLSER)/{dataset-name}"). They are GET, PUT and
+DELETE of a data set, the member list, and GET, PUT and DELETE of a member. The
+create request has no such path. A rename takes the prefix too:
 the volume applies to the data set that exists, which is the old name of a data
 set rename and the library of a member rename.
 

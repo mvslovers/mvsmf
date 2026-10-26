@@ -44,6 +44,19 @@ asynchronous purge the same way, and a status outside the z/OSMF list is not an
 option. A client that must know the spool is free reads `message`, or lists the
 job again. The second answer is the only one that takes the extra time.
 
+`job-correlator` is not emitted — MVS 3.8j has no job correlators.
+
+The job is looked up before it is purged. That lookup is what supplies `owner`
+(it cannot be read afterwards, the job is gone) and what makes an unknown job
+answer 404 the same way `GET /jobs/{name}/{id}` does.
+
+`owner` therefore comes back empty for a job purged in the seconds before JES2
+writes `JCTUSEID` — the same window the submit response used to expose (#210).
+Submit closes it by answering from the userid whose `USER=` it put on the job
+card; **this endpoint deliberately does not**: the caller may purge a job of
+another owner, and filling the field from the caller's identity would report a
+userid that never submitted the job. An empty owner is the honest answer here.
+
 ### The header `X-IBM-Job-Modify-Version` is ignored
 
 z/OSMF lets a client choose between an asynchronous purge (`X-IBM-Job-Modify-Version: 1.0`,
@@ -57,19 +70,6 @@ error is raised and nothing in the response says the header was not honoured.
 A client that sends `2.0` and takes `200` as "the job is gone" is therefore
 wrong for a job whose output a device holds. It reads `message`, or lists the
 job again, as described in the previous section.
-
-`job-correlator` is not emitted — MVS 3.8j has no job correlators.
-
-The job is looked up before it is purged. That lookup is what supplies `owner`
-(it cannot be read afterwards, the job is gone) and what makes an unknown job
-answer 404 the same way `GET /jobs/{name}/{id}` does.
-
-`owner` therefore comes back empty for a job purged in the seconds before JES2
-writes `JCTUSEID` — the same window the submit response used to expose (#210).
-Submit closes it by answering from the userid whose `USER=` it put on the job
-card; **this endpoint deliberately does not**: the caller may purge a job of
-another owner, and filling the field from the caller's identity would report a
-userid that never submitted the job. An empty owner is the honest answer here.
 
 ## Authorization
 

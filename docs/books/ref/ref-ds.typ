@@ -195,6 +195,8 @@ mvsMF does not send #cmd("totalRows").
   )
 ]
 
+#idx("device type", "data set list")
+
 === Errors <ref-ds-list-err>
 
 The list has two error answers. A level of more than 44 characters answers

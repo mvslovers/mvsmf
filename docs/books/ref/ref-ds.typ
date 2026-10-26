@@ -51,19 +51,43 @@ report #cmd("Not Found") (category 6, rc 4, reason 7). An HTTP method that
 mvsMF does not know at all gets #cmd("405") with no body.
 
 Seven of the paths also exist with a volume serial in front of the data set
-name, as #cmd("/zosmf/restfiles/ds/-(VOLSER)/{dataset-name}"): GET, PUT and
-DELETE of a data set, the member list, and GET, PUT and DELETE of a member. The
-volume serial is a check. The request is served as the cataloged form when the
-catalog entry of the data set is on that volume. A data set cataloged on another
-volume gets #cmd("404") with the report #cmd("Dataset not found on the
-requested volume") (category 6, rc 8, reason 13). A data set that is not
-cataloged gets #cmd("404") with the report #cmd("Dataset is not cataloged; only
-a cataloged dataset can be addressed by volume") (category 6, rc 8, reason 14),
-because mvsMF cannot reach a data set that is not in the catalog. A volume
-serial of more than six characters, or with a character other than a letter, a
-digit, #cmd("$"), #cmd("#") or #cmd("@"), gets #cmd("400") with the report
-#cmd("Invalid volume serial") (category 6, rc 8, reason 1). Of a multi-volume
-data set only the first volume is compared.
+name (@ref-ds-volume).
+
+== Addressing by Volume Serial <ref-ds-volume>
+
+#idx("volume serial")#idx("-(VOLSER)")
+The seven paths have the form
+#cmd("/zosmf/restfiles/ds/-(VOLSER)/{dataset-name}"). They are GET, PUT and DELETE of a data set\; the member list\; and GET, PUT and DELETE of
+a member. The create request has no such path. A rename takes the prefix too:
+the volume applies to the data set that exists, which is the old name of a data
+set rename and the library of a member rename.
+
+mvsMF reaches a data set through the catalog only. The volume serial is
+therefore a check and not another way to the data. The request is served as the
+cataloged form when the catalog entry of the data set is on that volume. The
+check comes after the check of the access (@ref-ds-auth), so the answer does not
+tell a caller without access where a data set lives. A refused request reads,
+writes and deletes nothing.
+
+#tab(caption: [Answers to a request with a volume serial])[
+  #table(columns: (0.6in, 0.6in, 1.9in, 1fr),
+    [Status], [Reason], [Message], [Cause],
+    [any], [], [], [The catalog entry is on that volume: the answer of the cataloged form.],
+    [404], [13], [#cmd("Dataset not found on the requested volume")], [The data set is cataloged, but on another volume.],
+    [404], [14], [#cmd("Dataset is not cataloged; only a cataloged dataset can be addressed by volume")], [The catalog has no entry for the name. A data set that is on a volume but not in the catalog cannot be reached.],
+    [400], [1], [#cmd("Invalid volume serial")], [The volume serial is empty, longer than six characters, or has a character other than a letter, a digit, #cmd("$"), #cmd("#") or #cmd("@").],
+  )
+]
+
+The category is 6 and the rc is 8 in the three reports. The volume serial is
+folded to upper case. The catalog lookup returns one volume serial, and the path
+is compared with that one: a request that names any other volume of a
+multi-volume data set gets reason 13. The query parameter #cmd("volser") of the
+list (@ref-ds-list) has nothing to do with the volume serial in the path.
+
+*Change from mvsMF 1.3.0:* a path with a volume serial was not routed and got
+#cmd("404") with the report #cmd("Not Found") (@ref-ds-sum). It is served as
+this section says now.
 
 == Names and Case <ref-ds-names>
 
@@ -651,7 +675,7 @@ library.
 mvsMF asks the security product through HTTPD for the class #cmd("DATASET"),
 with the folded name of the data set. For a member, the name is the library.
 The check comes before the catalog lookup, so the answer does not tell whether a
-data set exists.
+data set exists. The check of a volume serial (@ref-ds-volume) comes after it.
 
 #tab(caption: [Access needed])[
   #table(columns: (1.1in, 1fr),
@@ -689,6 +713,7 @@ column "Cat/rc" gives category and rc.
     [400], [6/8], [1], [#cmd("Dataset is not partitioned (use the dataset endpoint instead)")], [A member request for a data set that is not a PDS.],
     [400], [6/8], [1], [#cmd("Dataset name is too long"), #cmd("Member name is too long"), #cmd("Dataset level is too long")], [A name over the limit (@ref-ds-names).],
     [400], [6/8], [1], [#cmd("Missing Content-Length or Transfer-Encoding header")], [A write with neither header.],
+    [400], [6/8], [1], [#cmd("Invalid volume serial")], [A path with a malformed volume serial (@ref-ds-volume).],
     [400], [6/8], [3], [#cmd("Invalid or missing allocation parameters")], [@ref-ds-create.],
     [400], [6/8], [12], [#cmd("Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets")], [A record read of a V, VB or VBS data set or member (@ref-ds-record).],
     [400], [6/8], [6], [#cmd("Unsupported request; only 'rename' is supported")], [@ref-ds-rename.],
@@ -697,6 +722,8 @@ column "Cat/rc" gives category and rc.
     [401], [none], [none], [no body], [HTTPD has not resolved a user.],
     [404], [6/8], [4], [#cmd("Dataset not found")], [The data set is not cataloged, or the model of a create.],
     [404], [6/8], [5], [#cmd("PDS member not found")], [The library has no such member.],
+    [404], [6/8], [13], [#cmd("Dataset not found on the requested volume")], [A path with a volume serial, and the data set is cataloged on another volume (@ref-ds-volume).],
+    [404], [6/8], [14], [#cmd("Dataset is not cataloged; only a cataloged dataset can be addressed by volume")], [A path with a volume serial, and the name is not cataloged (@ref-ds-volume).],
     [404], [7/8], [4], [#cmd("Dataset not found")], [The directory for a member list could not be opened.],
     [404], [6/4], [7], [#cmd("Not Found")], [No route (@ref-ds-sum).],
     [412], [6/8], [10], [#cmd("The resource was modified since the supplied ETag was created")], [@ref-ds-etag.],

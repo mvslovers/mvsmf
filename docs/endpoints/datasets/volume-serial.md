@@ -1,7 +1,6 @@
 # Addressing a Data Set by Volume Serial
 
-Seven routes take a volume serial in front of the data set name, as z/OSMF does
-and as Zowe Explorer and the Zowe CLI send it when a volume is given:
+Seven routes take a volume serial in front of the data set name, as z/OSMF does:
 
 | Method | Path |
 |--------|------|
@@ -14,7 +13,8 @@ and as Zowe Explorer and the Zowe CLI send it when a volume is given:
 | DELETE | `/zosmf/restfiles/ds/-({volume-serial})/{dataset-name}({member-name})` |
 
 The rename request (`PUT` on the volume form with a `from-dataset` body) takes
-the same prefix; the volume applies to the existing data set being renamed.
+the same prefix. The volume applies to the data set that exists: the old name of
+a data set rename, and the library of a member rename.
 
 ## What the volume means
 
@@ -31,7 +31,8 @@ served silently.
 | Not cataloged | 404 | 14 | Dataset is not cataloged; only a cataloged dataset can be addressed by volume |
 | Volume serial malformed | 400 | 1 | Invalid volume serial |
 
-`category` is 6 and `rc` 8 in all three answers. A refused request reads, writes and deletes nothing.
+`category` is 6 and `rc` 8 in all three refusals. A refused request reads,
+writes and deletes nothing.
 
 A volume serial is one to six characters from `A-Z`, `0-9`, `$`, `#` and `@`,
 and is case-insensitive. Anything else, including a seventh character or a
@@ -45,18 +46,14 @@ data set gets the usual denial and learns nothing about where it lives.
 - **Uncataloged data sets cannot be reached.** Reading or writing a data set
   that is on a volume but not in the catalog needs OBTAIN and an open by volume,
   which mvsMF does not do. Such a request is 404 with reason 14.
-- **Only the first volume of a catalog entry is compared.** A multi-volume
-  data set is on its volume when the volume named is the first one in its
-  catalog entry.
-- The volume parameter of the list request (`volser`) is a separate filter and
-  is unchanged; see [list.md](list.md).
+- **One volume serial is compared.** The catalog lookup returns a single volume
+  serial, and that is the one the volume in the path is compared with. A request
+  that names any other volume of a multi-volume data set is 404 with reason 13.
+- The `volser` query parameter of the list request is a separate matter and is
+  unchanged: the list reads it and ignores it; see [list.md](list.md).
 
-## Examples
+## Example
 
 ```bash
 curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/ds/-(MVSRES)/SYS1.PARMLIB(IEASYS00)"
-```
-```bash
-zowe files view ds "SYS1.PARMLIB(IEASYS00)" --volume-serial MVSRES
-zowe files delete ds "IBMUSER.TEST.DATA" --volume MVSRES -f
 ```

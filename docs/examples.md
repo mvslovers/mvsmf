@@ -114,9 +114,6 @@ and member route (see [volume-serial.md](endpoints/datasets/volume-serial.md)).
 ```bash
 curl -s -u $USER:$PASS -X DELETE "$BASE/zosmf/restfiles/ds/-(MVSRES)/IBMUSER.TEST.DATA"
 ```
-```bash
-zowe files delete ds "IBMUSER.TEST.DATA" --volume MVSRES -f
-```
 
 ---
 

@@ -204,14 +204,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 - **The `-({volume-serial})` data set routes are back** (#336). They were
   withdrawn in 1.0.0 because the volume was captured and then ignored. Now the
   volume is read: a cataloged data set whose catalog entry is on exactly that
-  volume is served like the cataloged form, so `zowe files view ds NAME
-  --volume-serial VOL` and Zowe Explorer's volume-qualified requests work for
-  GET, PUT and DELETE of a data set and of a member, and for the member list.
-  A data set cataloged on another volume answers `404` (reason 13), a name that
-  is not cataloged `404` (reason 14), and a malformed volume serial `400`;
-  nothing is read, written or deleted. Data sets that are not cataloged cannot
-  be reached yet, and of a multi-volume data set only the first volume is
-  compared. See `docs/endpoints/datasets/volume-serial.md`.
+  volume is served like the cataloged form, for GET, PUT and DELETE of a data
+  set and of a member, for the member list, and for a rename. A data set
+  cataloged on another volume answers `404` (reason 13), a name that is not
+  cataloged `404` (reason 14), and a malformed volume serial `400`; nothing is
+  read, written or deleted. Data sets that are not cataloged cannot be reached
+  yet, and one volume serial, the one the catalog lookup returns, is compared.
+  See `docs/endpoints/datasets/volume-serial.md`.
 - **A job can be cancelled** (#417). `PUT /zosmf/restjobs/jobs/{name}/{id}`
   with `{"request":"cancel"}` stops the job the way the operator command `$C`
   does and leaves its output on the spool, which is what separates it from a

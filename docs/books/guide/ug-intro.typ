@@ -121,9 +121,11 @@ mvsMF offers a part of z/OSMF. These points differ from the IBM product:
 - *No change of a job.* A client can submit, list, read and purge jobs. It
   cannot hold or release a job, and it cannot cancel a job and keep its output
   (@ug-jobs-purge).
-- *No data sets by volume.* The forms of the data set paths that name a volume
-  (#cmd("-(VOLSER)")) are not offered. A request that uses one gets the
-  status 404.
+- *Data sets by volume only when cataloged.* The forms of the data set paths
+  that name a volume (#cmd("-(VOLSER)")) check the volume against the catalog.
+  A data set that is on a volume but not in the catalog cannot be reached, and
+  a request for one gets the status 404 (“Addressing by Volume
+  Serial” in the _mvsMF Reference_).
 - *No partial content.* mvsMF never answers 206. A list that is cut says so in
   the answer, in the field #cmd("moreRows").
 - *No 403 and no 409 from mvsMF.* A refusal by the security product is

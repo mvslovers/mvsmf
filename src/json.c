@@ -321,7 +321,7 @@ escape_char(char *out, unsigned char host, const unsigned char *etoa, int flags)
     }
 
     if (a < 0x20 || (a >= 0x7F && (a <= 0x9F || (flags & JSON_ESC_NONASCII)))) {
-        return (size_t) sprintf(out, "\\u%04X", (unsigned) a);
+        return (size_t) snprintf(out, JSON_ESC_MAX + 1, "\\u%04X", (unsigned) a);
     }
 
     out[0] = (char) host;
@@ -333,13 +333,12 @@ jsonEscapeBytes(char *out, size_t outlen, const unsigned char *raw,
                 unsigned rawlen, const unsigned char *etoa, int flags)
 {
     size_t o = 0;
-    unsigned i;
 
     if (outlen == 0) {
         return 0;
     }
 
-    for (i = 0; i < rawlen; i++) {
+    for (unsigned i = 0; i < rawlen; i++) {
         /* room for the longest escape plus the terminator */
         if (o + JSON_ESC_MAX >= outlen) break;
 

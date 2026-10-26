@@ -336,12 +336,12 @@ __asm__("\n&FUNC    SETC 'response_etoa'");
 void
 response_etoa(Session *session, unsigned char etoa[256])
 {
-	int i;
+	HTTPX *x = http_get_httpx(session->httpd);
 
-	for (i = 0; i < 256; i++) {
+	for (int i = 0; i < 256; i++) {
 		etoa[i] = (unsigned char) i;
 	}
-	http_etoa(etoa, 256);
+	(x->http_etoa)(etoa, 256);
 }
 
 __asm__("\n&FUNC    SETC 'createResponseBuilder'");

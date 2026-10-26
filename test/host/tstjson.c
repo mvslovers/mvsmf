@@ -203,10 +203,11 @@ roundtrip_array(const char *value, char *out, size_t outsz)
 	if (!doc) goto done;
 	translate(doc);
 
-	if (doc[0] == xl[(unsigned char) '['] &&
-	    (p = read_json_string(doc + 1, out, outsz)) != NULL &&
-	    p[0] == xl[(unsigned char) ']'] && p[1] == '\0') {
-		ok = 1;
+	if (doc[0] == xl[(unsigned char) '[']) {
+		p = read_json_string(doc + 1, out, outsz);
+		if (p != NULL && p[0] == xl[(unsigned char) ']'] && p[1] == '\0') {
+			ok = 1;
+		}
 	}
 	free(doc);
 done:
@@ -248,58 +249,58 @@ body_is(const char *value, const char *ascii_body)
 	return ok;
 }
 
-int
-main(void)
+/* 0. The checker itself: known good and known bad strings, given in
+   host spelling and run through the table like a response. */
+static void
+test_checker(void)
 {
-	char in[8], out[8192], want[8192];
-	unsigned c;
-	char *big, *dec, *text;
-	size_t i, n;
+	char tmp[32];
+	char src[32];
+	unsigned char raw[5];
 
-	init_table();
+	translate_copy(src, "\"abc\"");
+	CHECK(read_json_string(src, tmp, sizeof(tmp)) != NULL,
+	      "checker accepts a plain string");
+	translate_copy(src, "\"a\\u0001b\"");
+	CHECK(read_json_string(src, tmp, sizeof(tmp)) != NULL,
+	      "checker accepts \\u0001");
+	translate_copy(src, "\"a\\qb\"");
+	CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects \\q");
+	translate_copy(src, "\"a\\u00zzb\"");
+	CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects a short \\u escape");
+	translate_copy(src, "\"abc");
+	CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects an unterminated string");
+	raw[0] = 0x22; raw[1] = 0x61; raw[2] = 0x01; raw[3] = 0x22; raw[4] = 0;
+	CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects a raw U+0001");
+	raw[2] = 0x1F;
+	CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects the last control character");
+	raw[2] = 0x7F;
+	CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects a raw U+007F");
+	raw[2] = 0x85;
+	CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
+	      "checker rejects a raw U+0085");
+	raw[2] = 0xE9;
+	CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) != NULL,
+	      "checker accepts a raw byte above U+009F");
+}
 
-	/* 0. The checker itself: known good and known bad strings, given in
-	   host spelling and run through the table like a response. */
-	{
-		char tmp[32], src[32];
-		unsigned char raw[5];
+/* 1. Every byte, on its own, in both builders: valid JSON after the
+   translation, and the client decodes exactly the character the table
+   gives for it. */
+static void
+test_every_byte(void)
+{
+	char in[8];
+	char out[8192];
+	char want[8192];
 
-		translate_copy(src, "\"abc\"");
-		CHECK(read_json_string(src, tmp, sizeof(tmp)) != NULL,
-		      "checker accepts a plain string");
-		translate_copy(src, "\"a\\u0001b\"");
-		CHECK(read_json_string(src, tmp, sizeof(tmp)) != NULL,
-		      "checker accepts \\u0001");
-		translate_copy(src, "\"a\\qb\"");
-		CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects \\q");
-		translate_copy(src, "\"a\\u00zzb\"");
-		CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects a short \\u escape");
-		translate_copy(src, "\"abc");
-		CHECK(read_json_string(src, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects an unterminated string");
-		raw[0] = 0x22; raw[1] = 0x61; raw[2] = 0x01; raw[3] = 0x22; raw[4] = 0;
-		CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects a raw U+0001");
-		raw[2] = 0x1F;
-		CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects the last control character");
-		raw[2] = 0x7F;
-		CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects a raw U+007F");
-		raw[2] = 0x85;
-		CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) == NULL,
-		      "checker rejects a raw U+0085");
-		raw[2] = 0xE9;
-		CHECK(read_json_string((const char *) raw, tmp, sizeof(tmp)) != NULL,
-		      "checker accepts a raw byte above U+009F");
-	}
-
-	/* 1. Every byte, on its own, in both builders: valid JSON after the
-	   translation, and the client decodes exactly the character the table
-	   gives for it. */
-	for (c = 1; c < 256; c++) {
+	for (unsigned c = 1; c < 256; c++) {
 		in[0] = 'a'; in[1] = (char) c; in[2] = 'b'; in[3] = '\0';
 		translate_copy(want, in);
 
@@ -315,27 +316,39 @@ main(void)
 		snprintf(msg, sizeof(msg), "addJsonArrayString: 0x%02X decodes to U+%04X", c, xl[c]);
 		CHECK(strcmp(out, want) == 0, msg);
 	}
+}
 
-	/* 2. The five characters with a short form use it -- named by the code
-	   point they translate to, so EBCDIC TAB (0x05) gets \t too. */
-	{
-		static const struct { char ch; const char *esc; } shorts[] = {
-			{ '\b', "\\b" }, { '\f', "\\f" }, { '\n', "\\n" },
-			{ '\r', "\\r" }, { '\t', "\\t" },
-			{ 0x05, "\\t" }, { 0x15, "\\n" }, { 0x16, "\\b" }
-		};
+/* 2. The five characters with a short form use it -- named by the code
+   point they translate to, so EBCDIC TAB (0x05) gets \t too. */
+static void
+test_short_forms(void)
+{
+	char in[8];
+	size_t i;
 
-		for (i = 0; i < sizeof(shorts) / sizeof(shorts[0]); i++) {
-			in[0] = shorts[i].ch; in[1] = '\0';
-			snprintf(msg, sizeof(msg), "short form #%u (0x%02X) is written as %s",
-				(unsigned) i, (unsigned) (unsigned char) shorts[i].ch,
-				shorts[i].esc);
-			CHECK(body_is(in, shorts[i].esc), msg);
-		}
+	static const struct { char ch; const char *esc; } shorts[] = {
+		{ '\b', "\\b" }, { '\f', "\\f" }, { '\n', "\\n" },
+		{ '\r', "\\r" }, { '\t', "\\t" },
+		{ 0x05, "\\t" }, { 0x15, "\\n" }, { 0x16, "\\b" }
+	};
+
+	for (i = 0; i < sizeof(shorts) / sizeof(shorts[0]); i++) {
+		in[0] = shorts[i].ch; in[1] = '\0';
+		snprintf(msg, sizeof(msg), "short form #%u (0x%02X) is written as %s",
+			(unsigned) i, (unsigned) (unsigned char) shorts[i].ch,
+			shorts[i].esc);
+		CHECK(body_is(in, shorts[i].esc), msg);
 	}
+}
 
-	/* 3. The long form is \u00XX with XX the code point of the translated
-	   character, not the host byte. */
+/* 3. The long form is \u00XX with XX the code point of the translated
+   character, not the host byte. */
+static void
+test_long_forms(void)
+{
+	char in[8];
+	char *text;
+
 	in[0] = 0x01; in[1] = '\0';
 	CHECK(body_is(in, "\\u0001"), "0x01 is written as \\u0001");
 	in[0] = 0x04;
@@ -354,8 +367,15 @@ main(void)
 	CHECK(text != NULL && (unsigned char) text[6] == 0xE9,
 	      "a byte above U+009F passes through for the translation (encoding is #234)");
 	free(text);
+}
 
-	/* 4. Quote and backslash are still escaped, ordinary text is untouched. */
+/* 4. Quote and backslash are still escaped, ordinary text is untouched. */
+static void
+test_plain_text(void)
+{
+	char out[8192];
+	char want[8192];
+
 	CHECK(roundtrip_object("say \"hi\" \\ there", out, sizeof(out)) &&
 	      (translate_copy(want, "say \"hi\" \\ there"), strcmp(out, want) == 0),
 	      "quote and backslash round-trip");
@@ -364,9 +384,18 @@ main(void)
 	      "ordinary text round-trips");
 	CHECK(body_is("plain", "plain"), "ordinary text is written unchanged");
 	CHECK(body_is("a\"b\\c", "a\\\"b\\\\c"), "quote and backslash use their short form");
+}
 
-	/* 5. A string past the builder's initial buffer, every control character
-	   in it, so growth happens in the middle of escapes. */
+/* 5. A string past the builder's initial buffer, every control character
+   in it, so growth happens in the middle of escapes. */
+static void
+test_long_string(void)
+{
+	size_t i;
+	size_t n = 4000;
+	char *big;
+	char *dec;
+
 	n = 4000;
 	big = malloc(n + 1);
 	dec = malloc(n + 1);
@@ -396,68 +425,94 @@ main(void)
 	}
 	free(big);
 	free(dec);
+}
 
-	/* 6. NULL still means null. */
+/* 6. NULL still means null. */
+static void
+test_null(void)
+{
+	char want[64];
+	char *text;
+
 	text = object_text(NULL);
 	snprintf(want, sizeof(want), "{\"k\":null}");
 	translate(want);
 	CHECK(text != NULL && strcmp(text, want) == 0,
 	      "a NULL value is still null");
 	free(text);
+}
 
-	/* 7. jsonEscapeBytes(), the routine the data set listing escapes member
-	   names with (#473: the same one the builder uses). With
-	   JSON_ESC_NONASCII everything that does not translate to printable
-	   ASCII is a \u00XX escape; the bytes it leaves are the host bytes, for
-	   the response translation to turn into ASCII. */
-	{
-		static const unsigned char name1[] = { 'A', 'B', 0x01, 'C' };
-		static const unsigned char name2[] = { 'A', 0x05, 0x04, 0xE9, 'B' };
-		static const unsigned char name3[] = { 'A', '"', '\\', 'B' };
-		static const unsigned char name4[] = { 'A', 0x7E, 'B' };
-		char got[64];
-		size_t len;
+/* 7. jsonEscapeBytes(), the routine the data set listing escapes member
+   names with (#473: the same one the builder uses). With
+   JSON_ESC_NONASCII everything that does not translate to printable
+   ASCII is a \u00XX escape; the bytes it leaves are the host bytes, for
+   the response translation to turn into ASCII. */
+static void
+test_escape_bytes(void)
+{
+	char want[64];
 
-		len = jsonEscapeBytes(got, sizeof(got), name1, sizeof(name1), xl,
-		                      JSON_ESC_NONASCII);
-		snprintf(want, sizeof(want), "AB\\u0001C");
-		CHECK(len == strlen(got) && strcmp(got, want) == 0,
-		      "member name: a control byte is \\u0001");
+	static const unsigned char name1[] = { 'A', 'B', 0x01, 'C' };
+	static const unsigned char name2[] = { 'A', 0x05, 0x04, 0xE9, 'B' };
+	static const unsigned char name3[] = { 'A', '"', '\\', 'B' };
+	static const unsigned char name4[] = { 'A', 0x7E, 'B' };
+	char got[64];
+	size_t len;
 
-		len = jsonEscapeBytes(got, sizeof(got), name2, sizeof(name2), xl,
-		                      JSON_ESC_NONASCII);
-		snprintf(want, sizeof(want), "A\\t\\u009C\\u00E9B");
-		CHECK(len == strlen(got) && strcmp(got, want) == 0,
-		      "member name: a byte is named by its translation, short form kept (#473)");
+	len = jsonEscapeBytes(got, sizeof(got), name1, sizeof(name1), xl,
+	                      JSON_ESC_NONASCII);
+	snprintf(want, sizeof(want), "AB\\u0001C");
+	CHECK(len == strlen(got) && strcmp(got, want) == 0,
+	      "member name: a control byte is \\u0001");
 
-		len = jsonEscapeBytes(got, sizeof(got), name3, sizeof(name3), xl,
-		                      JSON_ESC_NONASCII);
-		snprintf(want, sizeof(want), "A\\\"\\\\B");
-		CHECK(len == strlen(got) && strcmp(got, want) == 0,
-		      "member name: quote and backslash are escaped");
+	len = jsonEscapeBytes(got, sizeof(got), name2, sizeof(name2), xl,
+	                      JSON_ESC_NONASCII);
+	snprintf(want, sizeof(want), "A\\t\\u009C\\u00E9B");
+	CHECK(len == strlen(got) && strcmp(got, want) == 0,
+	      "member name: a byte is named by its translation, short form kept (#473)");
 
-		len = jsonEscapeBytes(got, sizeof(got), name4, sizeof(name4), xl,
-		                      JSON_ESC_NONASCII);
-		snprintf(want, sizeof(want), "A\\u001AB");
-		CHECK(len == strlen(got) && strcmp(got, want) == 0,
-		      "member name: a host byte that translates to a control is escaped");
+	len = jsonEscapeBytes(got, sizeof(got), name3, sizeof(name3), xl,
+	                      JSON_ESC_NONASCII);
+	snprintf(want, sizeof(want), "A\\\"\\\\B");
+	CHECK(len == strlen(got) && strcmp(got, want) == 0,
+	      "member name: quote and backslash are escaped");
 
-		len = jsonEscapeBytes(got, sizeof(got), name2, sizeof(name2), xl, 0);
-		snprintf(want, sizeof(want), "A\\t\\u009C");
-		CHECK(strncmp(got, want, strlen(want)) == 0 &&
-		      (unsigned char) got[strlen(want)] == 0xE9,
-		      "without JSON_ESC_NONASCII a byte above U+009F stays as it is");
+	len = jsonEscapeBytes(got, sizeof(got), name4, sizeof(name4), xl,
+	                      JSON_ESC_NONASCII);
+	snprintf(want, sizeof(want), "A\\u001AB");
+	CHECK(len == strlen(got) && strcmp(got, want) == 0,
+	      "member name: a host byte that translates to a control is escaped");
 
-		/* room: stops before the output buffer is exceeded */
-		memset(got, 'z', sizeof(got));
-		len = jsonEscapeBytes(got, 10, name1, sizeof(name1), xl,
-		                      JSON_ESC_NONASCII);
-		CHECK(len < 10 && got[len] == '\0' && got[10] == 'z',
-		      "jsonEscapeBytes stays inside outlen and terminates");
-		CHECK(jsonEscapeBytes(got, 1, name1, sizeof(name1), xl, 0) == 0 &&
-		      got[0] == '\0',
-		      "an output of one byte holds just the terminator");
-	}
+	jsonEscapeBytes(got, sizeof(got), name2, sizeof(name2), xl, 0);
+	snprintf(want, sizeof(want), "A\\t\\u009C");
+	CHECK(strncmp(got, want, strlen(want)) == 0 &&
+	      (unsigned char) got[strlen(want)] == 0xE9,
+	      "without JSON_ESC_NONASCII a byte above U+009F stays as it is");
+
+	/* room: stops before the output buffer is exceeded */
+	memset(got, 'z', sizeof(got));
+	len = jsonEscapeBytes(got, 10, name1, sizeof(name1), xl,
+	                      JSON_ESC_NONASCII);
+	CHECK(len < 10 && got[len] == '\0' && got[10] == 'z',
+	      "jsonEscapeBytes stays inside outlen and terminates");
+	CHECK(jsonEscapeBytes(got, 1, name1, sizeof(name1), xl, 0) == 0 &&
+	      got[0] == '\0',
+	      "an output of one byte holds just the terminator");
+}
+
+int
+main(void)
+{
+	init_table();
+
+	test_checker();
+	test_every_byte();
+	test_short_forms();
+	test_long_forms();
+	test_plain_text();
+	test_long_string();
+	test_null();
+	test_escape_bytes();
 
 	return mbt_test_summary("TSTJSON");
 }

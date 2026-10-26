@@ -31,6 +31,12 @@ http_xlate((unsigned char *)body, body_len, httpx->xlate_cp037->atoe);
   applies `http_etoa()` with the *server-default* table. Response headers and
   JSON bodies built with `http_printf` need no explicit call — and must not be
   pre-translated, or they get converted twice.
+- **`JsonBuilder` text is host text, escaped against that table (#473).** The
+  finished document is translated with the server-default `http_etoa()` in
+  `sendJSONResponse()`. A `\u00XX` escape must name the character the client
+  decodes, so the builder (`createResponseBuilder()`) carries a copy of that
+  table (`response_etoa()`) and `escape_char()` in `json.c` decides on the
+  translated byte. The member list (`jsonEscapeBytes()`) uses the same routine.
 - **`send_all()` does not translate.** It sends the buffer raw and expects the
   caller to have produced ASCII already. (Neither does the `http_send()` under
   it — which nothing outside `common.c` may call, see **Sending** below.)

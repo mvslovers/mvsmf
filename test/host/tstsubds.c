@@ -51,15 +51,14 @@ fill(char *out, size_t n)
 	out[n] = '\0';
 }
 
+/* the whole request value is given; the name comes out without any quote */
 static void
-check_name(const char *what, const char *text, int want_rc)
+check_file(const char *what, const char *file, const char *text, int want_rc)
 {
 	struct slot s;
-	char file[160];
 	char msg[120];
 	int rc;
 
-	quoted(file, text);
 	memset(s.dsname, '#', sizeof(s.dsname));
 	memset(s.canary, CANARY, sizeof(s.canary));
 
@@ -76,6 +75,27 @@ check_name(const char *what, const char *text, int want_rc)
 		snprintf(msg, sizeof(msg), "%s: buffer untouched", what);
 		CHECK(s.dsname[0] == '#', msg);
 	}
+}
+
+static void
+check_name(const char *what, const char *text, int want_rc)
+{
+	char file[160];
+
+	quoted(file, text);
+	check_file(what, file, text, want_rc);
+}
+
+/* #493: Zowe CLI wraps an already quoted name once more: //''DSN(MEMBER)'' */
+static void
+check_double_quoted(const char *what, const char *text, int want_rc)
+{
+	char file[160];
+
+	strcpy(file, "//''");
+	strcat(file, text);
+	strcat(file, "''");
+	check_file(what, file, text, want_rc);
 }
 
 int
@@ -118,6 +138,36 @@ main(void)
 	check_name("empty member", "MY.PDS()", -1);
 	check_name("empty name before the member", "(MEMBER)", -1);
 	check_name("text after the closing parenthesis", "MY.PDS(MEM)X", -1);
+
+	/* #493: the doubly quoted form, //''DSN(MEMBER)'' */
+	check_double_quoted("double quotes: member", "IBMUSER.MVSMF.TESTJCL(IEFBR14)", 0);
+	check_double_quoted("double quotes: sequential", "MY.JCL", 0);
+	check_double_quoted("double quotes: one character", "A", 0);
+
+	fill(dsn, DSNAME_MAX);
+	check_double_quoted("double quotes: 44 characters", dsn, 0);
+	strcpy(text, dsn);
+	strcat(text, "(MEMBER01)");
+	check_double_quoted("double quotes: 44 + 8", text, 0);
+
+	fill(dsn, DSNAME_MAX + 1);
+	check_double_quoted("double quotes: 45 characters", dsn, -1);
+	strcpy(text, dsn);
+	strcat(text, "(MEMBER)");
+	check_double_quoted("double quotes: 45 + member", text, -1);
+	fill(dsn, DSNAME_MAX);
+	strcpy(text, dsn);
+	strcat(text, "(MEMBER012)");
+	check_double_quoted("double quotes: 9-character member", text, -1);
+
+	check_double_quoted("double quotes: no closing parenthesis", "MY.PDS(MEMBER", -1);
+	check_double_quoted("double quotes: empty member", "MY.PDS()", -1);
+	check_double_quoted("double quotes: empty name", "", -1);
+
+	/* quotes that do not pair up are refused */
+	check_file("opening pair only", "//''MY.PDS(MEM)'", "", -1);
+	check_file("closing pair only", "//'MY.PDS(MEM)''", "", -1);
+	check_file("three quotes each side", "//'''MY.JCL'''", "", -1);
 
 	/* shapes of the whole request value */
 	{

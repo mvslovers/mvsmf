@@ -1100,17 +1100,19 @@ right after the submit may see 404 for a short time.]
 The profiles above decide the data set and job services of mvsMF. These
 surfaces reach the system without them:
 
-- *The test endpoint.* #cmd("/zosmf/test") is registered in the default
-  build. #cmd("fn=cmd") issues an operator command and #cmd("fn=mtt") reads the
-  Master Trace Table. The check of #cmd("MVSMF.ACCESS") is the only one that
-  applies (@ug-security-console-only).
+- *The test endpoint.* A release does not register #cmd("/zosmf/test"): the
+  request answers 404. Only a build whose version ends in #cmd("-dev") registers
+  it, and this entry is about such a build. #cmd("fn=cmd") issues an operator
+  command and #cmd("fn=mtt") reads the Master Trace Table. The check of
+  #cmd("MVSMF.ACCESS") is the only one that applies
+  (@ug-security-console-only).
   #cmd("fn=listds"), #cmd("fn=locate") and #cmd("fn=dscb") read the catalog
-  and the VTOC with no data set check. #cmd("fn=password") prints the password
-  of the caller, masked, and unmasked with #cmd("reveal=1"). The job probes
+  and the VTOC with no data set check. The job probes
   #cmd("fn=job"), #cmd("fn=spool") and #cmd("fn=syslog") do follow the
-  JESSPOOL rules. A build with #cmd("-DMVSMF_NO_TEST_ENDPOINT") leaves the
-  endpoint out and answers 404. In the default build every user who passes the
-  #cmd("MVSMF.ACCESS") check reaches it.
+  JESSPOOL rules. No function of the endpoint returns data that identifies a
+  session. A function that did so was removed in mvsMF 1.4.0. In a development
+  build every user who passes the #cmd("MVSMF.ACCESS") check reaches the
+  endpoint.
 - *USS files.* RAKF profiles do not protect the files of the UFS. mvsMF hands
   the user ID and the group of the caller to UFSD, and UFSD decides by the
   permission bits of the file (@ug-uss).
@@ -1122,6 +1124,12 @@ surfaces reach the system without them:
   the _FTPD User's Guide_).
 
 #note[*Check the build you run.* Whether #cmd("/zosmf/test") answers 404
-depends on how mvsMF was built, not on a setting. Ask for
-#cmd("/zosmf/test?fn=version") with a user who has access, and look at the
-status.]
+depends on the version that is stamped into the module and not on a setting. A
+version that ends in #cmd("-dev") registers the endpoint; every other version
+does not. Read #cmd("zosmf_full_version") in the answer of
+#cmd("/zosmf/info"). The check is fail-closed: a version that is missing or too
+short counts as a release. Two limits stay. The code of the endpoint is still in
+the module of a release, only no route reaches it; leaving it out of the object
+needs a release flag at compile time that the build tool does not offer yet.
+And a package of a version that ends in #cmd("-dev") keeps the endpoint, so a
+prerelease package is not a release for this purpose.]

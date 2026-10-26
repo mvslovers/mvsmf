@@ -210,7 +210,8 @@ gives it up when the search is done.
   served. No list is refused. The wait has no limit in mvsMF.
 - The lock covers the catalog search only. The answer is sent after the lock is
   released.
-- #cmd("GET /zosmf/test?fn=listds") (@ref-test-listds) takes the same lock. The
+- #cmd("GET /zosmf/test?fn=listds") (@ref-test-listds), which only a
+  development build has, takes the same lock. The
   list of members (@ref-ds-members) and the other requests do not.
 - The status and the body of a list are the same with or without a wait.
 - When a list abends while it holds the lock, the recovery releases it and

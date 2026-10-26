@@ -15,8 +15,12 @@
 #   - a user ID with a good password (MVSMF_USER, MVSMF_PASS) that HTTPD lets
 #     in. If the /zosmf/* line has RES=FACILITY:MVSMF.ACCESS (the security
 #     chapter), this user ID must have READ access to MVSMF.ACCESS.
-#   - an mvsMF built without -DMVSMF_NO_TEST_ENDPOINT: the sessions version,
-#     cookie and after-logout call /zosmf/test?fn=version.
+#   - for the session version, an mvsMF whose stamped version ends in -dev
+#     (the only builds that register /zosmf/test) and a user ID with READ
+#     access to FACILITY MVSMF.CONSOLE. The sessions release-info and
+#     release-test need a build of a release version: they show its version
+#     and the 404. The sessions cookie, after-logout and denied call a
+#     service that every build has.
 #   - nothing else: no data sets, no UFS files, no side effects for other
 #     chapters. The script only reads, logs in and logs out.
 #
@@ -53,7 +57,18 @@ trap 'cd /; rm -rf "$WORK"' EXIT
 
 ses ug-first/info.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/info"'
 
-ses ug-first/version.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
+# version.txt: run against a build whose version ends in -dev.
+# release-info.txt, release-test.txt: run against a build of a release version.
+# Set BUILD=dev or BUILD=release for the run; without it neither is written.
+case "$BUILD" in
+dev)
+	ses ug-first/version.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
+	;;
+release)
+	ses ug-first/release-info.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/info"'
+	ses ug-first/release-test.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
+	;;
+esac
 
 # ---- 2. token login, use, logout -------------------------------------------
 
@@ -61,11 +76,11 @@ hid 'rm -f cookies.txt'
 
 ses ug-first/login.txt 'curl -si -c cookies.txt -X POST -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/services/authenticate"'
 
-ses ug-first/cookie.txt 'curl -s -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"'
+ses ug-first/cookie.txt 'curl -s -b cookies.txt "$MVSMF_URL/zosmf/restfiles/ds?dslevel=SYS1.PARMLIB"'
 
 ses ug-first/logout.txt 'curl -si -X DELETE -b cookies.txt "$MVSMF_URL/zosmf/services/authenticate"'
 
-ses ug-first/after-logout.txt 'curl -si -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"'
+ses ug-first/after-logout.txt 'curl -si -b cookies.txt "$MVSMF_URL/zosmf/restfiles/ds?dslevel=SYS1.PARMLIB"'
 
 # ---- 3. when it fails -------------------------------------------------------
 
@@ -81,7 +96,7 @@ if [ -n "$MVSMF_DENY_USER" ]; then
 		MVSMF_USER=$MVSMF_DENY_USER
 		MVSMF_PASS=$MVSMF_DENY_PASS
 		export MVSMF_USER MVSMF_PASS
-		ses ug-first/denied.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
+		ses ug-first/denied.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/restfiles/ds?dslevel=SYS1.PARMLIB"'
 	)
 else
 	echo "skipped ug-first/denied.txt (MVSMF_DENY_USER not set)" >&2

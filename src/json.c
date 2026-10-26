@@ -157,46 +157,14 @@ startJsonArrayKey(JsonBuilder *builder, const char *key)
     return 0;
 }
 
+/* Same as addJsonStringEsc(). It used to format "key":"value" into a 256-byte
+ * temp buffer: a value of 254 characters or more lost its closing quote, snprintf()
+ * returned the wanted length (not < 0) so the caller saw success, and a quote or
+ * backslash in the value was written as it stood (#480). */
 int 
 addJsonString(JsonBuilder *builder, const char *key, const char *value) 
 {
-    if (!builder || !key) {
-        return -1;
-    }
-    
-    char temp[JSON_TEMP_BUFFER_SIZE];
-    
-    if (!builder->is_first) {
-        if (append_string(builder, ",") < 0) {
-            return -1;
-        }
-    }
-    
-    if ((snprintf(temp, sizeof(temp), "\"%s\":", key)) < 0) {
-        return -1;
-    }
-
-    if (append_string(builder, temp) < 0) {
-        return -1;
-    }
-    
-    if (value) {
-        if ((snprintf(temp, sizeof(temp), "\"%s\"", value)) < 0) {
-            return -1;
-        }
-    } else {
-        if ((snprintf(temp, sizeof(temp), "null")) < 0) {
-            return -1;
-        }
-    }
-    
-    if (append_string(builder, temp) < 0) {
-        return -1;
-    }
-    
-    builder->is_first = 0;
-
-    return 0;
+    return addJsonStringEsc(builder, key, value);
 }
 
 int

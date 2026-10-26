@@ -995,6 +995,15 @@ test_submit_dataset_name_too_long() {
 	split_response "$resp"
 	assert_http_status "400" "$HTTP_STATUS" "submit 45-character name with a member"
 
+	# Zowe CLI wraps a name the user already quoted (#493): //''DSN(MEMBER)''.
+	# It passes the name check and is looked up: 404, not 400.
+	resp=$(do_curl PUT \
+		-H "Content-Type: application/json" \
+		-d '{"file":"//'"''"'NO.SUCH.DATASET(MEMBER01)'"''"'"}' \
+		"${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "404" "$HTTP_STATUS" "submit doubly quoted name is looked up"
+
 	return 0
 }
 

@@ -21,6 +21,19 @@ submit_dsname(const char *filename, char *dsname, size_t size)
 
 	name = &filename[3];
 	n = len - 4;
+
+	/* Zowe CLI wraps a name the user already quoted: //''DSN''. */
+	if (n > 0 && name[0] == '\'') {
+		if (n < 2 || name[n - 1] != '\'') {
+			return -1;
+		}
+		name++;
+		n -= 2;
+	}
+	if (n == 0 || name[0] == '\'' || name[n - 1] == '\'') {
+		return -1;
+	}
+
 	paren = memchr(name, '(', n);
 
 	if (paren) {

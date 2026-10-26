@@ -59,7 +59,8 @@ void freeJsonBuilder(JsonBuilder *builder)									asm("JSON001");
  * @brief Adds a string key-value pair to the JSON object
  *
  * Adds a quoted string value with the specified key. If value is NULL,
- * adds "null" instead of a string.
+ * adds "null" instead of a string. The value is JSON-escaped and may be of any
+ * length, exactly as addJsonStringEsc() writes it (#480).
  *
  * @param builder Pointer to JsonBuilder
  * @param key Key name for the value

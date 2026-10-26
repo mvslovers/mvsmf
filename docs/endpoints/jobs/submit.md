@@ -33,9 +33,10 @@ The request body is a JSON object referencing a dataset containing JCL:
 }
 ```
 
-The name is written `//'DSN'` or `//'DSN(MEMBER)'`, as on z/OSMF. The data set
-name is at most 44 characters and the member at most 8, so the text between the
-quotes can be up to 54 characters long.
+The name is written `//'DSN'` or `//'DSN(MEMBER)'`, as on z/OSMF. Zowe CLI wraps a
+name the user typed in quotes once more and sends `//''DSN(MEMBER)''`; that form
+is accepted too (#493). The data set name is at most 44 characters and the
+member at most 8, so the name can be up to 54 characters long.
 
 ## Response
 On successful completion, this request returns HTTP status code 200 (OK) and the job status as a JSON object (same format as the [status](status.md) endpoint).
@@ -61,7 +62,7 @@ a status poll issued inside that same window can still show an empty `owner`.
     - `JOB card cannot be continued: no room for the comma that joins it to the NOTIFY, USER and PASSWORD operands mvsMF adds` (reason 12) — the card cannot be given the comma that joins it to the card mvsMF adds. Three cases: the last line of the JOB card has data past column 71 and does not end in a comma (sequence numbers in columns 73-80 count; trailing blanks do not), or it ends in column 71 and holds no comma outside quotes and parentheses to cut at (a single operand, say a long quoted name), or the operand it would move is too wide for a continuation card of its own. A card that merely ends in column 70 or 71 is accepted, see [Limitations](#limitations) (#395)
     - Unsupported `Content-Type` (anything other than `application/json` or `text/plain`)
     - Missing `file` field in JSON body
-    - A `file` value that is not of the form `//'DSN'` or `//'DSN(MEMBER)'`, whose data set name is longer than 44 characters, or whose member is empty, longer than 8 characters or missing its closing parenthesis (#477)
+    - A `file` value that is not of the form `//'DSN'`, `//'DSN(MEMBER)'` or the doubly quoted `//''DSN(MEMBER)''`, whose data set name is longer than 44 characters, or whose member is empty, longer than 8 characters or missing its closing parenthesis (#477)
     - Failed to read request content: a malformed `Content-Length`, or a client that stopped sending
 - HTTP 413 (Request entity too large)
     - `Content-Length` of 16 MB or more -- more than 24-bit storage can hold. Nothing is read, and the connection is closed

@@ -324,7 +324,6 @@ static void
 test_short_forms(void)
 {
 	char in[8];
-	size_t i;
 
 	static const struct { char ch; const char *esc; } shorts[] = {
 		{ '\b', "\\b" }, { '\f', "\\f" }, { '\n', "\\n" },
@@ -332,7 +331,7 @@ test_short_forms(void)
 		{ 0x05, "\\t" }, { 0x15, "\\n" }, { 0x16, "\\b" }
 	};
 
-	for (i = 0; i < sizeof(shorts) / sizeof(shorts[0]); i++) {
+	for (size_t i = 0; i < sizeof(shorts) / sizeof(shorts[0]); i++) {
 		in[0] = shorts[i].ch; in[1] = '\0';
 		snprintf(msg, sizeof(msg), "short form #%u (0x%02X) is written as %s",
 			(unsigned) i, (unsigned) (unsigned char) shorts[i].ch,
@@ -391,7 +390,6 @@ test_plain_text(void)
 static void
 test_long_string(void)
 {
-	size_t i;
 	size_t n = 4000;
 	char *big;
 	char *dec;
@@ -404,7 +402,7 @@ test_long_string(void)
 		char *wide = malloc(n * 6 + 16);
 		char *exp = malloc(n + 1);
 
-		for (i = 0; i < n; i++) {
+		for (size_t i = 0; i < n; i++) {
 			unsigned k = (unsigned) (i % 40);
 			big[i] = (char) (k < CTRL_MAX - 1 ? k + 1 : 'x');
 		}

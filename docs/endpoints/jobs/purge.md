@@ -1,6 +1,7 @@
 # Purge Job
 
-Purges a job from the JES2 system.
+Purges a job from the JES2 system: the job and its output are removed. To stop
+a job and keep its output on the spool, use [Cancel Job](cancel.md).
 
 ## HTTP Method
 DELETE
@@ -126,7 +127,7 @@ mmf job purge TESTJOB JOB00123
 {
     "owner": "MIKE",
     "jobid": "JOB00123",
-    "job-correlator": "",
+    "original-jobid": "JOB00123",
     "message": "Request was successful.",
     "jobname": "TESTJOB",
     "status": 0

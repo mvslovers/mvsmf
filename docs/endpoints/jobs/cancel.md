@@ -58,6 +58,21 @@ The job is looked up before it is cancelled, as for a purge; `owner` comes from
 that lookup. The shape of this body has not been compared with a reference
 z/OSMF: it follows the purge response.
 
+## What a cancel does to the job
+
+| The job is | A cancel |
+|------------|----------|
+| waiting on the execution queue, for example held (`status` `ACTIVE`, see [Job Status](status.md)) | ends it without running it; it moves to the output queue |
+| executing (also `ACTIVE`) | JES2 ends it with ABEND S222 (the code of a job cancelled by the operator); it moves to the output queue and its job log stays on the spool |
+| already on the output queue (`OUTPUT`) | nothing to stop: HTTP 400, reason 14 |
+| a started task or a TSO user | refused: HTTP 400, reason 13 |
+
+In the status of a job that was executing, `retcode` reads `ABEND S222`, where
+`retcode` works at all: [Job Status](status.md) lists what it needs.
+
+The answer 200 says that JES2 accepted the cancel. A job that is executing may
+need a moment to end: poll [Job Status](status.md) until `status` is `OUTPUT`.
+
 ## Authorization
 
 A cancel is judged by the rule of the purge. A job of the caller's own userid
@@ -99,10 +114,13 @@ strings of the request. See [Job spool authorization](../../jesspool.md).
     - JES2 system error. An unexpected return code of the cancel is also
       reported to the operator console (`MVSMF207E`, see [messages](../../messages.md)).
 
+## See also
+- [Purge Job](purge.md): removes the job and its output.
+- [Job Status](status.md): `status` and `retcode` of the cancelled job.
+- [Job spool authorization](../../jesspool.md): who may cancel the job of another owner.
+- [Messages](../../messages.md): `MVSMF207E`.
+
 ## Limitations
-- A job that is waiting for an operator reply (for example an allocation
-  message) stays cancel-pending until that reply is given: JES2 has accepted the
-  cancel, but the job does not end by itself.
 - Cannot cancel started tasks or TSO users.
 - Hold and release are not implemented (#424).
 - No support for job correlator IDs.
@@ -112,15 +130,33 @@ strings of the request. See [Job spool authorization](../../jesspool.md).
 ### Using curl
 ```bash
 curl -X PUT -H "Content-Type: application/json" \
-     -H "X-CSRF-ZOSMF-HEADER: x" \
      --data '{"request":"cancel","version":"2.0"}' \
      http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123
 ```
 
+mvsMF does not require the header `X-CSRF-ZOSMF-HEADER`; z/OSMF clients send it
+and mvsMF accepts it.
+
 ### Using Zowe CLI
 ```bash
-zowe zos-jobs cancel job JOB00123
+zowe jobs cancel job JOB00123
 ```
+
+`zowe zos-jobs cancel job` is the same command. Zowe CLI takes the job
+ID alone and finds the job name itself.
+
+### Checking the result
+```bash
+curl http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123
+curl http://mvs:1080/zosmf/restjobs/jobs/TESTJOB/JOB00123/files
+```
+```bash
+zowe jobs view job-status-by-jobid JOB00123
+zowe jobs list spool-files-by-jobid JOB00123
+```
+
+The status reads `OUTPUT` and the spool files are listed. Remove the job with
+[Purge Job](purge.md) when its output is no longer needed.
 
 ### Success Response
 ```json

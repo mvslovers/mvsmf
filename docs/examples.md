@@ -284,15 +284,16 @@ zowe jobs view spool-file-by-id JOB00123 2
 ### Cancel a job
 `PUT /zosmf/restjobs/jobs/{job-name}/{jobid}`
 
-The job is stopped and its output stays on the spool (unlike a purge).
+The job is stopped and its output stays on the spool (unlike a purge). The
+status of the job then reads `OUTPUT`; see [Cancel Job](endpoints/jobs/cancel.md).
 
 ```bash
 curl -s -u $USER:$PASS -X PUT -H "Content-Type: application/json" \
-  -H "X-CSRF-ZOSMF-HEADER: x" --data '{"request":"cancel","version":"2.0"}' \
+  --data '{"request":"cancel","version":"2.0"}' \
   "$BASE/zosmf/restjobs/jobs/MYJOB/JOB00123"
 ```
 ```bash
-zowe zos-jobs cancel job JOB00123
+zowe jobs cancel job JOB00123
 ```
 
 ### Purge a job

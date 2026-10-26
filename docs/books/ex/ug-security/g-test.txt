@@ -1,0 +1,15 @@
+$ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/test?fn=cmd&cmd=D%20T"
+HTTP/1.1 500 Internal Server Error
+Date: Mon, 26 Oct 2026 17:41:31 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Type: application/json
+Content-Length: 124
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":4,"reason":0,"message":"LMOPEN error","details":["Authorization failed - You may not use this service."]}

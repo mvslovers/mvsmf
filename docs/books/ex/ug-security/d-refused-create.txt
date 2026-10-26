@@ -1,0 +1,18 @@
+$ curl -si -X POST -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  -H 'Content-Type: application/json' \
+  -d '{"dsorg":"PS","recfm":"FB","lrecl":80,"blksize":3120,"primary":1,"alcunit":"TRK"}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.SECDEMO.DENIED"
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 23 Oct 2026 07:54:45 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 71
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":900,"category":8,"reason":7,"message":"Dynamic allocation Error"}

@@ -1,0 +1,18 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"request":"cancel","version":"2.0"}' \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM1/$JOBID"
+HTTP/1.1 405 Method Not Allowed
+Date: Mon, 26 Oct 2026 17:50:26 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 89
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":4,"category":6,"reason":7,"message":"Http method PUT is not supported by this URL"}

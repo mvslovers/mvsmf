@@ -1,0 +1,3 @@
+$ curl -s -u "$MVSMF_USER:$MVSMF_PASS" \
+  "$MVSMF_URL/zosmf/restjobs/jobs/MVSMFDM4/$JEJOBID"
+{"subsystem":"JES2","jobname":"MVSMFDM4","jobid":"JOB00080","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM4/JOB00080","files-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM4/JOB00080/files","status":"OUTPUT","retcode":"JCL ERROR"}

@@ -1,0 +1,13 @@
+$ curl -si "$MVSMF_URL/zosmf/info"
+HTTP/1.1 401 Unauthorized
+Date: Fri, 23 Oct 2026 07:43:34 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Content-Length: 0
+WWW-Authenticate: Basic realm="MVSC"
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+

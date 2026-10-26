@@ -1,0 +1,17 @@
+$ head -c 5000000 /dev/zero | tr '\0' 'x' | curl -si -X PUT \
+  -u "$MVSMF_USER:$MVSMF_PASS" -H 'Expect:' --data-binary @- \
+  "$MVSMF_URL/zosmf/restfiles/fs/tmp/mvsmf-demo/big.txt"
+HTTP/1.1 500 Internal Server Error
+Date: Fri, 23 Oct 2026 07:45:47 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 68
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":8,"reason":1,"message":"No space left on device"}

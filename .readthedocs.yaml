@@ -1,0 +1,14 @@
+# Read the Docs: the mvsMF manuals, built from the same Typst sources as
+# the PDFs (docs/books, bookmaster template), as a static site.
+version: 2
+submodules:
+  include: all
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.12"
+  commands:
+    - curl -fsSL --proto "=https" --tlsv1.2 -O https://github.com/typst/typst/releases/download/v0.15.1/typst-x86_64-unknown-linux-musl.tar.xz
+    - echo "a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c  typst-x86_64-unknown-linux-musl.tar.xz" | sha256sum -c -
+    - tar -xf typst-x86_64-unknown-linux-musl.tar.xz
+    - PATH="$PWD/typst-x86_64-unknown-linux-musl:$PATH" sh docs/books/web/build.sh "$READTHEDOCS_OUTPUT/html"

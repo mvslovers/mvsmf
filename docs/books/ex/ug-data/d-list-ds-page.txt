@@ -1,0 +1,45 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'X-IBM-Max-Items: 1' \
+  "$MVSMF_URL/zosmf/restfiles/ds?dslevel=$MVSMF_USER.DEMO"
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 08:16:43 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: keep-alive
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+Content-Type: application/json
+Transfer-Encoding: chunked
+
+{
+  "items": [
+    {
+      "dsname": "SMITH.DEMO.BIN",
+      "blksz": "3120",
+      "catnm": "",
+      "cdate": "2026/10/23",
+      "dev": "3350",
+      "dsntp": "BASIC",
+      "dsorg": "PS",
+      "edate": "***None***",
+      "extx": "1",
+      "lrecl": "80",
+      "migr": "NO",
+      "mvol": "N",
+      "ovf": "NO",
+      "rdate": "2000/12/31",
+      "recfm": "FB",
+      "sizex": "1",
+      "spacu": "TRACKS",
+      "used": "100",
+      "vol": "WORK00",
+      "vols": "WORK00"
+    }
+  ],
+  "returnedRows": 1,
+  "moreRows": true,
+  "JSONversion": 1
+} 

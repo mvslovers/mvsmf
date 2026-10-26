@@ -58,6 +58,20 @@ card; **this endpoint deliberately does not**: the caller may purge a job of
 another owner, and filling the field from the caller's identity would report a
 userid that never submitted the job. An empty owner is the honest answer here.
 
+### The header `X-IBM-Job-Modify-Version` is ignored
+
+z/OSMF lets a client choose between an asynchronous purge (`X-IBM-Job-Modify-Version: 1.0`,
+the default) and a synchronous one (`2.0`), which answers only when the purge
+has finished. mvsMF has one mode. The handler does not read the header, so
+`2.0`, `1.0`, any other value and no header at all get the same answer: the
+asynchronous one described above, `200` with `status` `0`, and a `message` that
+says either `Request was successful.` or that the purge is only requested. No
+error is raised and nothing in the response says the header was not honoured.
+
+A client that sends `2.0` and takes `200` as "the job is gone" is therefore
+wrong for a job whose output a device holds. It reads `message`, or lists the
+job again, as described in the previous section.
+
 ## Authorization
 
 A job of the caller's own userid is always purgeable. A job of another owner
@@ -107,6 +121,7 @@ strings of the request. The job id is compared whole; no wildcard matches. See
 - Cannot purge active STCs (Started Tasks)
 - Cannot purge active TSO users
 - A job whose output a device holds is only marked for purge (see above); it leaves the queue when that output is released
+- No synchronous purge: `X-IBM-Job-Modify-Version: 2.0` is ignored and answered like `1.0` (see above)
 - Job must exist and be purgeable by the caller (own job, or UPDATE on its JESSPOOL profile)
 - No support for job correlator IDs
 

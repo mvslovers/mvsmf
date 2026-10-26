@@ -198,6 +198,14 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   ended, the time of its newest entry, and reports a match stamped later. The
   command's own reply can still count as a detection, and a detection is read
   afresh on every poll (see `docs/endpoints/console/detections.md`).
+- **An error report is valid JSON whatever the message holds** (#480). The
+  `message` of an error report was formatted into a 256-byte buffer, so a
+  message of 254 characters or more (a submit with a long `file` value is the
+  usual way to get one) lost its closing quote and the client could not parse
+  the body, and a quote or a backslash in the message ended the string early.
+  The message is now escaped and has no length limit. The text some messages
+  are built into before it is sent is still cut at 255 characters, but the
+  report stays valid JSON.
 
 ### Added
 

@@ -308,7 +308,7 @@ mbt run rest-tests -- curl-jobs --setup   # arguments after the names go to each
 - **Load run**: `load-452.sh`, by name only -- the combined stability run of #452 (member reads, job status polls, large PUTs, concurrent listings), for a local throwaway container; its header lists the knobs
 - **Measurement run**: `poll-425.sh` (by name only) -- status polls on a running read-only job from several clients, with `fn=textsum` sampling, `fn=storage` before/after and a console check, for #425. Not part of `all`; it needs a restartable HTTPD.
 - **Soak, by name only**: `reads-372.sh` sends `READS` (default 50000) strictly sequential member GETs and samples `fn=storage` every `EVERY` reads (`internals/storage-probe.md`); run it in a throwaway container: `READS=50000 mbt run rest-tests --target env -- reads-372`. It writes `storage.csv` and `summary.txt` (bytes lost per read) to `OUT`
-- **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`
+- **Lua (in mbt)**: `auth` (the authentication service) and `info-cookie` (the cookie on a Basic response), in `mbt/lua/restauth.lua`; `auth-refused` by name only (#520: adds the RAKF user `AUTH520`, changes its password and reloads `RAKFUSER` to get a login that RACF refuses; throwaway container, main user in `RAKFADM`)
 - **`tests/lib/conn.sh`**: what every shell suite sources instead of `.env`
 
 **No suite sees a password, and no shell suite may log off.** mbt hands over

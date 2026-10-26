@@ -236,9 +236,9 @@ send_session_cookie(Session *session)
 	return rc;
 }
 
-__asm__("\n&FUNC	SETC 'send_common_headers'");
+__asm__("\n&FUNC	SETC 'send_plain_headers'");
 int
-send_common_headers(Session *session)
+send_plain_headers(Session *session)
 {
 	int rc;
 
@@ -250,6 +250,17 @@ send_common_headers(Session *session)
 			"X-Content-Type-Options: nosniff\r\n")) < 0) return rc;
 	if ((rc = http_printf(session->httpc,
 			"Content-Language: en\r\n")) < 0) return rc;
+
+	return rc;
+}
+
+__asm__("\n&FUNC	SETC 'send_common_headers'");
+int
+send_common_headers(Session *session)
+{
+	int rc;
+
+	if ((rc = send_plain_headers(session)) < 0) return rc;
 
 	/* Here rather than in sendDefaultHeaders(): the streaming handlers in
 	   dsapi.c and ussapi.c write their headers through this function and

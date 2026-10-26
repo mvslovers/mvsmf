@@ -198,10 +198,22 @@ int send_auth_challenge(Session *session, int status) asm("CMN0017");
 int send_session_cookie(Session *session) asm("CMN0018");
 
 /**
+ * @brief Sends the four headers every mvsMF response carries, and no cookie
+ *
+ * Cache-Control, Pragma, X-Content-Type-Options and Content-Language. For a
+ * response that decides about the session cookie itself: the authentication
+ * service (#520). Every other response site wants send_common_headers().
+ *
+ * @param session Current session context
+ * @return 0 on success, negative value on error
+ */
+int send_plain_headers(Session *session) asm("CMN0025");
+
+/**
  * @brief Sends the headers every mvsMF response carries
  *
- * Cache-Control, Pragma, X-Content-Type-Options and Content-Language, written
- * once for all fourteen response sites (#324). Framing stays with the caller:
+ * send_plain_headers() plus the implicit session cookie, written once for
+ * all fourteen response sites (#324). Framing stays with the caller:
  * Content-Type, Content-Length and Transfer-Encoding depend on the status, and
  * a 204 or 304 must carry none of them.
  *

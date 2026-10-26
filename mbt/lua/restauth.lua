@@ -13,6 +13,9 @@
 --   info-cookie   the session cookie a Basic request gets back on any route
 --                 (#324). Was section 7 of tests/curl-info.sh; the rest of
 --                 that suite needs no password and stayed there.
+--   auth-refused  a login that httpd resolves but RACF no longer accepts
+--                 sets no cookie (#520). By name only: it adds and removes a
+--                 RAKF user and reloads the user table -- see the function.
 --
 -- Neither touches mbt's own session, which every shell suite of the run
 -- shares: each login here is logged off by the test that made it.
@@ -35,6 +38,16 @@ local function ltpa_cookie(headers)
     if v then return v, line end
   end
   return nil
+end
+
+-- How many LtpaToken2 cookies the response sets.
+local function count_ltpa(headers)
+  local sc = (headers and headers["set-cookie"]) or ""
+  local n = 0
+  for line in (sc .. "\n"):gmatch("([^\n]*)\n") do
+    if line:match("^%s*LtpaToken2=") then n = n + 1 end
+  end
+  return n
 end
 
 local function json_number(body, key)
@@ -87,6 +100,10 @@ function M.auth(ctx)
   t.ok(line and line:find("; Path=/", 1, true), "login: cookie has Path=/",
        "missing Path=/: " .. tostring(line))
 
+  -- The handler sends the cookie itself; the implicit cookie of any Basic
+  -- response (#324) must not repeat it, or the client gets two (#520).
+  t.eq(1, count_ltpa(h), "login: exactly one LtpaToken2 cookie")
+
   -- 2. Replay the token on a gated endpoint, with nothing else
   t.section("token replay (cookie only)")
   if token then
@@ -101,8 +118,11 @@ function M.auth(ctx)
   -- Without any credential the request takes the same path through the
   -- handler as a wrong password (no ACEE -> 401, returnCode 8 / reasonCode 1),
   -- so the body is asserted here, and no userid's logon record is touched.
-  st, body = ctx.mvs.request{ method = "POST", path = AUTH_PATH, auth = "none" }
+  local h401
+  st, body, h401 = ctx.mvs.request{ method = "POST", path = AUTH_PATH,
+                                    auth = "none" }
   t.eq(401, st, "a login without credentials is rejected")
+  t.eq(0, count_ltpa(h401), "a rejected login sets no cookie (#520)")
   if json_number(body, "returnCode") then
     t.eq("8", json_number(body, "returnCode"), "bad login: returnCode")
     t.eq("1", json_number(body, "reasonCode"), "bad login: reasonCode")
@@ -118,9 +138,12 @@ function M.auth(ctx)
   -- ordinary test user -- never for the target's main user, which is usually
   -- an administrator.
   if user2 then
-    st = ctx.mvs.request{ method = "POST", path = AUTH_PATH, auth = "basic",
-                          user = user2, password = "WRONGPW" }
+    local hwp
+    st, _, hwp = ctx.mvs.request{ method = "POST", path = AUTH_PATH,
+                                  auth = "basic", user = user2,
+                                  password = "WRONGPW" }
     t.eq(401, st, "a wrong password is rejected")
+    t.eq(0, count_ltpa(hwp), "a wrong password sets no cookie (#520)")
   else
     t.skip("wrong password (no further user test2 in the target)")
   end
@@ -206,6 +229,139 @@ function M.info_cookie(ctx)
   else
     t.skip("cookie replay (no cookie captured)")
   end
+
+  return t.summary()
+end
+
+-- A login httpd resolves from its credential cache but RACF now refuses (#520).
+--
+-- httpd keeps the credential of an earlier Basic request, so a login that
+-- arrives with the old password still resolves; http_new_session() then asks
+-- RACF for a second logon and is refused. That answer is a 500 and must not
+-- carry a cookie: the one it used to carry was the shared Basic credential's.
+--
+-- CHANGES THE SYSTEM UNDER TEST: it adds the RAKF user AUTH520, changes its
+-- password, reloads the RAKF user table (RAKFUSER) twice more and removes the
+-- user again. Run it by name, on a throwaway container, with a target whose
+-- main user is a RAKF administrator (group RAKFADM):
+--
+--   mbt run rest-tests -- auth-refused
+--
+-- The new user is not one of the target's, so its Basic requests go through
+-- curl with a password this test makes up and owns; nothing of the target's
+-- is used.
+local RF_USER = "AUTH520"
+local RF_OLD  = "OLDPW520"
+local RF_NEW  = "NEWPW520"
+
+-- Submit JCL as the main user, wait for it to end and purge it.
+-- Returns true when it ended CC 0000.
+local function rf_job(ctx, jcl)
+  local st, body = ctx.mvs.request{ method = "PUT", path = "/restjobs/jobs",
+                                    body = jcl, content_type = "text/plain" }
+  local name, id = json_string(body, "jobname"), json_string(body, "jobid")
+  if st ~= 200 or not name or not id then return false end
+  local path = "/restjobs/jobs/" .. name .. "/" .. id
+  local ok = false
+  for _ = 1, 60 do
+    local _, b = ctx.mvs.request{ path = path }
+    if json_string(b, "status") == "OUTPUT" then
+      ok = json_string(b, "retcode") == "CC 0000"
+      break
+    end
+    ctx.exec{ "sleep", "1" }
+  end
+  ctx.mvs.request{ method = "DELETE", path = path }
+  return ok
+end
+
+local function rf_tso(ctx, cmd)
+  return rf_job(ctx, table.concat({
+    "//AUTH520T JOB (ACCT),'AUTH 520',CLASS=A,MSGCLASS=H,GROUP=RAKFADM",
+    "//S1 EXEC PGM=IKJEFT01,REGION=4096K",
+    "//SYSPRINT DD SYSOUT=*",
+    "//SYSTSPRT DD SYSOUT=*",
+    "//SYSTSIN DD *",
+    " " .. cmd,
+    "/*" }, "\n"))
+end
+
+local function rf_reload(ctx)
+  return rf_job(ctx, table.concat({
+    "//AUTH520R JOB (ACCT),'AUTH 520',CLASS=A,MSGCLASS=H,GROUP=RAKFADM",
+    "//RAKFUSER EXEC RAKFUSER" }, "\n"))
+end
+
+-- A request of the made-up user through curl: status, headers (several
+-- Set-Cookie joined by a newline, names in lower case) and body. Under
+-- `mbt run` ctx.exec returns no output, so curl writes to files in .mbt/,
+-- which ctx.fs reads back.
+local RF_HEAD = ".mbt/auth520.head"
+local RF_BODY = ".mbt/auth520.body"
+
+local function rf_curl(ctx, method, path, password)
+  local url = ctx.target().mvsmf.url .. "/zosmf" .. path
+  ctx.fs.mkdir(".mbt")
+  ctx.exec{ "curl", "-s", "-X", method, "-u", RF_USER .. ":" .. password,
+            "-H", "X-CSRF-ZOSMF-HEADER: 1", "-D", RF_HEAD, "-o", RF_BODY,
+            url, check = false }
+  local head = ctx.fs.exists(RF_HEAD) and ctx.fs.read(RF_HEAD) or ""
+  local body = ctx.fs.exists(RF_BODY) and ctx.fs.read(RF_BODY) or ""
+  ctx.fs.remove(RF_HEAD)
+  ctx.fs.remove(RF_BODY)
+  local status = tonumber(head:match("^HTTP/%S+%s+(%d+)"))
+  local h = {}
+  for line in (head .. "\n"):gmatch("([^\r\n]*)\r?\n") do
+    local k, v = line:match("^([^:]+):%s*(.*)$")
+    if k then
+      k = k:lower()
+      h[k] = h[k] and (h[k] .. (k == "set-cookie" and "\n" or ", ") .. v) or v
+    end
+  end
+  return status, body, h
+end
+
+function M.auth_refused(ctx)
+  local t = check.new(ctx, "mvsMF Authentication API, refused new session - mbt (Lua) suite")
+
+  t.section("fixture: the user " .. RF_USER)
+  rf_tso(ctx, "DELUSER " .. RF_USER)   -- left over from a crashed run; may fail
+  local fixture = rf_tso(ctx, "ADDUSER " .. RF_USER .. " PASSWORD(" .. RF_OLD ..
+                         ") DFLTGRP(USER) NOOPERATIONS") and rf_reload(ctx)
+  if not fixture then
+    t.fail("the fixture user could not be added",
+           "needs a RAKF administrator as the target's main user")
+    return t.summary()
+  end
+  t.pass("user added, RAKF user table reloaded")
+
+  -- 1. The credential httpd will remember
+  local st = rf_curl(ctx, "GET", "/info", RF_OLD)
+  t.eq(200, st, "Basic request with the first password")
+
+  -- 2. RACF stops accepting it; httpd's cache still holds it
+  t.section("password changed behind httpd's back")
+  if rf_tso(ctx, "ALTUSER " .. RF_USER .. " PASSWORD(" .. RF_NEW .. ")") and
+     rf_reload(ctx) then
+    t.pass("password changed, RAKF user table reloaded")
+    local body, h
+    st, body, h = rf_curl(ctx, "POST", AUTH_PATH, RF_OLD)
+    -- Not asserted as 401: http_new_session() answers -1 for every reason,
+    -- and the handler maps all of them to 500 (authapi.c).
+    t.eq(500, st, "login with the old password is refused")
+    t.eq("40", json_number(body, "reasonCode"), "refused login: reasonCode")
+    t.eq(0, count_ltpa(h), "refused login: no LtpaToken2 cookie (#520)")
+    t.ok(not h["set-cookie"], "refused login: no Set-Cookie at all",
+         "got: " .. tostring(h["set-cookie"]))
+  else
+    t.fail("the password could not be changed")
+  end
+
+  -- 3. Put the system back, whatever happened above
+  t.section("cleanup")
+  t.ok(rf_tso(ctx, "DELUSER " .. RF_USER) and rf_reload(ctx),
+       "user removed, RAKF user table reloaded",
+       "remove " .. RF_USER .. " by hand and run RAKFUSER")
 
   return t.summary()
 end

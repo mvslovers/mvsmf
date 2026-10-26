@@ -40,7 +40,7 @@ None.
 ### Response
 On success, HTTP status code **200 (OK)** with:
 
-- a `Set-Cookie: LtpaToken2=<token>; Path=/` header carrying the session token, and
+- a single `Set-Cookie: LtpaToken2=<token>; Path=/` header carrying the session token, and
 - the z/OSMF login body:
 
 ```json
@@ -83,8 +83,13 @@ This needs an httpd that provides `http_new_session()` (4.2.0 or later).
 - HTTP **500 (Internal Server Error)** — a server-side error:
   `returnCode 4, reasonCode 40`. The credentials were good, but no session
   could be created (httpd's credential store is full, or the client already
-  holds 16 sessions, all used within the last minute), or the token could not
-  be encoded.
+  holds 16 sessions, all used within the last minute, or RACF no longer
+  accepts a password that httpd still has cached from an earlier request), or
+  the token could not be encoded.
+
+  Only a successful login sets a cookie. The 401 and the 500 above carry no
+  `Set-Cookie`: before 1.4.0 the 500 carried the token of the shared Basic
+  credential, which the next request accepted (#520).
 
 ---
 

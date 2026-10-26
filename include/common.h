@@ -339,6 +339,31 @@ int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
 void abort_response(Session *session) asm("CMN0019");
 
 /**
+ * @brief The table a JSON response is translated with on its way out (#473)
+ *
+ * sendJSONResponse() hands the finished document to http_etoa(), which uses
+ * the server-default code page. A JsonBuilder decides what to escape on the
+ * translated byte, so it needs that table. It is read off http_etoa() itself,
+ * by translating the 256 byte values, so it is the one the response gets
+ * whatever the server's code page is.
+ *
+ * @param session Current session context
+ * @param etoa    receives the 256-byte EBCDIC-to-ASCII table
+ */
+void response_etoa(Session *session, unsigned char etoa[256]) asm("CMN0026");
+
+/**
+ * @brief A JsonBuilder for a document that leaves through sendJSONResponse()
+ *
+ * Every builder in a handler is created with this: it carries the table of
+ * response_etoa(), which is what makes a \u00XX escape name the character the
+ * client decodes. Free it with freeJsonBuilder().
+ *
+ * @return the new builder, NULL on allocation failure
+ */
+JsonBuilder *createResponseBuilder(Session *session) asm("CMN0027");
+
+/**
  * @brief Answers a request refused by an authorization check (issue #228)
  *
  * Sends the z/OSMF error report a denial produces -- see

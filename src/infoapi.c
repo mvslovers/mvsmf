@@ -36,7 +36,7 @@ infoHandler(Session *session)
 	char hostname[MAX_HOST_NAME_LENGTH] = DEFAULT_HOST;
 	char port_str[MAX_PORT_LENGTH] = DEFAULT_PORT;
 
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 	if (!builder) {
 		sendDefaultHeaders(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 					   HTTP_CONTENT_TYPE_NONE, 0);

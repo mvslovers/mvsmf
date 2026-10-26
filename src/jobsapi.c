@@ -132,7 +132,7 @@ jobListHandler(Session *session)
 	JESFILT jesfilt = FILTER_NONE;
 	const char *filter = NULL;
 
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 
 	if (!builder) {
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
@@ -217,7 +217,7 @@ jobFilesHandler(Session *session)
 	JESJOB *job = NULL;
 	JESJOB **joblist = NULL;
 
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 	
 	if (!builder) {
 		sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
@@ -436,7 +436,7 @@ cancel_job(Session *session, int purge)
 
 	JESJOB *job = NULL;
 	JESJOB **joblist = NULL;
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 	char owner[JWN_PRTSZ] = {0};
 	char name[JWN_PRTSZ] = {0};
 	char id[JWN_PRTSZ] = {0};
@@ -2099,7 +2099,7 @@ send_job_status_response(Session *session, JESJOB *job, const char *host)
 {
     int rc = 0;
     
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 
     if (!builder) {
         sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, CATEGORY_UNEXPECTED,

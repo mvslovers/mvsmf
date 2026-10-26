@@ -109,6 +109,15 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   client could not parse any of it. All of them are escaped now: backspace, form
   feed, carriage return, line feed and tab in their short form, the rest as
   `\u00XX`.
+- **A `\u00XX` escape names the character the client sees** (#473). The escape
+  was written from the byte as the program holds it, which is the EBCDIC value,
+  while the response is translated to ASCII afterwards: the client decoded a
+  different character than the one meant (the EBCDIC tab, 0x05, came out as
+  `\u0005`, not as a tab). The escape now carries the code point of the
+  translated character, and the remaining C1 controls (U+007F to U+009F) are
+  escaped instead of being sent as a lone byte. The member names of a data set
+  listing go through the same routine; a quote or a backslash in one is now
+  written `\"` and `\\`, which is the same string to any JSON parser.
 
 - **Data set lists no longer fail with HTTP 500 under parallel requests**
   (#436). `GET /zosmf/restfiles/ds` has IDCAMS write the catalog listing into a

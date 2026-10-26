@@ -1,0 +1,12 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restjobs/jobs/JPOPS/$JOBID/files/103/records"
+RDEF * CL(JESSPOOL) UACC(READ)
+RDEFINE: JESSPOOL profile defined: *
+RDEFINE: Run RAKFPROF to activate the changes
+PE * CL(JESSPOOL) ID(OPS) ACCESS(UPDATE)
+PERMIT:  access UPDATE  granted to JESSPOOL/*
+PERMIT: ID = OPS
+PERMIT: Run RAKFPROF to activate the changes
+RDEF SYSTEM.* CL(JESSPOOL) UACC(NONE)
+RDEFINE: JESSPOOL profile defined: SYSTEM.*
+RDEFINE: Run RAKFPROF to activate the changes
+END

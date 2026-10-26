@@ -64,7 +64,8 @@ assert_json_field() {
 }
 
 BODYF=$(mktemp)
-mvsmf_on_exit 'rm -f "$BODYF"'
+HDRF=$(mktemp)
+mvsmf_on_exit 'rm -f "$BODYF" "$HDRF"'
 
 # GET /zosmf/info with the given extra headers; sets CODE and BODY.
 # Every argument is passed to curl verbatim (use one -H per header).
@@ -292,6 +293,37 @@ echo "--- implicit login ---"
 # No credential at all: there is no token to hand out.
 info_anon_hdrs
 assert_no_header "Set-Cookie" "an unauthenticated request gets no cookie"
+
+# =========================================================================
+# 8. A known path with a method nobody registered (issue #418)
+#
+# Measured on the reference: DELETE /zosmf/info -> 405 "Http method DELETE is
+# not supported by this URL", with NO Allow header. An unknown path stays 404.
+# =========================================================================
+echo ""
+echo "--- known path, unregistered method ---"
+
+for M in DELETE POST PUT; do
+	CODE=$(curl -s -K "$MVSMF_CURLRC" -X "$M" -D "$HDRF" -o "$BODYF" \
+		-w '%{http_code}' "$INFO_URL")
+	BODY=$(cat "$BODYF"); HDRS=$(cat "$HDRF")
+	assert_http_status "405" "$CODE" "$M on /zosmf/info"
+	assert_json_field "$BODY" ".category" "6" "$M: error report category"
+	assert_json_field "$BODY" ".message" "Http method $M is not supported by this URL" "$M: error report message"
+	assert_no_header "Allow" "$M: the reference sends no Allow header"
+done
+
+# Authentication runs before routing, as for every other route.
+CODE=$(curl -s -X DELETE -o /dev/null -w '%{http_code}' "$INFO_URL")
+assert_http_status "401" "$CODE" "DELETE without credentials is a 401, not a 405"
+
+# A path no route matches stays a 404, whatever the method.
+CODE=$(curl -s -K "$MVSMF_CURLRC" -X DELETE -o "$BODYF" -w '%{http_code}' \
+	"${BASE_URL}/zosmf/no/such/path")
+assert_http_status "404" "$CODE" "DELETE on an unknown path"
+CODE=$(curl -s -K "$MVSMF_CURLRC" -o "$BODYF" -w '%{http_code}' \
+	"${BASE_URL}/zosmf/no/such/path")
+assert_http_status "404" "$CODE" "GET on an unknown path"
 
 # =========================================================================
 # Summary

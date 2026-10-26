@@ -1,0 +1,18 @@
+$ printf 'LOST UPDATE\n' | curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X PUT \
+  -H 'Content-Type: text/plain' --data-binary @- \
+  -H "If-Match: $ETAG" \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.SEQ"
+HTTP/1.1 412 Precondition Failed
+Date: Fri, 23 Oct 2026 08:16:45 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 107
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"rc":8,"category":6,"reason":10,"message":"The resource was modified since the supplied ETag was created"}

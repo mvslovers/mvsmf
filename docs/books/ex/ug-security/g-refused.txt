@@ -1,0 +1,14 @@
+$ curl -si -X PUT -u "$MVSMF_USER2:$MVSMF_PASS2" \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"D T"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+HTTP/1.1 403 Forbidden
+Date: Mon, 26 Oct 2026 17:41:23 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Cache-Control: no-store
+Content-Type: text/plain
+Transfer-Encoding: chunked
+
+403 Forbidden

@@ -330,6 +330,25 @@ curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/hello.txt"
 zowe files view uss-file "/tmp/hello.txt"
 ```
 
+A download that the server cut off (the client stopped reading for about 10
+seconds) ends without the closing chunk; curl reports it:
+
+```bash
+curl -sS -u $USER:$PASS -o big.bin -H 'X-IBM-Data-Type: binary' \
+  "$BASE/zosmf/restfiles/fs/tmp/big.bin" || echo "incomplete, curl exit $?"   # 18
+```
+
+See [Slow clients](endpoints/README.md#slow-clients).
+
+### Address a name with `%` or `+`
+A name is percent-encoded once: a literal `%` is sent as `%25`, a literal `+` as
+`%2B`. This reads the file `/tmp/a%41` and the file `/tmp/c+d`:
+
+```bash
+curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/a%2541"
+curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/fs/tmp/c%2Bd"
+```
+
 ### Write a file
 `PUT /zosmf/restfiles/fs/{filepath}`
 
@@ -452,6 +471,11 @@ zowe zos-console collect sync-responses E2E82A699B2B2001
 
 Each call returns only what arrived since the previous one, so poll until it
 comes back empty. That is the completion path for a truncated `cmd-response`.
+
+Only an empty `200` ends the polling. A `500` (return code 8, reason code 1)
+means this poll could not be made, not that the block is finished: the cursor
+is unchanged, so ask again with the same key. See
+[Collect Command Response](endpoints/console/collect.md#error-responses).
 
 ### Detect a keyword in unsolicited messages
 `GET /zosmf/restconsoles/consoles/{console-name}/detections/{detection-key}`

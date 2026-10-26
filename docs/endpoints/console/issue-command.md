@@ -2,30 +2,39 @@
 
 Issues an MVS operator command and returns the captured command response. Part of the z/OSMF Console services (`/zosmf/restconsoles`).
 
-> **Authorization: none. Read this before exposing the endpoint.**
+> **Authorization: READ on `FACILITY MVSMF.CONSOLE`, checked by mvsMF in the
+> handler. Read this before exposing the endpoint.**
 >
-> The request needs an authenticated userid and nothing else. There is no
-> per-command policy, no console authority level and no RACF check — `consapi.c`
-> makes no authorization call at all. Measured on MVS/CE with RAKF: a userid in
-> group `USER` without operations authority (RAKF refuses it a protected data
-> set) ran `D T`, `D A,L` and `S RAKFUSER` through this endpoint, and none was
-> refused. The command goes out by SVC 34 with the
+> Every console request (command, response, detection, log) and every
+> `/zosmf/test` request starts with that check, fail-closed: it permits only
+> when RAKF answers "permitted". A user without READ, and **every user while
+> the profile is not defined**, gets `500` with category 4 (Authorization) and
+> the detail "Authorization failed - You may not use this service." (the same
+> report a refused data set open gets, `"message": "LMOPEN error"`); a request
+> without a resolved user gets `401`. No operator message is written for a
+> refusal. The HTTPD route
+> `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN RES=FACILITY:MVSMF.CONSOLE`
+> in `samplib/mvsmfprm` (listed before `/zosmf/*`) is an additional first
+> layer: it requires READ, and a user without it gets a plain-text `403` from
+> HTTPD before mvsMF is reached. Measured on MVS/CE with RAKF: a userid in
+> group `USER` was refused (`403`) with Basic and with a token, a userid in
+> `ADMIN` with READ ran `D T`, and the other `/zosmf/` endpoints stayed open to
+> both. Set up, with the traps: [Who may use the console service](../../installation.md#who-may-use-the-console-service-and-zosmftest).
+>
+> **It gates who may issue commands, not which.** There is no per-command
+> policy and no console authority level. The command goes out by SVC 34 with the
 > MCS console field left zero, which is **console 0**: no console entered it, so
-> no `UCMAUTH` authority group applies and nothing is filtered. `$P JES2`,
-> `V xxx,OFFLINE` and `P`/`S` of any started task are all reachable by any user
-> who can log in.
->
-> That is [#347](https://github.com/mvslovers/mvsmf/issues/347), open and
-> deliberately unfixed rather than half-fixed: the policy has to be invented
-> here, because MVS 3.8j has no mechanism to delegate it to (measured — the
+> no `UCMAUTH` authority group applies and nothing is filtered. A user with
+> READ can run `$P JES2`, `V xxx,OFFLINE` and `P`/`S` of any started task. MVS
+> 3.8j has no mechanism to delegate a per-command policy to (measured — the
 > authority machinery hangs off the UCM entry of the console a command was
-> entered at, and MGCR from a program has none). Note that a display-only
-> allow-list is not the obvious answer it looks like: `P FTPD` / `S FTPD` are
-> group-1 SYS commands and are in normal use.
+> entered at, and MGCR from a program has none), and a display-only allow-list
+> would break `P FTPD` / `S FTPD`, which are group-1 SYS commands in normal use.
 >
-> Until it is settled: register only the prefixes you want in the httpd parmlib
-> member rather than `/zosmf/*`, and leave `/zosmf/restconsoles/*` out on a
-> system where not every userid is trusted at the operator console.
+> The same check covers collect, detect, the hardcopy log and the diagnostic
+> endpoint `/zosmf/test`, with the one profile. Tracked as
+> [#347](https://github.com/mvslovers/mvsmf/issues/347) and
+> [#460](https://github.com/mvslovers/mvsmf/issues/460).
 
 ## HTTP Method
 PUT
@@ -134,7 +143,7 @@ Adds detection fields on top of the keys above:
 See [Detect Unsolicited Message](detections.md).
 
 ## Error Responses
-Console services use a `return-code`/`reason-code`/`reason` body (not `category`/`rc`/`message`):
+Console services use a `return-code`/`reason-code`/`reason` body (not `category`/`rc`/`message`), with one exception: the authorization refusal (first two rows of the table) uses the `category`/`rc`/`message`/`details` body of the data set and job services.
 
 ```json
 { "return-code": 1, "reason-code": 13, "reason": "..." }
@@ -142,6 +151,8 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 
 | HTTP | return-code | reason-code | Cause |
 |------|-------------|-------------|-------|
+| 401 | | | No resolved user. Body in the `category`/`rc`/`message` form; the command was **not** issued. |
+| 500 | | | No READ on `FACILITY MVSMF.CONSOLE`, or the profile is not defined (`category` 4, `rc` 8, `reason` 0, `details` "Authorization failed - You may not use this service."). The command was **not** issued; nothing is written to the operator console. |
 | 400 | 1 | 6 | Content-Type not `application/json` |
 | 400 | 1 | 12 | Body not valid JSON |
 | 400 | 1 | 13 | `cmd` missing or empty |
@@ -152,7 +163,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 | 413 | 1 | 12 | `Content-Length` of 16 MB or more; nothing is read and the connection is closed. Shares 1 / 12 with the 400 above: both are a body that cannot be used, and the status tells them apart. |
 | 429 | 8 | 16 | Another console command is in progress; the command was **not** issued. |
 | 500 | 8 | 1  | No storage for the request body; the command was **not** issued. The body is read to its end first, so the answer reaches the client (#412). |
-| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the baseline for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
+| 500 | 8 | 14 | Command **was issued**, but its response could not be read: no storage for the response buffer, or the copy of the Master Trace Table could not be made (on the capture, on the anchor for `unsol-key`, or at the end of a synchronous `unsol-key` wait). A failed read is never answered as an empty `200`. |
 | 503 | 8 | 15 | Command **was issued**; response/detection poll abandoned (server quiescing). |
 | 503 | 8 | 17 | Server quiescing; the command was **not** issued. Checked before the command goes out, whether or not another command is in progress. |
 
@@ -169,8 +180,8 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > so there is nothing to collect.
 > A single poll that cannot copy the table is skipped and the next one tried;
 > the error is answered only when no poll of the capture got a copy, when the
-> `unsol-key` baseline could not be taken (a baseline of 0 would report every
-> message already in the table as new), or when the last look of a synchronous
+> `unsol-key` anchor could not be taken (without one, every message already
+> in the table would be reported as new), or when the last look of a synchronous
 > `unsol-key` wait failed (`timeout` would claim the keyword did not appear).
 
 > **`503 / 8 / 15` is a post-issue outcome, not a pre-issue failure.** The command
@@ -204,7 +215,7 @@ Console services use a `return-code`/`reason-code`/`reason` body (not `category`
 > the handler; the command did not run.
 
 ## Implementation (MVS 3.8j)
-mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF itself makes no authorization check (see the notice at the top); the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
+mvsMF has no EMCS consoles or TSO address spaces. The command is issued with **SVC 34 (MGCR)** with the authenticated user's ACEE set on the task; mvsMF checks READ on `FACILITY MVSMF.CONSOLE` before it reads the request (see the notice at the top), and the httpd route is an additional first layer, but there is no per-command check; the response is read from the **Master Trace Table (MTT)** via `clibmtt`, correlating the command echo and its responses by jobid + command text + MLWTO number. EMCS OPERPARM fields (`auth`, `routcode`, `mscope`, `storage`, `auto`) are accepted but ignored.
 
 ### One command at a time (#214)
 

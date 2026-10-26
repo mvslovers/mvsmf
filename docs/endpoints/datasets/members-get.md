@@ -24,7 +24,9 @@ GET
       the code page is CP037 unless `text;fileEncoding=IBM-1047` asks for
       IBM-1047 (see [encoding.md](encoding.md))
     - `binary`: Raw bytes without conversion, Content-Type: `application/octet-stream`
-    - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`
+    - `record`: Like binary, but each record prefixed with 4-byte big-endian length, Content-Type: `application/octet-stream`.
+      **RECFM=F and FB only**: on a member of a RECFM=V, VB or VBS library it is
+      refused (see [Error Responses](#error-responses)).
 - `X-IBM-Return-Etag` (optional): `true` returns an `ETag` for the member. Any
   other value, or an absent header, returns none.
 - `If-None-Match` (optional): makes the read conditional — a member that still
@@ -101,6 +103,12 @@ A member that cannot be read gets no 304 — the open then produces the real
 diagnosis (404, or 500 on an I/O error), which is the more specific answer.
 
 ## Error Responses
+- HTTP 400 (Bad Request)
+    - `X-IBM-Data-Type: record` on a member of a RECFM=V library (V, VB or
+      VBS), `category` 6, `rc` 8, `reason` 12:
+      `{"rc":8,"category":6,"reason":12,"message":"Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets"}`.
+      The check runs before the first byte of the answer, so no data is sent.
+      Text and binary reads of the same member are unaffected.
 - HTTP 404 (Not Found)
     - Dataset not cataloged (`reason` 4, `Dataset not found`)
     - Dataset exists but has no such member (`reason` 5, `PDS member not found`)
@@ -118,7 +126,12 @@ was simply not there looked like a broken server (issue #191). The two cases are
 now told apart by a catalog lookup and a filtered directory read.
 
 ## Limitations
+- Record mode is refused for RECFM=V libraries (issue #455). Framing one record
+  per length prefix needs the logical records, and the read used here returns
+  LRECL-sized chunks that cross record boundaries on variable-length data. A
+  correct variable-length record mode is not available yet (#361).
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.
+- A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 
 ## Authorization
 

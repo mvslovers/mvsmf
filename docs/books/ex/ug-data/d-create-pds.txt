@@ -1,0 +1,17 @@
+$ curl -si -u "$MVSMF_USER:$MVSMF_PASS" -X POST \
+  -H 'Content-Type: application/json' \
+  -d '{"dsorg":"PO","recfm":"FB","lrecl":80,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1,"dirblk":5}' \
+  "$MVSMF_URL/zosmf/restfiles/ds/$MVSMF_USER.DEMO.PDS"
+HTTP/1.1 201 Created
+Date: Fri, 23 Oct 2026 08:16:41 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+Transfer-Encoding: chunked
+

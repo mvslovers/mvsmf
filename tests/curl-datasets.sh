@@ -271,6 +271,18 @@ fi
 VOLUME=$(echo "$CONTENT" | jq -r --arg dsn "$TEST_SEQ" \
 	'.items[] | select(.dsname == $dsn) | .vol // empty' 2>/dev/null) || VOLUME=""
 
+# Device type for DS4DEVTK of a volume's format-4 DSCB (#443).
+dev_for_devtk() {
+	case "$1" in
+	13165) echo "3330" ;;
+	19254) echo "3350" ;;
+	36000) echo "3375" ;;
+	47968) echo "3380" ;;
+	58786) echo "3390" ;;
+	*) echo "????" ;;
+	esac
+}
+
 # --- List datasets (exact three-level name) ---
 echo ""
 echo "--- List Datasets (exact name) ---"
@@ -281,6 +293,40 @@ HTTP_CODE=$(echo "$BODY" | tail -1)
 CONTENT=$(echo "$BODY" | sed '$d')
 assert_http_status "200" "$HTTP_CODE" "list datasets (exact name)"
 assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
+
+# dev is named from the volume's track capacity (devtk of its format-4 DSCB,
+# #443), not from tracks per cylinder: a 3380 and a 3390 both have 15.
+DEVTK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}" | jq -r '.devtk')
+WANT_DEV=$(dev_for_devtk "$DEVTK")
+assert_json_field "$CONTENT" '.items[0].dev' "$WANT_DEV" "dev follows devtk $DEVTK"
+
+# --- dev on every volume a listing touches (#443) ---
+# The check above sees only the volume the fixtures live on. A mixed listing
+# (data sets on several device types) has to name each volume's own device, so
+# every volume in the listing is compared with devtk read for one of its data sets.
+echo ""
+echo "--- List Datasets (dev per volume, issue #443) ---"
+
+DEV_VOLS=0
+for LVL in SYS1 HTTPD "${MVSMF_USER}"; do
+	LIST=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Max-Items: 0' \
+		"${BASE_URL}/zosmf/restfiles/ds?dslevel=${LVL}")
+	for VOL in $(echo "$LIST" | jq -r '.items[]?.vol' 2>/dev/null | sort -u); do
+		DSN=$(echo "$LIST" | jq -r --arg v "$VOL" '[.items[] | select(.vol == $v)][0].dsname')
+		TK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${DSN}" | jq -r '.devtk // empty')
+		[ -n "$TK" ] && [ "$TK" != "0" ] || continue
+		WANT=$(dev_for_devtk "$TK")
+		BAD=$(echo "$LIST" | jq -r --arg v "$VOL" --arg w "$WANT" \
+			'[.items[] | select(.vol == $v and .dev != $w)] | length')
+		if [ "$BAD" = "0" ]; then
+			pass "dev per volume: ${LVL} on ${VOL} is ${WANT} (devtk ${TK})"
+		else
+			fail "dev per volume: ${LVL} on ${VOL}" "$BAD item(s) not ${WANT} (devtk ${TK})"
+		fi
+		DEV_VOLS=$((DEV_VOLS + 1))
+	done
+done
+[ "$DEV_VOLS" -gt 0 ] || skip "dev per volume: no volume with a readable format-4 DSCB"
 
 # --- List datasets (exact two-level name, issue #61) ---
 echo ""
@@ -3076,7 +3122,14 @@ assert_http_status "400" "$HTTP_CODE" "no like= and incomplete parameters is sti
 DSCB_SEC() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.secondary'; }
 DSCB_UNIT() { curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=$1" | jq -r '.spacu'; }
 
-assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+DEV_BUILD=0
+mvsmf_dev_build "${BASE_URL}/zosmf/info" && DEV_BUILD=1
+
+if [[ "$DEV_BUILD" == 1 ]]; then
+	assert_json_field "$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${LIKE_NEW}")" 	'.spacu' "TRK" "like: a fully derived allocation is stated in tracks"
+else
+	skip "like: derived allocation in tracks (needs ?fn=dscb, development builds only)"
+fi
 
 LIKE_CYL="${MVSMF_USER}.CURL.LIKECYL"
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}" || true
@@ -3084,21 +3137,25 @@ curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/d
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null -X POST -K "$MVSMF_CURLRC" 	-H "Content-Type: application/json" 	-d "{\"like\":\"${TEST_PDS}\",\"primary\":1,\"alcunit\":\"CYL\"}" 	"${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}")
 assert_http_status "201" "$HTTP_CODE" "like: create with an explicit primary in cylinders"
 
-CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
-CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
-MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")
+if [[ "$DEV_BUILD" == 1 ]]; then
+	CYL_UNIT=$(DSCB_UNIT "${LIKE_CYL}")
+	CYL_SEC=$(DSCB_SEC "${LIKE_CYL}")
+	MODEL_SEC=$(DSCB_SEC "${TEST_PDS}")
 
-if [ "$CYL_UNIT" = "CYL" ]; then
-	pass "like: an explicit alcunit is honoured (CYL)"
-else
-	fail "like: an explicit alcunit is honoured (CYL)" "got spacu=${CYL_UNIT}"
-fi
+	if [ "$CYL_UNIT" = "CYL" ]; then
+		pass "like: an explicit alcunit is honoured (CYL)"
+	else
+		fail "like: an explicit alcunit is honoured (CYL)" "got spacu=${CYL_UNIT}"
+	fi
 
-# the derived, track-denominated secondary must not have been emitted as cylinders
-if [ "${CYL_SEC:-0}" = "0" ]; then
-	pass "like: no track-denominated secondary is emitted under CYL"
+	# the derived, track-denominated secondary must not have been emitted as cylinders
+	if [ "${CYL_SEC:-0}" = "0" ]; then
+		pass "like: no track-denominated secondary is emitted under CYL"
+	else
+		fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
+	fi
 else
-	fail "like: no track-denominated secondary is emitted under CYL" 		"secondary=${CYL_SEC} under spacu=${CYL_UNIT} (model's own secondary is ${MODEL_SEC} tracks) -- a track count written as cylinders over-allocates every extent"
+	skip "like: alcunit and secondary under CYL (needs ?fn=dscb, development builds only)"
 fi
 
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${LIKE_CYL}"

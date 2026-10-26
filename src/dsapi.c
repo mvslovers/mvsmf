@@ -20,6 +20,7 @@
 #include "mvsmfmsg.h"
 #include "common.h"
 #include "blkptrk.h"
+#include "listfail.h"
 #include "dsextent.h"
 #include "datatype.h"
 #include "etag.h"
@@ -148,20 +149,54 @@ typedef char dsx_f3_fmtid_ok[offsetof(DSCB3, fmtid) == DSX_F3_FMTID_OFF ? 1 : -1
 typedef char dsx_f3_ext9_ok[offsetof(DSCB3, extent9) == DSX_F3_EXT9_OFF ? 1 : -1];
 typedef char dsx_f3_ptr_ok[offsetof(DSCB3, ptrds) == DSX_F3_PTR_OFF ? 1 : -1];
 
-/* Tracks per cylinder of a volume, from its format-4 DSCB. 30 is the 3350
-   fallback the listing uses when the volume DSCB cannot be read. */
+/* Geometry of a volume from its format-4 DSCB: tracks per cylinder (30, the
+   3350 value, when the DSCB cannot be read) and the track capacity devtk (0
+   then, which device_name() reports as unknown). */
+__asm__("\n&FUNC    SETC 'vol_geom'");
+static void
+vol_geom(const char *vol, unsigned *tpc, unsigned *devtk)
+{
+	DSCB		dscb4buf;
+
+	*tpc = 0;
+	*devtk = 0;
+	memset(&dscb4buf, 0, sizeof(dscb4buf));
+	if (__dscbv(vol, &dscb4buf) == 0) {
+		*tpc = dscb4buf.dscb4.dstrk;
+		*devtk = dscb4buf.dscb4.devtk;
+	}
+	if (*tpc == 0) *tpc = 30;
+}
+
 __asm__("\n&FUNC    SETC 'vol_tpc'");
 static unsigned
 vol_tpc(const char *vol)
 {
-	DSCB		dscb4buf;
-	unsigned	tpc = 0;
+	unsigned	tpc;
+	unsigned	devtk;
 
-	memset(&dscb4buf, 0, sizeof(dscb4buf));
-	if (__dscbv(vol, &dscb4buf) == 0) {
-		tpc = dscb4buf.dscb4.dstrk;
+	vol_geom(vol, &tpc, &devtk);
+	return tpc;
+}
+
+/* Names the device of the volume ds is on from its track capacity (#443).
+   __listds() fills ds->dev from the tracks per cylinder, which a 3380 and a
+   3390 share, so every entry is renamed here. A listing is mostly a few
+   volumes in a row: the last volume read is kept in cvol/cdev, owned by the
+   caller (stack, not a static -- the module is RENT). */
+__asm__("\n&FUNC    SETC 'fix_dev'");
+static void
+fix_dev(DSLIST *ds, char cvol[7], char cdev[5])
+{
+	unsigned	tpc;
+	unsigned	devtk;
+
+	if (strcmp(cvol, ds->volser) != 0) {
+		vol_geom(ds->volser, &tpc, &devtk);
+		strcpy(cdev, device_name(devtk));
+		strcpy(cvol, ds->volser);
 	}
-	return tpc ? tpc : 30;
+	strcpy(ds->dev, cdev);
 }
 
 /* dscb_alloc_tracks() reader: the format-3 DSCB at cchhr on the volume ctx. */
@@ -463,6 +498,18 @@ read_and_send_dataset(Session *session, FILE *fp, int data_type,
 	const char *content_type;
 	int lrecl = fp->lrecl;
 	long count = 0;
+
+	/* Record mode frames each fread() of LRECL bytes as one record, which is
+	   only true of fixed-length data. On RECFM=V the reads cross record
+	   boundaries and carry RDWs, so the client would get wrong data with a 200.
+	   Refuse before the headers go out, and before the first read (issue
+	   #455). A correct variable-length record mode is #244/#245/#361. */
+	if (data_type == DATA_TYPE_RECORD
+		&& (fp->recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
+		return sendErrorResponse(session, HTTP_STATUS_BAD_REQUEST,
+			CATEGORY_SERVICE, RC_ERROR, REASON_RECORD_MODE_RECFM_V,
+			ERR_MSG_RECORD_MODE_RECFM_V, NULL, 0);
+	}
 
 	buffer = calloc(1, lrecl + 2);
 	if (!buffer) {
@@ -786,6 +833,7 @@ static int
 diagnose_open_failure(const char *dsname, const char *member)
 {
     PDSLIST  **pdslist;
+    int      outcome;
 
     if (!dsname) {
         return OPEN_FAIL_IO;
@@ -806,14 +854,17 @@ diagnose_open_failure(const char *dsname, const char *member)
         return OPEN_FAIL_NOTPDS;
     }
 
-    /* NULL is an empty result (errno 0) or a storage shortage (ENOMEM): the
-       first is a member that is not there, the second says nothing about it */
+    /* errno is read before the WTO can touch it (listfail.h). LIST_FAILED, an
+       unreadable directory, still answers like a missing member: splitting it
+       off into a 500 needs a run on MVS showing that a successful empty walk
+       leaves errno 0, which is not measured (#360). */
     pdslist = __listpd(dsname, member);
-    if (!pdslist) {
-        if (errno == ENOMEM) {
-            wtof(MSG_STORAGE_FAILED, ALLOC_MEMBER_LIST);
-            return OPEN_FAIL_NOSTOR;
-        }
+    outcome = list_outcome(pdslist, errno);
+    if (outcome == LIST_NOSTOR) {
+        wtof(MSG_STORAGE_FAILED, ALLOC_MEMBER_LIST);
+        return OPEN_FAIL_NOSTOR;
+    }
+    if (outcome != LIST_FOUND) {
         return OPEN_FAIL_NOMEM;
     }
     __freepd(&pdslist);
@@ -1484,6 +1535,8 @@ int datasetListHandler(Session *session)
 	char		*start		= NULL;
 	char		*filter		= NULL;
 	char		level_buf[45]	= {0};
+	char		dev_vol[7]	= {0};
+	char		dev_name[5]	= {0};
 	char		dslevel_buf[MAX_DATASET_NAME + 1] = {0};
 	char		start_key[MAX_DATASET_NAME + 1] = {0};
 	int		have_start	= 0;
@@ -1527,7 +1580,7 @@ int datasetListHandler(Session *session)
 	   empty items array would tell the client the catalog has nothing there
 	   (#360). errno is only meaningful on NULL, and the exact-name lookup
 	   below would overwrite it, so it is read here. */
-	if (!dslist && errno == ENOMEM) {
+	if (list_outcome(dslist, errno) == LIST_NOSTOR) {
 		wtof(MSG_STORAGE_FAILED, ALLOC_DATASET_LIST);
 		rc = sendErrorResponse(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 			CATEGORY_UNEXPECTED, RC_SEVERE, REASON_SERVER_ERROR,
@@ -1593,13 +1646,6 @@ int datasetListHandler(Session *session)
 						unsigned tpc = vol_tpc(vol);
 						unsigned trks = 0;
 
-						switch (tpc) {
-						case 30: strcpy(ds->dev, "3350"); break;
-						case 12: strcpy(ds->dev, "3375"); break;
-						case 19: strcpy(ds->dev, "3380"); break;
-						case 15: strcpy(ds->dev, "3390"); break;
-						default: strcpy(ds->dev, "3390"); break;
-						}
 						if (dscb1_trks(dscb1, vol, tpc, &trks) == 0
 						    && trks <= 0xFFFF)
 							ds->alloc_trks = (unsigned short)trks;
@@ -1696,6 +1742,7 @@ int datasetListHandler(Session *session)
 		unsigned pct;
 
 		fix_alloc(ds);
+		fix_dev(ds, dev_vol, dev_name);
 
 		if ((rc = http_printf(session->httpc, "      \"dsname\": \"%.44s\",\n", ds->dsn)) < 0) goto quit;
 
@@ -1706,7 +1753,7 @@ int datasetListHandler(Session *session)
 		if ((rc = http_printf(session->httpc, "      \"blksz\": \"%u\",\n", ds->blksize)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"catnm\": \"\",\n")) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"cdate\": \"%u/%02u/%02u\",\n", ds->cryear, ds->crmon, ds->crday)) < 0) goto quit;
-		if ((rc = http_printf(session->httpc, "      \"dev\": \"%.4s\",\n", ds->dev[0] ? ds->dev : "3390")) < 0) goto quit;
+		if ((rc = http_printf(session->httpc, "      \"dev\": \"%.4s\",\n", ds->dev[0] ? ds->dev : DEVICE_UNKNOWN)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"dsntp\": \"%s\",\n", dsntp)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"dsorg\": \"%.4s\",\n", ds->dsorg)) < 0) goto quit;
 		if ((rc = http_printf(session->httpc, "      \"edate\": \"***None***\",\n")) < 0) goto quit;

@@ -1,0 +1,5 @@
+$ curl -s -u "$MVSMF_ADMIN:$MVSMF_ADMIN_PASS" "$MVSMF_URL/zosmf/restjobs/jobs/ADDUSER/$JOBID/files/104/records"
+ ADDUSER ADAMS PASSWORD(START123) DFLTGRP(USER) GROUP(MVSMFUSR)
+ADDUSER: User ADAMS    successfully defined
+ADDUSER: Run RAKFUSER to activate the changes
+END

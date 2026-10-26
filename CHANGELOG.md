@@ -11,14 +11,16 @@ it, and `HTTPD005I` reports the server's, not mvsMF's.
 
 ## [1.4.0] - unreleased
 
-The release that lets a site decide who may see, read and purge which job.
-FMID `TZMF140`, and its SYSMOD deletes `TZMF130`, so an upgrade from 1.3.0
-needs nothing beyond the package. It is **not a drop-in**: without profiles in
-the RAKF class `JESSPOOL` every user sees only their own jobs. Read the first
-item below before you install.
+The release that lets a site decide who may see, read and purge which job, and
+who may use the console service. FMID `TZMF140`, and its SYSMOD deletes
+`TZMF130`, so an upgrade from 1.3.0 needs nothing beyond the package. It is
+**not a drop-in**: without profiles in the RAKF class `JESSPOOL` every user sees
+only their own jobs, and until the RAKF profile `FACILITY MVSMF.CONSOLE` is
+defined and READ granted, the console service and `/zosmf/test` refuse every
+user. Read the first two items below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
-4.2.0**, **ufsd 1.5.0** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
+4.2.0**, **ufsd 1.5.1** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
 (see 1.2.0).
 
 ### Read this first
@@ -30,6 +32,15 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   other users' jobs, for example a started task found with `owner=*`, stops
   finding them. The class needs RAKF 2.0.0 or later. See
   `docs/jesspool.md`.
+- **Define the console profile before you upgrade** (#347, #460). From 1.4.0
+  mvsMF checks READ on the RAKF resource `FACILITY MVSMF.CONSOLE` itself for
+  every console request and every `/zosmf/test` request. Until the profile is
+  defined and READ is granted, **every user is refused**, administrators
+  included (`500`, category 4). Define the profile, grant READ to those who may
+  issue operator commands, and add the fourth route line to the HTTPD parmlib
+  member. The deploy user needs READ too: the operator commands that restart
+  HTTPD and the call that confirms the build id both go through this check.
+  See `docs/installation.md`, *Who may use the console service*.
 - **The `owner` filter of the job list is exact.** `owner=ABC` no longer also
   lists the jobs of `ABCD`, and a pattern such as `ABC*` gives an empty list.
 - **A job that was just submitted answers 404 to a status request until JES2
@@ -42,9 +53,28 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   shows how to ask SMP which level owns the module.
 - **Stop HTTPD around the install job** (#434). The install replaces the
   module the running server loads from; see `docs/installation.md`.
+- **A record-mode read of a RECFM=V data set now fails** (#455). A client that
+  sends `X-IBM-Data-Type: record` for a V, VB or VBS data set or member
+  used to get `200` with wrong data and now gets `400`. Read
+  such data with `text` or `binary`. RECFM=F and FB are unchanged.
 
 ### Fixed
 
+- **The request path is decoded once** (#507). httpd decodes the percent
+  escapes of the path before it hands the request over, and the router then
+  decoded the result a second time. A name with a literal `%` was read as the
+  start of an escape, so `%25b1` in a URL, which names `%b1`, reached the
+  handler as another character, and a path that had been encoded twice was
+  decoded twice. The route match, the path variables and the name a handler
+  authorizes and opens are now the name the client sent, decoded once. A
+  client that relied on double encoding has to send the name once-encoded.
+  Query parameters were already decoded once and are unchanged.
+- **The data set list names the right device** (#443). The `dev` attribute was
+  taken from the tracks per cylinder of the volume, which does not identify a
+  device: a 3380 volume, like a 3390, has 15, so it was listed as `3390`, and any
+  unknown value was silently answered `3390`. It now comes from the track
+  capacity in the volume's format-4 DSCB (3330, 3350, 3375, 3380, 3390). A capacity
+  that is none of these, or a DSCB that cannot be read, gives `????`.
 - **A JOB card that fills its last line is accepted** (#395). mvsMF adds
   `NOTIFY`, `USER` and `PASSWORD` on a continuation card, which needs a comma
   behind the last operand of the submitted card, and a comma is data only up to
@@ -53,6 +83,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   hands its last operand to a continuation card of its own, so the same operands
   reach JES2 in the same order. A card that cannot be cut anywhere is still
   refused, with the new text `JOB card cannot be continued`.
+- **A record-mode read of a RECFM=V data set is refused instead of returning
+  wrong data** (#455). `X-IBM-Data-Type: record` on a V, VB or VBS data set or
+  member answered 200 with LRECL-sized chunks that ran across record
+  boundaries, each with a length prefix that matched no record. It now answers
+  `400` with `category` 6, `rc` 8, `reason` 12 and sends no data. RECFM=F and
+  FB, and text and binary reads of any data set, are unchanged. A correct
+  variable-length record mode is still to come (#361).
 - **`exec-system` and `exec-member` are emitted** (#209). With `exec-data=Y` the
   job object now carries both, as z/OSMF does. MVS 3.8j has no sysplex and one
   JES2 member, so both hold the system id JES2 recorded for the job (the SMF
@@ -128,6 +165,16 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   The command **was issued** in all three, so a retry re-issues it. None of
   them writes an operator message: the console API reads the table back, and a
   polling client would flood it.
+- **Collect no longer answers an empty `200` when it has no storage for its
+  response buffer** (#475). It needs 32 KB for the lines it returns, and when
+  that allocation failed it answered `200` with an empty `cmd-response` before
+  it looked at the table. A client that polls collect stops on an empty answer
+  and takes the block for finished, so a storage shortage lost the lines still
+  to come. It answers `500` with reason code 8/1 now, the same answer as a copy
+  of the table that cannot be made (#407), and the cursor is kept as it was, so
+  asking again with the same key works. No operator message is written. An
+  empty `200` stays the answer for no new lines and for an unknown or evicted
+  key.
 - **The job endpoints no longer need `HASPCKPT`/`HASPACE1` DD statements in
   the server procedure** (libc370 2.24.0). They are still honoured, and still
   needed when JES2 uses a `$DSNPRFX` other than `SYS1`.
@@ -140,8 +187,17 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   arrives. A console command sent while the server is stopping is refused
   with 503 / 8 / 17 and not issued, or the connection is reset once the
   server has stopped accepting. The answer to the `P` itself closes the
-  connection, as every console answer does. See
+  connection, as the answer to any request that carries a body does. See
   `docs/endpoints/console/issue-command.md`.
+- **A detection no longer reports `waiting` for a message that arrived**
+  (#195). The unsolicited-message detection compared the number of matching
+  lines in the Master Trace Table with a count taken at issue. The table is a
+  window that wraps and is bounded in bytes, so after a burst of other
+  messages the older matches were gone, the count fell below the baseline, and
+  a fresh match went unreported. The detection now remembers where the table
+  ended, the time of its newest entry, and reports a match stamped later. The
+  command's own reply can still count as a detection, and a detection is read
+  afresh on every poll (see `docs/endpoints/console/detections.md`).
 
 ### Added
 
@@ -157,6 +213,14 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 
 ### Changed
 
+- **A path mvsMF serves, requested with a method it does not offer, answers
+  405 and not 404** (#418). `DELETE /zosmf/info` is the example. The body is
+  the usual error report with the message `Http method DELETE is not supported
+  by this URL`, and, as in the reference z/OSMF, there is no `Allow` header. A
+  path no endpoint serves is still 404, and a request without credentials is
+  still 401. A client that tested for 404 to detect "this endpoint does not
+  exist" must now accept 405 as well. `PATCH` and `OPTIONS` are still answered
+  by HTTPD with its own 405.
 - **The installation guide says to stop HTTPD around an upgrade** (#434). The
   install replaces the module the running server loads on every request.
   Whether a request that arrives meanwhile fails has not been measured.
@@ -192,6 +256,39 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
   longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
   list. An empty `owner=` means the caller's own jobs.
+- **The console service and `/zosmf/test` refuse every user until you define
+  a profile and grant READ** (#347, #460). mvsMF now checks READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` itself, as the first step of every console
+  request (command, response, detection, hardcopy log) and of every
+  `/zosmf/test` request, `fn=version` included. The check is fail-closed: it
+  permits only when RAKF says "permitted". A user without READ, and everybody
+  while the profile is not defined, gets `500` with category 4
+  (Authorization); a request with no resolved user gets `401`. **This is the
+  upgrade behaviour, not an error.** A user with READ can issue any operator
+  command, as before; there is still no per-command policy. The shipped route
+  configuration gains `MOD=MVSMF /zosmf/restconsoles/* AUTH=TOKEN
+  RES=FACILITY:MVSMF.CONSOLE`, listed before `/zosmf/*`, as an additional first
+  layer (`403` from httpd for a user without READ); the check in mvsMF does not
+  depend on it.
+
+  **Upgrade: define the profile and grant READ to those who may use it.** The
+  deploy user, and whoever checks the build id of a
+  development build with `?fn=version`, needs READ
+  too. Rules and the profile commands: `docs/installation.md`.
+- **The diagnostic endpoint `/zosmf/test` no longer has a function that
+  returns session data** (#508). The function is removed, not gated: a
+  request to it now gets the endpoint's help text like any unknown `fn`. No
+  function of the endpoint may return what identifies a session.
+- **A release does not register the diagnostic endpoint `/zosmf/test`** (#508).
+  Only a development build, whose version ends in `-dev`, answers it; a release
+  answers `404`, and so does a build with `-DMVSMF_NO_TEST_ENDPOINT`. The endpoint
+  carries operator commands (`fn=cmd`), deliberate abends and storage probes,
+  none of which belongs on a production system. The code is still in the module,
+  only unreachable: dropping it from the object needs a compile-time release
+  flag from the build tool. **A release deploy is checked with
+  `GET /zosmf/info`**, field `zosmf_full_version`, instead of `?fn=version`, and
+  `fn=version`, `fn=storage` and `fn=textsum` exist on development builds only.
+  `docs/installation.md`, step 5.
 
 ## [1.3.0] - 2026-10-15
 

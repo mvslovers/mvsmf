@@ -25,7 +25,7 @@
  * MTENTRY, CMTT, Session and the cmtt_* calls replaced by fakes that can be
  * told to fail. consapi.c itself cannot compile on the host (file-scope HLASM
  * labels + MVS intrinsics), which is why mtt_snap_open() and
- * mtt_detect_count() live in their own TU. correlate_once() takes its
+ * mtt_detect_since() live in their own TU. correlate_once() takes its
  * snapshot through mtt_snap_open(), so the failure it must report is the one
  * tested here; what it and the handlers do with that result is review.
  * ====================================================================
@@ -101,18 +101,24 @@ static void table_reset(void)
 
 /* One line in the layout of a formatted MTT entry: 24 columns of flags, time
  * and source, then the message text (MTT_MSG_OFF). */
-static void table_add(const char *msg)
+static void table_add_at(const char *stamp, const char *msg)
 {
 	MTENTRY *e = &fake_pool[fake_n];
 	char line[96];
 
 	memset(line, ' ', sizeof(line));
 	memcpy(line, "0000  9.24.38 STC  320  ", MTT_MSG_OFF);
+	if (stamp) memcpy(line + 5, stamp, 8);
 	memcpy(line + MTT_MSG_OFF, msg, strlen(msg));
 	memcpy(e->mtentdat, line, MTT_MSG_OFF + strlen(msg));
 	e->mtentlen = (short)(MTT_MSG_OFF + strlen(msg));
 	fake_arr[fake_n] = e;
 	fake_n++;
+}
+
+static void table_add(const char *msg)
+{
+	table_add_at((const char *)0, msg);
 }
 
 int main(void)
@@ -122,6 +128,8 @@ int main(void)
 	MTENTRY **arr = (MTENTRY **)0;
 	unsigned n = 99;
 	char latest[64];
+	MTT_ANCHOR none = { -1, 0 };
+	MTT_ANCHOR anc;
 	int r;
 
 	printf("=== TSTMTSN: #407 failed MTT snapshot is not 'no matches' ===\n");
@@ -130,7 +138,7 @@ int main(void)
 	 *    This is the line the fix must not move -- 0 and "failed" differ. */
 	table_reset();
 	strcpy(latest, "stale");
-	r = mtt_detect_count(&session, "FTPD", latest, sizeof(latest));
+	r = mtt_detect_since(&session, "FTPD", &none, latest, sizeof(latest));
 	CHECK_EQ(r, 0, "empty table: count is 0, not FAILED");
 	CHECK(latest[0] == '\0', "empty table: latest is empty");
 	CHECK_EQ(fake_free_calls, 1, "empty table: handle released once");
@@ -141,7 +149,7 @@ int main(void)
 	table_add("ftpd054i Listening on port 2121");
 	table_add("IEE136I LOCAL: TIME=09.24.38");
 	table_add("FTPD055I Connection accepted   ");
-	r = mtt_detect_count(&session, "FTPD", latest, sizeof(latest));
+	r = mtt_detect_since(&session, "FTPD", &none, latest, sizeof(latest));
 	CHECK_EQ(r, 3, "healthy: three matching entries");
 	CHECK(strcmp(latest, "FTPD055I Connection accepted") == 0,
 	      "healthy: latest is the newest match, right-stripped");
@@ -153,7 +161,7 @@ int main(void)
 	table_add("FTPD054I Listening on port 2121");
 	fake_new_fails = 1;
 	strcpy(latest, "stale");
-	r = mtt_detect_count(&session, "FTPD", latest, sizeof(latest));
+	r = mtt_detect_since(&session, "FTPD", &none, latest, sizeof(latest));
 	CHECK_EQ(r, MTT_SNAP_FAILED, "cmtt_new fails: FAILED, not a count of 0");
 	CHECK(r < 0, "cmtt_new fails: result cannot be taken for a baseline");
 	CHECK(latest[0] == '\0', "cmtt_new fails: latest is empty");
@@ -164,7 +172,7 @@ int main(void)
 	table_reset();
 	table_add("FTPD054I Listening on port 2121");
 	fake_array_fails = 1;
-	r = mtt_detect_count(&session, "FTPD", latest, sizeof(latest));
+	r = mtt_detect_since(&session, "FTPD", &none, latest, sizeof(latest));
 	CHECK_EQ(r, MTT_SNAP_FAILED, "no array: FAILED, not a count of 0");
 	CHECK_EQ(fake_free_calls, 1, "no array: handle released once");
 
@@ -216,6 +224,88 @@ int main(void)
 		CHECK_EQ(mtt_len(&e), 42, "mtt_len: sane length passes through");
 		CHECK_EQ(mtt_len((const MTENTRY *)0), 0, "mtt_len: NULL entry is 0");
 	}
+
+	/* 7. #195: the window wraps, so what counts is what is NEWER than a place
+	 *    in the table, not how many matches there are. */
+	table_reset();
+	table_add_at("10.44.01", "IEE136I LOCAL: TIME=10.44.01");
+	table_add_at("10.44.03", "IEE136I LOCAL: TIME=10.44.03");
+	table_add_at("10.44.05", "IEE136I LOCAL: TIME=10.44.05");
+	table_add_at("10.44.06", "IEE102I ACTIVITY");
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, 0, "anchor: taken");
+	CHECK_EQ(anc.secs, 10 * 3600 + 44 * 60 + 6, "anchor: second of the newest entry");
+	CHECK_EQ(anc.same, 0u, "anchor: no match at that second");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 0, "since: nothing new right after the anchor");
+
+	/* the cluster leaves the window, one fresh line arrives: the count fell
+	 * from three to one, and that one is new */
+	table_reset();
+	table_add_at("10.50.20", "IEE102I ACTIVITY");
+	table_add_at("10.50.27", "IEE136I LOCAL: TIME=10.50.27");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 1, "aging: a fresh match after the cluster aged out is detected");
+	CHECK(strcmp(latest, "IEE136I LOCAL: TIME=10.50.27") == 0,
+	      "aging: latest is the fresh match");
+
+	/* the window shifted but nothing arrived: old matches stay old, however
+	 * few of them are left */
+	table_reset();
+	table_add_at("10.44.05", "IEE136I LOCAL: TIME=10.44.05");
+	table_add_at("10.44.06", "IEE102I ACTIVITY");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 0, "aging: matches older than the anchor are not new");
+
+	/* the stamp has one-second grain: at the anchor's own second only matches
+	 * beyond the ones already counted are new */
+	table_reset();
+	table_add_at("10.44.06", "IEE136I FIRST");
+	table_add_at("10.44.06", "IEE102I ACTIVITY");
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, 0, "same second: anchor taken");
+	CHECK_EQ(anc.same, 1u, "same second: the match at the anchor is counted");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 0, "same second: the counted match is not new");
+	table_add_at("10.44.06", "IEE136I SECOND");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 1, "same second: a further match in that second is new");
+	CHECK(strcmp(latest, "IEE136I SECOND") == 0, "same second: latest is the further match");
+
+	/* midnight: the stamp carries no date */
+	table_reset();
+	table_add_at("23.59.58", "IEE136I OLD");
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, 0, "midnight: anchor taken");
+	table_reset();
+	table_add_at("23.59.58", "IEE136I OLD");
+	table_add_at(" 0.00.02", "IEE136I NEW");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 1, "midnight: a stamp after 00.00.00 is newer than 23.59.58");
+
+	/* a continuation line has no time of its own and takes the one before */
+	table_reset();
+	table_add_at("10.44.06", "IEE102I ACTIVITY");
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, 0, "continuation: anchor taken");
+	table_add_at("10.50.27", "IEE102I ACTIVITY");
+	table_add_at("        ", "IEE136I CONTINUATION");
+	r = mtt_detect_since(&session, "IEE136I", &anc, latest, sizeof(latest));
+	CHECK_EQ(r, 1, "continuation: an unstamped line takes the earlier time");
+
+	/* an anchor on a table with nothing stamped: everything stamped is new */
+	table_reset();
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, 0, "empty table: anchor taken");
+	CHECK_EQ(anc.secs, -1, "empty table: no second to anchor on");
+
+	/* a failed snapshot is a failure for the anchor too (#407) */
+	table_reset();
+	fake_new_fails = 1;
+	anc.secs = 1234;
+	r = mtt_detect_anchor(&session, "IEE136I", &anc);
+	CHECK_EQ(r, MTT_SNAP_FAILED, "anchor, cmtt_new fails: FAILED");
+	CHECK_EQ(anc.secs, 1234, "anchor, cmtt_new fails: anchor left alone");
 
 	return mbt_test_summary("TSTMTSN");
 }

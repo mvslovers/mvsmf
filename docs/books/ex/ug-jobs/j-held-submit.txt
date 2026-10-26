@@ -1,0 +1,26 @@
+$ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: text/plain' \
+  --data-binary @- "$MVSMF_URL/zosmf/restjobs/jobs" <<'JCL'
+//MVSMFDM6 JOB (ACCT),'MVSMF DEMO',CLASS=A,MSGCLASS=H
+//STEP1    EXEC PGM=IEBGENER
+//SYSPRINT DD SYSOUT=H
+//SYSIN    DD DUMMY
+//SYSUT1   DD *
+A CARD FOR THE PUNCH
+/*
+//SYSUT2   DD SYSOUT=(B,,ZMF1)
+JCL
+HTTP/1.1 200 OK
+Date: Fri, 23 Oct 2026 08:24:18 GMT
+Server: HTTPD Server
+X-Powered-By: MVSLOVERS
+Connection: close
+Content-Type: application/json
+Content-Length: 282
+Cache-Control: no-store
+Pragma: no-cache
+X-Content-Type-Options: nosniff
+Content-Language: en
+Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
+
+{"subsystem":"JES2","jobname":"MVSMFDM6","jobid":"JOB00039","owner":"SMITH","type":"JOB","class":"A","url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM6/JOB00039","files-url":"http://localhost:8080/zosmf/restjobs/jobs/MVSMFDM6/JOB00039/files","status":"ACTIVE","retcode":null}

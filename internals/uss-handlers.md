@@ -113,26 +113,47 @@ and never reach past it to `http_send()` (see **Sending**).
 header, and answers the request itself (unsupported encoding, `record`) when
 it returns non-zero.
 
+The loop is `uss_stream_file()` (`src/ussread.c`, header `include/ussread.h`),
+a TU of its own so `TSTUSSRD` (`test/host/tstussrd.c`) drives the real one on
+the host; `ussapi.c` injects `ufs_fread`, `send_all`, `http_xlate` and the
+error probe through `USS_READ_OPS`. The handler's part:
+
 ```c
-char          buf[4096];
-UINT32        n;
-int           data_type;
-const HTTPCP *cp = NULL;
+USS_GET_CTX ctx = { session, fp, cp };
+int         read_rc = 0;
 
-if ((rc = uss_data_type(session, &data_type, &cp)) != 0) {
-    return rc < 0 ? rc : 0;     /* already answered */
-}
+rc = uss_stream_file(&ctx,
+    (data_type == DATA_TYPE_TEXT) ? &uss_get_ops : &uss_get_ops_binary,
+    (unsigned char *)buf, sizeof(buf), &read_rc);
 
-while ((n = ufs_fread(buf, 1, sizeof(buf), fp)) > 0) {
-    if (data_type == DATA_TYPE_TEXT) {
-        /* EBCDIC -> ASCII: IBM-1047 unless fileEncoding said CP037 */
-        http_xlate((unsigned char *)buf, n, cp->etoa);
-    }
-    if (send_all(session, (const UCHAR *)buf, (int)n) < 0) {
-        break;  /* real handlers goto their cleanup label */
-    }
+if (read_rc != 0) {                     /* the read failed, not the send */
+    wtof(MSG_USS_READ_ERROR, abspath, read_rc);
+    abort_response(session);
+    rc = -1;
 }
 ```
+
+**`ufs_fread()` returns 0 for a failed read exactly as for the end of the
+file** (#423). Only the handle's state tells them apart, so every loop over it
+has to look afterwards -- `uss_etag()` does, and so does the GET since #423.
+The probe (`uss_get_failed()`) treats a loop that ended *without* `ufs_feof()`
+as a failure as well as one with `ufs_ferror()`: libufs sets the error flag
+with whatever rc the request block holds, and `ufs_ferror()` returns that rc,
+so a flag set with rc 0 would read as "no error". The loop ending anywhere but
+at the end of the file is a failure either way. The code reported is `fp->error`, or `UFSD_RC_IO` when
+there is none. Measured with UFSD stopped under a running download:
+`fp->error` is `-1` (the SSI request failed), so `MVSMF301E ... RC=-1`.
+
+What "visibly aborted" means once the headers are out: the 200 cannot be taken
+back, so `abort_response()` (`common.c`) clears `chunked` and `keepalive` and
+marks the client done. httpd then does not write the chunk terminator
+(`0\r\n\r\n`) and closes the socket in the middle of the body; curl exits 18
+("transfer closed with outstanding read data remaining"). A send that fails
+goes through the same `abort_response()` inside `send_all()`, so the
+handler does not repeat it for that case. The bytes read *before* the failure were already sent; the client has a prefix of the file
+and an error, never a prefix that looks like the file. Operator side:
+`MVSMF301E` (`docs/messages.md`). Nothing on the wire is sent after the abort,
+so there is no error body -- the status line said 200 a moment ago.
 
 ### I/O Pattern for File Write
 

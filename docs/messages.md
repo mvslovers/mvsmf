@@ -36,7 +36,7 @@ Ranges:
 | `MVSMF0xx` | router, CGI entry, shared request handling |
 | `MVSMF1xx` | data sets (`restfiles/ds`) |
 | `MVSMF2xx` | jobs (`restjobs`) |
-| `MVSMF3xx` | USS (`restfiles/fs`) — none yet |
+| `MVSMF3xx` | USS (`restfiles/fs`) |
 | `MVSMF4xx` | consoles (`restconsoles`) — none yet |
 | `MVSMF9xx` | abend recovery and diagnostics |
 
@@ -51,7 +51,7 @@ Ranges:
 | `MVSMF005E` | `pgm MUST BE CALLED BY THE HTTPD SERVER` | MVSMF was started from TSO or batch instead of as a CGI under httpd. It returns 12. |
 | `MVSMF006E` | `STORAGE ALLOCATION FAILED FOR what` | GETMAIN/`malloc` failed. The region is too small or the address space is leaking — see the httpd notes on CGI storage. `what` names the allocation (request body, JCL line table, spool block, `THE DATA SET LIST`, `THE MEMBER LIST`). For the two lists the shortage hit libc370's list builder, which answers NULL for an empty result and for a failed allocation alike; the catalog or directory is not known to be empty, so the request is not answered with an empty list or a 404 (#360). The request is answered 500. For `THE REQUEST BODY` the body is read to its end first, so the answer reaches the client; until #412 the client saw the connection close instead. |
 | `MVSMF007W` | `RECEIVE TIMED OUT AFTER n RETRIES` | A client stopped sending in the middle of a request body and the read gave up. The worker was tied up for the whole wait. Isolated occurrences are a client or network problem; a steady stream means workers are being consumed. |
-| `MVSMF008W` | `SEND TIMED OUT AFTER n RETRIES` | The mirror image on the way out: the client stopped reading, so the socket send buffer stayed full for the whole 10 second budget (100 retries of 100 ms) and the response was abandoned. The connection is dropped and the worker released — before the fix for #298 that same condition spun the worker at 100% CPU forever, so this message replaces a hang. A server that is stopping (`P HTTPD`) does not wait out the budget: a send that stalls is abandoned at once and silently, and is not reported here. |
+| `MVSMF008W` | `SEND TIMED OUT AFTER n RETRIES` | The mirror image on the way out: the client stopped reading, so the socket send buffer stayed full for the whole 10 second budget (100 retries of 100 ms) and the response was abandoned. The connection is dropped and the worker released — before the fix for #298 that same condition spun the worker at 100% CPU forever, so this message replaces a hang. A server that is stopping (`P HTTPD`) does not wait out the budget: a send that stalls is abandoned at once and silently, and is not reported here. Nor is a chunked download (every HTTP/1.1 download of a file, data set, member or spool file) whose client stopped reading: httpd gives up on that one itself, after the same 10 seconds, without a message (see [Slow clients](endpoints/README.md#slow-clients)). |
 
 ## MVSMF1xx — data sets
 
@@ -81,6 +81,12 @@ member not found, record too long) produce **no** console message.
 | `MVSMF206E` | `CLOSE OF THE JES2 INTERNAL READER FAILED` | `jesircls()` failed. The job may or may not have been queued — check the JES2 queue before resubmitting. |
 | `MVSMF207E` | `JESCANJ RETURNED RC=n` | A purge or a cancel returned a code this build does not know. The client got a 500. Worth reporting with the `RC`. |
 
+## MVSMF3xx — USS
+
+| Id | Text | Meaning and action |
+|---|---|---|
+| `MVSMF301E` | `I/O ERROR READING path RC=n` | A USS file read failed after the reply had started, so the file was **not** delivered whole. `path` is the absolute path as UFSD sees it (not case-folded), `n` the UFSD return code of the failed read (`52` I/O error, also reported when a failed request carried no code of its own; `56` bad file descriptor; `-1` UFSD is not reachable — it was stopped while the file was being read). The `200` and the headers were already on the wire, so the client is told by the connection closing in the middle of the body — curl exits 18 (`transfer closed with outstanding read data remaining`) — never by a body that ends cleanly. Check UFSD and the volume behind the file system; the next read of the same file may succeed. Until #423 this ended as a complete-looking `200` with a truncated file and no message. |
+
 ## MVSMF9xx — abend recovery and diagnostics
 
 | Id | Text | Meaning and action |
@@ -90,7 +96,7 @@ member not found, record too long) produce **no** console message.
 | `MVSMF903W` | `SESSION FILE TABLE FULL, FILE NOT TRACKED` | More data sets are open in one request than `MAX_SESSION_FILES`. The untracked file is not closed if the handler abends. |
 | `MVSMF904I` | `RECOVERY CLOSING dsn (DD:ddname)` | Recovery is closing a data set the abending handler left open. Informational; it accompanies a `MVSMF901E`. |
 | `MVSMF905W` | `RECOVERY FCLOSE ABENDED FOR SLOT n` | The recovery close abended in turn. The DD stays allocated and its storage stays held for the life of the address space. |
-| `MVSMF906W` | `FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY` | `/zosmf/test?fn=abend` is about to abend the worker **on purpose**. Not a fault. A build that does not want the diagnostic endpoint at all leaves it out with `-DMVSMF_NO_TEST_ENDPOINT` (#343). |
+| `MVSMF906W` | `FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY` | `/zosmf/test?fn=abend` is about to abend the worker **on purpose**. Not a fault. A release does not register the endpoint, so this message appears only on development builds (#343, #508). |
 | `MVSMF907I` | `ENV[n] "name"="value"` | CGI environment dump, one line per variable. Only written when `logging_middleware` is registered — it is not by default. A developer aid, not an operator message. |
 | `MVSMF908I` | `RECOVERY CLOSING THE JES SPOOL HANDLE` | Recovery is closing the JES2 spool handle an abending handler left open. Informational; it accompanies a `MVSMF901E`. Its absence after a jobs-API abend is the leak of issue #286. |
 | `MVSMF909W` | `RECOVERY JESCLOSE ABENDED, SPOOL DATA SETS STAY OPEN` | The recovery `jesclose()` abended in turn. The JES2 spool data sets stay allocated and their storage stays held for the life of the address space. |

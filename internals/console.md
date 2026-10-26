@@ -36,12 +36,13 @@ the copy is the largest allocation on these paths. An empty table still gives
 an array with no entries (`cmtt_get_array()` returns NULL only for a NULL handle
 or table), so **no array is the failure and zero entries is an answer**.
 `mtt_snap_open()` (`src/mttsnap.c`) draws that line once; its failure value is
-`MTT_SNAP_FAILED` (-1), which `correlate_once()` and `mtt_detect_count()` return
+`MTT_SNAP_FAILED` (-1), which `correlate_once()`, `mtt_detect_anchor()` and
+`mtt_detect_since()` return
 in place of a count. Folding it into 0 does not just answer emptily, it answers
 *wrongly*:
 
-- a detection baseline of 0 makes the first healthy poll report `detected` with
-  a message that was in the table before the command;
+- a detection anchored on nothing makes the first healthy poll report `detected`
+  with a message that was in the table before the command;
 - a cursor stored with 0 lines and `echo_secs = -1` makes collect anchor on the
   newest echo of the command — #214's mis-anchor, reopened by an allocation
   failure.
@@ -54,7 +55,7 @@ What each caller does with it:
 | issue, capture failed | 500 `8/14`, the command **was issued** |
 | issue, `unsol-key` baseline | 500 `8/14`; nothing is armed |
 | issue, sync `unsol-key` wait | a failed poll is retried; 500 `8/14` if the **last** look at the deadline failed (`timeout` would claim absence) |
-| `consoleCollectHandler` | 500 `8/1`; cursor rewritten unchanged (kept alive, not advanced) |
+| `consoleCollectHandler` | 500 `8/1`; cursor rewritten unchanged (kept alive, not advanced). Also when the 32 KB response buffer cannot be allocated (#475), which is checked before the table is read; both go through `collect_poll()` (`src/collpoll.c`) |
 | `consoleDetectHandler` | 500 `8/1`; the detection stays armed |
 | `consoleLogHandler` | 500 `8/1` (#251) |
 
@@ -68,9 +69,47 @@ client polling through a storage shortage would write one line per poll into
 the table it is reading.
 
 The failure cannot be provoked on MVS. `test/host/tstmtsn.c` runs the real
-`mtt_snap_open()` and `mtt_detect_count()` against a fake `cmtt_new()` that
-fails; what `correlate_once()` and the handlers do with the result is checked
-by review (the handlers do not compile on the host).
+`mtt_snap_open()`, `mtt_detect_anchor()` and `mtt_detect_since()` against a
+fake `cmtt_new()` that fails. `test/host/tstcolpl.c` runs the real
+`collect_poll()` against a `malloc` that fails and a correlator that reports
+`MTT_SNAP_FAILED`: both give `COLLECT_POLL_FAILED`, the delivered count stays as
+it was and nothing is left to free. That the handler answers 500 `8/1` on it, and what `correlate_once()`
+does with its snapshot, is checked by review (consapi.c does not compile on
+the host).
+
+Collect answered an empty `200` for the buffer until #475: the allocation sat
+in the handler ahead of the table, so it was the one failure the #407 fix did
+not reach.
+
+### Detection is an anchor, not a count (#195)
+
+`consoleDetectHandler()` and the synchronous wait of the issue command ask
+`mtt_detect_since()` for matches **newer than an anchor** (`MTT_ANCHOR`,
+`mttsnap.h`): the `hh.mm.ss` of the newest stamped entry at issue, and the
+number of matches stamped exactly then. The first design stored a *count* of
+matches and reported `detected` when the live count exceeded it. The table is a
+byte-bounded wrapping window, so a burst of other messages removes older matches
+and the count falls below the baseline while a fresh match is in the table:
+measured on a throwaway system, four `D T` then an armed `D T`, eight
+`D U,,,000,400`, one more `D T` -- one fresh `IEE136I` in the table, status
+`waiting`. Two snapshots without traffic in between were identical, so it is
+not a torn copy.
+
+What is left, deliberately: the anchor is taken after `issue_command()`, so the
+command's own reply may detect; and `detected` is not latched, so a match that
+leaves the window before the next poll reads `waiting` again. Latching needs
+room in the kv-store value (`MVSMF_KVS_VALMAX`) for a message, which
+`SOL_DETECTION` does not have.
+
+The table is read oldest first, and a line without a time inherits the time of
+the line before it. Times are compared modulo 24 hours: a match counts as newer
+when it is less than 12 hours ahead of the anchor, so a detection armed for more
+than 12 hours (a very long `detect-time`) can no longer see matches stamped
+later than that and reads `waiting`.
+
+Reproducing it needs few commands with much output: every command stores a
+cursor in the 32-slot kv-store, and enough small commands evict the detection
+that is being watched (500 / 5 / 9).
 
 ### Notes
 

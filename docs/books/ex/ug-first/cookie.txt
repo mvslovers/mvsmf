@@ -1,0 +1,2 @@
+$ curl -s -b cookies.txt "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"
+[]

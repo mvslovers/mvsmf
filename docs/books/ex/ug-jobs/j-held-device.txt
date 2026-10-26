@@ -1,0 +1,5 @@
+$ curl -s -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
+  -H 'Content-Type: application/json' \
+  -d '{"cmd":"$DU,PUN1"}' \
+  "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
+{"cmd-response":"$HASP000 PUNCH1    00D HALTED   (JOB    39 MVSMFDM6) F=ZMF1,AUTOM P=N\r$HASP000                        R=LOCAL    S=Y LIM=0-* Q=B\r","cmd-response-key":"E378DFDA784C9080","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378DFDA784C9080","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378DFDA784C9080"}

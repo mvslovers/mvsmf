@@ -2,7 +2,8 @@
 
 mvsMF 1.4.0 decides for every job whether the caller may list it, read its
 output and purge it. The jobs endpoints (`/zosmf/restjobs/jobs/...`) apply this,
-and so does the job lookup of the `/zosmf/test` endpoint. The RAKF class
+and so does the job lookup of the `/zosmf/test` endpoint, which in addition
+needs READ on `FACILITY MVSMF.CONSOLE` for every request. The RAKF class
 `JESSPOOL` holds the rules. They are the rules FTPD 1.3.0 applies to its JES
 mode, so one set of profiles governs both servers.
 
@@ -424,24 +425,28 @@ after `S RAKFPROF`.
 
 JESSPOOL decides the job services only: list, status, files, records, cancel and
 purge under `/zosmf/restjobs/jobs`, and the job probes (`fn=job`, `fn=spool`,
-`fn=syslog`) of `/zosmf/test`. Two other surfaces reach jobs without it.
+`fn=syslog`) of `/zosmf/test`, after the check of `FACILITY MVSMF.CONSOLE` that
+every `/zosmf/test` request passes first. Two other surfaces reach jobs without
+it.
 
-- **Console services** (`/zosmf/restconsoles`). Any authenticated user can issue
-  an operator command, including `$P` or `$C` for the job of somebody else,
-  and read the Master Trace Table, whose message texts name jobs (for example
-  `$HASP395 jobname ENDED`) and carry job numbers, whatever their owner.
-  `consapi.c` makes no authorization call. See [Issue Command](endpoints/console/issue-command.md) and
+- **Console services** (`/zosmf/restconsoles`). READ on the RAKF
+  resource `FACILITY MVSMF.CONSOLE` allows issuing an operator command, including
+  `$P` or `$C` for the job of somebody else, and reading the Master Trace Table,
+  whose message texts name jobs (for example `$HASP395 jobname ENDED`) and carry
+  job numbers, whatever their owner. mvsMF checks that profile in every console
+  handler and refuses everybody while it is not defined. See [Issue Command](endpoints/console/issue-command.md) and
   [#347](https://github.com/mvslovers/mvsmf/issues/347).
-- **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way. The
-  endpoint is registered in the default build. A build with
-  `-DMVSMF_NO_TEST_ENDPOINT` leaves `/zosmf/test` unregistered, and it answers
-  404.
+- **`fn=cmd` of `/zosmf/test`.** It issues operator commands the same way, and
+  needs the same READ on `FACILITY MVSMF.CONSOLE` (the whole endpoint does). A
+  release does not register the endpoint and answers 404; a development build
+  (version ending in `-dev`) does, unless it was built with
+  `-DMVSMF_NO_TEST_ENDPOINT`.
 
 A JESSPOOL profile does not keep a user from reaching a job through these two.
-To remove `/zosmf/test`, build with `-DMVSMF_NO_TEST_ENDPOINT`. For the console
-services, a `RES=FACILITY:MVSMF.ACCESS` check on the catch-all route decides who
-may use mvsMF at all, not who may use the console services alone; see
-[Register the routes](installation.md#4-register-the-routes).
+A release has no `/zosmf/test`. For the console
+services and `/zosmf/test`, READ on `FACILITY MVSMF.CONSOLE` decides who may use
+them; see
+[Who may use the console service](installation.md#who-may-use-the-console-service-and-zosmftest).
 
 ## Check it
 

@@ -360,9 +360,8 @@ command in the last 40 entries. It prints the line
 The last line is #cmd("DONE").
 
 Every user with READ access to #cmd("MVSMF.CONSOLE") can issue any operator
-command with this function (@ref-test-access). The user ID of the caller is
-not used for the command. It runs with the authority of the address space, as
-for the console routes (@ref-cons).
+command with this function (@ref-test-access). The function issues the
+command with SVC 34 (MGCR), as the console routes do (@ref-cons).
 
 === job <ref-test-job>
 

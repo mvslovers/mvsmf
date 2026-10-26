@@ -47,9 +47,8 @@ not look at it. All names reach the same table.
 asks RAKF for READ access to the resource #cmd("MVSMF.CONSOLE") in the class
 #cmd("FACILITY") at the start of every console request. A user without the
 access, and every user while the profile does not exist, is refused and issues
-no command. A command runs with the authority of the address space, not of the
-user, so give the permission only to the people who may issue every operator command.
-See @ug-security-console, which defines the profile and the route and shows
+no command. The permission covers every operator command, so give it only to
+the people who may issue every one. See @ug-security-console, which defines the profile and the route and shows
 what a user without the permission gets.]
 
 == Issuing a Command <ug-console-issue>

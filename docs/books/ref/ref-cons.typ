@@ -72,9 +72,9 @@ These cases are refused:
 
 "No profile" counts as "not permitted". This is the difference to the route
 check of HTTPD, which lets everyone through while no profile covers the
-resource (@ref-httpd). A system that has not defined the profile therefore refuses the console
-services to every user, administrators included, until the profile is defined
-and READ is granted.
+resource (@ref-httpd). A system that has not defined the profile therefore
+refuses the console services to every user, administrators included, until the
+profile is defined and READ is granted.
 
 A refusal has the shape of the authorization refusals of the data set
 services, not the console error shape of @ref-cons-errors: HTTP 500, category 4,

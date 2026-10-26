@@ -188,12 +188,12 @@ READ in HTTPD: a user without it gets `403` from HTTPD on
 console and `/zosmf/test` refuse everybody until you have defined the profile
 and granted READ.
 
+**Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
 Define the profile with the RAKF commands `RDEFINE` and `PERMIT`, then reload
 the profiles. The commands keep `PROFILES` sorted and refuse a group line that
-has no universal line; do not edit the file by hand (the reasons are in
-[Job spool authorization](jesspool.md), *Create the profiles with the RAKF
-commands*, which also says who may run the commands). Start each command in
-column 1:
+has no universal line (the reasons are in [Job spool
+authorization](jesspool.md), *Create the profiles with the RAKF commands*, which
+also says who may run the commands). Start each command in column 1:
 
 ```
 RDEF MVSMF.CONSOLE CL(FACILITY) UACC(NONE)
@@ -212,8 +212,8 @@ PERMIT: Run RAKFPROF to activate the changes
 
 Then reload with `S RAKFPROF`; the console acknowledges it with
 `RAKFPROF7  RAKF PROFILES UPDATED`. `PROFILES` contains these two lines
-afterwards (class in columns 1-8, resource from column 9, group from column 53,
-access from column 61):
+afterwards, shown so that you can check the result (class in columns 1-8,
+resource from column 9, group from column 53, access from column 61):
 
 ```
 FACILITYMVSMF.CONSOLE                                       NONE

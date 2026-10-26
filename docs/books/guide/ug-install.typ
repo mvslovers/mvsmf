@@ -166,8 +166,11 @@ an early step failed therefore runs fewer steps than the table lists.
 The function SYSMOD ids of mvsMF are #cmd("TZMF110"), #cmd("TZMF120"),
 #cmd("TZMF130") and #cmd("TZMF140"). The id is the letter T, the product letters
 ZMF, and the major and minor version and a zero. Each id is used once. The
-SYSMOD of 1.4.0 deletes only #cmd("TZMF130"). A system that holds an older id
-has to be brought to 1.3.0 first. This edition does not describe that upgrade.
+SYSMOD of 1.4.0 deletes only #cmd("TZMF130"). On a system that still holds
+#cmd("TZMF120"), that id keeps owning the module: the install of 1.4.0 prints
+#cmd("NOT SEL"), copies nothing and ends every step with the return code 0. Such
+a system has to be brought to 1.3.0 first. This edition does not describe that
+upgrade.
 
 #note[*Ending with 0 is not the proof.* A return code says that the job ran. It
 does not say that the work happened. SMP installs an element only when the SYSMOD
@@ -298,7 +301,8 @@ The third line protects the console services, which issue operator commands.
 HTTPD lets a user through only if the user has READ access to the resource
 #cmd("MVSMF.CONSOLE"). Define the profile before you start HTTPD with this
 line (@ug-security-console). With no profile, HTTPD writes #cmd("HTTPD425W")
-and does not gate the route.
+and does not gate the route, but mvsMF refuses every console request until the
+profile exists.
 
 To let only some users into mvsMF, add a check of a RACF resource to the last
 line:
@@ -335,21 +339,16 @@ of HTTPD. Then send the request with your user ID and password:
 
 The answer is 200 and a JSON document. The header #cmd("Set-Cookie") sets the
 cookie #cmd("LtpaToken2"). The field #cmd("zosmf_full_version") has the version
-of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The version is the version
-of the product, not of the build. The session was taken from a build of the
-development line, so the field says #cmd("1.4.0-dev"). The released module says
-#cmd("1.4.0"). The build that runs is another request:
+of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The released module says
+#cmd("1.4.0"), as in the session. A version that ends in #cmd("-dev") belongs to
+a development build. The field is the way to see that the new module is the one
+that runs (@ug-ops-build). The check needs no profile.
 
-#screen(raw(read("../ex/ug-install/i-version.txt"), block: true))
-
-The field #cmd("build") has the short commit that the module was built from. The
-field is the way to see that the new module is the one that runs
-(@ug-ops-build).
-
-#note[*The test service.* The request #cmd("/zosmf/test?fn=version") belongs to
-the diagnostic service of mvsMF. The module as released registers the service,
-and the route #cmd("/zosmf/*") covers it like every other path. A module built
-with the option #cmd("-DMVSMF_NO_TEST_ENDPOINT") does not have the service.]
+#note[*The test service.* The diagnostic service of mvsMF, the path
+#cmd("/zosmf/test"), is part of a development build only. A release does not
+register it and answers 404. On a development build the service needs READ
+access to #cmd("MVSMF.CONSOLE"), like the console services
+(@ug-security-console). Use #cmd("/zosmf/info") to check a release.]
 
 If the answers are not the ones above, the table in @ug-ops-trouble lists the
 causes by symptom.
@@ -368,6 +367,13 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   jobs of their own, and a started task that a client found with
   #cmd("owner=*") disappears from the list. @ug-security describes the profiles
   and the setup step by step.
++ *Prepare the console profile.* Version 1.4.0 checks READ access to the
+  resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY") for every
+  console request and every request of the diagnostic endpoint, and it refuses
+  every user, an administrator included, until the profile exists and READ is
+  granted. Define it as in @ug-security-console, and grant READ to those who
+  may issue operator commands. The user ID that deploys and restarts HTTPD needs
+  READ too, or its restart is abandoned.
 + *Stop HTTPD.* Send #cmd("P HTTPD") and wait for #cmd("HTTPD099I"). Stopped, no
   request reaches the library while SMP replaces the module.
 + *Do not run the allocation job* and do not scratch any data set. The libraries
@@ -385,7 +391,11 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
   library that holds a copy of #cmd("MVSMF"). An upgrade where the STEPLIB names
   another library ends with 0 in every step, and the old module keeps serving.
 + *Compare the route lines* in your member of HTTPD with #cmd("MVSMFPRM") of the
-  new #cmd("MVSMF.SAMPLIB"). A member of 1.3.0 has three lines. The line for #cmd("/zosmf/restconsoles/*") is new in 1.4.0 and must stand above the line with the wild card.
+  new #cmd("MVSMF.SAMPLIB"). A member of 1.3.0 has three lines. The line for
+  #cmd("/zosmf/restconsoles/*") is new in 1.4.0 and must stand above the line
+  with the wild card. mvsMF refuses a user without READ on its own, so the line
+  does not open or close the console, but it makes HTTPD refuse such a user one
+  layer earlier.
 + *Start HTTPD* and check the build as in @ug-install-verify.
 
 *Change from mvsMF 1.3.0.* The class #cmd("JESSPOOL") is new in 1.4.0. Version

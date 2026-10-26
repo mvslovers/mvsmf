@@ -39,7 +39,8 @@ mvsMF has six services. All paths begin with #cmd("/zosmf/"):
 ]
 
 Another path, #cmd("/zosmf/test"), is a diagnostic endpoint for the people who
-look after the system. It is not a service for users. The _mvsMF Reference_
+look after the system. It is not a service for users, and a release build does
+not have it. The _mvsMF Reference_
 describes it in "The Diagnostic Endpoint".
 
 The _mvsMF Reference_ lists every request of these services with its parameters,
@@ -75,7 +76,9 @@ A request passes these stations on its way to a data set, a job or a file:
   for that user. If HTTPD found no good credential, the middleware answers 401.
   Only the login (@ug-first-token) goes past it without a credential.
 + mvsMF finds the handler for the method and the path. A request that no
-  handler matches gets the status 404, with a JSON error report.
+  handler matches gets the status 404, with a JSON error report. A path that
+  mvsMF serves, requested with a method that it does not offer, gets the status
+  405.
 + The handler does the work and sends the answer. Most answers are JSON. A file
   or a data set is sent as text or as bytes.
 
@@ -191,10 +194,11 @@ book explains the subject:
       you upgrade.], [@ug-jobs-change, @ug-security-jesspool],
     [The sample route lines of HTTPD have a route of its own for
       #cmd("/zosmf/restconsoles/*"). It asks RAKF for READ access to the
-      resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"). Before, any
-      user who got in could issue any operator command. The route is above the
-      catch-all, and the profile must exist, or the route is not gated.
-      The diagnostic endpoint is not covered.],
+      resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY"), and mvsMF
+      checks the same resource itself for every console request and every
+      request of the diagnostic endpoint. Before, any user who got in could
+      issue any operator command. Without the profile every user is refused.
+      The diagnostic endpoint is part of a development build only.],
       [@ug-security-console, @ug-install-upgrade],
     [A list of data sets that fails for lack of storage, and the check why a
       member could not be opened, answer the status 500. Before, the answer was

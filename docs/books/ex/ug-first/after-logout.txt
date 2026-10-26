@@ -1,6 +1,6 @@
-$ curl -si -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"
+$ curl -si -b cookies.txt "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"
 HTTP/1.1 401 Unauthorized
-Date: Fri, 23 Oct 2026 07:57:57 GMT
+Date: Mon, 26 Oct 2026 17:44:14 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive

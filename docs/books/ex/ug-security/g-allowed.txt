@@ -3,7 +3,7 @@ $ curl -si -X PUT -u "$MVSMF_USER:$MVSMF_PASS" \
   -d '{"cmd":"D T"}' \
   "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
 HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 08:01:24 GMT
+Date: Mon, 26 Oct 2026 17:41:24 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close
@@ -15,4 +15,4 @@ X-Content-Type-Options: nosniff
 Content-Language: en
 Set-Cookie: LtpaToken2=<token>; Path=/; HttpOnly; SameSite=Strict
 
-{"cmd-response":"IEE136I LOCAL: TIME=03.01.24 DATE=2026.296  UTC: TIME=08.01.24 DATE=2026.296\r","cmd-response-key":"E378DABB26E3E040","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E378DABB26E3E040","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E378DABB26E3E040"}
+{"cmd-response":"IEE136I LOCAL: TIME=12.41.24 DATE=2026.299  UTC: TIME=17.41.24 DATE=2026.299\r","cmd-response-key":"E37D21F708703000","cmd-response-url":"http://localhost:8080/zosmf/restconsoles/consoles/defcn/solmsgs/E37D21F708703000","cmd-response-uri":"/zosmf/restconsoles/consoles/defcn/solmsgs/E37D21F708703000"}

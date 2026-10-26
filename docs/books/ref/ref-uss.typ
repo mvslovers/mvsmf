@@ -27,10 +27,10 @@ HTTPD 4.2.0 or later.
   )
 ]
 
-Every other method on these paths gets the error report with #cmd("rc") 4,
-#cmd("category") 6 and #cmd("reason") 7, the message #cmd("Not Found") and the
-status 404. A request whose method mvsMF cannot parse gets a 405 without a
-body.
+Every other method on these paths gets the status 405 and the error report with
+#cmd("rc") 4, #cmd("category") 6 and #cmd("reason") 7. The message names the
+method: #cmd("Http method PATCH is not supported by this URL"). A request whose
+method mvsMF cannot parse gets a 405 without a body (@ref-conv-methods).
 
 == Paths <ref-uss-path>
 
@@ -146,9 +146,14 @@ The data type is checked before the file is opened. A path that does not exist
 gives 404, and a path that is a directory gives 400 with the message
 #cmd("Is a directory") (@ref-uss-errors).
 
-#note[*A defect* (mvsmf\#423): the read loop does not test whether UFSD failed
-while it read. A read that fails after the headers went out ends as a normal
-200 with the bytes read so far. The client cannot tell it from a short file.]
+#note[*A failed read ends the answer in the middle of the body.* The read loop
+tests the return code of UFSD for every piece. When a read fails after the
+headers went out, mvsMF breaks off the reply: it does not send the last chunk,
+and it ends the connection. The client sees a transfer that closed with data
+outstanding (#cmd("curl") exits with 18), not a short file with a clean end.
+mvsMF writes #cmd("MVSMF301E I/O ERROR READING path RC=n") on the console.
+#cmd("n") is the return code of UFSD: 52 for an I/O error, 56 for a bad file
+descriptor, #cmd("-1") when UFSD cannot be reached.]
 
 == Write a File <ref-uss-write>
 

@@ -118,14 +118,18 @@ After an install or a replacement you want to know which module serves the
 requests. Two requests tell it:
 
 - #cmd("GET /zosmf/info") answers #cmd("zosmf_full_version") with the version of
-  the product.
+  the product. This is the check of a release. It needs no other permission
+  than a valid credential. A version that ends in #cmd("-dev") belongs to a
+  development build.
 - #cmd("GET /zosmf/test?fn=version") answers the version and the build. The
   build is the short commit that the module was built from. A module built from a
-  tree with uncommitted changes has the suffix #cmd("-dirty").
+  tree with uncommitted changes has the suffix #cmd("-dirty"). Only a development
+  build has this request, and it needs READ access to #cmd("MVSMF.CONSOLE").
+  A release answers 404.
 
-The two sessions are in @ug-install-verify. The request with #cmd("fn=version")
-is the better check after a replacement, because a rebuilt module has another
-build and the same version.
+The session of the first request is in @ug-install-verify. The request with
+#cmd("fn=version") is the better check after a replacement of a development
+build, because a rebuilt module has another build and the same version.
 
 #note[The build is the answer of the module that ran. If it is not the one you
 expect, another library comes first in the STEPLIB, or HTTPD has not been
@@ -158,7 +162,8 @@ that started task, and each request needs a block of it for the C stack.
 The remedy for a U0801 is more region or less fragmented storage. Free storage
 that is split into pieces smaller than the stack does not help. The request
 #cmd("GET /zosmf/test?fn=storage&sp=0") reports the largest contiguous free block
-of a subpool. The test service is described in the _mvsMF Reference_. The option
+of a subpool. This request exists on a development build only. The test service
+is described in the _mvsMF Reference_. The option
 #cmd("total=1") makes the service hold all the free storage for a short time,
 so use it between load runs and never during one.
 
@@ -261,7 +266,11 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
       (@ug-security).],
     [A route with #cmd("RES=") lets everyone in], [The profile does not exist.
       HTTPD wrote #cmd("HTTPD425W") at the start, and does not gate the route
-      without it.],
+      without it. The console services are still refused by mvsMF, with a 500,
+      until the profile exists.],
+    [500 with #cmd("Authorization failed") on a console request], [The user has
+      no READ access to #cmd("MVSMF.CONSOLE"), or the profile does not exist
+      (@ug-security-console).],
     [The jobs service fails; #cmd("MVSMF201E") on the console], [mvsMF cannot
       open the JES2 checkpoint and spool data sets (@ug-install-jes).],
     [A job is not submitted; #cmd("MVSMF204E"), #cmd("MVSMF205E") or

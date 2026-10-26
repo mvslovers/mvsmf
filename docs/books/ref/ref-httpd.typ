@@ -66,7 +66,8 @@ The three specific lines come before the line with the wild card.
       which issue operator commands under the identity of the caller. HTTPD asks
       RAKF for READ access to #cmd("MVSMF.CONSOLE") in the class
       #cmd("FACILITY") (@ref-httpd-opts). A user without the access gets the
-      plain text 403 of HTTPD, and mvsMF does not run.],
+      plain text 403 of HTTPD, and mvsMF does not run. mvsMF checks the same
+      access again in its console handlers (@ref-cons-auth).],
     [#cmd("/zosmf/*")], [#cmd("TOKEN")], [Every other path of mvsMF. A request
       without a valid credential gets a plain 401 from HTTPD (a text body, no challenge), before mvsMF runs.],
   )
@@ -236,14 +237,18 @@ with #cmd("RES=") needs an identity to check, so it authenticates.
     [#cmd("RECLAIM=")], [Retired. HTTPD ignores the option and writes a warning.],
     [#cmd("RES=") for a resource that no profile covers], [#cmd("HTTPD425W NO PROFILE FOR class:resource -- path NOT GATED").
       HTTPD checks this once at start. As long as no profile covers
-      the resource, the route is #emph[not] gated by it.],
+      the resource, the route is #emph[not] gated by it. The console routes
+      of mvsMF are still closed: mvsMF refuses a caller of the console
+      services on its own (@ref-cons-auth).],
   )
 ]
 
 #note[*A missing profile opens the route.* With #cmd("RES=FACILITY:MVSMF.ACCESS")
 and no profile for #cmd("MVSMF.ACCESS") in the class #cmd("FACILITY"), HTTPD
 starts, writes #cmd("HTTPD425W"), and lets every authenticated caller through.
-Check the start messages after you add a #cmd("RES=") option. HTTPD asks RAKF
+This holds for the route of the whole API. The console services are the
+exception, because mvsMF checks #cmd("MVSMF.CONSOLE") itself and refuses
+without the profile (@ref-cons-auth). Check the start messages after you add a #cmd("RES=") option. HTTPD asks RAKF
 on every request, so a profile that is defined later gates the route from the
 next request on, without a restart of HTTPD.]
 

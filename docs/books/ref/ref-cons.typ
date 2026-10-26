@@ -12,16 +12,51 @@ The console services clone the console REST interface of IBM z/OSMF. mvsMF
 implements the parts described here. Section @ref-cons-unsup lists what it does
 not.
 
-#note[*The console code of mvsMF makes no authorization check of its own.* Any
-caller that HTTPD lets in to the module can issue any operator command. The
-sample HTTPD configuration of mvsMF 1.4.0 puts the console routes behind the
-RAKF resource #cmd("FACILITY:MVSMF.CONSOLE") (@ref-httpd, @ref-auth). See
-"Protecting the Console Services" in the _mvsMF User's Guide_.]
+#note[*Every console request needs READ access to the RAKF resource
+#cmd("FACILITY:MVSMF.CONSOLE").* mvsMF checks it itself, in each of the four
+handlers, before it reads the request. HTTPD checks the same resource on the
+route as a first layer (@ref-cons-auth).]
 
-#note[*A defect* (mvsmf\#460): the diagnostic endpoint #cmd("/zosmf/test") with
-#cmd("fn=cmd") or #cmd("fn=mtt") lies under the catch-all route, not under the
-console route, so the console gate does not cover it (@ref-test). The issue is
-open.]
+== Who May Use the Console Services <ref-cons-auth>
+
+#idx("authorization")#idx("MVSMF.CONSOLE")
+A caller needs READ access to the resource #cmd("MVSMF.CONSOLE") in the class
+#cmd("FACILITY"). Two layers check it:
+
++ The route line #cmd("/zosmf/restconsoles/*") of HTTPD names the resource
+  (@ref-httpd). A user without READ gets the plain text 403 of HTTPD, and mvsMF
+  does not run.
++ Each console handler of mvsMF asks RAKF for READ access of the caller before
+  it reads the request. mvsMF permits the request only when RAKF answers that
+  the user holds READ. The check is fail-closed.
+
+The answers of the check of mvsMF:
+
+#tab(caption: [The answers of the console check])[
+  #table(columns: (1.9in, 0.5in, 1fr),
+    [Case], [Status], [Answer],
+    [The caller holds READ], [-], [The request goes on (@ref-cons-order).],
+    [The caller has no READ access], [500], [Error report with category 4,
+      return code 8, reason code 0, message #cmd("LMOPEN error") and details
+      #cmd("Authorization failed - You may not use this service.").],
+    [The profile is not defined, so that RAKF has no rule for the resource],
+      [500], [The same error report. The profile is a precondition of the
+      service, not a switch that opens it.],
+    [No user was resolved for the request], [401], [The 401 of mvsMF with the
+      challenge.],
+  )
+]
+
+A refused request writes nothing to the operator console, and no command is
+issued. The route of HTTPD does not replace the check of mvsMF: with a wrong
+order of the route lines, or with no profile, mvsMF still refuses the request.
+HTTPD writes #cmd("HTTPD425W") at its start when the route names a resource
+that no profile covers (@ref-httpd-opts).
+
+The user ID that deploys and restarts mvsMF needs READ access too: the restart
+sends its operator commands through this service. A user without READ cannot
+stop HTTPD this way, and HTTPD keeps running. The same check protects the
+diagnostic endpoint (@ref-test-access).
 
 == Requests <ref-cons-req>
 
@@ -48,9 +83,10 @@ Common rules:
   (@ref-cons-issue). The collect and detection requests ignore it.
 - Every request needs a user ID that the HTTPD configuration lets in
   (@ref-auth). The issue request needs no #cmd("X-CSRF-ZOSMF-HEADER").
-- A path that matches no route gets the router's #cmd("404"), also when the
-  method is a valid one that the path does not have. The router's #cmd("405")
-  is for a method that is none of GET, POST, PUT and DELETE (@ref-conv).
+- A path that matches no route gets the router's #cmd("404"). A path of the
+  console services requested with a method that it does not offer, such as a GET
+  to #cmd("/zosmf/restconsoles/consoles/{console-name}"), gets the router's
+  #cmd("405") (@ref-conv-methods).
 - The console requests report errors in the form of @ref-cons-errors, not in the
   form of the data set and job requests.
 - The answers are JSON. No console request changes a data set, a job or a file.
@@ -135,6 +171,7 @@ Any other field of the body is ignored.
 
 mvsMF checks in this order and answers the first failure:
 
++ the authorization (@ref-cons-auth);
 + the #cmd("Content-Type") (reason code 6);
 + the length of the console name (reason code 14);
 + the body: storage, size, presence (reason codes 1, 12);
@@ -349,6 +386,16 @@ lock.
 - When HTTPD does not offer the per-CGI context, there is nothing to lock on and
   the commands are not serialized.
 
+The command #cmd("P HTTPD") stops the server that answers it. The capture is
+abandoned and the answer is #cmd("503") with return code 8 and reason code 15, and
+its body reaches the client (until 1.4.0 the client got the status line and the
+headers of a body that never followed, and #cmd("curl") ended with 18). If the
+response is complete before the server notices the command, the answer is the
+ordinary #cmd("200"). The answer closes the connection, as the answer to every
+request with a body does. A command that arrives while the server stops gets
+#cmd("503") with reason code 17 and is not issued, or the connection is reset
+when HTTPD no longer accepts requests. Do not send the #cmd("P") again.
+
 One known weakness remains: the first read runs right after the command is
 issued, when the echo may not be in the table yet. Then the newest echo of an
 identical earlier command can be taken, and the answer is the block of that
@@ -375,6 +422,11 @@ How it works:
 + If the copy of the table cannot be taken, the answer is #cmd("500") with
   return code 8 and reason code 1, not an empty answer. The cursor is stored as
   it was, so it stays alive and the same key works at the next request.
++ The same holds when mvsMF has no storage for the buffer of the answer, which
+  takes 32 KB for the lines that it returns. The request does not answer an empty
+  #cmd("200") then: it answers #cmd("500") with return code 8 and reason code 1,
+  before it reads the table, and keeps the cursor. Neither case writes a console
+  message.
 
 The request does not wait. It does not take the lock. It does not check the
 console name.
@@ -714,7 +766,8 @@ not the shape of the data set and job requests.
       [Cannot find the result for the specified detection ID.],
     [#cmd("500")], [8], [1], [collect],
       [An error occurred during the retrieval of the command response. Cause: the
-       copy of the table could not be taken. The cursor is kept.],
+       copy of the table could not be taken, or no storage for the buffer of the
+       answer. The cursor is kept.],
     [#cmd("500")], [8], [1], [detection],
       [An error occurred during the retrieval of the detection result. Cause: the
        copy of the table could not be taken. The detection stays armed.],
@@ -748,7 +801,8 @@ and the text with the reason code.
 
 The console error shape applies to errors of the console handlers. A user ID that
 mvsMF does not let in gets the #cmd("401") of @ref-auth. A route or method that
-does not exist gets the router's reply (@ref-conv).
+does not exist, or a method that it does not offer, gets the router's reply
+(@ref-conv-methods).
 
 == What Is Not Supported <ref-cons-unsup>
 

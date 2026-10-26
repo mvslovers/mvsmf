@@ -54,7 +54,7 @@ There is no debug level and no other letter. The numbers are grouped by area:
       (@ref-msg-core).],
     [#cmd("MVSMF1xx")], [Data sets (@ref-msg-ds).],
     [#cmd("MVSMF2xx")], [Jobs (@ref-msg-jobs).],
-    [#cmd("MVSMF3xx")], [UNIX files. There is no message yet.],
+    [#cmd("MVSMF3xx")], [UNIX files (@ref-msg-uss).],
     [#cmd("MVSMF4xx")], [Console services. There is no message yet.],
     [#cmd("MVSMF9xx")], [Abend recovery and diagnostics (@ref-msg-recovery).],
   )
@@ -217,6 +217,28 @@ record that is too long, produces no console message.
   )
 ]
 
+== UNIX Files: MVSMF3xx <ref-msg-uss>
+
+#idx("messages", "MVSMF3xx")
+
+#tab(caption: [Message MVSMF301E])[
+  #table(columns: (0.9in, 1.6in, 1fr),
+    [Id], [Text], [Meaning and action],
+    [#cmd("MVSMF301E")], [#cmd("I/O ERROR READING %s RC=%d")],
+      [The read of a UNIX file failed after the reply had started, so the file
+       was not delivered whole. The first field is the absolute path as UFSD
+       sees it, in the case in which it was written. The second is the return
+       code of UFSD: 52 for an I/O error (also when a failed request carried
+       no code of its own), 56 for a bad file descriptor, and -1 when UFSD
+       cannot be reached because it was stopped during the read. The status
+       200 and the headers had gone out already, so mvsMF breaks off the body
+       without the last chunk. The client sees the connection close in the
+       middle of the answer (#cmd("curl") ends with 18). Check UFSD and the
+       volume behind the file system. The next read of the file may
+       succeed (@ref-uss-read).],
+  )
+]
+
 == Recovery and Diagnostics: MVSMF9xx <ref-msg-recovery>
 
 #idx("messages", "MVSMF9xx")
@@ -328,7 +350,8 @@ address changes with every load of the module. It gives each address as a signed
 offset from the entry point of the module, written #cmd("EP+X'...'") or
 #cmd("EP-X'...'"). To find the code, add the offset to the entry point of the
 deployed module and look up the result in the link map of the same build. The
-build is the value of #cmd("fn=version") (@ref-test-version).
+build is the value of #cmd("fn=version") (@ref-test-version), which only a
+development build has. Ask the person who built the module for the commit.
 
 If the entry point plus the offset is negative or lies beyond the length of the
 module, the abend was not in mvsMF. It was in HTTPD, reached through the vector

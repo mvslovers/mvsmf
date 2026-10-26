@@ -42,9 +42,12 @@ mvsMF 1.4.0 does.
   )
 ]
 
-No other method and path pair is routed. A request that matches none of the
-nine rows (a POST to a member, a GET below #cmd("/member"), a path that names a
-volume serial in parentheses after the data set name) gets #cmd("404") with the
+No other method and path pair is routed. A request for one of the nine paths
+with a method that the path does not offer (a POST to a member, a PUT to the
+member list) gets #cmd("405") with the report #cmd("Http method POST is not
+supported by this URL") (category 6, rc 4, reason 7). A request that matches
+none of the paths (a GET below #cmd("/member"), a path that names a volume
+serial in parentheses after the data set name) gets #cmd("404") with the
 report #cmd("Not Found") (category 6, rc 4, reason 7). An HTTP method that
 mvsMF does not know at all gets #cmd("405") with no body. The routes that named
 a volume serial were withdrawn in mvsMF 1.4.0: they ignored the serial.
@@ -166,7 +169,14 @@ mvsMF does not send #cmd("totalRows").
     [#cmd("blksz")], [The block size.],
     [#cmd("catnm")], [Always the empty string.],
     [#cmd("cdate")], [The creation date as #cmd("YYYY/MM/DD").],
-    [#cmd("dev")], [The device type, derived from the number of tracks per cylinder that the volume reports: 30 gives #cmd("3350"), 12 gives #cmd("3375"), 19 gives #cmd("3380"), any other number gives #cmd("3390"). A volume that does not report the number counts as 30.],
+    [#cmd("dev")], [The device type of the volume, named from the track capacity in bytes
+      that its format-4 DSCB reports: 13165 gives #cmd("3330"), 19254 gives #cmd("3350"),
+      36000 gives #cmd("3375"), 47968 gives #cmd("3380"), 58786 gives #cmd("3390").
+      Any other capacity, and a volume whose format-4 DSCB cannot be read, give
+      #cmd("????"): mvsMF does not guess a device. The number of tracks per
+      cylinder does not decide it, because a 3380 and a 3390 both have 15.
+      Before 1.4.0 the name came from that number, and a 3380 was listed as
+      #cmd("3390").],
     [#cmd("dsntp")], [#cmd("PDS") for organization #cmd("PO"), #cmd("BASIC") for #cmd("PS"), #cmd("UNKNOWN") for any other.],
     [#cmd("dsorg")], [The data set organization.],
     [#cmd("edate")], [Always #cmd("***None***").],
@@ -320,7 +330,7 @@ semicolon: a blank around the word makes it text.
     [Type], [Content type of a read], [Transfer],
     [#cmd("text")], [#cmd("text/plain")], [Read: one line for each record, translated from EBCDIC to ASCII with the chosen table. For F and FB records the trailing blanks are removed first, and each line ends with a line feed. Records of other formats keep their blanks. Write: see @ref-ds-write.],
     [#cmd("binary")], [#cmd("application/octet-stream")], [Read: the records as they are, one after another, with no separator and no translation. Write: the bytes are cut into records (@ref-ds-write).],
-    [#cmd("record")], [#cmd("application/octet-stream")], [Read: each record is preceded by four bytes, a big-endian binary length. Write: not usable. Use #cmd("text") or #cmd("binary").],
+    [#cmd("record")], [#cmd("application/octet-stream")], [Read: each record is preceded by four bytes, a big-endian binary length. A read is possible for the record formats F and FB only. A data set or member of the format V, VB or VBS is refused (@ref-ds-record). Write: not usable. Use #cmd("text") or #cmd("binary").],
   )
 ]
 
@@ -345,6 +355,19 @@ different bytes for some characters, among them #cmd("[") #cmd("]") and
 so a value after the semicolon is not checked. A request with an encoding that
 is refused ends before the data set is opened for output, so nothing is
 truncated.
+
+=== Record Mode and Variable Records <ref-ds-record>
+
+#idx("record mode")#idx("RECFM=V")
+A read with the type #cmd("record") of a data set or a member with the record
+format V, VB or VBS answers #cmd("400") with category 6, return code 8 and reason
+code 12, and the message #cmd("Record mode (X-IBM-Data-Type: record) is not
+supported for RECFM=V data sets"). mvsMF checks this before the headers go out
+and before the first record is read, so no data is sent. Before 1.4.0 such a
+read answered #cmd("200") with chunks of the length LRECL that ran across the
+record boundaries, each with a length prefix that matched no record. Text and
+binary reads of the same data set are not affected, and neither are the formats
+F and FB. A record mode for variable records is not available yet.
 
 === The End of a Sequential Data Set <ref-ds-eod>
 
@@ -651,6 +674,7 @@ column "Cat/rc" gives category and rc.
     [400], [6/8], [1], [#cmd("Dataset name is too long"), #cmd("Member name is too long"), #cmd("Dataset level is too long")], [A name over the limit (@ref-ds-names).],
     [400], [6/8], [1], [#cmd("Missing Content-Length or Transfer-Encoding header")], [A write with neither header.],
     [400], [6/8], [3], [#cmd("Invalid or missing allocation parameters")], [@ref-ds-create.],
+    [400], [6/8], [12], [#cmd("Record mode (X-IBM-Data-Type: record) is not supported for RECFM=V data sets")], [A record read of a V, VB or VBS data set or member (@ref-ds-record).],
     [400], [6/8], [6], [#cmd("Unsupported request; only 'rename' is supported")], [@ref-ds-rename.],
     [400], [6/8], [7], [#cmd("Rename target already exists")], [A member rename.],
     [400], [6/8], [9], [#cmd("Member pattern is too long")], [The member list.],

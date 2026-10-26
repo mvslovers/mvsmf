@@ -353,10 +353,23 @@ client that issues commands:
       [mvsMF had no storage for the answer, or could not copy the table that
        holds it. The command *was* issued. Do not send it again blindly.],
     [#cmd("500")], [#cmd("1")],
-      [A collect or a poll of a detection could not copy the table. Nothing is
-       lost: mvsMF keeps the key or the armed detection, so ask again.],
+      [A collect could not copy the table or had no storage for its answer
+       buffer, or a poll of a detection could not copy the table. Nothing is
+       lost: mvsMF keeps the key or the armed detection, so ask again. An empty
+       #cmd("200") is not the answer to a shortage. It means that no line is
+       new.],
   )
 ]
+
+*Stopping HTTPD through the console API.* The command #cmd("P HTTPD") stops the
+server that answers it. The answer is normally the #cmd("503") with reason code
+15 and its JSON body. A client sees the status and the body, and learns that the
+command ran. Before 1.4.0 the body was lost and the client saw an empty #cmd("503"),
+with #cmd("curl") ending with the exit code 18. The answer closes the
+connection, as the answer to every request that carries a body does. A command
+sent while the server is stopping is either refused with #cmd("503") and reason
+code 17, and not issued, or the connection is reset once HTTPD no longer accepts
+requests. Do not send the #cmd("P") again.
 
 The other failures of the console requests, and the status that goes with each,
 are in the _mvsMF Reference_, chapter "Console Services", section "Console

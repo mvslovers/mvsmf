@@ -149,9 +149,14 @@ The header #cmd("X-IBM-Data-Type: binary") sends the bytes of the file as
 they are, with the content type #cmd("application/octet-stream"). A client that
 stores files of any kind needs it.
 
-#note[*A defect* (mvsmf\#423): when UFSD fails while mvsMF reads the file, mvsMF
-does not notice. The request ends as a normal #cmd("200") with a file that is
-too short.]
+If UFSD fails while mvsMF reads the file, the status #cmd("200") and the headers
+have gone out already. mvsMF then breaks off the answer in the middle of the
+body and does not send the last chunk. The client sees a connection that closed
+too early, never a body that ends cleanly: #cmd("curl") ends with the exit code
+18, and a library reports an incomplete read. mvsMF writes the message
+#cmd("MVSMF301E") on the console, with the path and the return code of UFSD. A
+client must treat such a transfer as failed and not use the file. A new read
+may succeed.
 
 A path that is a directory answers 400 with the message #cmd("Is a directory").
 

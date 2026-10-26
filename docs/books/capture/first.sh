@@ -15,8 +15,10 @@
 #   - a user ID with a good password (MVSMF_USER, MVSMF_PASS) that HTTPD lets
 #     in. If the /zosmf/* line has RES=FACILITY:MVSMF.ACCESS (the security
 #     chapter), this user ID must have READ access to MVSMF.ACCESS.
-#   - an mvsMF built without -DMVSMF_NO_TEST_ENDPOINT: the sessions version,
-#     cookie and after-logout call /zosmf/test?fn=version.
+#   - a release build of mvsMF (the version does not end in -dev). The sessions
+#     cookie and after-logout call GET /zosmf/restjobs/jobs?prefix=NOSUCH*, a
+#     request that every user ID that mvsMF lets in may send and that no job
+#     matches (the answer is an empty array).
 #   - nothing else: no data sets, no UFS files, no side effects for other
 #     chapters. The script only reads, logs in and logs out.
 #
@@ -53,19 +55,17 @@ trap 'cd /; rm -rf "$WORK"' EXIT
 
 ses ug-first/info.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/info"'
 
-ses ug-first/version.txt 'curl -s -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
-
 # ---- 2. token login, use, logout -------------------------------------------
 
 hid 'rm -f cookies.txt'
 
 ses ug-first/login.txt 'curl -si -c cookies.txt -X POST -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/services/authenticate"'
 
-ses ug-first/cookie.txt 'curl -s -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"'
+ses ug-first/cookie.txt 'curl -s -b cookies.txt "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"'
 
 ses ug-first/logout.txt 'curl -si -X DELETE -b cookies.txt "$MVSMF_URL/zosmf/services/authenticate"'
 
-ses ug-first/after-logout.txt 'curl -si -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"'
+ses ug-first/after-logout.txt 'curl -si -b cookies.txt "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"'
 
 # ---- 3. when it fails -------------------------------------------------------
 
@@ -81,7 +81,7 @@ if [ -n "$MVSMF_DENY_USER" ]; then
 		MVSMF_USER=$MVSMF_DENY_USER
 		MVSMF_PASS=$MVSMF_DENY_PASS
 		export MVSMF_USER MVSMF_PASS
-		ses ug-first/denied.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/test?fn=version"'
+		ses ug-first/denied.txt 'curl -si -u "$MVSMF_USER:$MVSMF_PASS" "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"'
 	)
 else
 	echo "skipped ug-first/denied.txt (MVSMF_DENY_USER not set)" >&2

@@ -3,7 +3,7 @@ $ curl -si -X PUT -u "$MVSMF_USER2:$MVSMF_PASS2" \
   -d '{"cmd":"D T"}' \
   "$MVSMF_URL/zosmf/restconsoles/consoles/defcn"
 HTTP/1.1 403 Forbidden
-Date: Fri, 23 Oct 2026 08:01:24 GMT
+Date: Mon, 26 Oct 2026 17:41:23 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: close

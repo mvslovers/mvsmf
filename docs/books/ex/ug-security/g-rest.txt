@@ -1,6 +1,6 @@
 $ curl -si -u "$MVSMF_USER2:$MVSMF_PASS2" "$MVSMF_URL/zosmf/restjobs/jobs?owner=*&prefix=NOSUCH*"
 HTTP/1.1 200 OK
-Date: Fri, 23 Oct 2026 08:01:25 GMT
+Date: Mon, 26 Oct 2026 17:41:24 GMT
 Server: HTTPD Server
 X-Powered-By: MVSLOVERS
 Connection: keep-alive

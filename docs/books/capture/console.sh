@@ -5,10 +5,10 @@
 #
 # Needs, on the system under test:
 #
-#   - a user ID that mvsMF lets in. mvsMF makes no authorization check of its
-#     own for the console services, so no RAKF profile is needed in the
-#     default set-up. If the HTTPD configuration protects the console routes
-#     ("Protecting the Console Services" in ug-security), this user ID must have the
+#   - a user ID with READ on the RAKF resource FACILITY MVSMF.CONSOLE. mvsMF
+#     checks it itself for every console request and refuses every other user
+#     ("Protecting the Console Services" in ug-security). If the HTTPD
+#     configuration also protects the console routes, the user ID needs the
 #     access that section describes.
 #   - FTPD installed as a started task named FTPD and RUNNING when the script
 #     starts. The sessions c-late, c-start, c-arm and c-poll stop and start

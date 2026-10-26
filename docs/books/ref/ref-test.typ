@@ -10,8 +10,11 @@ loaded, the catalog, the Master Trace Table, the storage of the address space,
 the JES2 spool, the security product. It also holds functions that cause
 a failure on purpose, to test the recovery of mvsMF.
 
-Read @ref-test-cmd and @ref-test-access before you decide to leave the
-endpoint in a production system.
+*The endpoint exists in a development build only.* A release does not register
+it, and a request for it answers 404 (@ref-test-build). Where it exists, every
+request needs READ access to the RAKF resource #cmd("FACILITY MVSMF.CONSOLE")
+(@ref-test-access). Read @ref-test-cmd as well before you leave a development
+build on a production system: it has no business there.
 
 == The Request <ref-test-req>
 
@@ -24,7 +27,7 @@ The query parameter #cmd("fn") selects the function. If it is missing, or if
 its value is not a name in this chapter, the answer is the help text of
 @ref-test-help. The other parameters depend on the function. The route is a
 GET only. Like every route under #cmd("/zosmf/") it needs a credential
-(@ref-auth-cred).
+(@ref-auth-cred), and in addition the permission of @ref-test-access.
 
 A second route, #cmd("GET /zosmf/test/wildcard/{*filepath}"), tests the
 matching of a path with the rest of the path in one variable. It answers 200
@@ -38,38 +41,67 @@ empty.
 
 == The Build Option <ref-test-build>
 
-#idx("MVSMF_NO_TEST_ENDPOINT")
-Both routes are registered unless mvsMF is compiled with the option
-#cmd("-DMVSMF_NO_TEST_ENDPOINT"). Without the routes a request for
-#cmd("/zosmf/test") is a request for an unknown route and gets the 404 of
-@ref-conv-fixed. The shipped module is built without the option, so the
-endpoint is present. This is on purpose: the functions #cmd("version") and
-#cmd("storage") serve the operation of mvsMF (@ref-test-version,
-@ref-test-storage).
+#idx("MVSMF_NO_TEST_ENDPOINT")#idx("development build")#idx("release", "diagnostic endpoint")
+mvsMF registers both routes only in a *development build*, a build whose version
+ends in #cmd("-dev"). A release does not register them, and a request for
+#cmd("/zosmf/test") is then a request for an unknown route: it gets the 404 of
+@ref-conv-fixed, as in this session of a release:
+
+#screen(raw(read("../ex/ug-security/g-test-release.txt"), block: true))
+
+The decision is made from the version that the build stamped into the module,
+and a missing or odd version counts as a release. A build with the option
+#cmd("-DMVSMF_NO_TEST_ENDPOINT") leaves the routes out of a development build
+too. The code of the functions stays in the module of a release, and only the
+routes that reach it are missing.
+
+The functions #cmd("version"), #cmd("storage") and #cmd("textsum") therefore
+exist on a development build only. A release is checked with
+#cmd("GET /zosmf/info"), whose field #cmd("zosmf_full_version") is the version
+only, with no build id and with no need for the profile of @ref-test-access
+(@ref-auth-info). If that field ends in #cmd("-dev") on a system that should
+run a release, a development module is installed.
 
 == Who May Use It <ref-test-access>
 
 #idx("security", "diagnostic endpoint")
-The endpoint has no gate of its own. There is no setting that enables or
-disables a single function. The functions #cmd("syslog"), #cmd("job") and
-#cmd("spool") apply the spool policy of the job routes (see the jobs chapter),
-and no other function checks authorization in mvsMF. Every user that HTTPD lets reach the route can call every function.
-With the shipped route lines (@ref-httpd) that is every user with a valid
-credential, or every user that holds the permission of the #cmd("RES=") profile
-if the operator has put one on the route #cmd("/zosmf/*").
+The endpoint has no gate for a single function. There is no setting that enables
+or disables a function. One check covers the whole endpoint, both routes and
+every value of #cmd("fn"), #cmd("version") and the help text included: at the
+start of every request, before #cmd("fn") is read, mvsMF checks READ access to
+the RAKF resource #cmd("FACILITY MVSMF.CONSOLE"). It is the profile of the
+console services (@ref-cons), and there is no separate resource for the
+endpoint: a user who may use the console services may use the endpoint, and the
+other way round.
 
-The only way to close the endpoint is to restrict the route in HTTPD or to
-build mvsMF with #cmd("-DMVSMF_NO_TEST_ENDPOINT").
+The check is fail-closed. mvsMF lets the request through only when RAKF says
+that the access is permitted, so a resource without a profile does not permit.
 
-#note[*A defect* (mvsmf\#460): The console routes are gated by a route line of
-their own with #cmd("RES=FACILITY:MVSMF.CONSOLE") (@ref-httpd). The functions
-#cmd("cmd") and #cmd("mtt") of this endpoint do the work of the console routes,
-but their route is #cmd("/zosmf/test"), which the catch-all line
-#cmd("/zosmf/*") matches. HTTPD does not check the console profile for them.
-A user without access to the console routes can issue an operator command
-through #cmd("fn=cmd") and read the Master Trace Table through #cmd("fn=mtt").
-A build with #cmd("-DMVSMF_NO_TEST_ENDPOINT") does not register the routes and
-has no such path.]
+#tab(caption: [The check of the diagnostic endpoint])[
+  #table(columns: (1.8in, 0.55in, 1fr),
+    [Request], [Status], [Answer],
+    [The user has READ], [200], [The function runs.],
+    [The user has no READ, or the profile is not defined (everybody)], [500],
+      [Category 4, #cmd("rc") 8, #cmd("reason") 0, the message
+      #cmd("LMOPEN error"), and the detail #cmd("Authorization failed - You may not use this service.")],
+    [No user is resolved for the request], [401], [The 401 of @ref-conv-401.],
+  )
+]
+
+The check writes no operator message. The functions #cmd("syslog"), #cmd("job")
+and #cmd("spool") apply the spool policy of the job routes on top of it (see the
+jobs chapter). The route of the endpoint lies under #cmd("/zosmf/*"), so the
+console route line of HTTPD (@ref-httpd) does not cover it. The check in mvsMF
+is the only one that uses the console profile for it.
+
+An operator command through #cmd("fn=cmd") needs the same permission as the
+console services, and so does the user ID that confirms a deploy with
+#cmd("fn=version") on a development build.
+
+No function of the endpoint returns what identifies a session or authenticates
+a caller. A function that returned the password of the caller was removed, and a
+request for it gets the help text like any other name that mvsMF does not know.
+The function #cmd("token") shows the length of a token and never its value.
 
 Several functions show data of the system and the caller beyond the user's
 own permissions:
@@ -78,8 +110,6 @@ own permissions:
   whoever wrote them.
 - #cmd("listds") and #cmd("locate") read the catalog and #cmd("dscb") the
   volume table of contents, without a RACF check for the data set.
-- #cmd("password") returns the password of the caller, if the caller asks for
-  it.
 - #cmd("env") lists the names of the environment variables of the server.
 
 == Response Format <ref-test-resp>
@@ -115,7 +145,6 @@ is sent, so the router can send its error report (@ref-conv-fixed).
     [#cmd("dscb")], [#cmd("dsn") (#cmd("SYS1.MACLIB"))], [Format-1 DSCB.],
     [#cmd("userid")], [none], [The user ID of the request, read two ways.],
     [#cmd("token")], [none], [Whether a session token exists.],
-    [#cmd("password")], [#cmd("reveal") (0)], [The password export of HTTPD.],
     [#cmd("env")], [none], [The environment of the module.],
     [#cmd("storage")], [#cmd("sp") (0), #cmd("total") (off)], [Free storage.],
     [#cmd("syslog")], [#cmd("step") (0)], [Probe the JES2 SYSLOG job.],
@@ -145,18 +174,18 @@ is sent, so the router can send its error report (@ref-conv-fixed).
 
 #idx("fn", "help")
 The answer is a JSON object with the field #cmd("fn") (#cmd("help")) and the
-field #cmd("usage"), an array of 19 sentences. Each sentence shows the form of
+field #cmd("usage"), an array of 18 sentences. Each sentence shows the form of
 one request. The list does not contain #cmd("env"), #cmd("help") or #cmd("jesabend"). A value of #cmd("fn")
 that mvsMF does not know gives the same answer.
 
 === version <ref-test-version>
 
 #idx("fn", "version")
-The answer is
+The function exists on a development build only. The answer is
 
-#screen(raw("{ \"fn\": \"version\", \"version\": \"1.4.0\", \"build\": \"a1b2c3d\" }"))
+#screen(raw("{ \"fn\": \"version\", \"version\": \"1.4.0-dev\", \"build\": \"a1b2c3d\" }"))
 
-The #cmd("version") is the version of the build. The #cmd("build") is the short
+The #cmd("version") is the version of the build, with the suffix #cmd("-dev"). The #cmd("build") is the short
 identifier of the source commit that the module was built from. It ends with
 #cmd("-dirty") if a tracked file differed from the commit at build time. After a
 deploy, the value shows which build is loaded.
@@ -205,9 +234,13 @@ changes nothing. The answer has these fields, in this order:
   [#cmd("lstar_tt"), #cmd("lstar_r")], [The last-written-record pointer.],
   [#cmd("dscb4_rc")], [The return code of the read of the format-4 DSCB.],
   [#cmd("devtk"), #cmd("devov"), #cmd("devk"), #cmd("devfg"),
-   #cmd("dstrk")], [Device data from the format-4 DSCB.],
+   #cmd("dstrk")], [The device geometry from the format-4 DSCB: the bytes
+    per track (#cmd("devtk")), the overhead of a block (#cmd("devov")) and of its
+    key (#cmd("devk")), the device flags and the tracks per cylinder. They are 0 if the read of the format-4 DSCB failed.],
   [#cmd("blocks_per_track")], [The blocks per track for the block size on this
-    device. The jobs and data set routes use the same computation.],
+    device, computed from the geometry. It is 0 if the read of the format-4 DSCB
+    failed or if mvsMF cannot count the blocks of this device (@ref-ds-eod). The
+    jobs and data set routes use the same computation.],
 )
 
 === userid <ref-test-userid>
@@ -226,18 +259,6 @@ The function tells whether HTTPD holds a token for the request. The answer has
 the fields #cmd("toklen") (the length of the token, 0 if none),
 #cmd("have_token"), #cmd("sent_authorization"), #cmd("sent_cookie") (true or
 false) and #cmd("note"). The value of the token is never shown.
-
-=== password <ref-test-password>
-
-#idx("fn", "password")
-The function exercises the export of HTTPD that returns the password of the
-caller. The answer has the fields #cmd("http_get_password_ret"),
-#cmd("strlen") and #cmd("value"). Without #cmd("reveal=1") the #cmd("value") is
-a string of asterisks as long as the password, so the answer shows the length.
-With #cmd("reveal=1") the #cmd("value") is the password of the caller in
-plain text. The password then appears in the response, in any proxy log and in
-the terminal of the caller. Any other value of #cmd("reveal") masks the
-password.
 
 === env <ref-test-env>
 
@@ -329,7 +350,7 @@ a bar. The last line is #cmd("DONE step=N").
 #idx("fn", "cmd")
 #idx("operator command")
 The function issues an operator command. This is a function of its own, outside
-the console routes (@ref-cons). The command is the value of the parameter
+the console routes (@ref-cons), with the same permission. The command is the value of the parameter
 #cmd("cmd"), default #cmd("D T"), cut at 100 characters.
 
 mvsMF issues the command with SVC 34, in supervisor state with key 0 for the
@@ -344,11 +365,12 @@ command in the last 40 entries. It prints the line
 #cmd("MTT count=N after P poll(s), tail:") and the last 50 lines of the table.
 The last line is #cmd("DONE").
 
-Every user that reaches the route can issue any operator command with this
-function. mvsMF makes no check of its own, and the user ID of the caller is
-not used. The command runs with the authority of the address space, as for
-the console routes (@ref-cons). The console routes have a gate in HTTPD for
-this reason; this function does not (@ref-test-access).
+Every user who has READ access to #cmd("MVSMF.CONSOLE") can issue any operator
+command with this function, as through the console routes: nothing narrows the
+permission per command. The user ID of the caller is not used for the command,
+which runs with the authority of the address space (@ref-cons). A user without
+the permission gets the 500 of @ref-test-access, and the command is not
+issued.
 
 === job <ref-test-job>
 

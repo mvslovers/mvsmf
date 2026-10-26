@@ -1,2 +1,2 @@
-$ curl -s -b cookies.txt "$MVSMF_URL/zosmf/test?fn=version"
-{ "fn": "version", "version": "1.4.0-dev", "build": "aae7db2" }
+$ curl -s -b cookies.txt "$MVSMF_URL/zosmf/restjobs/jobs?prefix=NOSUCH*"
+[]

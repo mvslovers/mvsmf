@@ -85,15 +85,20 @@ lists the parameters of its routes.
 mvsMF knows four methods: GET, POST, PUT and DELETE. A route has one method
 (@ref-conv-routes). Two rules follow from the router:
 
-- A request with any other method, such as HEAD, OPTIONS or PATCH, gets status
-  405 and no body. The router answers it before it looks at the credential, so
-  a client that sent no credential gets the 405 and not a 401.
-- A request with a known method for a path that is registered only under other
-  methods, such as a PUT to #cmd("/zosmf/restfiles/ds"), gets 404 and the
-  report of an unknown route (@ref-conv-fixed), not 405.
-
-#note[*A defect* (mvsmf\#418): a method that is wrong for a known path answers
-404 and not 405, and the 405 for an unknown method has no body.]
+- A request for a path that a route serves, with a method that the route does
+  not offer, such as a PUT to #cmd("/zosmf/restfiles/ds") or a DELETE to
+  #cmd("/zosmf/info"), gets status 405 and the error report with #cmd("rc") 4,
+  #cmd("category") 6 and #cmd("reason") 7. The message names the method of the
+  request: #cmd("Http method DELETE is not supported by this URL"). There is no
+  #cmd("Allow") header, as in z/OSMF. A path that no route serves gets 404 and
+  the report of an unknown route (@ref-conv-fixed). The credential comes first:
+  a request without one gets the 401 and not the 405.
+- A request whose method mvsMF cannot parse, such as HEAD, gets status 405 and
+  no body. The router answers it before it looks at the credential, so a client
+  that sent no credential gets the 405 and not a 401. HTTPD answers the methods
+  PATCH, OPTIONS and TRACE itself, before mvsMF runs: the status is 405, the
+  body is the plain text #cmd("405 Method Not Allowed"), and the connection is
+  closed.
 
 == Request Headers <ref-conv-headers>
 
@@ -204,9 +209,11 @@ file or of a directory.
       directory that is not empty are also 400.],
     [401], [No credential, or a credential that RACF refuses
       (@ref-conv-401).],
-    [404], [The object does not exist, the route does not exist, or the method
-      is wrong for the route (@ref-conv-methods).],
-    [405], [A method other than GET, POST, PUT or DELETE. No body.],
+    [404], [The object does not exist, or the route does not exist
+      (@ref-conv-methods).],
+    [405], [A method that the route does not offer: the error report of
+      @ref-conv-methods. A method that mvsMF cannot parse, such as HEAD, gets
+      no body.],
     [412], [An #cmd("If-Match") that does not match the ETag.],
     [413], [A request body of 16 MB or more (@ref-conv-limits). The body of a
       chunked request counts when its chunks add up to 16 MB.],
@@ -297,8 +304,11 @@ Some conditions have the same report in every area:
 #tab(caption: [Reports that every area shares])[
   #table(columns: (1.45in, 0.5in, 0.4in, 0.35in, 0.6in, 1fr),
     [Condition], [Status], [Cat.], [rc], [Reason], [Message and details],
-    [Unknown route, or wrong method for the route], [404], [6], [4], [7],
+    [Unknown route], [404], [6], [4], [7],
       [#cmd("Not Found")],
+    [A route that does not offer the method], [405], [6], [4], [7],
+      [#cmd("Http method DELETE is not supported by this URL"), with the method
+      of the request],
     [Authorization refused: a protected data set, or the abend S913], [500], [4], [8],
       [0], [#cmd("LMOPEN error"). #cmd("details") has one sentence:
       #cmd("Authorization failed - You may not use this protected data set."),

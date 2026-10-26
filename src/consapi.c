@@ -239,7 +239,7 @@ static int send_console_error(Session *session, int http, int retcode,
                               int reason_code, const char *reason)
 {
 	int rc = 0;
-	JsonBuilder *b = createJsonBuilder();
+	JsonBuilder *b = createResponseBuilder(session);
 	if (!b) {
 		sendDefaultHeaders(session, http, HTTP_CONTENT_TYPE_NONE, 0);
 		return -1;
@@ -1027,7 +1027,7 @@ int consoleIssueHandler(Session *session)
 	}
 
 	/* build the response */
-	b = createJsonBuilder();
+	b = createResponseBuilder(session);
 	if (!b) { rc = -1; goto quit; }
 
 	if (startJsonObject(b) < 0) { rc = -1; goto quit; }
@@ -1078,7 +1078,7 @@ __asm__("\n&FUNC	SETC 'send_collect'");
 static int send_collect(Session *session, const char *text)
 {
 	int rc;
-	JsonBuilder *b = createJsonBuilder();
+	JsonBuilder *b = createResponseBuilder(session);
 	if (!b) {
 		sendDefaultHeaders(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 		                   HTTP_CONTENT_TYPE_NONE, 0);
@@ -1206,7 +1206,7 @@ int consoleDetectHandler(Session *session)
 		msg[0] = '\0';
 	}
 
-	b = createJsonBuilder();
+	b = createResponseBuilder(session);
 	if (!b) {
 		sendDefaultHeaders(session, HTTP_STATUS_INTERNAL_SERVER_ERROR,
 		                   HTTP_CONTENT_TYPE_NONE, 0);
@@ -1442,7 +1442,7 @@ int consoleLogHandler(Session *session)
 	}
 
 	/* ---- build the response ---- */
-	b = createJsonBuilder();
+	b = createResponseBuilder(session);
 	if (!b) {
 		free(esecs);
 		if (cmtt) cmtt_free(&cmtt);

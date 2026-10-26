@@ -2369,47 +2369,6 @@ error:
    list that does not answer what it asked. */
 #define MEMBER_PATTERN_SIZE	45
 
-/* Render a directory member name as the body of a JSON string.
-
-   Member names are normally A-Z 0-9 @ # $, but nothing enforces that: a PDS
-   directory can hold arbitrary bytes, and the SMP/E keys in SYS1.SMPCDS are
-   binary. Emitting those raw produces a response that is not JSON -- jq and
-   every other parser reject the unescaped control characters.
-
-   The printability test has to be applied to the ASCII byte, not the EBCDIC
-   one, because http_printf() translates everything we emit on the way out.
-   So each name byte is run through the same table httpd will use, and the
-   result decides: pass the EBCDIC byte through and let the translation do its
-   work, or emit a \uXXXX escape naming the ASCII value.
-
-   This is the one place where comparing against numeric ASCII values is
-   correct rather than the mistake the root CLAUDE.md warns about: `a` is
-   already post-translation, so 0x22 and 0x5C really are the quote and the
-   backslash the parser will see. */
-__asm__("\n&FUNC    SETC 'json_escape_member'");
-static void
-json_escape_member(const unsigned char *raw, unsigned rawlen,
-                   const unsigned char *etoa, char *out, size_t outlen)
-{
-	size_t		o = 0;
-	unsigned	i;
-
-	for (i = 0; i < rawlen; i++) {
-		unsigned char a = etoa[raw[i]];
-
-		/* room for the longest escape plus the terminator */
-		if (o + 6 >= outlen) break;
-
-		if (a < 0x20 || a > 0x7E || a == 0x22 /* " */ || a == 0x5C /* \ */) {
-			o += (size_t) snprintf(&out[o], outlen - o, "\\u%04X", a);
-		} else {
-			out[o++] = (char) raw[i];
-		}
-	}
-
-	out[o] = '\0';
-}
-
 /* Walk a PDS directory once, applying start= and pattern to every entry, and
 ** write the matches out as JSON objects on the way past.
 **
@@ -2429,6 +2388,7 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
             const char *pattern_key, int have_pattern, unsigned page)
 {
 	char		blk[PDS_DIR_BLKSIZE];
+	unsigned char	etoa[256];
 	unsigned	seen		= 0;
 	unsigned	first		= 1;
 	unsigned	bound		= 0;	/* 0 = walk the whole directory */
@@ -2441,6 +2401,8 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 	   first member.  No page that large can be truncated anyway, so walking it
 	   all is the right answer for that value. */
 	if (page > 0 && page < UINT_MAX) bound = page + 1;
+
+	response_etoa(session, etoa);
 
 	while (!at_end) {
 		int	len;
@@ -2537,9 +2499,15 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 			   it is counted and not written -- it is what tells the
 			   caller more members follow. */
 			if (page == 0 || seen <= page) {
-				json_escape_member((const unsigned char *) &blk[pos],
-					(unsigned) nlen,
-					httpx->xlate_cp037->etoa, member, sizeof(member));
+				/* A directory can hold arbitrary bytes (the SMP/E keys in
+				   SYS1.SMPCDS are binary), and emitting those raw makes a
+				   response no parser reads.  The name is escaped on the table
+				   http_printf() translates it with, so a \uXXXX names the
+				   character the client sees (#473); everything above U+007E is
+				   escaped as well, a member name being 7-bit ASCII or an escape. */
+				jsonEscapeBytes(member, sizeof(member),
+					(const unsigned char *) &blk[pos], (unsigned) nlen,
+					etoa, JSON_ESC_NONASCII);
 
 				if (first) {
 					/* first time we're printing this '{' so no ',' needed */

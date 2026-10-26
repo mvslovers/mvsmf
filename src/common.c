@@ -332,6 +332,28 @@ quit:
 	return irc;
 }
 
+__asm__("\n&FUNC    SETC 'response_etoa'");
+void
+response_etoa(Session *session, unsigned char etoa[256])
+{
+	int i;
+
+	for (i = 0; i < 256; i++) {
+		etoa[i] = (unsigned char) i;
+	}
+	http_etoa(etoa, 256);
+}
+
+__asm__("\n&FUNC    SETC 'createResponseBuilder'");
+JsonBuilder *
+createResponseBuilder(Session *session)
+{
+	unsigned char etoa[256];
+
+	response_etoa(session, etoa);
+	return createJsonBuilder(etoa);
+}
+
 int 
 sendJSONResponse(Session *session, int status, JsonBuilder *builder)
 {
@@ -372,7 +394,7 @@ sendErrorResponse(Session *session, int status, int category, int rc,
 {
 	int irc = RC_SUCCESS;  
 
-	JsonBuilder *builder = createJsonBuilder();
+	JsonBuilder *builder = createResponseBuilder(session);
 	if (!builder) {
 		goto quit;
 	}

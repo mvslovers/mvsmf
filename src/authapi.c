@@ -56,10 +56,11 @@
 /* ------------------------------------------------------------------ */
 __asm__("\n&FUNC	SETC 'auth_body'");
 static char *
-auth_body(int return_code, int reason_code, const char *message)
+auth_body(Session *session, int return_code, int reason_code,
+          const char *message)
 {
 	char *json = NULL;
-	JsonBuilder *b = createJsonBuilder();
+	JsonBuilder *b = createResponseBuilder(session);
 	if (!b) {
 		return NULL;
 	}
@@ -173,7 +174,7 @@ int authLoginHandler(Session *session)
 	/* httpd has already resolved the Basic credential into httpc->cred. No
 	   credential (bad or missing credentials) => z/OSMF-shaped 401. */
 	if (!http_get_acee(httpc)) {
-		json = auth_body(8, 1, AUTH_MSG_LOGIN_FAILED);
+		json = auth_body(session, 8, 1, AUTH_MSG_LOGIN_FAILED);
 		rc = auth_send(session, HTTP_STATUS_UNAUTHORIZED, NULL, json);
 		if (json) {
 			free(json);
@@ -193,7 +194,7 @@ int authLoginHandler(Session *session)
 	   password, so it is not the 401 above. */
 	if (http_new_session(httpc) != 0 ||
 	    (toklen = http_get_token(httpc, token, sizeof(token))) <= 0) {
-		json = auth_body(4, 40, AUTH_MSG_INTERNAL);
+		json = auth_body(session, 4, 40, AUTH_MSG_INTERNAL);
 		rc = auth_send(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL, json);
 		if (json) {
 			free(json);
@@ -207,7 +208,7 @@ int authLoginHandler(Session *session)
 	   it round-trips with httpd's base64_decode on later requests. */
 	b64 = base64_encode(token, (size_t)toklen, &b64len);
 	if (!b64) {
-		json = auth_body(4, 40, AUTH_MSG_INTERNAL);
+		json = auth_body(session, 4, 40, AUTH_MSG_INTERNAL);
 		rc = auth_send(session, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL, json);
 		if (json) {
 			free(json);
@@ -233,7 +234,7 @@ int authLoginHandler(Session *session)
 	               "LtpaToken2=%s; Path=/; HttpOnly; SameSite=Strict",
 	               (char *)b64);
 
-	json = auth_body(0, 0, AUTH_MSG_SUCCESS);
+	json = auth_body(session, 0, 0, AUTH_MSG_SUCCESS);
 	rc = auth_send(session, HTTP_STATUS_OK, cookie, json);
 
 	if (json) {

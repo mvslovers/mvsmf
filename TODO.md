@@ -264,9 +264,10 @@ response reaches every `consapi.c` caller and this reaches none.
 **Fixed on `issue-215-json-control-chars`, awaiting merge:** one shared
 `append_quoted()` in `json.c` serves `addJsonStringEsc()` and
 `addJsonArrayString()`; every byte below `' '` is escaped (short form for
-`\b \f \n \r \t`, else `\u00XX`), tested by `TSTJSON`. The entry below is kept
-for the one point the fix did not take over: `dsapi.c`'s `json_escape_member()`
-still has its own copy, because it names the *translated* byte in the escape.
+`\b \f \n \r \t`, else `\u00XX`), tested by `TSTJSON`. #473 took over the one
+point this left: `dsapi.c`'s own copy, `json_escape_member()`, is gone, and the
+builder and the member names share `jsonEscapeBytes()` in `json.c`, which names
+the *translated* byte in the escape.
 
 One raw control byte makes the **whole** response unparseable, and `consapi.c`
 passes Master Trace Table text — whatever any address space wrote to the console.

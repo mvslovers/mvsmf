@@ -6,9 +6,11 @@
 
 static int append_string(JsonBuilder *builder, const char *str);
 static int append_quoted(JsonBuilder *builder, const char *value);
+static size_t escape_char(char *out, unsigned char host,
+                          const unsigned char *etoa, int flags);
 
 JsonBuilder *
-createJsonBuilder(void) 
+createJsonBuilder(const unsigned char *etoa)
 {
     JsonBuilder *builder = calloc(1, sizeof(JsonBuilder));
     if (!builder) {
@@ -24,7 +26,11 @@ createJsonBuilder(void)
     builder->capacity = JSON_INITIAL_BUFFER_SIZE;
     builder->size = 0;
     builder->is_first = 1;
-    
+    if (etoa) {
+        memcpy(builder->etoa, etoa, sizeof(builder->etoa));
+        builder->has_etoa = 1;
+    }
+
     return builder;
 }
 
@@ -282,47 +288,87 @@ getJsonString(JsonBuilder *builder)
 // private functions
 
 #ifdef __MVS__
+__asm__("\n&FUNC    SETC 'escape_char'");
+#endif
+/* One character of a JSON string. host is the byte as it stands in the buffer;
+ * the decision is on a, the byte the client receives once the response has been
+ * translated with etoa (a == host if there is no table). So the numbers below
+ * are ASCII values on purpose: 0x22 and 0x5C are the quote and the backslash
+ * the parser will see, which is not the mistake the root CLAUDE.md warns of.
+ *
+ * RFC 8259 forbids every character below U+0020 inside a string. The five with
+ * a short form use it; every other control character, U+007F to U+009F
+ * included, becomes \u00XX, XX being a and not the host byte (on MVS the host
+ * byte is EBCDIC: 0x05 is the TAB U+0009 the client decodes, not U+0005).
+ * What stays raw is the host byte itself, for the translation to turn into
+ * ASCII -- unless JSON_ESC_NONASCII asks for everything above U+007E as an
+ * escape too. Writes at most JSON_ESC_MAX characters, no terminator. */
+static size_t
+escape_char(char *out, unsigned char host, const unsigned char *etoa, int flags)
+{
+    unsigned char a = etoa ? etoa[host] : host;
+
+    switch (a) {
+    case 0x22: memcpy(out, "\\\"", 2); return 2;
+    case 0x5C: memcpy(out, "\\\\", 2); return 2;
+    case 0x08: memcpy(out, "\\b", 2);  return 2;
+    case 0x0C: memcpy(out, "\\f", 2);  return 2;
+    case 0x0D: memcpy(out, "\\r", 2);  return 2;
+    case 0x0A: memcpy(out, "\\n", 2);  return 2;
+    case 0x09: memcpy(out, "\\t", 2);  return 2;
+    default:
+        break;
+    }
+
+    if (a < 0x20 || (a >= 0x7F && (a <= 0x9F || (flags & JSON_ESC_NONASCII)))) {
+        return (size_t) sprintf(out, "\\u%04X", (unsigned) a);
+    }
+
+    out[0] = (char) host;
+    return 1;
+}
+
+size_t
+jsonEscapeBytes(char *out, size_t outlen, const unsigned char *raw,
+                unsigned rawlen, const unsigned char *etoa, int flags)
+{
+    size_t o = 0;
+    unsigned i;
+
+    if (outlen == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < rawlen; i++) {
+        /* room for the longest escape plus the terminator */
+        if (o + JSON_ESC_MAX >= outlen) break;
+
+        o += escape_char(&out[o], raw[i], etoa, flags);
+    }
+
+    out[o] = '\0';
+    return o;
+}
+
+#ifdef __MVS__
 __asm__("\n&FUNC    SETC 'append_quoted'");
 #endif
 /* Append value as a quoted JSON string. One piece at a time, so there is no
- * fixed temp buffer and the length is not capped.
- *
- * RFC 8259 forbids every character below U+0020 inside a string. In the
- * execution character set that is every byte below ' ' -- 0x20 in ASCII, 0x40
- * in EBCDIC, where the response is translated only after this runs -- so the
- * test is written against ' ' and not against a number. The five with a short
- * form use it; the rest become \u00XX, XX being the byte as it stands here
- * (on MVS the host byte, not its ASCII image; the escape is still valid). */
+ * fixed temp buffer and the length is not capped. What each character becomes
+ * is escape_char()'s decision, on the table the builder was created with. */
 static int
 append_quoted(JsonBuilder *builder, const char *value)
 {
     const char *p;
-    char one[2];
-    char esc[8];
+    char esc[JSON_ESC_MAX + 1];
 
     if (append_string(builder, "\"") < 0) return -1;
-    one[1] = '\0';
     for (p = value; *p; p++) {
-        int rc;
-        switch (*p) {
-        case '"':  rc = append_string(builder, "\\\""); break;
-        case '\\': rc = append_string(builder, "\\\\"); break;
-        case '\b': rc = append_string(builder, "\\b");  break;
-        case '\f': rc = append_string(builder, "\\f");  break;
-        case '\r': rc = append_string(builder, "\\r");  break;
-        case '\n': rc = append_string(builder, "\\n");  break;
-        case '\t': rc = append_string(builder, "\\t");  break;
-        default:
-            if ((unsigned char)*p < (unsigned char)' ') {
-                snprintf(esc, sizeof(esc), "\\u%04X", (unsigned)(unsigned char)*p);
-                rc = append_string(builder, esc);
-            } else {
-                one[0] = *p;
-                rc = append_string(builder, one);
-            }
-            break;
-        }
-        if (rc < 0) return -1;
+        size_t n = escape_char(esc, (unsigned char) *p,
+                               builder->has_etoa ? builder->etoa : NULL, 0);
+
+        esc[n] = '\0';
+        if (append_string(builder, esc) < 0) return -1;
     }
     return append_string(builder, "\"");
 }

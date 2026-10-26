@@ -39,7 +39,7 @@
 
 #include "../../src/json.c"
 
-#define CTRL_MAX	((unsigned) ' ')
+#define CTRL_MAX	0x20u
 
 static char msg[160];
 static unsigned char xl[256];
@@ -70,6 +70,8 @@ init_table(void)
 	xl[0x04] = 0x9C;	/* C1 control            */
 	xl[0x06] = 0x86;	/* C1 control            */
 	xl[0x7E] = 0x1A;	/* printable here, SUB there */
+	xl[0x07] = 0x7F;	/* DEL                   */
+	xl[0x0E] = 0xE9;	/* above U+009F          */
 }
 
 /* what http_etoa() does to a response */
@@ -89,12 +91,11 @@ translate_copy(char *dst, const char *src)
 static int
 hexval(char c)
 {
-	static const char lower[] = "0123456789abcdef";
-	static const char upper[] = "0123456789ABCDEF";
-	const char *p;
+	unsigned char u = (unsigned char) c;
 
-	if (c != '\0' && (p = strchr(lower, c)) != NULL) return (int) (p - lower);
-	if (c != '\0' && (p = strchr(upper, c)) != NULL) return (int) (p - upper);
+	if (u >= 0x30 && u <= 0x39) return (int) (u - 0x30);
+	if (u >= 0x61 && u <= 0x66) return (int) (u - 0x61 + 10);
+	if (u >= 0x41 && u <= 0x46) return (int) (u - 0x41 + 10);
 	return -1;
 }
 
@@ -165,9 +166,11 @@ roundtrip_object(const char *value, char *out, size_t outsz)
 	JsonBuilder *b = createJsonBuilder(xl);
 	char *doc;
 	const char *p;
+	char pre[8];
 	int ok = 0;
 
 	if (!b) return 0;
+	translate_copy(pre, "{\"k\":");
 	if (startJsonObject(b) < 0) goto done;
 	if (addJsonStringEsc(b, "k", value) < 0) goto done;
 	if (endJsonObject(b) < 0) goto done;
@@ -175,7 +178,7 @@ roundtrip_object(const char *value, char *out, size_t outsz)
 	if (!doc) goto done;
 	translate(doc);
 
-	if (strncmp(doc, "{\"k\":", 5) == 0 &&
+	if (strncmp(doc, pre, 5) == 0 &&
 	    (p = read_json_string(doc + 5, out, outsz)) != NULL &&
 	    p[0] == xl[(unsigned char) '}'] && p[1] == '\0') {
 		ok = 1;
@@ -357,11 +360,11 @@ test_long_forms(void)
 	in[0] = 0x7E;
 	CHECK(body_is(in, "\\u001A"),
 	      "a printable host byte that translates to U+001A is \\u001A (#473)");
-	in[0] = 0x7F;
+	in[0] = 0x07;
 	CHECK(body_is(in, "\\u007F"), "U+007F is escaped");
 	in[0] = (char) 0x9F;
 	CHECK(body_is(in, "\\u009F"), "U+009F is escaped");
-	in[0] = (char) 0xE9;
+	in[0] = 0x0E;
 	text = object_text(in);
 	CHECK(text != NULL && (unsigned char) text[6] == 0xE9,
 	      "a byte above U+009F passes through for the translation (encoding is #234)");
@@ -451,7 +454,7 @@ test_escape_bytes(void)
 	char want[64];
 
 	static const unsigned char name1[] = { 'A', 'B', 0x01, 'C' };
-	static const unsigned char name2[] = { 'A', 0x05, 0x04, 0xE9, 'B' };
+	static const unsigned char name2[] = { 'A', 0x05, 0x04, 0x0E, 'B' };
 	static const unsigned char name3[] = { 'A', '"', '\\', 'B' };
 	static const unsigned char name4[] = { 'A', 0x7E, 'B' };
 	char got[64];
@@ -484,7 +487,7 @@ test_escape_bytes(void)
 	jsonEscapeBytes(got, sizeof(got), name2, sizeof(name2), xl, 0);
 	snprintf(want, sizeof(want), "A\\t\\u009C");
 	CHECK(strncmp(got, want, strlen(want)) == 0 &&
-	      (unsigned char) got[strlen(want)] == 0xE9,
+	      (unsigned char) got[strlen(want)] == 0x0E,
 	      "without JSON_ESC_NONASCII a byte above U+009F stays as it is");
 
 	/* room: stops before the output buffer is exceeded */

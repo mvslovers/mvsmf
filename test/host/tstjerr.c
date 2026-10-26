@@ -29,36 +29,97 @@
 #define MSG_MAX	8192
 
 static char msg[160];
+static unsigned char xl[256];
 
-/* Read one JSON string at s (its opening quote). Returns the position after
-   the closing quote, or NULL when the string is not valid JSON. Only the
-   escapes the builder writes for printable text are accepted. */
+/* host spelling -> ASCII, what http_etoa() does to a response */
+static void
+init_table(void)
+{
+	static const char printable[] =
+		" !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~";
+	unsigned i;
+
+	for (i = 0; i < 256; i++) xl[i] = (unsigned char) i;
+	for (i = 0; printable[i] != '\0'; i++) {
+		xl[(unsigned char) printable[i]] = (unsigned char) (0x20 + i);
+	}
+}
+
+static void
+translate(char *s)
+{
+	for (; *s != '\0'; s++) *s = (char) xl[(unsigned char) *s];
+}
+
+/* a malloc'd ASCII copy of a host-spelled string */
+static char *
+ascii_dup(const char *src)
+{
+	char *d = malloc(strlen(src) + 1);
+
+	if (d) {
+		strcpy(d, src);
+		translate(d);
+	}
+	return d;
+}
+
+/* number at s (ASCII digits); *end is the first byte after it */
+static int
+ascii_num(const char *s, const char **end)
+{
+	int n = 0;
+
+	while ((unsigned char) *s >= 0x30 && (unsigned char) *s <= 0x39) {
+		n = n * 10 + ((unsigned char) *s - 0x30);
+		s++;
+	}
+	*end = s;
+	return n;
+}
+
+/* 1 if the ASCII text at s starts with the host-spelled literal lit */
+static int
+ascii_starts(const char *s, const char *lit)
+{
+	char buf[32];
+
+	strcpy(buf, lit);
+	translate(buf);
+	return strncmp(s, buf, strlen(buf)) == 0;
+}
+
+/* Read one JSON string at s (its opening quote), in ASCII as the client gets
+   it. Returns the position after the closing quote, or NULL when the string
+   is not valid JSON. Only the escapes the builder writes for printable text
+   are accepted. */
 static const char *
 read_str(const char *s, char *out, size_t outsz)
 {
 	size_t o = 0;
 
-	if (*s != '"') return NULL;
+	if ((unsigned char) *s != 0x22) return NULL;
 	s++;
 
-	while (*s != '"') {
+	while ((unsigned char) *s != 0x22) {
 		unsigned char c = (unsigned char) *s;
 
 		if (c == '\0') return NULL;			/* unterminated */
-		if (c < (unsigned) ' ') return NULL;		/* raw control character */
+		if (c < 0x20) return NULL;			/* raw control character */
 		if (o + 1 >= outsz) return NULL;
 
-		if (c != '\\') {
+		if (c != 0x5C) {
 			out[o++] = (char) c;
 			s++;
 			continue;
 		}
 
 		s++;
-		switch (*s) {
-		case '"':  out[o++] = '"';  break;
-		case '\\': out[o++] = '\\'; break;
-		case '/':  out[o++] = '/';  break;
+		switch ((unsigned char) *s) {
+		case 0x22: out[o++] = 0x22; break;
+		case 0x5C: out[o++] = 0x5C; break;
+		case 0x2F: out[o++] = 0x2F; break;
 		default:   return NULL;
 		}
 		s++;
@@ -68,35 +129,60 @@ read_str(const char *s, char *out, size_t outsz)
 	return s + 1;
 }
 
-/* Parse {"rc":N,"category":N,"reason":N,"message":"..."}; the decoded message
-   goes to out. 1 if the document is exactly that, 0 if not. */
+/* Parse {"rc":N,"category":N,"reason":N,"message":"..."} (doc in ASCII); the
+   decoded message goes to out, in ASCII. 1 if the document is exactly that,
+   0 if not. */
 static int
 parse_report(const char *doc, char *out, size_t outsz, int *rc)
 {
 	const char *p = doc;
 
-	if (strncmp(p, "{\"rc\":", 6) != 0) return 0;
+	if (!ascii_starts(p, "{\"rc\":")) return 0;
 	p += 6;
-	*rc = (int) strtol(p, (char **) &p, 10);
-	if (strncmp(p, ",\"category\":", 12) != 0) return 0;
+	*rc = ascii_num(p, &p);
+	if (!ascii_starts(p, ",\"category\":")) return 0;
 	p += 12;
-	(void) strtol(p, (char **) &p, 10);
-	if (strncmp(p, ",\"reason\":", 10) != 0) return 0;
+	(void) ascii_num(p, &p);
+	if (!ascii_starts(p, ",\"reason\":")) return 0;
 	p += 10;
-	(void) strtol(p, (char **) &p, 10);
-	if (strncmp(p, ",\"message\":", 11) != 0) return 0;
+	(void) ascii_num(p, &p);
+	if (!ascii_starts(p, ",\"message\":")) return 0;
 	p += 11;
 	p = read_str(p, out, outsz);
 	if (!p) return 0;
-	if (p[0] != '}' || p[1] != '\0') return 0;
+	if ((unsigned char) p[0] != xl[(unsigned char) '}'] || p[1] != '\0') return 0;
 	return 1;
 }
 
-/* The report for message, as text; NULL if a builder call failed. */
+/* parse_report() on a host-spelled document, as a response is translated. */
+static int
+parse_host(const char *hostdoc, char *out, size_t outsz, int *rc)
+{
+	char *doc = ascii_dup(hostdoc);
+	int ok;
+
+	if (!doc) return 0;
+	ok = parse_report(doc, out, outsz, rc);
+	free(doc);
+	return ok;
+}
+
+/* 1 if the ASCII text a equals the host-spelled string h. */
+static int
+ascii_equals(const char *a, const char *h)
+{
+	char *w = ascii_dup(h);
+	int eq = w != NULL && strcmp(a, w) == 0;
+
+	free(w);
+	return eq;
+}
+
+/* The report for message, as the client receives it (ASCII); NULL if a builder call failed. */
 static char *
 report_text(const char *message, int *build_rc)
 {
-	JsonBuilder *b = createJsonBuilder(NULL);
+	JsonBuilder *b = createJsonBuilder(xl);
 	char *doc = NULL;
 
 	*build_rc = -1;
@@ -109,6 +195,7 @@ report_text(const char *message, int *build_rc)
 	if (*build_rc < 0) goto done;
 	if (endJsonObject(b) < 0) { *build_rc = -1; goto done; }
 	doc = getJsonString(b);
+	if (doc) translate(doc);
 done:
 	freeJsonBuilder(b);
 	return doc;
@@ -118,19 +205,25 @@ done:
 static int
 report_roundtrips(const char *message)
 {
-	char *doc, *out;
+	char *doc, *out, *want;
 	int build_rc, rc = 0, ok = 0;
 
 	out = malloc(MSG_MAX + 16);
-	if (!out) return 0;
+	want = ascii_dup(message);
+	if (!out || !want) {
+		free(out);
+		free(want);
+		return 0;
+	}
 
 	doc = report_text(message, &build_rc);
 	if (doc && build_rc == 0 && parse_report(doc, out, MSG_MAX + 16, &rc) &&
-	    rc == 8 && strcmp(out, message) == 0) {
+	    rc == 8 && strcmp(out, want) == 0) {
 		ok = 1;
 	}
 	free(doc);
 	free(out);
+	free(want);
 	return ok;
 }
 
@@ -160,23 +253,25 @@ main(void)
 	char *doc;
 	int build_rc;
 
+	init_table();
+
 	/* 0. The reader itself: known good and known bad documents. */
 	{
 		int rc;
 
-		CHECK(parse_report("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"abc\"}",
-		                   tmp, sizeof(tmp), &rc) && strcmp(tmp, "abc") == 0,
+		CHECK(parse_host("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"abc\"}",
+		                   tmp, sizeof(tmp), &rc) && ascii_equals(tmp, "abc"),
 		      "reader accepts a report");
-		CHECK(!parse_report("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"abc",
+		CHECK(!parse_host("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"abc",
 		                    tmp, sizeof(tmp), &rc),
 		      "reader rejects an unterminated message (the #480 shape)");
-		CHECK(!parse_report("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\"b\"}",
+		CHECK(!parse_host("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\"b\"}",
 		                    tmp, sizeof(tmp), &rc),
 		      "reader rejects an unescaped quote");
-		CHECK(parse_report("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\\\"b\"}",
-		                   tmp, sizeof(tmp), &rc) && strcmp(tmp, "a\"b") == 0,
+		CHECK(parse_host("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\\\"b\"}",
+		                   tmp, sizeof(tmp), &rc) && ascii_equals(tmp, "a\"b"),
 		      "reader decodes an escaped quote");
-		CHECK(!parse_report("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\\qb\"}",
+		CHECK(!parse_host("{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"a\\qb\"}",
 		                    tmp, sizeof(tmp), &rc),
 		      "reader rejects an escape JSON does not define");
 	}
@@ -210,7 +305,7 @@ main(void)
 
 	/* 4. The value does not swallow what comes after it. */
 	{
-		JsonBuilder *b = createJsonBuilder(NULL);
+		JsonBuilder *b = createJsonBuilder(xl);
 		char *big = make_msg(5000);
 		char *text = NULL;
 		size_t len;
@@ -220,10 +315,11 @@ main(void)
 		    addJsonNumber(b, "after", 42) == 0 &&
 		    endJsonObject(b) == 0) {
 			text = getJsonString(b);
+			if (text) translate(text);
 		}
 		len = text ? strlen(text) : 0;
 		CHECK(text != NULL && len > 5000 &&
-		      strcmp(text + len - 12, ",\"after\":42}") == 0,
+		      ascii_equals(text + len - 12, ",\"after\":42}"),
 		      "a member after a 5000 character value is intact");
 		free(text);
 		free(big);
@@ -232,12 +328,12 @@ main(void)
 
 	/* 5. Unchanged: NULL is null, ordinary text is written as it was. */
 	doc = report_text(NULL, &build_rc);
-	CHECK(doc != NULL && build_rc == 0 && strstr(doc, ",\"message\":null}") != NULL,
+	CHECK(doc != NULL && build_rc == 0 && ascii_starts(doc + strlen(doc) - 16, ",\"message\":null}"),
 	      "a NULL message is written as null");
 	free(doc);
 	doc = report_text("plain", &build_rc);
-	CHECK(doc != NULL && strcmp(doc,
-	      "{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"plain\"}") == 0,
+	CHECK(doc != NULL && ascii_equals(doc,
+	      "{\"rc\":8,\"category\":6,\"reason\":7,\"message\":\"plain\"}"),
 	      "ordinary text is written unchanged");
 	free(doc);
 

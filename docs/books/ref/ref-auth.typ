@@ -163,8 +163,9 @@ The status is 200. The body is
 
 #screen(raw("{\"returnCode\":0,\"reasonCode\":0,\"message\":\"Success.\"}"))
 
-The response carries the token as a cookie (@ref-auth-cookie). The cookie
-header can appear twice in the response, with the same value.
+The response carries the token as a cookie (@ref-auth-cookie), in one
+#cmd("Set-Cookie") header. Before 1.4.0 the header was sent twice, with the same
+value.
 
 === Failure
 
@@ -177,7 +178,9 @@ header can appear twice in the response, with the same value.
       with #cmd("Content-Type: application/json") and the header
       #cmd("WWW-Authenticate") of @ref-conv-401 (not for a web page script).],
     [500], [The credential is good, but HTTPD could not give it a session of its
-      own. Causes: RACF refused the second logon, the credential store is full,
+      own. Causes: RACF refused the second logon (for example, the password has
+      changed in RACF while HTTPD still holds the old one from an earlier
+      request), the credential store is full,
       or the client already holds 16 sessions of the same user ID, password and
       address and none of them has been idle for 60 seconds. When one of them
       has, HTTPD ends the one used least recently and makes room.],
@@ -187,6 +190,11 @@ header can appear twice in the response, with the same value.
 
 The login uses the response shape of @ref-conv-loginerr, not the error report
 of the other areas.
+
+Only a successful login sets a cookie. The 401 and the 500 carry no
+#cmd("Set-Cookie") header. Before 1.4.0 the 500 carried the token of the
+credential that HTTPD holds for the user ID, the password and the client
+address (@ref-auth-cookie), and a request that sent it was accepted.
 
 == The Token and the Cookie <ref-auth-cookie>
 
@@ -202,8 +210,10 @@ The cookie has no #cmd("Secure") attribute. A client sends it back in a
 with the same base64 text also works.
 
 A request with an #cmd("Authorization") header gets this cookie in every
-response, on every route, as long as HTTPD holds a token for the credential of
-the request (@ref-conv-resphdr). For a Basic request the token is that of the
+response, on every route except the two of the authentication service, as long
+as HTTPD holds a token for the credential of the request (@ref-conv-resphdr).
+The login and the logout set only the cookie that this chapter names for them
+(@ref-auth-login, @ref-auth-logout). For a Basic request the token is that of the
 shared credential for the user ID, the password and the client address, and not
 the token of a session of its own. A logout with that token ends the credential
 for every holder of it. The token of a login (@ref-auth-login) is private to

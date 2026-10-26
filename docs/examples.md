@@ -281,6 +281,20 @@ curl -s -u $USER:$PASS "$BASE/zosmf/restjobs/jobs/MYJOB/JOB00123/files/2/records
 zowe jobs view spool-file-by-id JOB00123 2
 ```
 
+### Cancel a job
+`PUT /zosmf/restjobs/jobs/{job-name}/{jobid}`
+
+The job is stopped and its output stays on the spool (unlike a purge).
+
+```bash
+curl -s -u $USER:$PASS -X PUT -H "Content-Type: application/json" \
+  -H "X-CSRF-ZOSMF-HEADER: x" --data '{"request":"cancel","version":"2.0"}' \
+  "$BASE/zosmf/restjobs/jobs/MYJOB/JOB00123"
+```
+```bash
+zowe zos-jobs cancel job JOB00123
+```
+
 ### Purge a job
 `DELETE /zosmf/restjobs/jobs/{job-name}/{jobid}`
 

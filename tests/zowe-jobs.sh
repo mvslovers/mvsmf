@@ -9,7 +9,8 @@
 #   4. zowe jobs view job-status-by-jobid  (job status)
 #   5. zowe jobs list spool-files-by-jobid (spool files)
 #   6. zowe jobs view spool-file-by-id     (spool records)
-#   7. zowe jobs delete job              (purge)
+#   7. zowe jobs cancel job              (cancel, output stays)
+#   8. zowe jobs delete job              (purge)
 #
 # Prerequisites:
 #   - Run through mbt (see Usage), which hands over the target's
@@ -691,6 +692,56 @@ test_purge_job() {
 	SUBMIT_JOBID=""
 }
 
+test_cancel_job() {
+	echo ""
+	echo "--- Cancel Job (issue #417) ---"
+
+	# A job held before execution (TYPRUN=HOLD) never ends by itself, so there
+	# is something to cancel without racing a job that is about to finish.
+	local jcl output rc=0 ji
+	jcl=$(mktemp)
+	printf '%s\n%s\n' \
+		"//ZCANCEL1 JOB CLASS=A,MSGCLASS=H,TYPRUN=HOLD" \
+		"//STEP1    EXEC PGM=IEFBR14" >"$jcl"
+	output=$(run_zowe_json jobs submit local-file "$jcl") || rc=$?
+	rm -f "$jcl"
+	assert_rc 0 "$rc" "submit a held job"
+	if [ $rc -ne 0 ]; then
+		return
+	fi
+	ji=$(echo "$output" | jq -r '.data.jobid')
+
+	rc=0
+	output=$(run_zowe_json jobs cancel job "$ji") || rc=$?
+	assert_rc 0 "$rc" "cancel job"
+	if [ $rc -eq 0 ]; then
+		assert_json_field "$output" '.success' "true" "cancel success"
+	fi
+
+	wait_for_output "$ji" || true
+	rc=0
+	output=$(run_zowe_json jobs view job-status-by-jobid "$ji") || rc=$?
+	assert_rc 0 "$rc" "the cancelled job is still known"
+	if [ $rc -eq 0 ]; then
+		assert_json_field "$output" '.data.status' "OUTPUT" "the cancelled job is on the output queue"
+	fi
+
+	rc=0
+	output=$(run_zowe_json jobs list spool-files-by-jobid "$ji") || rc=$?
+	assert_rc 0 "$rc" "the output of the cancelled job is listed"
+
+	# a job on the output queue cannot be cancelled again
+	rc=0
+	output=$(run_zowe_json jobs cancel job "$ji") || rc=$?
+	if [ $rc -ne 0 ]; then
+		pass "cancel of a job on the output queue is refused (rc=$rc)"
+	else
+		fail "cancel of a job on the output queue is refused" "expected a non-zero rc"
+	fi
+
+	run_zowe jobs delete job "$ji" >/dev/null 2>&1 || true
+}
+
 # =========================================================================
 # Main
 # =========================================================================
@@ -732,6 +783,9 @@ test_job_status
 test_spool_files
 test_spool_records
 test_spool_records_empty_dd_reused_mttr
+
+# Cancel test
+test_cancel_job
 
 # Purge test (last)
 test_purge_job

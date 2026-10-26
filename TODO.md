@@ -25,12 +25,15 @@ data set stays allocated until HTTPD restarts. 2 of 2 on mvsdev on 2026-10-12,
 the cause is open. ~~**#407 is new (2026-10-13) and not ranked either**: the two
 other MTT snapshot sites behind #251 (fixed in PR #408) read a failed snapshot as no matches — a
 false `detected`, and #214's mis-anchor reopened.~~ Fixed in PR #470.
-**#417 and #418 are new (2026-10-13) and not ranked either**, both from a
-client on m38b: `PUT /restjobs/jobs/{name}/{id}` with `request: cancel|hold|release`
-is not implemented and answers 404 (a hung job had to be `$C`'d from the
-console). #417 is cancel only, `jescanj(…, 0)`; hold/release split out as
+**#418 is new (2026-10-13) and not ranked**, and **#417 is done** (PR open,
+2026-10-23: `PUT /restjobs/jobs/{name}/{id}` with `{"request":"cancel"}`,
+`jescanj(…, 0)`, the purge rule of #440, `docs/endpoints/jobs/cancel.md`). Both came
+from a client on m38b: that PUT answered 404 (a hung job had to be `$C`'d from the
+console). Hold/release were split out as
 **#424**, blocked on **libc370#529** (`jeshold()`/`jesrels()`: `$H`/`$A J` via
-SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). #418 is the 404 itself: a known path with an unregistered method. Measured on `zxp` (2026-10-23): the reference answers 405 without `Allow`; implemented on `issue-418-router-405`, in review.
+SVC 34, verified against the JQE hold bit). Cancel takes the purge rule of #440 (UPDATE on the JESSPOOL entity). The PUT handler already dispatches on `request`, so #424 only has to fill in the
+`hold`/`release` branches of `jobCancelHandler()` (they answer 400, reason 15, until
+then). #418 is the 404 itself: a known path with an unregistered method. Measured on `zxp` (2026-10-23): the reference answers 405 without `Allow`; implemented on `issue-418-router-405`, in review.
 **#423** (USS file GET: no `ufs_ferror()` check after the read loop) is fixed in
 its PR: the loop is `src/ussread.c` (host test `TSTUSSRD`), the failure is
 `MVSMF301E` plus `abort_response()`. A mid-file UFSD read error *can* be
@@ -116,8 +119,11 @@ handed its list over). In hand, in this order:
 - **#345 is superseded by #440** (the JESSPOOL model, as in FTPD 1.3.0;
   `docs/jesspool.md`): implemented on `issue-440-jesspool`, in review. Close #345
   with it.
-- **#417** (cancel) right after #440 -- it widens the same gap and takes the
-  purge rule (UPDATE on the JESSPOOL entity).
+- ~~**#417** (cancel)~~ -- done, PR open (purge rule, UPDATE on the JESSPOOL
+  entity). Verified on a throwaway container; **not** measured on `zxp` (a write,
+  needs the board's approval), so the response body follows the purge shape and
+  `version` is ignored. The started-task refusal and the READ-only denial were
+  measured by QA on throwaway containers with RAKF profiles.
 - **#418** (405 for a known path with an unregistered method, no `Allow`; measured
   on zxp 2026-10-23) is implemented on `issue-418-router-405`, in review.
 - **#424** is blocked on `libc370#529` (still open; `jeshold()`/`jesrels()` are not in 2.25.1).
@@ -142,7 +148,7 @@ the next case).
 | 7 | ~~#347~~ | fixed in PR #459 and PR #505, merged: **who** is gated (fail-closed check in the handlers, `FACILITY MVSMF.CONSOLE`, console and `/zosmf/test`; #460) | **which commands** stays a policy — measured, nothing to delegate to |
 | 8 | #234 | `type:research` | measuring the reference |
 | 9 | #329 | `type:research` | **one measurement** — see *RAKF* |
-| 10 | #345 | superseded by #440 | done with #440 (in review); #417 cancel follows |
+| 10 | #345 | superseded by #440 | done with #440; #417 cancel done (PR open) |
 | 11 | #195 | split from #214 — not the same bug | one two-snapshot measurement |
 | 12 | #291 | reclassified — hygiene, not stability | nothing |
 | 13 | #186 | unblocked; sysroot refreshed 2026-08-23 | nothing |

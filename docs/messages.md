@@ -79,7 +79,7 @@ member not found, record too long) produce **no** console message.
 | `MVSMF204E` | `UNABLE TO OPEN THE JES2 INTERNAL READER` | `jesiropn()` failed. No job can be submitted until this clears. |
 | `MVSMF205E` | `WRITE TO THE JES2 INTERNAL READER FAILED` | A `jesirput()` failed part-way. The job is incomplete and is not queued. |
 | `MVSMF206E` | `CLOSE OF THE JES2 INTERNAL READER FAILED` | `jesircls()` failed. The job may or may not have been queued — check the JES2 queue before resubmitting. |
-| `MVSMF207E` | `JESCANJ RETURNED RC=n` | A purge returned a code this build does not know. The client got a 500. Worth reporting with the `RC`. |
+| `MVSMF207E` | `JESCANJ RETURNED RC=n` | A purge or a cancel returned a code this build does not know. The client got a 500. Worth reporting with the `RC`. |
 
 ## MVSMF3xx — USS
 

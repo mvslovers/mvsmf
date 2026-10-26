@@ -42,7 +42,7 @@ mbt = "3.0"
 [dependencies]
 "mvslovers/crypto370" = ">=1.0.0"
 "mvslovers/httpd" = ">=4.2.0"
-"mvslovers/ufsd" = ">=1.5.0"
+"mvslovers/ufsd" = ">=1.5.1"
 
 # `mbt run restart -- HTTPD` compresses MVSMF.DEV.LINKLIB and restarts HTTPD.
 # That is what activates a deploy: HTTPD loads MVSMF when it starts, and every

@@ -8,8 +8,8 @@
     "version": "4.2.0"
   },
   "mvslovers/ufsd": {
-    "sha256": "7cd78cc51d90873c4c52d7fb102254e62e8be34eab2c5df652f968c4b0528675",
-    "version": "1.5.0"
+    "sha256": "63fb5abcc6d5f2611c6c7128cf7529e4c57a2aa0ebd051b019980bf4cf1f8acf",
+    "version": "1.5.1"
   },
   "plugin:mvslovers/mbt-stc": {
     "sha256": "f2b6882fe28be89291c80e5d4631054fbad5f9487c8b4d9b906e18059ec6e412",

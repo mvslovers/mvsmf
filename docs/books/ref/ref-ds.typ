@@ -268,9 +268,13 @@ object with one field:
 #tab(caption: [Item of the member list])[
   #table(columns: (1.35in, 1fr),
     [Field], [Value],
-    [#cmd("member")], [The member name. A character that is not printable, a
-      quotation mark and a backslash are written as a #cmd("\\uXXXX") escape that
-      names the ASCII value.],
+    [#cmd("member")], [The member name. A quotation mark is written as
+      #cmd("\\\""), a backslash as #cmd("\\\\"). Every other character that is
+      not a printable ASCII character (below U+0020 or above U+007E) is written as
+      a #cmd("\\u00XX") escape that names its code point, as the client sees it
+      after the translation of the response (@ref-conv-json). A
+      member name made of letters, digits, #cmd("@"), #cmd("#") and #cmd("$") is
+      not changed.],
   )
 ]
 

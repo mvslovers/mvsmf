@@ -509,15 +509,36 @@ Every JSON body that mvsMF sends has these properties:
 - A request body in JSON is read by the handler that expects it. A body that
   does not parse is a 400 from that handler.
 
-The JSON builders differ in how they treat text. The function for a plain
-string copies it as it is, through a buffer of 256 bytes that holds the whole
-field, so a long text is cut. The function for an
-escaped string and the one for an array element escape the double quote, the
-backslash, the backspace, the form feed, the carriage return, the line feed and
-the tab with a short form (#cmd("\\b"), #cmd("\\f"), #cmd("\\r"),
-#cmd("\\n"), #cmd("\\t")). Every other byte below the blank becomes
-#cmd("\\u00XX"), XX being the byte as the program holds it, in EBCDIC, before
-the response is translated.
+mvsMF builds the text of a JSON body in the character set of the program,
+EBCDIC, and HTTPD translates the finished response to ASCII. The escapes
+therefore name the character that the client receives, not the byte that the
+program holds. For each byte of a string value or of an array element the
+builder looks up the character that HTTPD's translation makes of it, with the
+default table of the server (CP037, unless HTTPD is configured otherwise), and
+decides on that character:
+
+#tab(caption: [Escapes in a JSON string])[
+  #table(columns: (1.9in, 1fr),
+    [Character the client receives], [Written as],
+    [Double quote, backslash], [#cmd("\\\""), #cmd("\\\\")],
+    [Backspace, form feed, line feed, carriage return, tab], [#cmd("\\b"),
+      #cmd("\\f"), #cmd("\\n"), #cmd("\\r"), #cmd("\\t")],
+    [Any other character below U+0020, and U+007F to U+009F],
+      [#cmd("\\u00XX"), XX being the code point of the character in two
+      hexadecimal digits (A to F in upper case)],
+    [Every other character], [The byte as it is. HTTPD translates it with the
+      rest of the response.],
+  )
+] <ref-conv-esctab>
+
+The string function, the escaped string function and the array element function
+all follow @ref-conv-esctab, and none of them cuts a long text.
+
+#note[This is the behaviour of mvsMF 1.4.0. In 1.3.0 and earlier the escaped
+string function and the array element function wrote only the double quote, the
+backslash, the carriage return, the line feed and the tab with an escape. Every
+other byte went out as it was, and the plain string function escaped nothing and
+cut a text of 254 characters or more.]
 
 == Limits <ref-conv-limits>
 

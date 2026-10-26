@@ -83,10 +83,12 @@ keep the server alive.
 ## Non-printable member names
 
 Nothing requires a directory entry to hold a printable name, and some do not —
-the SMP/E keys in `SYS1.SMPCDS` are binary. Any byte that cannot appear literally
-in a JSON string is emitted as a `\uXXXX` escape naming its ASCII value, so the
-response parses whatever the directory contains. Ordinary names (`A-Z 0-9 @ # $`)
-are unaffected.
+the SMP/E keys in `SYS1.SMPCDS` are binary. A quotation mark is written `\"` and a
+backslash `\\`. Every other byte whose character, after the response has been
+translated to ASCII, is not a printable ASCII character (below U+0020 or above
+U+007E) is emitted as a `\u00XX` escape naming that code point, so the response
+parses whatever the directory contains. Ordinary names (`A-Z 0-9 @ # $`) are
+unaffected.
 
 ## Name padding
 

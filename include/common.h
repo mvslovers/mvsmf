@@ -350,7 +350,7 @@ void abort_response(Session *session) asm("CMN0019");
  * @param session Current session context
  * @param etoa    receives the 256-byte EBCDIC-to-ASCII table
  */
-void response_etoa(Session *session, unsigned char etoa[256]) asm("CMN0025");
+void response_etoa(Session *session, unsigned char etoa[256]) asm("CMN0026");
 
 /**
  * @brief A JsonBuilder for a document that leaves through sendJSONResponse()
@@ -361,7 +361,7 @@ void response_etoa(Session *session, unsigned char etoa[256]) asm("CMN0025");
  *
  * @return the new builder, NULL on allocation failure
  */
-JsonBuilder *createResponseBuilder(Session *session) asm("CMN0026");
+JsonBuilder *createResponseBuilder(Session *session) asm("CMN0027");
 
 /**
  * @brief Answers a request refused by an authorization check (issue #228)

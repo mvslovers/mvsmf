@@ -23,6 +23,7 @@
 #include "testapi.h"
 #include "dsapi.h"            /* dslist_locked -- fn=listds (#436) */
 #include "blkptrk.h"          /* blocks_per_track -- fn=dscb (#439) */
+#include "listfail.h"         /* list_outcome -- fn=listds (#360) */
 #include "jobauth.h"
 #include "consauth.h"
 #include "consapi.h"        /* console_lock_acquire/release -- fn=cmd shares it (#214) */
@@ -460,7 +461,7 @@ int testHandler(Session *session) {
 
     dslist = dslist_locked(session, level, filter);
     /* NULL with ENOMEM is a storage shortage, not an empty level (#360) */
-    nomem = (!dslist && errno == ENOMEM);
+    nomem = (list_outcome(dslist, errno) == LIST_NOSTOR);
 
     rc = http_printf(
         session->httpc,

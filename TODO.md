@@ -100,8 +100,12 @@ measured (a write); `X-IBM-Job-Modify-Version: 2.0` is not implemented.
 (2.0.0) is read in `datasetListHandler()` and `diagnose_open_failure()`, so a
 shortage is a 500 with `MVSMF006E`, no longer an empty 200 or a 404. The
 `__listds()` half never needed `libc370#157` for that: NULL with `ENOMEM` was
-already there. The unreachable path is untested on MVS (`fn=listds` reports it
-as `"nomem"`). #360 stays open until a shortage has been provoked on MVS. #361 is new (2026-09-06) and moved
+already there. The decision is `list_outcome()` (`src/listfail.c`), pinned by
+the host test TSTLSFL; the shortage itself has not been provoked on MVS
+(`fn=listds` reports it as `"nomem"`). Still open, now #514: an unreadable
+directory (`__listpd()` NULL with `errno` other than 0 and `ENOMEM`) answers
+404 "member not found" like an empty one; making it a 500 needs a run on MVS
+showing that a successful empty walk leaves `errno` 0. #361 is new (2026-09-06) and moved
 #245 down: they are one subsystem and must be done in sequence. **Tier 1 is
 empty again** — #406 landed in PR #409 and #371 in PR #403, both on
 2026-10-13, and before them #336's

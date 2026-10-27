@@ -99,8 +99,9 @@ names these products as dependencies:
       login service needs a function that HTTPD has from 4.2.0.],
     [crypto370], [1.0.0 or later], [A library of cryptographic functions. mvsMF
       uses its base64 coding for the token of the login.],
-    [UFSD (ufsd)], [built against 1.4.0], [The file systems behind the UNIX file
-      services. The installation instructions name no minimum level.],
+    [UFSD (ufsd)], [built against 1.5.1 (client library)], [The file systems
+      behind the UNIX file services. Run the UFSD 1.5.2 server with it
+      (@ug-install-prereq).],
   )
 ]
 

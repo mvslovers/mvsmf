@@ -27,9 +27,10 @@ The installation needs these parts on the system:
       #cmd("http_new_session") that HTTPD 4.2.0 introduced. There is no test
       for the entry at run time, so the floor is yours to check. The banner
       #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start).],
-    [UFSD], [Only the UFS file service needs it (@ug-uss). The data set, job and
-      console services do not depend on it. mvsMF is built against UFSD 1.4.0.
-      The installation instructions of mvsMF name no minimum level of UFSD.],
+    [UFSD 1.5.2], [Only the UFS file service needs it (@ug-uss). The data set,
+      job and console services do not depend on it. mvsMF is built against the
+      client library of UFSD 1.5.1. The server to run is UFSD 1.5.2 (see the
+      note below).],
     [RAKF], [Every request runs under the identity of the caller, which HTTPD
       resolves from the user ID and the password or the token. The job access
       described in @ug-install-upgrade needs RAKF 2.0.0 or later.],
@@ -43,6 +44,27 @@ prerequisite (#cmd("REQ")) in a SYSMOD means one exact level. The SYSMOD
 #cmd("TZMF140") therefore names none, and the install job does not check
 either. crypto370 and the C library are linked into the load module of mvsMF.
 They need no installation of their own.]
+
+#note[*Run the UFSD 1.5.2 server for the file services.* UFSD servers before
+1.5.2 could give one disk block to two files while a file was being written.
+The write reported success, and the file held another file's data in that
+block. This was measured on UFSD 1.4.0 and 1.5.1, and every release since 1.3.0
+is assumed to be affected. mvsMF writes UFS files through that server, so a
+#cmd("PUT") to a UFS file can be hit. UFSD 1.5.2 stops it. It does not undo
+it: compare files written earlier with a copy, or write them again. The
+operator command #cmd("F UFSD,REBUILD") is not a repair. The fix is in the
+server. mvsMF needs no rebuild, because UFSD 1.5.2 leaves the client library
+unchanged. The steps and details are on the UFSD 1.5.2 release page at
+`github.com/mvslovers/ufsd/releases/tag/v1.5.2`.
+
+The client library of UFSD 1.5.1 reports failures that the 1.4.0 library hid. A
+file request that could answer success with the library of UFSD 1.3.0 can now
+answer with an error report (a refused request, a rejected write). The
+server-side fixes of UFSD 1.5.0 and 1.5.1 are not in an older server either:
+inodes lost when files are removed, a file read that could report end of file
+early, and races in the queues of the server on systems with more than one
+processor. An older server is not refused. The file tests of this release passed against a UFSD 1.4.0
+server, but that is a build finding and no reason to run one.]
 
 The retcode of a finished job in the jobs service comes from a marker in the
 completion word of the job that a JES2 usermod writes. On a JES2 without that

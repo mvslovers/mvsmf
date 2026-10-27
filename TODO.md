@@ -94,7 +94,7 @@ CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
 against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
-stand. Open before the last pass: #372, #425, #428, #452, #449. **#454 is done in its PR**:
+stand. **Final pass, 2026-10-27**: #372 and #452 are measured, #449 landed (two manuals, Draft edition); #425 and #428 (not reproduced) and #514 (no measurement) moved to 1.5.0 and stand in the CHANGELOG as Known issues; #370 and #423 and the console-gate wording (#460, #508) are in the Fixed list. Open: PR #542 (#493 folded into the #477 entry), then the tag. **#454 is done in its PR**:
 `mbt.lock` resolves httpd 4.4.0 (floor in `mbt.toml` stays `>=4.2.0`, nothing from 4.3/4.4
 is needed), the CHANGELOG "Built against" line names it.
 **#426 is done in its PR**: a purge JES2 only accepts (output held on a device)

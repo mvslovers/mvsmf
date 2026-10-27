@@ -16,8 +16,8 @@ who may use the console service. FMID `TZMF140`, and its SYSMOD deletes
 `TZMF130`, so an upgrade from 1.3.0 needs nothing beyond the package. It is
 **not a drop-in**: without profiles in the RAKF class `JESSPOOL` every user sees
 only their own jobs, and until the RAKF profile `FACILITY MVSMF.CONSOLE` is
-defined and READ granted, the console service and `/zosmf/test` refuse every
-user. Read the first two items below before you install.
+defined and READ granted, the console service refuses every user. Read the
+first two items below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 4.4.0**, **ufsd 1.5.1** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
@@ -34,12 +34,11 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `docs/jesspool.md`.
 - **Define the console profile before you upgrade** (#347, #460). From 1.4.0
   mvsMF checks READ on the RAKF resource `FACILITY MVSMF.CONSOLE` itself for
-  every console request and every `/zosmf/test` request. Until the profile is
-  defined and READ is granted, **every user is refused**, administrators
-  included (`500`, category 4). Define the profile, grant READ to those who may
-  issue operator commands, and add the fourth route line to the HTTPD parmlib
-  member. The deploy user needs READ too: the operator commands that restart
-  HTTPD and the call that confirms the build id both go through this check.
+  every console request. Until the profile is defined and READ is granted,
+  **every user is refused**, administrators included (`500`, category 4).
+  Define the profile, grant READ to those who may issue operator commands, and
+  add the fourth route line to the HTTPD parmlib member. The deploy user needs
+  READ too: the operator commands that restart HTTPD go through this check.
   See `docs/installation.md`, *Who may use the console service*.
 - **The `owner` filter of the job list is exact.** `owner=ABC` no longer also
   lists the jobs of `ABCD`, and a pattern such as `ABC*` gives an empty list.
@@ -120,6 +119,24 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   escaped instead of being sent as a lone byte. The member names of a data set
   listing go through the same routine; a quote or a backslash in one is now
   written `\"` and `\\`, which is the same string to any JSON parser.
+- **The data set list reports the size of a data set with more than three
+  extents** (#370). `sizex` (tracks allocated) and `used` (percent used) summed
+  only the three extents of the format-1 DSCB; extents 4 to 16 live in the
+  format-3 DSCB, which was never read. A data set with seven extents listed as
+  `"sizex":"3","used":"233"` and now as `"sizex":"7","used":"100"`. If the
+  extent chain cannot be read, `sizex` and `used` are `"?"` rather than a wrong
+  number, and `like=` no longer copies a partial sum from such a model. The
+  list fields `extx`, `sizex`, `used` and `spacu` are documented now
+  (`docs/endpoints/datasets/list.md`). Not handled: a user-label extent and
+  ISAM data sets.
+- **A USS file download that fails part-way no longer ends as a clean `200`**
+  (#423). The read loop took a failed read for the end of the file, so the
+  client got a complete-looking `200` with a truncated file and no error. The
+  reply is now aborted: the connection closes in the middle of the body without
+  the final chunk, which a client reports as an incomplete transfer, and the
+  new operator message `MVSMF301E` names the file. Bytes read before the
+  failure were already sent; there is no error body. See
+  `docs/endpoints/uss/get.md`.
 
 - **Data set lists no longer fail with HTTP 500 under parallel requests**
   (#436). `GET /zosmf/restfiles/ds` has IDCAMS write the catalog listing into a
@@ -243,6 +260,11 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `release` are recognised and answer 400 "not implemented". See
   `docs/endpoints/jobs/cancel.md`.
 
+- **Two manuals** (#449, #543). *mvsMF for MVS 3.8j, User's Guide* (ML08-0001)
+  and *mvsMF for MVS 3.8j, Reference* (ML08-0002), in a Draft edition. They are
+  read online at mvslovers.readthedocs.io, and the PDFs are attached to the
+  release with their checksums.
+
 ### Changed
 
 - **A path mvsMF serves, requested with a method it does not offer, answers
@@ -288,11 +310,12 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   `[]`). The value is an exact user id (any case) or `*`: `owner=ABC` no
   longer matches the owner `ABCD`, and a pattern such as `ABC*` gives an empty
   list. An empty `owner=` means the caller's own jobs.
-- **The console service and `/zosmf/test` refuse every user until you define
-  a profile and grant READ** (#347, #460). mvsMF now checks READ on the RAKF
-  resource `FACILITY MVSMF.CONSOLE` itself, as the first step of every console
-  request (command, response, detection, hardcopy log) and of every
-  `/zosmf/test` request, `fn=version` included. The check is fail-closed: it
+- **The console service refuses every user until you define a profile and
+  grant READ** (#347, #460). mvsMF now checks READ on the RAKF resource
+  `FACILITY MVSMF.CONSOLE` itself, as the first step of every console request
+  (command, response, detection, hardcopy log) and of every request to the
+  diagnostic endpoint `/zosmf/test`, which only a development build has (#508),
+  `fn=version` included. The check is fail-closed: it
   permits only when RAKF says "permitted". A user without READ, and everybody
   while the profile is not defined, gets `500` with category 4
   (Authorization); a request with no resolved user gets `401`. **This is the
@@ -304,9 +327,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   depend on it.
 
   **Upgrade: define the profile and grant READ to those who may use it.** The
-  deploy user, and whoever checks the build id of a
-  development build with `?fn=version`, needs READ
-  too. Rules and the profile commands: `docs/installation.md`.
+  deploy user needs READ too, and so does whoever checks the build id of a
+  development build with `?fn=version`. A release deploy is checked with
+  `GET /zosmf/info`, which needs no profile. Rules and the profile commands:
+  `docs/installation.md`.
 - **The diagnostic endpoint `/zosmf/test` no longer has a function that
   returns session data** (#508). The function is removed, not gated: a
   request to it now gets the endpoint's help text like any unknown `fn`. No
@@ -329,6 +353,30 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   the shared Basic credential's, the one a logout ends for every client that
   logged on the same way. Only a successful login sets the cookie now, and it
   sets it once: a login used to send it twice.
+
+### Known issues
+
+Three problems are open and moved to the next release. The first two were
+reported on 1.2.0 and have **not been reproduced**: the load and soak runs made
+for 1.4.0 did not show them, and the issues stay open. If you see one with
+1.4.0, please add the server log and the request that came before it to the
+issue.
+
+- **An abend at the entry of a function, with the loaded module overwritten**
+  (#425). Two status polls of a running job ended `S0C7` (`MVSMF901E`), and the
+  instruction found at the entry of the function was not the one the module
+  holds, so the code in storage had been changed after it was loaded. It was
+  seen once; the same server shut down badly afterwards.
+- **A large upload is cut off** (#428). An upload of about 20 MB ended with a
+  broken connection on the client, and the server wrote `MVSMF007W`: for ten
+  seconds no data had arrived in the middle of the body, so mvsMF gave up. The
+  next upload went through. It was seen twice.
+- **A member read answers `404` "member not found" when the directory of the
+  PDS cannot be read** (#514). The open of the member failed, and mvsMF looks
+  at the directory to tell a missing member from an I/O error; if the
+  directory itself cannot be read, the answer should be an error and is the
+  `404`. Making it a `500` needs a measurement on MVS of what an empty
+  directory walk leaves behind, which did not fit before this release.
 
 ## [1.3.0] - 2026-10-15
 

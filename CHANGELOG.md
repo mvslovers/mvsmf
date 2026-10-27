@@ -20,7 +20,7 @@ defined and READ granted, the console service and `/zosmf/test` refuse every
 user. Read the first two items below before you install.
 
 Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
-4.2.0**, **ufsd 1.5.1** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
+4.4.0**, **ufsd 1.5.1** and **crypto370 1.0.1**. httpd 4.2.0 stays the minimum
 (see 1.2.0).
 
 ### Read this first

@@ -59,11 +59,11 @@ unchanged. The steps and details are on the UFSD 1.5.2 release page at
 
 The client library of UFSD 1.5.1 reports failures that the 1.4.0 library hid. A
 file request that could answer success with the library of UFSD 1.3.0 can now
-answer with an error report (a refused request, a rejected write). The server-side fixes of
-UFSD 1.5.0 and 1.5.1 are not in an older server either: inodes lost when files
-are removed, a file read that could report end of file early, and races in the
-queues of the server on systems with more than one processor. An older server
-is not refused. The file tests of this release passed against a UFSD 1.4.0
+answer with an error report (a refused request, a rejected write). The
+server-side fixes of UFSD 1.5.0 and 1.5.1 are not in an older server either:
+inodes lost when files are removed, a file read that could report end of file
+early, and races in the queues of the server on systems with more than one
+processor. An older server is not refused. The file tests of this release passed against a UFSD 1.4.0
 server, but that is a build finding and no reason to run one.]
 
 The retcode of a finished job in the jobs service comes from a marker in the

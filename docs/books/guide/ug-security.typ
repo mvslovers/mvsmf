@@ -39,8 +39,9 @@ RAKF 2.0.0, keeps JES2 from starting at the next IPL.
 @ug-security-jp-byhand is a reference for reading an existing file and for
 repairing a broken one. A RAKF before 2.0.0, such as the one in the TK5 image,
 does not have the commands. For the console profile it takes lines in
-#cmd("PROFILES"): @ug-security-console-old. The class #cmd("JESSPOOL") does not
-exist there.]
+#cmd("PROFILES"): @ug-security-console-old. The job authorization with the class
+#cmd("JESSPOOL") is described and tested for RAKF 2.0.0 or later only. The
+older RAKF has no class table and has not been tested with job profiles.]
 
 #note[*Read the console after every reload.* A profile is in effect only after
 the reload, and a broken table aborts the reload. @ug-security-jp-byhand says

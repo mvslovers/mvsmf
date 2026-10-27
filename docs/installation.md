@@ -398,14 +398,15 @@ decides for every job who may see, read and purge it. Without a profile in the
 RAKF class `JESSPOOL` every user, an administrator included, sees only their own
 jobs, and `owner=*` lists only those. If a client or a tool relied on seeing the
 jobs of others, for example a started task found with `owner=*`, create the
-profiles before you start the new level. The class needs **RAKF 2.0.0 or later**,
-and so do the commands. Create the profiles with `RDEFINE` and `PERMIT`, then
+profiles before you start the new level. The commands need **RAKF 2.0.0 or
+later**. Create the profiles with `RDEFINE` and `PERMIT`, then
 reload with `S RAKFPROF`: **with these commands, do not edit `PROFILES` by hand;
 RAKF's maintainer recommends the commands.** The rules, the commands and examples
 are in [Job spool authorization](jesspool.md) (section *Create the profiles
-with the RAKF commands*). On a RAKF before 2.0.0, such as the one in the TK5 image, there is no
-class `JESSPOOL` and nothing to define: every user sees only their own jobs, as
-the prerequisites say.
+with the RAKF commands*). The job authorization is described and tested for
+RAKF 2.0.0 or later. A RAKF before 2.0.0, such as the one in the TK5 image, has
+no class table and has not been tested with job profiles. Without a profile,
+every user sees only their own jobs, as the prerequisites say.
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same

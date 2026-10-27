@@ -386,14 +386,15 @@ The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 
 + *Check HTTPD.* HTTPD must be 4.2.0 or later (@ug-install-prereq).
 + *Prepare the job profiles.* Version 1.4.0 decides which jobs a user may see,
-  read and purge with the RACF class #cmd("JESSPOOL"). The class has to exist in
-  the security product, which needs RAKF 2.0.0 or later, and the profiles have
-  to exist _before_ the upgrade. Without profiles, every user sees only the
+  read and purge with the RACF class #cmd("JESSPOOL"). The commands that define
+  the profiles need RAKF 2.0.0 or later, and the profiles have to exist
+  _before_ the upgrade. Without profiles, every user sees only the
   jobs of their own, and a started task that a client found with
   #cmd("owner=*") disappears from the list. @ug-security describes the profiles
-  and the setup step by step. A RAKF before 2.0.0, such as the one in the TK5
-  image, has no class #cmd("JESSPOOL"): there is nothing to define, and every
-  user sees only their own jobs.
+  and the setup step by step. The job authorization is described and tested
+  for RAKF 2.0.0 or later. A RAKF before 2.0.0, such as the one in the TK5
+  image, has no class table and has not been tested with job profiles. Without
+  a profile, every user sees only their own jobs.
 + *Prepare the console profile.* Version 1.4.0 checks READ access to the
   resource #cmd("MVSMF.CONSOLE") in the class #cmd("FACILITY") for every
   console request and every request of the diagnostic endpoint, and it refuses

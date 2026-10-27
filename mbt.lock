@@ -4,8 +4,8 @@
     "version": "1.0.1"
   },
   "mvslovers/httpd": {
-    "sha256": "061e077324940212f1a37110d6225f57fb05958b1c1de9580555bd1f6b483183",
-    "version": "4.2.0"
+    "sha256": "3528a9744617c716d029dde5733cc219ea38e38593c4ea7e11f0ec0dfe1032b4",
+    "version": "4.4.0"
   },
   "mvslovers/ufsd": {
     "sha256": "63fb5abcc6d5f2611c6c7128cf7529e4c57a2aa0ebd051b019980bf4cf1f8acf",

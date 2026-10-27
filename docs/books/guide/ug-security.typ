@@ -30,8 +30,8 @@ the release whose commands #cmd("RDEFINE"), #cmd("PERMIT") and #cmd("ADDUSER")
 the tasks below use. @ug-security-notcovered lists what the profiles do not
 govern.
 
-#note[*With RAKF 2.0.0 or later, do not edit #cmd("PROFILES") by hand; RAKF's
-maintainer recommends the commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
+#note[*With RAKF 2.0.0 or later, do not edit #cmd("PROFILES") by hand;
+RAKF's maintainer recommends the commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
 #cmd("ADDSD"), then reload with #cmd("RAKFPROF"). The commands keep the file
 sorted, refuse a group line that has no universal line, and do not write a
 profile twice. A hand-edited file that is wrong aborts the reload and, on
@@ -576,18 +576,20 @@ error. Define the profile before you start the new version
 #idx("MVSMF.CONSOLE", "RAKF before 2.0.0")#idx("TK5")#idx("PROFILES member")
 The commands #cmd("RDEFINE") and #cmd("PERMIT") come with RAKF 2.0.0. The RAKF
 in the TK5 image is older and does not have them. In a batch TSO step
-#cmd("RDEF") answers #cmd("IKJ56500I COMMAND RDEF NOT FOUND") and the step ends
-with the return code 12. #cmd("HELP RDEFINE") and #cmd("HELP PERMIT") answer
-that the command is not found. On such a system you write the lines of the
+#cmd("RDEF") answers #cmd("IKJ56500I COMMAND RDEF NOT FOUND"), and
+#cmd("HELP RDEFINE") and #cmd("HELP PERMIT") answer that the command is not
+found. On such a system you write the lines of the
 profile into the member #cmd("PROFILES") of #cmd("SYS1.SECURE.CNTL") yourself.
 Do this only there. On RAKF 2.0.0 or later use the commands: a wrong
 hand-written table aborts the reload (@ug-security-jp-byhand).
 
 + Keep a copy of #cmd("PROFILES").
 + Add the two lines below. Keep the member in ascending order of class,
-  resource and group; the table in the measurement was in that order. The line
-  for #cmd("MVSMF.CONSOLE") goes among the #cmd("FACILITY") lines. The line
-  without a group, the universal access, stands before the line with the group.
+  resource and group (@ug-security-jp-byhand): it is easier to read and a
+  duplicate is easier to see. The line for #cmd("MVSMF.CONSOLE") goes among the
+  #cmd("FACILITY") lines. The line without a group, the universal access, stands
+  before the line with the group. A second line with the same class, resource
+  and group aborts the reload.
 + Keep the layout: the class in columns 1 to 8 (#cmd("FACILITY") fills them),
   the resource from column 9, the group from column 53 and the access from
   column 61.

@@ -190,9 +190,8 @@ and granted READ.
 
 **Which RAKF do you have?** The RAKF commands `RDEFINE` and `PERMIT` come with
 **RAKF 2.0.0**. The RAKF in the TK5 image is older and does not have them: in a
-batch TSO step `RDEF` answers `IKJ56500I COMMAND RDEF NOT FOUND` (step return
-code 12), and `HELP RDEFINE` and `HELP PERMIT` answer that the command is not
-found. If yours answers like that, skip to *RAKF before 2.0.0* below.
+batch TSO step `RDEF` answers `IKJ56500I COMMAND RDEF NOT FOUND`, and `HELP
+RDEFINE` and `HELP PERMIT` answer that the command is not found. If yours answers like that, skip to *RAKF before 2.0.0* below.
 
 **With RAKF 2.0.0 or later: do not edit `PROFILES` by hand; RAKF's maintainer
 recommends the commands.**
@@ -268,9 +267,11 @@ reload (the abends are in [Job spool authorization](jesspool.md), *Writing
 
 1. Keep a copy of `PROFILES`.
 2. Add the two lines. Keep the member in ascending order of class, resource and
-   group; the table in the measurement was in that order. The line for
-   `FACILITY MVSMF.CONSOLE` goes among the `FACILITY` lines, and the line
-   without a group (the universal access) stands before the line with the group.
+   group, as [Job spool authorization](jesspool.md) recommends: it is easier to
+   read and a duplicate is easier to see. The line for `FACILITY MVSMF.CONSOLE`
+   goes among the `FACILITY` lines, and the line without a group (the universal
+   access) stands before the line with the group. A second line with the same
+   class, resource and group aborts the reload.
 3. Use this layout: the class in columns 1-8 (`FACILITY` fills them), the
    resource from column 9, the group from column 53, the access from column 61.
 4. Reload with `S RAKFPROF` and look at the console. A reload that worked

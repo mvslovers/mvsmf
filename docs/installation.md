@@ -16,7 +16,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 |---|---|
 | **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
 | **RAKF 2.0.0 or later** | Only to see jobs of other users: the class `JESSPOOL` that decides this is in the class table of RAKF 2.0.0 and later. Without the class every user sees only their own jobs. See [Job spool authorization](jesspool.md). |
-| **RAKF** | For the console service and `/zosmf/test`, in every case: they are open only to a user that RAKF reports as holding READ on `FACILITY MVSMF.CONSOLE` (see step 4). mvsMF asks the system's RACHECK service through libc370's `racf_auth()` and permits only the answer 0, so a system where that service answers anything else, "not protected" (4) included, refuses everybody. It has not been run on a system without RAKF. |
+| **RAKF** | For the console service and `/zosmf/test`, in every case: they are open only to a user that RAKF reports as holding READ on `FACILITY MVSMF.CONSOLE` (see step 4). The RAKF commands `RDEFINE` and `PERMIT` that step 4 uses to define the profile **come with RAKF 2.0.0**; the RAKF in the TK5 image is older and takes the profile as lines in `PROFILES` (step 4, *RAKF before 2.0.0*). mvsMF asks the system's RACHECK service through libc370's `racf_auth()` and permits only the answer 0, so a system where that service answers anything else, "not protected" (4) included, refuses everybody. It has not been run on a system without RAKF. |
 | **UFSD 1.5.2** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. **Run the 1.5.2 server.** UFSD servers before 1.5.2 could give one disk block to two files while a file was being written: the write reported success and the file held another file's data in that block (measured on UFSD 1.4.0 and 1.5.1; assume every release since 1.3.0 is affected). mvsMF writes USS files through that server, so a `PUT` to a USS file can be hit. UFSD 1.5.2 stops it and does not undo it: compare files written earlier with a copy, or write them again, and do not rely on `F UFSD,REBUILD` as a repair. The fix is in the server; mvsMF needs no rebuild, because UFSD 1.5.2 leaves the client library unchanged. Steps and details: the [UFSD 1.5.2 release page](https://github.com/mvslovers/ufsd/releases/tag/v1.5.2). mvsMF 1.4.0 is built with the client library of UFSD 1.5.1, which reports failures the 1.4.0 library hid (a refused request, a rejected write), so a USS request that could answer success with 1.3.0 can now answer with an error report. The server-side fixes of UFSD 1.5.0 and 1.5.1 (inodes lost when files are removed, a file read that could report end of file early, races in the server's queues on systems with more than one processor) are not in an older server either. An older server is not refused: the USS tests of this release passed against a UFSD 1.4.0 server, but that is a build finding, not a licence to run one. |
 | **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See [The `SYZJ201` usermod](https://github.com/mvslovers/mvsmf/blob/main/README.md#the-syzj201-usermod) in the project README. |
 
@@ -188,7 +188,14 @@ READ in HTTPD: a user without it gets `403` from HTTPD on
 console and `/zosmf/test` refuse everybody until you have defined the profile
 and granted READ.
 
-**Do not edit `PROFILES` by hand; RAKF's maintainer recommends the commands.**
+**Which RAKF do you have?** The RAKF commands `RDEFINE` and `PERMIT` come with
+**RAKF 2.0.0**. The RAKF in the TK5 image is older and does not have them: in a
+batch TSO step `RDEF` answers `IKJ56500I COMMAND RDEF NOT FOUND` (step return
+code 12), and `HELP RDEFINE` and `HELP PERMIT` answer that the command is not
+found. If yours answers like that, skip to *RAKF before 2.0.0* below.
+
+**With RAKF 2.0.0 or later: do not edit `PROFILES` by hand; RAKF's maintainer
+recommends the commands.**
 Define the profile with the RAKF commands `RDEFINE` and `PERMIT`, then reload
 the profiles. The commands keep `PROFILES` sorted and refuse a group line that
 has no universal line (the reasons are in [Job spool
@@ -249,6 +256,37 @@ Three things to know:
   user who may use the console may use the test endpoint, and the other way
   round. A release does not register `/zosmf/test` at all, and a build with
   `-DMVSMF_NO_TEST_ENDPOINT` leaves it out of a development build too.
+
+### RAKF before 2.0.0: write the lines into `PROFILES`
+
+A RAKF without `RDEFINE` and `PERMIT`, such as the one in the TK5 image, has no
+other way: you write the two lines of the example above into the member
+`PROFILES` of `SYS1.SECURE.CNTL` yourself. Do this only on such a system. On
+RAKF 2.0.0 or later use the commands: a wrong hand-written table aborts the
+reload (the abends are in [Job spool authorization](jesspool.md), *Writing
+`PROFILES` by hand*).
+
+1. Keep a copy of `PROFILES`.
+2. Add the two lines. Keep the member in ascending order of class, resource and
+   group; the table in the measurement was in that order. The line for
+   `FACILITY MVSMF.CONSOLE` goes among the `FACILITY` lines, and the line
+   without a group (the universal access) stands before the line with the group.
+3. Use this layout: the class in columns 1-8 (`FACILITY` fills them), the
+   resource from column 9, the group from column 53, the access from column 61.
+4. Reload with `S RAKFPROF` and look at the console. A reload that worked
+   answers `RAKFPROF7  RAKF PROFILES UPDATED`.
+
+```
+FACILITYMVSMF.CONSOLE                                       NONE
+FACILITYMVSMF.CONSOLE                               MVSCONS READ
+```
+
+The first line closes the resource for everybody, the second lets the group
+`MVSCONS` in. On the TK5 image the layout was measured with the group `ADMIN`
+in the second line; `MVSCONS` is the group of this example. The users who may
+use the console must be connected to the group you name in the member `USERS` of
+`SYS1.SECURE.CNTL`; this guide does not describe that member for an older RAKF.
+Everything else in this step applies unchanged, the deploy user included.
 
 ## 5. Restart httpd and verify
 
@@ -341,7 +379,11 @@ administrator included, until the profile is defined and READ granted. Before
 you start the new level:
 
 - define the profile and grant READ to those who may issue operator commands,
-  **the deploy user included** (step 4, *Who may use the console service*);
+  **the deploy user included** (step 4, *Who may use the console service*). With
+  RAKF 2.0.0 or later use the commands `RDEFINE` and `PERMIT`. A RAKF before
+  2.0.0, such as the one in the TK5 image, does not have them: write the two
+  lines into `PROFILES` as step 4 shows under *RAKF before 2.0.0*, then reload
+  with `S RAKFPROF`;
 - add the fourth route line of step 4 to the HTTPD parmlib member, before
   `/zosmf/*`. An existing system has the three lines of 1.3.0. The check in
   mvsMF does not depend on the line, but the line makes HTTPD refuse a user
@@ -355,10 +397,14 @@ decides for every job who may see, read and purge it. Without a profile in the
 RAKF class `JESSPOOL` every user, an administrator included, sees only their own
 jobs, and `owner=*` lists only those. If a client or a tool relied on seeing the
 jobs of others, for example a started task found with `owner=*`, create the
-profiles before you start the new level. Create them with the RAKF commands
-`RDEFINE` and `PERMIT`, then reload with `S RAKFPROF`: **do not edit `PROFILES`
-by hand; RAKF's maintainer recommends the commands.** The rules, the commands
-and examples are in [Job spool authorization](jesspool.md).
+profiles before you start the new level. The class needs **RAKF 2.0.0 or later**,
+and so do the commands. Create the profiles with `RDEFINE` and `PERMIT`, then
+reload with `S RAKFPROF`: **with these commands, do not edit `PROFILES` by hand;
+RAKF's maintainer recommends the commands.** The rules, the commands and examples
+are in [Job spool authorization](jesspool.md) (section *Create the profiles
+with the RAKF commands*). On a RAKF before 2.0.0, such as the one in the TK5 image, there is no
+class `JESSPOOL` and nothing to define: every user sees only their own jobs, as
+the prerequisites say.
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
 refused once the FMID has been accepted, which the install job does in the same

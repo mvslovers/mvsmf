@@ -30,14 +30,17 @@ the release whose commands #cmd("RDEFINE"), #cmd("PERMIT") and #cmd("ADDUSER")
 the tasks below use. @ug-security-notcovered lists what the profiles do not
 govern.
 
-#note[*Do not edit #cmd("PROFILES") by hand; RAKF's maintainer recommends the
-commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
+#note[*With RAKF 2.0.0 or later, do not edit #cmd("PROFILES") by hand; RAKF's
+maintainer recommends the commands.* Create profiles with #cmd("RDEFINE"), #cmd("PERMIT") and
 #cmd("ADDSD"), then reload with #cmd("RAKFPROF"). The commands keep the file
 sorted, refuse a group line that has no universal line, and do not write a
 profile twice. A hand-edited file that is wrong aborts the reload and, on
 RAKF 2.0.0, keeps JES2 from starting at the next IPL.
 @ug-security-jp-byhand is a reference for reading an existing file and for
-repairing a broken one.]
+repairing a broken one. A RAKF before 2.0.0, such as the one in the TK5 image,
+does not have the commands. For the console profile it takes lines in
+#cmd("PROFILES"): @ug-security-console-old. The class #cmd("JESSPOOL") does not
+exist there.]
 
 #note[*Read the console after every reload.* A profile is in effect only after
 the reload, and a broken table aborts the reload. @ug-security-jp-byhand says
@@ -550,7 +553,8 @@ universal access #cmd("NONE") is the line without an ID:
 #screen(raw(read("../ex/ug-security/r-console-prof.txt"), block: true))
 
 Define the profile with the commands, as the job does, and do not edit
-#cmd("PROFILES") by hand (@ug-security-jp-byhand).
+#cmd("PROFILES") by hand (@ug-security-jp-byhand). A RAKF before 2.0.0 does not
+have the commands (@ug-security-console-old).
 
 The profile takes effect at once. HTTPD and mvsMF ask RAKF on every request, so
 neither needs a restart after you define the profile or change a permission.
@@ -566,6 +570,43 @@ endpoint refuse every user, administrators included, until the profile is
 defined and READ is granted. This is the behaviour after an upgrade, not an
 error. Define the profile before you start the new version
 (@ug-install-upgrade).]
+
+=== Define the Profile on a RAKF before 2.0.0 <ug-security-console-old>
+
+#idx("MVSMF.CONSOLE", "RAKF before 2.0.0")#idx("TK5")#idx("PROFILES member")
+The commands #cmd("RDEFINE") and #cmd("PERMIT") come with RAKF 2.0.0. The RAKF
+in the TK5 image is older and does not have them. In a batch TSO step
+#cmd("RDEF") answers #cmd("IKJ56500I COMMAND RDEF NOT FOUND") and the step ends
+with the return code 12. #cmd("HELP RDEFINE") and #cmd("HELP PERMIT") answer
+that the command is not found. On such a system you write the lines of the
+profile into the member #cmd("PROFILES") of #cmd("SYS1.SECURE.CNTL") yourself.
+Do this only there. On RAKF 2.0.0 or later use the commands: a wrong
+hand-written table aborts the reload (@ug-security-jp-byhand).
+
++ Keep a copy of #cmd("PROFILES").
++ Add the two lines below. Keep the member in ascending order of class,
+  resource and group; the table in the measurement was in that order. The line
+  for #cmd("MVSMF.CONSOLE") goes among the #cmd("FACILITY") lines. The line
+  without a group, the universal access, stands before the line with the group.
++ Keep the layout: the class in columns 1 to 8 (#cmd("FACILITY") fills them),
+  the resource from column 9, the group from column 53 and the access from
+  column 61.
++ Reload with #cmd("S RAKFPROF") and look at the console. A reload that worked
+  answers #cmd("RAKFPROF7  RAKF PROFILES UPDATED").
+
+#screen(```
+FACILITYMVSMF.CONSOLE                                       NONE
+FACILITYMVSMF.CONSOLE                               CONSOPS READ
+```)
+
+The first line closes the resource for everybody. The second lets the group
+#cmd("CONSOPS") in. On the TK5 image the layout was measured with the group
+#cmd("ADMIN") in the second line; #cmd("CONSOPS") is the group of the example in
+this chapter. The users who may use the console must be connected to the group
+you name in the member #cmd("USERS") of #cmd("SYS1.SECURE.CNTL"). This book
+describes that member only for RAKF 2.0.0 (@ug-security-users). Everything else
+in this section applies unchanged: the profile takes effect at once, and the
+user ID that deploys needs READ.
 
 === What a User without Access Sees <ug-security-console-refused>
 

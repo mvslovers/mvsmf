@@ -90,7 +90,7 @@ section says stop HTTPD, run the install job, start HTTPD. An APPLY into
 page and the stand rollout already do it that way. Docs only.
 **1.4.0 release mechanics (#450), prepared 2026-10-23**: FMID `TZMF140`
 (deleting `TZMF130`) in README, installation guide and uninstall job; the
-CHANGELOG section `[1.4.0]` (dated 2026-10-31 in the bump PR, a Board decision;
+CHANGELOG section `[1.4.0]` (dated 2026-10-27 in the bump PR, a Board decision;
 "Built against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any

@@ -377,10 +377,10 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
 ### Known issues
 
 Three problems are open and moved to the next release. The first two were
-reported on 1.2.0 and have **not been reproduced**: the load and soak runs made
-for 1.4.0 did not show them, and the issues stay open. If you see one with
-1.4.0, please add the server log and the request that came before it to the
-issue.
+reported on earlier builds and have **not been reproduced**: the load and
+soak runs made for 1.4.0 did not show them, and the issues stay open. If you
+see one with 1.4.0, please add the server log and the request that came
+before it to the issue.
 
 - **An abend at the entry of a function, with the loaded module overwritten**
   (#425). Two status polls of a running job ended `S0C7` (`MVSMF901E`), and the
@@ -388,8 +388,8 @@ issue.
   holds, so the code in storage had been changed after it was loaded. The same
   server shut down badly afterwards. A second server showed an `S0C1`, an
   invalid instruction, on a status poll of a running job, about once in 1,860
-  polls of a repeat run on 1.2.0; where it happened is unknown. Neither was
-  seen in the runs made for 1.4.0.
+  polls of a repeat run; where it happened is unknown. Neither was seen in the
+  runs made for 1.4.0.
 - **A large upload is cut off** (#428). An upload of about 20 MB ended with a
   broken connection on the client in the middle of the body. It was seen twice.
   For the one whose server log is still there, the server wrote `MVSMF007W`: for

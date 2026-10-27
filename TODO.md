@@ -90,8 +90,8 @@ section says stop HTTPD, run the install job, start HTTPD. An APPLY into
 page and the stand rollout already do it that way. Docs only.
 **1.4.0 release mechanics (#450), prepared 2026-10-23**: FMID `TZMF140`
 (deleting `TZMF130`) in README, installation guide and uninstall job; the
-CHANGELOG section `[1.4.0] - unreleased` (date goes in with the tag; "Built
-against" follows the final pins). `mbt package` on a throwaway tree with a local
+CHANGELOG section `[1.4.0]` (dated 2026-10-27 in the bump PR, a Board decision;
+"Built against" follows the final pins). `mbt package` on a throwaway tree with a local
 `1.4.0` bump: `inst.jcl` reads `++FUNCTION(TZMF140)`, `++VER(Z038)
 DELETE(TZMF130)`, ACCEPT `COND=(4,LT,APPLY)`. Not yet `LIST`-checked on any
 stand. **Final pass, 2026-10-27**: #372 and #452 are measured, #449 landed (two manuals, Draft edition); #425 and #428 (not reproduced) and #514 (no measurement) moved to 1.5.0 and stand in the CHANGELOG as Known issues; #370 and #423 and the console-gate wording (#460, #508) are in the Fixed list. **Board approval, 2026-10-27, with three conditions**: (a) no `LIST` of `TZMF140` on a stand; (b) UFSD server at least 1.5.2 (older servers could give one block to two files while writing; UFSD 1.5.2 fixes it, does not undo it; `libufs` unchanged, `mbt.toml` keeps `ufsd >= 1.5.1`, `mbt.lock` stays on 1.5.1), now in the CHANGELOG ("Read this first", Changed) and the installation guide, and in the two manuals (`ug-install`, `ug-intro`, `ref-uss`; #553, PR #554); (c) tag only when #451 (TK5 acceptance with the SMP install) is accepted on the release build. The version bump runs as a PR; merge and tag `v1.4.0` are the Board's. The `[1.4.0] - unreleased` heading takes its date in the bump PR (target 2026-10-31, a Board decision). **#454 is done in its PR**:

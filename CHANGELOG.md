@@ -9,7 +9,7 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
-## [1.4.0] - unreleased
+## [1.4.0] - 2026-10-27
 
 The release that lets a site decide who may see, read and purge which job, and
 who may use the console service. FMID `TZMF140`, and its SYSMOD deletes

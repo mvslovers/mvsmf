@@ -297,9 +297,14 @@ assert_json_field "$CONTENT" '.items[0].dsname' "$TEST_SEQ" "exact name match"
 
 # dev is named from the volume's track capacity (devtk of its format-4 DSCB,
 # #443), not from tracks per cylinder: a 3380 and a 3390 both have 15.
-DEVTK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}" | jq -r '.devtk')
-WANT_DEV=$(dev_for_devtk "$DEVTK")
-assert_json_field "$CONTENT" '.items[0].dev' "$WANT_DEV" "dev follows devtk $DEVTK"
+# devtk comes from /zosmf/test, which only a development build has (#508).
+if mvsmf_dev_build "${BASE_URL}/zosmf/info"; then
+	DEVTK=$(curl -s -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/test?fn=dscb&dsn=${TEST_SEQ}" | jq -r '.devtk')
+	WANT_DEV=$(dev_for_devtk "$DEVTK")
+	assert_json_field "$CONTENT" '.items[0].dev' "$WANT_DEV" "dev follows devtk $DEVTK"
+else
+	skip "dev follows devtk: not a development build, /zosmf/test is not registered"
+fi
 
 # --- dev on every volume a listing touches (#443) ---
 # The check above sees only the volume the fixtures live on. A mixed listing

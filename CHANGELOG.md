@@ -46,12 +46,25 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   has written its owner.** The answer to the submit request itself is
   unchanged. A client that polls the status right after submitting has to
   accept a 404 for the first moments.
-- **For the USS endpoints, run UFSD 1.5.1 as well** (#453). mvsMF 1.4.0 is
-  linked with the client library of UFSD 1.5.1, which reports failures the
-  older library hid: a USS request that failed inside it can now answer with an
-  error report where 1.3.0 answered success. An older UFSD server is not
-  refused (the USS tests passed against a 1.4.0 server), but it lacks the
-  server-side fixes. See *Changed*.
+- **For the USS endpoints, run the UFSD 1.5.2 server** (#453). UFSD servers
+  before 1.5.2 could give one disk block to two files while a file was being
+  written: the write reported success, and the file held another file's data in
+  that block. It was measured on UFSD 1.4.0 and 1.5.1; assume every release
+  since 1.3.0 is affected. mvsMF writes USS files through that server, so a
+  `PUT` to a USS file can be hit. The fault is in the server, not in mvsMF, and
+  mvsMF needs no rebuild (UFSD 1.5.2 leaves the client library unchanged). **UFSD 1.5.2 stops the
+  damage; it does not undo it:** a file written through an older server can
+  still hold another file's data in one 4096-byte block, and UFSD cannot tell
+  which files. Compare such files with a copy, or write them again after the upgrade.
+  The operator command `F UFSD,REBUILD` is not a repair. The steps and details
+  are on the
+  [UFSD 1.5.2 release page](https://github.com/mvslovers/ufsd/releases/tag/v1.5.2).
+  mvsMF 1.4.0 is also linked with the client library of UFSD 1.5.1, which
+  reports failures the older library hid: a USS request that failed inside it
+  can now answer with an error report where 1.3.0 answered success. An older
+  server is not refused (the USS tests of this release passed against a 1.4.0
+  server, but that is a build finding, not a licence to run one). See
+  *Changed*.
 - **Only an upgrade from 1.3.0 is the package and nothing else.** The SYSMOD
   deletes `TZMF130`, not `TZMF120`. On a system still at 1.2.0 the install is
   expected to copy nothing and end RC 00 (derived from SMP's ownership rule; the
@@ -283,7 +296,7 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   exist" must now accept 405 as well. `PATCH` and `OPTIONS` are still answered
   by HTTPD with its own 405.
 - **The USS endpoints use the UFSD 1.5.1 client library** (#453), up from
-  1.4.0, and the guide names UFSD 1.5.1 as the server to run with it. The
+  1.4.0, and the guide names UFSD 1.5.2 as the server to run with it. The
   library no longer hides failures: a request that the UFSD router refuses is
   returned as an error, and a write the server rejects counts 0 bytes, so a USS
   request that could answer success in 1.3.0 can now answer with an error
@@ -292,9 +305,13 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   request, because the handlers already refuse a request path that does not fit
   255 characters. The server-side fixes of UFSD 1.5.0 and 1.5.1 (inodes lost
   when files are removed, a file read that could report end of file early, two
-  races in the server's queues on systems with more than one processor) need
-  the 1.5.1 server. An older server is not refused: the USS tests of this
-  release passed against a UFSD 1.4.0 server.
+  races in the server's queues on systems with more than one processor) need a
+  server of at least 1.5.1, and UFSD 1.5.2 stops a further fault: a server
+  before 1.5.2 could give one disk block to two files while a file was being
+  written (see *Read this first*). UFSD 1.5.2 leaves the client library
+  unchanged, so mvsMF stays built with the library of 1.5.1. An older server is
+  not refused: the USS tests of this release passed against a UFSD 1.4.0
+  server, but that is a build finding, not a licence to run one.
 - **The installation guide says to stop HTTPD around an upgrade** (#434). The
   install replaces the module the running server loads on every request.
   Whether a request that arrives meanwhile fails has not been measured.

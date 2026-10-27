@@ -9,3 +9,43 @@ jobs:
     uses: mvslovers/mbt/.github/workflows/release3.yml@main
     permissions:
       contents: write
+
+  # The manuals (docs/books) are built from the tag and attached to the
+  # release that release3.yml just created. The PDFs are reproducible
+  # (SOURCE_DATE_EPOCH=0), so a rebuild from the tag gives the same sums.
+  books:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TYPST_VERSION: 0.15.1
+      TYPST_SHA256: a6d077d0a95eed5a2eba715b2dae06be954f624ccbf85758a03f389ded33118c
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install typst (pinned)
+        run: |
+          f=typst-x86_64-unknown-linux-musl.tar.xz
+          curl -fsSL --proto "=https" --tlsv1.2 -O "https://github.com/typst/typst/releases/download/v$TYPST_VERSION/$f"
+          echo "$TYPST_SHA256  $f" | sha256sum -c -
+          tar xf "$f"
+          sudo install -m 755 typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst
+
+      - name: Build the manuals
+        run: SOURCE_DATE_EPOCH=0 make -C docs/books
+
+      - name: Attach the manuals and their sums
+        run: |
+          cd docs/books
+          assets=$(gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          if printf '%s\n' "$assets" | grep -qx SHA256SUMS; then
+            gh release download "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" -p SHA256SUMS
+          else
+            : > SHA256SUMS
+          fi
+          sha256sum ml08-0001-*.pdf ml08-0002-*.pdf >> SHA256SUMS
+          gh release upload "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --clobber ml08-0001-*.pdf ml08-0002-*.pdf SHA256SUMS

@@ -46,10 +46,17 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   has written its owner.** The answer to the submit request itself is
   unchanged. A client that polls the status right after submitting has to
   accept a 404 for the first moments.
+- **For the USS endpoints, run UFSD 1.5.1 as well** (#453). mvsMF 1.4.0 is
+  linked with the client library of UFSD 1.5.1, which reports failures the
+  older library hid: a USS request that failed inside it can now answer with an
+  error report where 1.3.0 answered success. An older UFSD server is not
+  refused (the USS tests passed against a 1.4.0 server), but it lacks the
+  server-side fixes. See *Changed*.
 - **Only an upgrade from 1.3.0 is the package and nothing else.** The SYSMOD
-  deletes `TZMF130`, not `TZMF120`. On a system still at 1.2.0 the install
-  copies nothing and ends RC 00; install 1.3.0 first. The installation guide
-  shows how to ask SMP which level owns the module.
+  deletes `TZMF130`, not `TZMF120`. On a system still at 1.2.0 the install is
+  expected to copy nothing and end RC 00 (derived from SMP's ownership rule; the
+  step from 1.2.0 to 1.4.0 itself was not run); install 1.3.0 first. The
+  installation guide shows how to ask SMP which level owns the module.
 - **Stop HTTPD around the install job** (#434). The install replaces the
   module the running server loads from; see `docs/installation.md`.
 - **A record-mode read of a RECFM=V data set now fails** (#455). A client that
@@ -275,6 +282,19 @@ Built against **libc370 2.25.1** (cc370 1.6.3), up from 2.12.1, **httpd
   still 401. A client that tested for 404 to detect "this endpoint does not
   exist" must now accept 405 as well. `PATCH` and `OPTIONS` are still answered
   by HTTPD with its own 405.
+- **The USS endpoints use the UFSD 1.5.1 client library** (#453), up from
+  1.4.0, and the guide names UFSD 1.5.1 as the server to run with it. The
+  library no longer hides failures: a request that the UFSD router refuses is
+  returned as an error, and a write the server rejects counts 0 bytes, so a USS
+  request that could answer success in 1.3.0 can now answer with an error
+  report. A path of 256 characters or more is refused by the library instead of
+  being cut to 255, which could name another file; that changes nothing for a
+  request, because the handlers already refuse a request path that does not fit
+  255 characters. The server-side fixes of UFSD 1.5.0 and 1.5.1 (inodes lost
+  when files are removed, a file read that could report end of file early, two
+  races in the server's queues on systems with more than one processor) need
+  the 1.5.1 server. An older server is not refused: the USS tests of this
+  release passed against a UFSD 1.4.0 server.
 - **The installation guide says to stop HTTPD around an upgrade** (#434). The
   install replaces the module the running server loads on every request.
   Whether a request that arrives meanwhile fails has not been measured.
@@ -365,8 +385,11 @@ issue.
 - **An abend at the entry of a function, with the loaded module overwritten**
   (#425). Two status polls of a running job ended `S0C7` (`MVSMF901E`), and the
   instruction found at the entry of the function was not the one the module
-  holds, so the code in storage had been changed after it was loaded. It was
-  seen once; the same server shut down badly afterwards.
+  holds, so the code in storage had been changed after it was loaded. The same
+  server shut down badly afterwards. A second server showed an `S0C1`, an
+  invalid instruction, on a status poll of a running job, about once in 1,860
+  polls of a repeat run on 1.2.0; where it happened is unknown. Neither was
+  seen in the runs made for 1.4.0.
 - **A large upload is cut off** (#428). An upload of about 20 MB ended with a
   broken connection on the client in the middle of the body. It was seen twice.
   For the one whose server log is still there, the server wrote `MVSMF007W`: for

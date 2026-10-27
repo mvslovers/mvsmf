@@ -17,7 +17,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 | **httpd** | **4.2.0 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. |
 | **RAKF 2.0.0 or later** | Only to see jobs of other users: the class `JESSPOOL` that decides this is in the class table of RAKF 2.0.0 and later. Without the class every user sees only their own jobs. See [Job spool authorization](jesspool.md). |
 | **RAKF** | For the console service and `/zosmf/test`, in every case: they are open only to a user that RAKF reports as holding READ on `FACILITY MVSMF.CONSOLE` (see step 4). mvsMF asks the system's RACHECK service through libc370's `racf_auth()` and permits only the answer 0, so a system where that service answers anything else, "not protected" (4) included, refuses everybody. It has not been run on a system without RAKF. |
-| **UFSD** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. |
+| **UFSD 1.5.1** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. mvsMF 1.4.0 is linked with the client library of UFSD 1.5.1, which reports failures the 1.4.0 library hid (a refused request, a rejected write), so a USS request that could answer success with 1.3.0 can now answer with an error report. Run the 1.5.1 server too: the server-side fixes of UFSD 1.5.0 and 1.5.1 (inodes lost when files are removed, a file read that could report end of file early, races in the server's queues on systems with more than one processor) are not in an older server. An older server is not refused: the USS tests of this release passed against a UFSD 1.4.0 server. |
 | **JES2 usermod `SYZJ201`** | Only for `retcode` on submitted jobs. Without it every job reports `"retcode": null`. See [The `SYZJ201` usermod](https://github.com/mvslovers/mvsmf/blob/main/README.md#the-syzj201-usermod) in the project README. |
 
 **None of these is an SMP prerequisite, and that is deliberate.** SMP's `REQ()`
@@ -297,9 +297,10 @@ it names the data sets the new install is about to use.
 
 **The SYSMOD deletes only the release just before it.** 1.4.0 (`TZMF140`)
 deletes `TZMF130`. On a system still at 1.2.0 (`TZMF120`), `TZMF120` keeps
-owning `MOD(MVSMF)`: the install prints `NOT SEL` for it, copies nothing, and
-every step still ends RC 00. Install 1.3.0 first, then 1.4.0. Check which level
-owns the module before you start:
+owning `MOD(MVSMF)`: the install is expected to print `NOT SEL` for it, copy
+nothing, and end every step RC 00. That follows from SMP's ownership rule; the
+step from 1.2.0 to 1.4.0 itself was not run. Install 1.3.0 first, then 1.4.0.
+Check which level owns the module before you start:
 
 ```
 //LIST    EXEC SMPAPP
@@ -310,7 +311,13 @@ owns the module before you start:
 ```
 
 `TZMF130` is the level this package replaces. An id that is not found means a
-fresh install.
+fresh install (or a hand-copied MVSMF, see below).
+
+**Expected return codes of an upgrade from 1.3.0.** RECEIVE and APPLY CHECK end
+RC 00. The APPLY ends **RC 04**, on `HMA2461 ... NOT FOUND ON SMPSCDS LIBRARY`
+for the deleted `TZMF130`: a deleted SYSMOD has no backup entry. That is
+expected, and the install job conditions the ACCEPT to run through it. A fresh
+install ends RC 00 throughout.
 
 **Stop HTTPD before the install job and start it afterwards:**
 

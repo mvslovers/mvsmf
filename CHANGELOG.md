@@ -368,9 +368,10 @@ issue.
   holds, so the code in storage had been changed after it was loaded. It was
   seen once; the same server shut down badly afterwards.
 - **A large upload is cut off** (#428). An upload of about 20 MB ended with a
-  broken connection on the client, and the server wrote `MVSMF007W`: for ten
-  seconds no data had arrived in the middle of the body, so mvsMF gave up. The
-  next upload went through. It was seen twice.
+  broken connection on the client in the middle of the body. It was seen twice.
+  For the one whose server log is still there, the server wrote `MVSMF007W`: for
+  ten seconds no data had arrived in the middle of the body, so mvsMF gave up.
+  The next upload went through.
 - **A member read answers `404` "member not found" when the directory of the
   PDS cannot be read** (#514). The open of the member failed, and mvsMF looks
   at the directory to tell a missing member from an I/O error; if the

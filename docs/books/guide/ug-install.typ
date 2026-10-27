@@ -58,7 +58,7 @@ unchanged. The steps and details are on the UFSD 1.5.2 release page at
 `github.com/mvslovers/ufsd/releases/tag/v1.5.2`.
 
 The client library of UFSD 1.5.1 reports failures that the 1.4.0 library hid. A
-file request that could answer success with the library of UFSD 1.3.0 can now
+file request that could answer success with mvsMF 1.3.0 can now
 answer with an error report (a refused request, a rejected write). The
 server-side fixes of UFSD 1.5.0 and 1.5.1 are not in an older server either:
 inodes lost when files are removed, a file read that could report end of file

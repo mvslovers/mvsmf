@@ -116,12 +116,35 @@ that owns the module is not freed.
 
 Ask SMP which id the system carries:
 
-```
- LIST CDS MOD(MVSMF) .
+```jcl
+//MVSMFQRY JOB (SYS),'MVSMF QUERY',
+//             CLASS=A,MSGCLASS=H,MSGLEVEL=(1,1),
+//             REGION=4096K
+//LIST    EXEC SMPAPP
+//SMPCNTL  DD  *
+ LIST CDS  MOD(MVSMF) .
+ LIST ACDS MOD(MVSMF) .
+/*
+//
 ```
 
-`FMID = TZMF150` (or any other id that is not in the job above) means that you
-are in the right section. Run the job above with three changes:
+The releases of mvsMF that SMP installs are `TZMF110`, `TZMF120`, `TZMF130` and
+`TZMF140`. If `FMID` is one of them, the job above is the one to run. Any other
+`FMID` (`TZMF150` for a build of 1.5.0-dev) means that you are in this section.
+On a system that holds the development build the output reads:
+
+```
+ LIST CDS  MOD(MVSMF) .
+SMPCDS  MODULE ENTRIES
+  NAME
+MVSMF     LASTUPD         = TZMF150  TYPE=ADD
+          LIBRARIES       = DISTLIB=AMVSMFLD
+          FMID            = TZMF150
+          RMID            = TZMF150
+          LMOD            = MVSMF
+```
+
+Run the job above with three changes:
 
 1. The owner of the module is the development id: in both zones, the first
    `DEL` statement names `TZMF150` instead of `TZMF140`.
@@ -171,8 +194,10 @@ block is then ignored (`HMA2293`, RC 12), and the distribution zone keeps
 `MOD(MVSMF)` with `FMID = TZMF150`, `TZMF150` and the tombstones. The target
 zone is clean, the distribution zone is not.
 
-If a release is to follow, leave out steps 2 and 3: the configuration stays, and
-the install job of the release package copies into the libraries that exist.
+If a release is to follow, leave out sections 2 and 3 below: the configuration
+stays, and the install job of the release package copies into the libraries that
+exist. If the product is to go away, continue with sections 2 and 3 as for a
+release; that path has not been run after a development build.
 **Do not run the allocation job `MVSMFALC`**; it allocates the libraries `NEW`
 and fails on libraries that exist. `UCLIN` has not touched the libraries: until
 the release is installed, `MVSMF.LINKLIB` still holds the module of the
@@ -217,13 +242,29 @@ still says `FMID = TZMF150`, and `MVSMF.AMVSMFLD` got no `HMA2380` line.
 After every install, check the `ACCEPT` return code and the `HMA2380` line
 for `AMVSMFLD` too, not only the `APPLY`.
 
-**What has not been measured.** A system with an older history than `TZMF110`,
-or with ids that are not mvsMF's. A second development build installed over the
-first. A development build under another throwaway id than `TZMF150`. Whether a
-missing id in the middle of a `UCLIN` block stops the statements after it (the
-runs above show it does not for `TZMF120` followed by `TZMF110`, and for the
-first statement of the block). A production system: all runs were on TK5 and
-MVS/CE test systems that had held only 1.4.0 and the development build.
+On the TK5 system, `GET /zosmf/info` reports `zosmf_full_version` as
+`1.5.0-dev` while the development build is in place and as `1.4.0` after the
+release install. On the MVS/CE system the value stayed `1.3.0` throughout, so
+the member lists, the `HMA2380` lines and the `LIST` are the check there.
+
+**`MVSMF.DEV.LINKLIB` is not part of this.** `mbt deploy` writes to it, SMP does
+not know it, and neither the `UCLIN` job nor the release install touches it.
+If your `HTTPD` procedure names it in the `STEPLIB` ahead of `MVSMF.LINKLIB`,
+HTTPD keeps loading the development build after the release is installed. Read
+the `STEPLIB` and take the library out of it, or scratch it, before you judge
+the result. The runs did not use a development library.
+
+**What was measured on.** Two test systems. The TK5 system held 1.3.0 by SMP
+(`TZMF130`, with `TZMF120` as its tombstone). The MVS/CE system held no mvsMF
+entry in SMP, and its libraries were allocated with `MVSMFALC` before the first
+install. On both, 1.4.0 was installed by SMP from its release package, then the
+development build over it. A missing id in a `UCLIN` block did not stop the
+statements after it (`TZMF120` followed by `TZMF110` on the MVS/CE system).
+
+**What has not been measured.** A system with an older history than `TZMF110`.
+A second development build installed over the first. A development build under
+another throwaway id than `TZMF150`. The removal of the product after a
+development build (sections 2 and 3). A production system.
 
 ## 2. Undo the configuration
 

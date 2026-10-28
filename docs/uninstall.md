@@ -78,6 +78,53 @@ SMP-installed, so there is nothing below `TZMF110`.
 
 `LMOD` exists only in the CDS; there is nothing to delete for it in the ACDS.
 
+### A development build with a later FMID
+
+A development build of `main` is packaged under the FMID of the release that
+`main` is heading for. A build of 1.5.0-dev carries `TZMF150`, although 1.5.0 is
+not released. If you installed such a package by SMP, the system holds an id
+that the job above does not name, and that id owns `MOD(MVSMF)`. The job cannot
+free it. A package that was built with a throwaway id of its own (`[smp] fmid`
+in `mbt.toml`) is the same case with another name. Wherever this section says
+`TZMF150`, read your id.
+
+<!-- MEASURE: what the job above does on such a system: return codes, which DEL
+     fail, what LIST shows afterwards -->
+
+Ask SMP which id the system carries:
+
+```
+ LIST CDS MOD(MVSMF) .
+```
+
+`FMID = TZMF150` (or any other id that is not in the job above) means that you
+are in the right section. Run the job above with three changes:
+
+1. The owner of the module is the development id: in both zones, the first
+   `DEL` statement names `TZMF150` instead of `TZMF140`.
+2. `DEL SYSMOD(TZMF150) .` is added in both zones, above the one for
+   `TZMF140`.
+3. `LIST CDS SYSMOD(TZMF150) .` and `LIST ACDS SYSMOD(TZMF150) .` are added to
+   the `LIST` step. It has ten statements then, and every one of them must show
+   its id as not found.
+
+<!-- MEASURE: the modified job: UCLIN return codes and messages per zone, the
+     LIST, LIST CDS/ACDS MOD(MVSMF) afterwards -->
+
+If a release is to follow, leave out steps 2 and 3: the configuration stays, and
+the install job of the release package copies into the libraries that exist.
+**Do not run the allocation job `MVSMFALC`**; it allocates the libraries `NEW`
+and fails on libraries that exist. `UCLIN` has not touched the libraries: until
+the release is installed, `MVSMF.LINKLIB` still holds the module of the
+development build. After the install, list the members of `MVSMF.LINKLIB`, look
+for the `HMA2380` line (see [installation.md](installation.md)), and check that
+`LIST CDS MOD(MVSMF) .` shows the `FMID` of the release and not `TZMF150`.
+
+<!-- MEASURE: the release install over the cleaned system, and the control run
+     of the release installed over the development build without this section -->
+
+**What has not been measured.** <!-- MEASURE: replace after the runs -->
+
 ## 2. Undo the configuration
 
 Both changes have to go, and in this order.

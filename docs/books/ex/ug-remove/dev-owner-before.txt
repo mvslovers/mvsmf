@@ -1,0 +1,15 @@
+ LIST CDS  MOD(MVSMF) .
+SMPCDS  MODULE ENTRIES
+  NAME
+MVSMF     LASTUPD         = TZMF150  TYPE=ADD
+          LIBRARIES       = DISTLIB=AMVSMFLD
+          FMID            = TZMF150
+          RMID            = TZMF150
+          LMOD            = MVSMF
+ LIST ACDS MOD(MVSMF) .
+SMPACDS MODULE ENTRIES
+  NAME
+MVSMF     LASTUPD         = TZMF150  TYPE=ADD
+          LIBRARIES       = DISTLIB=AMVSMFLD
+          FMID            = TZMF150
+          RMID            = TZMF150

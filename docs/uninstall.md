@@ -39,6 +39,7 @@ distribution zone. Skip one and the id survives there.
   DEL SYSMOD(TZMF120) .
   DEL SYSMOD(TZMF110) .
  ENDUCL .
+ RESETRC .
  UCLIN ACDS .
   DEL SYSMOD(TZMF140) MOD(MVSMF) .
   DEL MOD(MVSMF) .
@@ -63,9 +64,20 @@ distribution zone. Skip one and the id survives there.
 //
 ```
 
-Every `DEL` reports `HMA2550 UPDATE COMPLETE`. The `LIST` at the end is the
-check: **RC 04 with the id reported as not found means it is free.** A hit
-prints `TYPE`, `STATUS` and the FMID it belongs to — the id is still taken.
+A `DEL` that finds its entry reports `HMA2550 UPDATE COMPLETE`. A `DEL` for an
+id that the system never held reports `HMA2532 ** SYSMOD ENTRY … TO BE DELETED
+DOES NOT EXIST` and `HMA2560 UPDATE PROCESSING TERMINATED`, and the `UCLIN`
+block ends with RC 08. That is no fault: the id is free. A system that has only
+ever held 1.4.0 has no `TZMF110`, so the job above ends with RC 08 there.
+
+**Keep the `RESETRC` between the two blocks.** Without it, SMP ignores the
+whole `UCLIN ACDS` block after the RC 08 of the first one (`HMA2293 ** CONTROL
+STATEMENT IGNORED DUE TO PREVIOUS ERROR`, RC 12), and the distribution zone
+keeps its entries.
+
+The `LIST` at the end is the check: **RC 04 with the id reported as not found
+means it is free.** A hit prints `TYPE`, `STATUS` and the FMID it belongs to —
+the id is still taken.
 
 **Name every level that was ever installed on the system, not only the current
 one.** The block above lists `TZMF140`, `TZMF130`, `TZMF120` and `TZMF110`; add a pair for each
@@ -88,8 +100,19 @@ free it. A package that was built with a throwaway id of its own (`[smp] fmid`
 in `mbt.toml`) is the same case with another name. Wherever this section says
 `TZMF150`, read your id.
 
-<!-- MEASURE: what the job above does on such a system: return codes, which DEL
-     fail, what LIST shows afterwards -->
+The job above does not clean such a system. On a system that holds `TZMF150`,
+its first statement fails in the target zone:
+
+```
+  DEL SYSMOD(TZMF140) MOD(MVSMF) .
+HMA3572 ** MOD MVSMF TO BE DELETED FROM ENTRY DOES NOT EXIST
+HMA2560    UPDATE PROCESSING TERMINATED - UPDATE NOT COMPLETE
+```
+
+The statements after it still run. `DEL MOD(MVSMF)` and `DEL LMOD(MVSMF)` remove
+the module and the load module entry although `TZMF150` owns them, and
+`SYSMOD TZMF150` stays in the target zone with status `REC APP ACC`. The id
+that owns the module is not freed.
 
 Ask SMP which id the system carries:
 
@@ -108,8 +131,45 @@ are in the right section. Run the job above with three changes:
    the `LIST` step. It has ten statements then, and every one of them must show
    its id as not found.
 
-<!-- MEASURE: the modified job: UCLIN return codes and messages per zone, the
-     LIST, LIST CDS/ACDS MOD(MVSMF) afterwards -->
+The modified job, on a system that held 1.4.0 and then the development build
+`TZMF150`, ends with RC 08. Both `UCLIN` blocks run to the end. The RC 08 comes
+only from the ids the system never held (`TZMF110`, and on some systems
+`TZMF120` too); every other `DEL` reports `HMA2550`:
+
+```
+ UCLIN CDS .
+  DEL SYSMOD(TZMF150) MOD(MVSMF) .
+HMA2550    UPDATE COMPLETE FOR TZMF150
+  DEL MOD(MVSMF) .
+HMA2550    UPDATE COMPLETE FOR MVSMF
+  DEL LMOD(MVSMF) .
+HMA2550    UPDATE COMPLETE FOR MVSMF
+  DEL SYSMOD(TZMF150) .
+HMA2550    UPDATE COMPLETE FOR TZMF150
+  DEL SYSMOD(TZMF140) .
+HMA2550    UPDATE COMPLETE FOR TZMF140
+  DEL SYSMOD(TZMF130) .
+HMA2550    UPDATE COMPLETE FOR TZMF130
+  DEL SYSMOD(TZMF120) .
+HMA2550    UPDATE COMPLETE FOR TZMF120
+  DEL SYSMOD(TZMF110) .
+HMA2532 ** SYSMOD ENTRY TZMF110 TO BE DELETED DOES NOT EXIST
+HMA2560    UPDATE PROCESSING TERMINATED - UPDATE NOT COMPLETE
+ ENDUCL .
+HMA2050    UCLIN PROCESSING COMPLETED - HIGHEST RETURN CODE IS 08
+ RESETRC .
+HMA2050    RESETRC PROCESSING COMPLETED - HIGHEST RETURN CODE IS 00
+ UCLIN ACDS .
+```
+
+The `UCLIN ACDS` block reports the same. All ten `LIST` statements then end
+with RC 04 and the id reported as not found, and so do `LIST CDS MOD(MVSMF) .`,
+`LIST ACDS MOD(MVSMF) .` and `LIST CDS LMOD(MVSMF) .`.
+
+**Without the `RESETRC` between the blocks the section fails.** The `UCLIN ACDS`
+block is then ignored (`HMA2293`, RC 12), and the distribution zone keeps
+`MOD(MVSMF)` with `FMID = TZMF150`, `TZMF150` and the tombstones. The target
+zone is clean, the distribution zone is not.
 
 If a release is to follow, leave out steps 2 and 3: the configuration stays, and
 the install job of the release package copies into the libraries that exist.
@@ -120,10 +180,50 @@ development build. After the install, list the members of `MVSMF.LINKLIB`, look
 for the `HMA2380` line (see [installation.md](installation.md)), and check that
 `LIST CDS MOD(MVSMF) .` shows the `FMID` of the release and not `TZMF150`.
 
-<!-- MEASURE: the release install over the cleaned system, and the control run
-     of the release installed over the development build without this section -->
+The release install over the cleaned system (1.4.0, install job without
+`MVSMFALC`) ends with RC 00. `APPLY` and `ACCEPT` complete, and `HMA2380`
+reports the copy into both libraries:
 
-**What has not been measured.** <!-- MEASURE: replace after the runs -->
+```
+HMA2380    COPY SUCCESSFUL - MOD=MVSMF - LMOD=MVSMF - LIBRARY=LINKLIB - SYSMOD=TZMF140 - RETURN CODE=00
+HMA2380    COPY SUCCESSFUL - MOD=MVSMF - LMOD=MVSMF - LIBRARY=AMVSMFLD - SYSMOD=TZMF140 - RETURN CODE=00
+```
+
+`MVSMF.LINKLIB` and `MVSMF.AMVSMFLD` each hold the member `MVSMF`;
+`MVSMF.SAMPLIB` holds `MVSMFPRM` and `MVSMFSTC`. In both zones
+`LIST … MOD(MVSMF) .` now shows `FMID = TZMF140` and `RMID = TZMF140`. After
+the install `TZMF130` shows as a tombstone (`DELBY = TZMF140`) in both zones: a
+hit at RC 00. That is the state of a release, not a leftover.
+
+**Without this section the release does not install over a development
+build.** `APPLY` stops with
+
+```
+HMA3792 ** SYSMOD TZMF140 SELECTED FOR APPLY IS DELETED
+HMA3703 ** APPLY PROCESSING TERMINATED BECAUSE FUNCTION SYSMOD TZMF140 FAILED
+```
+
+and the job ends with RC 12. Nothing is installed: the development build keeps
+running and `LIST CDS MOD(MVSMF) .` still shows `FMID = TZMF150`. The reason is
+that `TZMF150` has deleted `TZMF140` in the inventory. A failure that is this
+loud is easy to read; the one below is not.
+
+**Do not clean the target zone only.** If the `UCLIN CDS` block runs and the
+`UCLIN ACDS` block does not (the missing `RESETRC` above), the release install
+ends with `APPLY` at RC 00 and the new `MVSMF` in `MVSMF.LINKLIB`, and then
+`ACCEPT` fails with `HMA3792 ** SYSMOD TZMF140 SELECTED FOR ACCEPT IS DELETED`,
+RC 12. The target zone then says `FMID = TZMF140`, while the distribution zone
+still says `FMID = TZMF150`, and `MVSMF.AMVSMFLD` got no `HMA2380` line.
+After every install, check the `ACCEPT` return code and the `HMA2380` line for `AMVSMFLD` too, not
+only the `APPLY`.
+
+**What has not been measured.** A system with an older history than `TZMF110`,
+or with ids that are not mvsMF's. A second development build installed over the
+first. A development build under another throwaway id than `TZMF150`. Whether a
+missing id in the middle of a `UCLIN` block stops the statements after it (the
+runs above show it does not for `TZMF120` followed by `TZMF110`, and for the
+first statement of the block). A production system: all runs were on TK5 and
+MVS/CE test systems that had held only 1.4.0 and the development build.
 
 ## 2. Undo the configuration
 

@@ -214,8 +214,8 @@ ends with `APPLY` at RC 00 and the new `MVSMF` in `MVSMF.LINKLIB`, and then
 `ACCEPT` fails with `HMA3792 ** SYSMOD TZMF140 SELECTED FOR ACCEPT IS DELETED`,
 RC 12. The target zone then says `FMID = TZMF140`, while the distribution zone
 still says `FMID = TZMF150`, and `MVSMF.AMVSMFLD` got no `HMA2380` line.
-After every install, check the `ACCEPT` return code and the `HMA2380` line for `AMVSMFLD` too, not
-only the `APPLY`.
+After every install, check the `ACCEPT` return code and the `HMA2380` line
+for `AMVSMFLD` too, not only the `APPLY`.
 
 **What has not been measured.** A system with an older history than `TZMF110`,
 or with ids that are not mvsMF's. A second development build installed over the

@@ -92,11 +92,12 @@ SMP-installed, so there is nothing below `TZMF110`.
 
 ### A development build with a later FMID
 
-A development build of `main` is packaged under the FMID of the release that
-`main` is heading for. A build of 1.5.0-dev carries `TZMF150`, although 1.5.0 is
-not released. If you installed such a package by SMP, the system holds an id
-that the job above does not name, and that id owns `MOD(MVSMF)`. The job cannot
-free it. A package that was built with a throwaway id of its own (`[smp] fmid`
+A development build of `main` was packaged under the FMID of the release that
+`main` is heading for. A build of 1.5.0-dev carried `TZMF150`, although 1.5.0 is
+not released. A current `mbt` refuses to package a pre-release without an FMID
+of its own, so a package of this kind comes from an older `mbt`. If you
+installed such a package by SMP, the system holds an id that the job above does
+not name, and that id owns `MOD(MVSMF)`. The job cannot free it. A package that was built with a throwaway id of its own (`[smp] fmid`
 in `mbt.toml`) is the same case with another name. Wherever this section says
 `TZMF150`, read your id.
 

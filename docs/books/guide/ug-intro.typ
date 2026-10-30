@@ -96,7 +96,8 @@ names these products as dependencies:
   #table(columns: (1.2in, 1.1in, 1fr),
     [Product], [Version], [Used for],
     [HTTPD (httpd)], [4.2.0 or later], [The web server that runs mvsMF. The
-      login service needs a function that HTTPD has from 4.2.0.],
+      login service needs a function that HTTPD has from 4.2.0. HTTPD 4.5.1 or
+      later is advised (@ug-install-httpd-login).],
     [crypto370], [1.0.0 or later], [A library of cryptographic functions. mvsMF
       uses its base64 coding for the token of the login.],
     [UFSD (ufsd)], [built against 1.5.1 (client library)], [The file systems

@@ -73,6 +73,13 @@ explains who may see, read and purge which job.
   mvsMF is a separate load module with its own statically linked runtime, so
   relinking the server does nothing for mvsMF and the other way round: both
   sides want to be current.
+
+  Run httpd **4.5.1 or later**. mvsMF does no login check of its own; it takes
+  the identity of every caller from httpd, and from 4.5.1 httpd checks at login
+  that the answer of the security system belongs to the user who logged in.
+  Earlier versions of httpd accept every login on a system with an old RAKF
+  (release 1.2.x, that is, before RAKF 2.0.0) whose user and profile tables are
+  missing or invalid. See [the installation guide](docs/installation.md).
 - **`DD:HASPCKPT` and `DD:HASPACE1` in the httpd STC procedure** — only when
   `$DSNPRFX` is not `SYS1`, see below
 - JES2 usermod **`SYZJ201`** — required for the jobs API to report `retcode`

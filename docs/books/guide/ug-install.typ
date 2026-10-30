@@ -23,10 +23,11 @@ The installation needs these parts on the system:
     [MVS 3.8j with SMP4], [The install job uses the SMP4 procedures #cmd("SMPREC")
       and #cmd("SMPAPP"), and the TSO command #cmd("RECEIVE") for the two
       XMIT files.],
-    [HTTPD 4.2.0 or later], [mvsMF is a CGI module of HTTPD. It calls the entry
-      #cmd("http_new_session") that HTTPD 4.2.0 introduced. There is no test
-      for the entry at run time, so the floor is yours to check. The banner
-      #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start).],
+    [HTTPD 4.2.0 or later, 4.5.1 or later advised], [mvsMF is a CGI module of
+      HTTPD. It calls the entry #cmd("http_new_session") that HTTPD 4.2.0
+      introduced. There is no test for the entry at run time, so the floor is
+      yours to check. The banner #cmd("HTTPD000I") shows the version of HTTPD
+      (@ug-ops-start). Run HTTPD 4.5.1 or later: see @ug-install-httpd-login.],
     [UFSD 1.5.2], [Only the UFS file service needs it (@ug-uss). The data set,
       job and console services do not depend on it. mvsMF is built against the
       client library of UFSD 1.5.1. The server to run is UFSD 1.5.2 (see the
@@ -72,6 +73,18 @@ server, but that is a build finding and no reason to run one.]
 The retcode of a finished job in the jobs service comes from a marker in the
 completion word of the job that a JES2 usermod writes. On a JES2 without that
 usermod the field #cmd("retcode") is null for jobs that ran (see @ug-jobs).
+
+#idx("HTTPD", "login check")
+=== Why HTTPD 4.5.1 <ug-install-httpd-login>
+
+mvsMF does no login check of its own. It takes the identity of every caller
+from HTTPD. From HTTPD 4.5.1, HTTPD checks at login that the answer of the
+security system belongs to the user who logged in, and refuses the login if it
+does not. Earlier versions of HTTPD accept every login, whatever user ID and
+password are given, when they run on a system with an old RAKF (release 1.2.x,
+that is, before RAKF 2.0.0) whose user and profile tables are missing or
+invalid. If you run an earlier HTTPD on RAKF 1.2.x, update HTTPD to 4.5.1 or
+later before you install mvsMF.
 
 == The Package <ug-install-package>
 
@@ -384,7 +397,8 @@ causes by symptom.
 The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 #cmd("TZMF130"), and the library keeps its name. Do these steps in this order.
 
-+ *Check HTTPD.* HTTPD must be 4.2.0 or later (@ug-install-prereq).
++ *Check HTTPD.* HTTPD must be 4.2.0 or later, and 4.5.1 or later is advised
+  (@ug-install-prereq, @ug-install-httpd-login).
 + *Prepare the job profiles.* Version 1.4.0 decides which jobs a user may see,
   read and purge with the RACF class #cmd("JESSPOOL"). The commands that define
   the profiles need RAKF 2.0.0 or later, and the profiles have to exist

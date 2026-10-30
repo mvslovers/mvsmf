@@ -85,6 +85,8 @@ password are given, when they run on a system with an old RAKF (release 1.2.x,
 that is, before RAKF 2.0.0) whose user and profile tables are missing or
 invalid. If you run an earlier HTTPD on RAKF 1.2.x, update HTTPD to 4.5.1 or
 later before you install mvsMF.
+What HTTPD 4.5.1 does at every start, and how to cure the state, is in
+@ug-security-open.
 
 == The Package <ug-install-package>
 
@@ -363,7 +365,11 @@ takes effect when you stop HTTPD and start it again (@ug-ops-start). After the
 start, the console shows one message
 #cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") for each of the four lines,
 and then #cmd("HTTPD001I"). @ug-ops-start shows these messages from a real
-start.
+start. With HTTPD 4.5.1 or later and a working RAKF, the console also shows one
+line #cmd("RAKF0004 INVALID ATTEMPT TO ACCESS SYSTEM:  USER:HTTPPRB") after the
+message about the identity of the started task. It is the test logon of HTTPD
+and it is expected. The message #cmd("HTTPD042W") in its place means that HTTPD
+refuses every login (@ug-security-open).
 
 With curl, first send a request without a credential:
 

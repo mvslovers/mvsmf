@@ -299,6 +299,58 @@ submits runs as that user too: mvsMF replaces any #cmd("USER=") on the JOB
 statement with the user ID of the caller and adds the password of the caller.
 The owner of the new job is the caller.
 
+=== A Security Product That Accepts Any User ID <ug-security-open>
+
+#idx("HTTPD042W")#idx("HTTPPRB")#idx("RAKF0004")
+#idx("security product", "accepts any user ID")
+mvsMF has no login of its own. A login is a question that HTTPD asks RAKF, and
+the answer is worth something only if RAKF says no to a user that it does not
+know. RAKF 2.0.0 and later do. RAKF 1.2.x, the version in the TK5 image, does
+not always. It loads its user table from #cmd("SYS1.SECURE.CNTL(USERS)") at the
+IPL. When the table is missing or invalid, it answers every logon with return
+code 0. A line of #cmd("USERS") with a blank password is enough to make the
+table invalid: the load stops with #cmd("RAKFUIDS2  INPUT DATA INVALID OR OUT
+OF SEQ.") and #cmd("RAKFUIDSX  ** PROGRAM TERMINATED **"). This was measured on
+TK5. TK4- was not measured.
+
+HTTPD 4.5.1 and later test for this state. At every start HTTPD makes one logon
+with the reserved user ID #cmd("HTTPPRB") and a password that cannot be right.
+In a healthy system RAKF refuses it and writes one line, which is expected:
+
+#screen(```
+RAKF0004 INVALID ATTEMPT TO ACCESS SYSTEM:  USER:HTTPPRB
+```)
+
+If the product accepts the logon, HTTPD writes
+
+#screen(```
+HTTPD042W SECURITY SYSTEM ACCEPTS ANY USERID, ALL LOGINS REFUSED
+```)
+
+and refuses every login of every user, also of the users that you defined.
+mvsMF then answers each request that needs a user with the 401 of
+@ug-first-open. HTTPD writes no message for a refused login, so the message at
+the start is the only sign in the log. A RAKF without valid tables adds its own
+lines at the start: #cmd("RAKF0001") and #cmd("RAKF0002") for a user table that
+is missing or invalid, #cmd("RAKF0003") and #cmd("RAKF0009") for a profile
+table. The HTTPD User's Guide has a capture of such a start in the chapter
+"Authentication and Security".
+
+To cure it:
+
++ Correct #cmd("USERS") and #cmd("PROFILES") in #cmd("SYS1.SECURE.CNTL") before
+  the next IPL. RAKF reads them at the IPL.
++ *Restart HTTPD.* HTTPD makes the test once, at the start. A server that wrote
+  #cmd("HTTPD042W") keeps refusing logins until it is stopped and started
+  again, also after the tables are right.
++ Read the start again. A good start has the one #cmd("RAKF0004") line and no
+  #cmd("HTTPD042W").
+
+Do not define a user #cmd("HTTPPRB"): the test uses it at every start. A login
+as #cmd("STC") is always refused, because that account belongs to the started
+tasks. A HTTPD before 4.5.1 has no test and no #cmd("HTTPD042W"); run 4.5.1 or
+later where RAKF 1.2.x is in use (@ug-install-prereq).
+
 == Controlling Access to Data Sets <ug-security-dsn>
 
 #idx("data set", "access")#idx("DATASET class")

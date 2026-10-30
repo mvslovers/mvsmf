@@ -419,6 +419,12 @@ documentation.
     [#cmd("HTTPD005I")], [The version of the C library in HTTPD.],
     [#cmd("HTTPD002I")], [How HTTPD got its authorization.],
     [#cmd("HTTPD004I")], [The identity of the started task.],
+    [#cmd("RAKF0004")], [HTTPD 4.5.1 and later only. RAKF refused the test logon
+      of the reserved user ID #cmd("HTTPPRB"). One line at every start. It is
+      expected and not a fault.],
+    [#cmd("HTTPD042W")], [HTTPD 4.5.1 and later only. The security product
+      accepted the test logon. HTTPD refuses every login until it is started
+      again (@ref-auth-open). It replaces #cmd("RAKF0004").],
     [#cmd("HTTPD036I")], [One message for each route of #cmd("MOD="): four
       messages, in the order of the route lines.],
     [#cmd("HTTPD054I")], [The port on which HTTPD listens.],

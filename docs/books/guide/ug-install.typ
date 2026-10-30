@@ -26,7 +26,10 @@ The installation needs these parts on the system:
     [HTTPD 4.2.0 or later], [mvsMF is a CGI module of HTTPD. It calls the entry
       #cmd("http_new_session") that HTTPD 4.2.0 introduced. There is no test
       for the entry at run time, so the floor is yours to check. The banner
-      #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start).],
+      #cmd("HTTPD000I") shows the version of HTTPD (@ug-ops-start). Run
+      4.5.1 or later: from that level HTTPD tests the security product at every
+      start, and refuses all logins if the product accepts any user ID
+      (@ug-security-open).],
     [UFSD 1.5.2], [Only the UFS file service needs it (@ug-uss). The data set,
       job and console services do not depend on it. mvsMF is built against the
       client library of UFSD 1.5.1. The server to run is UFSD 1.5.2 (see the
@@ -350,7 +353,11 @@ takes effect when you stop HTTPD and start it again (@ug-ops-start). After the
 start, the console shows one message
 #cmd("HTTPD036I MODULE MVSMF REGISTERED FOR path") for each of the four lines,
 and then #cmd("HTTPD001I"). @ug-ops-start shows these messages from a real
-start.
+start. With HTTPD 4.5.1 or later and a working RAKF, the console also shows one
+line #cmd("RAKF0004 INVALID ATTEMPT TO ACCESS SYSTEM:  USER:HTTPPRB") after the
+message about the identity of the started task. It is the test logon of HTTPD
+and it is expected. The message #cmd("HTTPD042W") in its place means that HTTPD
+refuses every login (@ug-security-open).
 
 With curl, first send a request without a credential:
 

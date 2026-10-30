@@ -16,3 +16,8 @@ cancels a punch device, so it runs on a throwaway system only.
 chapter, "A Read That Fails Part-Way" (`ex/ug-uss/u-readfail-log.txt`). It
 stops UFSD in the middle of a download and starts it again, so it runs on a
 throwaway system only.
+
+`ex/ug-first/open-authenticate.txt` and `ex/ug-first/open-jobs.txt` (section
+"Every user is refused") have no script. They were recorded by hand on a
+throwaway TK5 system whose RAKF had no user and no profile table, with
+HTTPD 4.5.1 or later running, so HTTPD refused every login.

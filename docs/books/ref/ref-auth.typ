@@ -196,6 +196,25 @@ Only a successful login sets a cookie. The 401 and the 500 carry no
 credential that HTTPD holds for the user ID, the password and the client
 address (@ref-auth-cookie), and a request that sent it was accepted.
 
+=== When HTTPD Refuses Every Login <ref-auth-open>
+
+#idx("HTTPD042W")
+HTTPD 4.5.1 and later test the security product at every start with one logon
+of the reserved user ID #cmd("HTTPPRB") and a password that cannot be right. If
+the product accepts it, HTTPD writes #cmd("HTTPD042W SECURITY SYSTEM ACCEPTS ANY
+USERID, ALL LOGINS REFUSED") and accepts no Basic credential of any user until
+it is started again. The user ID #cmd("STC") is refused in every case, too.
+
+mvsMF has no part in this. It sees a request without a credential, and answers
+as in @ref-auth-cred and in the table above. The login gets the 401 with the
+body shown for the status 401 above, which is the answer for a wrong password. The services
+under #cmd("/zosmf/") that HTTPD protects with #cmd("AUTH=TOKEN") get the plain
+401 of HTTPD. Neither HTTPD nor RAKF writes a message for a refused login. RAKF
+1.2.x with a missing or invalid user table is a product that does this (measured
+on TK5; TK4- was not measured). The cure and the signs in the log are in the
+_mvsMF User's Guide_, "Setting Up Security", and in the HTTPD documentation:
+correct the tables of RAKF before the IPL and restart HTTPD.
+
 == The Token and the Cookie <ref-auth-cookie>
 
 #idx("token")

@@ -241,7 +241,9 @@ the installation ships (@ug-install), these cases exist:
 ]
 
 A request that has no credential at all, and a request with a wrong password,
-get the same answer, so the answer does not say which of the two it was.
+get the same answer, so the answer does not say which of the two it was. If
+every user is refused, also a user with a right password, read
+@ug-first-open.
 
 The first case in a session:
 
@@ -325,6 +327,37 @@ Which requests get it depends on the route lines:
 Ask the administrator for access to the profile that your 403 belongs to. A
 user ID that has access does not meet this 403. It meets the checks of the data
 sets, the files and the jobs instead (@ug-errors).
+
+=== Every user is refused <ug-first-open>
+
+#idx("HTTPD042W")
+#idx("401", "every user refused")
+If no user can log in, not even one whose password you know is right, the cause
+can be on the system and not in the request. HTTPD 4.5.1 and later test the
+security product when they start. If the product accepts any user ID, as RAKF
+1.2.x does when its user table is missing or invalid, HTTPD writes
+#cmd("HTTPD042W SECURITY SYSTEM ACCEPTS ANY USERID, ALL LOGINS REFUSED") to the
+console and refuses every login until it is started again. mvsMF does not
+run for the login of a user, because it has none of its own: the user ID comes
+from HTTPD.
+
+The client sees the 401 answers of @ug-first-401, for every user ID and with
+every credential. The login of @ug-first-login gets the answer for a wrong
+password:
+
+#screen(raw(read("../ex/ug-first/open-authenticate.txt"), block: true))
+
+A request for another service gets the plain 401 of HTTPD:
+
+#screen(raw(read("../ex/ug-first/open-jobs.txt"), block: true))
+
+Both sessions were typed against a TK5 system whose RAKF had no user table. The
+two answers are the same as for a wrong password and for a missing
+credential, so the client cannot tell this cause from a mistyped password.
+HTTPD writes no message for a refused login. The console message at the start
+is the sign. Ask the administrator to look for #cmd("HTTPD042W") in the log of
+the last start of HTTPD (@ug-security-open). The cure is on the system: the administrator corrects
+the RAKF tables before the next IPL and restarts HTTPD.
 
 == Leaving <ug-first-leave>
 

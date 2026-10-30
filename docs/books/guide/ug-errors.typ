@@ -42,7 +42,9 @@ Some answers have no body at all.
   [*Status and report*], [*What it means*], [*See*],
   [#cmd("401"), #cmd("returnCode") 8, #cmd("reasonCode") 1], [The login
     failed. The message asks to check the user ID and the password, and that
-    the user ID has the SAF permissions mvsMF needs.], [@ug-first],
+    the user ID has the SAF permissions mvsMF needs. If it happens to every
+    user, also with a right password, the console of HTTPD shows
+    #cmd("HTTPD042W") from the last start.], [@ug-first, @ug-security-open],
 )
 ]
 

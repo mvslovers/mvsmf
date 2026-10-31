@@ -14,7 +14,7 @@ by Mike Rayborn's **HTTPD** server, which must be installed and running.
 
 | | |
 |---|---|
-| **httpd** | **4.2.0 or later; run 4.5.1 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. **Why 4.5.1:** mvsMF does no login check of its own. It takes the identity of every caller from httpd. From 4.5.1 httpd checks, at login, that the answer of the security system belongs to the user who logged in, and refuses the login if it does not. Earlier versions of httpd accept every login, whatever user ID and password are given, when they run on a system with an old RAKF (release 1.2.x, that is, before RAKF 2.0.0) whose user and profile tables are missing or invalid. If you run an earlier httpd on RAKF 1.2.x, update httpd to 4.5.1 or later before you install mvsMF. |
+| **httpd** | **4.2.0 or later; run 4.5.1 or later.** The token login calls `http_new_session()`, which first appeared in 4.2.0, and mvsMF cannot test for it at run time (#363): on an older server the login abends the CGI. Install httpd first, then mvsMF. These instructions also assume the unversioned product data sets httpd carries since 4.1.0. The startup message `HTTPD001I HTTPD <version> READY` names the level that runs. **Why 4.5.1:** mvsMF does no login check of its own. It takes the identity of every caller from httpd. From 4.5.1 httpd checks, at login, that the answer of the security system belongs to the user who logged in, and refuses the login if it does not. Earlier versions of httpd accept every login, whatever user ID and password are given, when they run on a system with an old RAKF (release 1.2.x, that is, before RAKF 2.0.0) whose user and profile tables are missing or invalid. If you run an earlier httpd on RAKF 1.2.x, update httpd to 4.5.1 or later before you install mvsMF. What httpd 4.5.1 does at every start, and how to cure the state, is in [A security system that accepts any user ID](#a-security-system-that-accepts-any-user-id). |
 | **RAKF 2.0.0 or later** | Only to see jobs of other users: the class `JESSPOOL` that decides this is in the class table of RAKF 2.0.0 and later. Without the class every user sees only their own jobs. See [Job spool authorization](jesspool.md). |
 | **RAKF** | For the console service and `/zosmf/test`, in every case: they are open only to a user that RAKF reports as holding READ on `FACILITY MVSMF.CONSOLE` (see step 4). The RAKF commands `RDEFINE` and `PERMIT` that step 4 uses to define the profile **come with RAKF 2.0.0**; the RAKF in the TK5 image is older and takes the profile as lines in `PROFILES` (step 4, *RAKF before 2.0.0*). mvsMF asks the system's RACHECK service through libc370's `racf_auth()` and permits only the answer 0, so a system where that service answers anything else, "not protected" (4) included, refuses everybody. It has not been run on a system without RAKF. |
 | **UFSD 1.5.2** | Only for the USS endpoints (`/zosmf/restfiles/fs`). Everything else works without it. **Run the 1.5.2 server.** UFSD servers before 1.5.2 could give one disk block to two files while a file was being written: the write reported success and the file held another file's data in that block (measured on UFSD 1.4.0 and 1.5.1; assume every release since 1.3.0 is affected). mvsMF writes USS files through that server, so a `PUT` to a USS file can be hit. UFSD 1.5.2 stops it and does not undo it: compare files written earlier with a copy, or write them again, and do not rely on `F UFSD,REBUILD` as a repair. The fix is in the server; mvsMF needs no rebuild, because UFSD 1.5.2 leaves the client library unchanged. Steps and details: the [UFSD 1.5.2 release page](https://github.com/mvslovers/ufsd/releases/tag/v1.5.2). mvsMF 1.4.0 is built with the client library of UFSD 1.5.1, which reports failures the 1.4.0 library hid (a refused request, a rejected write), so a USS request that could answer success with 1.3.0 can now answer with an error report. The server-side fixes of UFSD 1.5.0 and 1.5.1 (inodes lost when files are removed, a file read that could report end of file early, races in the server's queues on systems with more than one processor) are not in an older server either. An older server is not refused: the USS tests of this release passed against a UFSD 1.4.0 server, but that is a build finding, not a licence to run one. |
@@ -326,6 +326,82 @@ check working.
 A `-dev` version in `zosmf_full_version` on a system that should run a release
 means the module is a development build: it has the diagnostic endpoint. Install
 the release package.
+
+### A security system that accepts any user ID
+
+mvsMF has no login of its own. The user ID, the password and the token are
+resolved by HTTPD, and every request runs under the identity that HTTPD hands
+over. So the answer to every login depends on a security system that says *no*
+to a user it does not know.
+
+**RAKF before 2.0.0 does not always say no.** The RAKF in the TK5 image
+(RAKF 1.2.x) loads its user table from `SYS1.SECURE.CNTL(USERS)` at the IPL.
+When that table is missing or invalid, it answers every logon with return code
+0. RAKF 2.0.0 and later (the RAKF of MVS/CE) refuse a user they do not know.
+This was measured on TK5; TK4- was not measured. A `USERS` line with a blank
+password is enough to make the table invalid: the load stops with
+`RAKFUIDS2  INPUT DATA INVALID OR OUT OF SEQ.` and `RAKFUIDSX  ** PROGRAM
+TERMINATED **`.
+
+**What HTTPD does about it.** HTTPD 4.5.1 and later make one test logon at every
+start, with the reserved user ID `HTTPPRB` and a password that cannot be right.
+Two outcomes:
+
+- **The security system refuses it. That is the healthy case.** RAKF writes one
+  line for it at every start, and the line is expected, not a fault:
+
+  ```
+  RAKF0004 INVALID ATTEMPT TO ACCESS SYSTEM:  USER:HTTPPRB
+  ```
+
+- **The security system accepts it.** HTTPD writes
+
+  ```
+  HTTPD042W SECURITY SYSTEM ACCEPTS ANY USERID, ALL LOGINS REFUSED
+  ```
+
+  and goes on with the start. HTTPD runs, but it refuses every login, for every
+  user ID, also for those you defined.
+
+**What the client sees.** Every mvsMF request that needs a user gets a 401,
+`/zosmf/info` included. A login at `POST /zosmf/services/authenticate` gets the
+answer for a wrong password, with its JSON body; the client cannot tell the two
+apart (headers shortened):
+
+```
+$ curl -i -X POST -u HERC01:****** -H "X-CSRF-ZOSMF-HEADER: true" http://localhost:8080/zosmf/services/authenticate
+HTTP/1.1 401 Unauthorized
+Content-Type: application/json
+WWW-Authenticate: Basic realm="MVS.EXAMPLE"
+
+{"returnCode":8,"reasonCode":1,"message":"Login failed. Check whether the user ID and password you use for the Basic Auth is correct, and if the user ID has the required SAF permissions."}
+```
+
+HTTPD writes no message for a refused login, so the console does not show it.
+The one sign is `HTTPD042W` at the start. RAKF with no valid table adds its own
+lines at the start: `RAKF0001` and `RAKF0002` for a missing or invalid user
+table (the pair appears for HTTPD and for `HTTPPRB`), `RAKF0003` and `RAKF0009`
+for a missing or invalid profile table. A rejected user table alone gives
+`RAKF0001`, `RAKF0002` and `HTTPD042W`, without `RAKF0003`.
+
+**What to do.**
+
+1. Correct the tables in `SYS1.SECURE.CNTL` (`USERS` and `PROFILES`) **before
+   the next IPL**. RAKF reads them at the IPL. The console shows
+   `RAKFUIDS4  USER TABLE UPDATED` and `RAKFPROF7  RAKF PROFILES UPDATED` when
+   they are loaded.
+2. **Restart HTTPD** (`P HTTPD`, `S HTTPD`). HTTPD makes the test once, at the
+   start, and does not repeat it: a server that wrote `HTTPD042W` keeps
+   refusing logins until it is restarted, also after the tables are right.
+3. Read the start again: the good start has the one `RAKF0004` line and no
+   `HTTPD042W`.
+
+Two more points. Do not define a user `HTTPPRB`: the server makes one failed
+logon with that name at every start. And a login as `STC` is always refused; it
+is the account RAKF 1.2.x gives to started tasks. If `HTTPD003W` appears at the
+start, HTTPD could not make the test and writes no `HTTPD042W`; correct that
+first. HTTPD's own documentation (the *HTTPD User's Guide*, chapter
+"Authentication and Security") has the details.
 
 ## Upgrading
 

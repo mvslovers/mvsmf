@@ -5,17 +5,15 @@
   subtitle: "Reference",
   short-title: "mvsMF Reference",
   product: "mvsMF",
-  number: "ML08-0002-0",
+  number: "ML08-0002-1",
   date: "October 2026",
   authors: ("Mike Großmann",),
   edition: [
-    #text(font: head-font, weight: "bold", size: 11pt)[Draft Edition (October 2026)]
+    #text(font: head-font, weight: "bold", size: 11pt)[First Edition (October 2026)]
 
     This edition applies to Version 1 Release 4 of mvsMF, the z/OSMF REST API
     for MVS 3.8j (mvsmf 1.4.0), and to all subsequent releases and
     modifications until otherwise indicated in new editions.
-
-    *Draft.* This book is a draft edition.
 
     Comments on this book may be addressed to the issue tracker of the
     mvslovers/mvsmf repository on GitHub.

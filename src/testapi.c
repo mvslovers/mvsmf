@@ -164,6 +164,41 @@ static int testAbend(Session *session) {
   return 0; /* not reached */
 }
 
+/* fn=abendbody -- abend after the response has started (issue #570).
+ *
+ * fn=abend faults with headers_sent still 0, so the router answers a 500. This
+ * one is the other branch: the status line and a few body lines are already on
+ * the wire, as in a data set GET that abends mid-read, and the router can no
+ * longer send an error. What the client must see then is a broken response --
+ * no terminating chunk, no keep-alive -- not a 200 that looks complete.
+ * Deterministic on purpose: the VBS read that first showed it depends on a
+ * libc370 fault (libc370#757).
+ */
+__asm__("\n&FUNC	SETC 'testAbendBody'");
+static int testAbendBody(Session *session) {
+  int i;
+
+  session->headers_sent = 1;
+  if (http_resp(session->httpc, 200) < 0)
+    return -1;
+  if (http_printf(session->httpc, "Content-Type: text/plain\r\n") < 0)
+    return -1;
+  /* separate call -- see the note at testHandler (#355) */
+  if (http_printf(session->httpc, "\r\n") < 0)
+    return -1;
+
+  for (i = 0; i < 5; i++) {
+    if (http_printf(session->httpc, "LINE %03d\n", i) < 0)
+      return -1;
+  }
+
+  wtof(MSG_ABEND_TEST);
+
+  __asm__ volatile("  DC	H'0'");
+
+  return 0; /* not reached */
+}
+
 /* fn=jesabend -- abend with a JES handle open, the shape of issue #282.
  *
  * fn=abend proves the ESTAE catches; this proves the catch also releases the
@@ -424,6 +459,9 @@ int testHandler(Session *session) {
    * its 500 recovery response after failed() retries. */
   if (strcmp(fn, "abend") == 0)
     return testAbend(session);
+
+  if (strcmp(fn, "abendbody") == 0)
+    return testAbendBody(session);
 
   if (strcmp(fn, "jesabend") == 0)
     return testJesAbend(session);
@@ -1627,6 +1665,7 @@ int testHandler(Session *session) {
         " \"?fn=textsum             (load point + FNV-1a per 4K block of the loaded MVSMF; mvsmf#425)\","
         " \"?fn=textdump&off=HEX&len=1..256 (bytes of the loaded MVSMF, off from the load point = entry-load + MVSMF913I EP offset; mvsmf#425)\","
         " \"?fn=abend               (force S0C1 -> ESTAE recovery test)\","
+        " \"?fn=abendbody           (200 and five lines, then S0C1 -> broken response)\","
         " \"?fn=denyopen&dsn=DS      (open without authorizing -> S913 -> denial recovery)\""
         " ] }\n");
   }

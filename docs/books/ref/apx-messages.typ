@@ -263,8 +263,12 @@ work.
        MVSMF913I and MVSMF914I and the build (@ref-test-version). The build of a
        release is its version.],
     [#cmd("MVSMF902W")], [#cmd("HEADERS ALREADY SENT, NO ERROR RESPONSE POSSIBLE")],
-      [The abend came after the response had begun. The client sees a body that
-       ends too soon and not an error report. It always follows MVSMF901E.],
+      [The abend came after the response had begun, so no error response can
+       follow. mvsMF closes the connection without the terminating chunk and
+       without keep-alive. The client sees a broken transfer (curl: typically
+       exit code 18) and not a short reply that looks complete. The function
+       #cmd("abendbody") of the diagnostic endpoint (@ref-test-abendbody) causes
+       this on purpose. The message always follows MVSMF901E.],
     [#cmd("MVSMF903W")], [#cmd("SESSION FILE TABLE FULL, FILE NOT TRACKED")],
       [One request has more data sets open than the table holds (4). The file
        that does not fit is not recorded, so the recovery does not close it if
@@ -278,10 +282,10 @@ work.
        its storage stays held for the life of the address space. Restart HTTPD
        when the storage is needed.],
     [#cmd("MVSMF906W")], [#cmd("FORCING S0C1 TO EXERCISE THE ESTAE RECOVERY")],
-      [The functions #cmd("abend") and #cmd("jesabend") of the diagnostic
-       endpoint (@ref-test) cause an abend on purpose. This is not a fault. The
-       message does not occur in a release or in a build without the endpoint
-       (@ref-test-build).],
+      [The functions #cmd("abend"), #cmd("abendbody") and #cmd("jesabend") of the
+       diagnostic endpoint (@ref-test) cause an abend on purpose. This is not a
+       fault. The message does not occur in a release or in a build without the
+       endpoint (@ref-test-build).],
     [#cmd("MVSMF907I")], [#cmd("ENV[%u] \"%s\"=\"%s\"")],
       [A dump of the CGI environment, one line for each variable. The message is
        written only if the logging middleware is registered. The shipped build

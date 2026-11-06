@@ -115,9 +115,9 @@ own permissions:
 == Response Format <ref-test-resp>
 
 #idx("response format", "diagnostic endpoint")
-Except for #cmd("abend"), #cmd("jesabend") and #cmd("denyopen"), every function
-answers 200 with the header #cmd("Content-Type: application/json") and a body
-that is sent in chunks (#cmd("Transfer-Encoding: chunked")), not with a
+Except for #cmd("abend"), #cmd("abendbody"), #cmd("jesabend") and
+#cmd("denyopen"), every function answers 200 with the header
+#cmd("Content-Type: application/json") and a body that is sent in chunks (#cmd("Transfer-Encoding: chunked")), not with a
 #cmd("Content-Length"). The status 200 does not say that the function worked.
 Errors of a function are in the body.
 
@@ -127,8 +127,10 @@ JSON. Their last line is #cmd("DONE step=N") (#cmd("DONE") for #cmd("cmd")). The
 function #cmd("cmd") ends without it when it does not get the console lock
 (@ref-test-cmd).
 
-The three functions that fail on purpose answer before any byte of a response
-is sent, so the router can send its error report (@ref-conv-fixed).
+Three of the four functions that fail on purpose answer before any byte of a
+response is sent, so the router can send its error report (@ref-conv-fixed). The
+function #cmd("abendbody") fails after the response has begun
+(@ref-test-abendbody).
 
 == The Functions <ref-test-fn>
 
@@ -164,6 +166,7 @@ is sent, so the router can send its error report (@ref-conv-fixed).
     [#cmd("textdump")], [#cmd("off") (0), #cmd("len") (64)], [Bytes of the loaded
       module.],
     [#cmd("abend")], [none], [Fail with S0C1.],
+    [#cmd("abendbody")], [none], [Send 200 and five lines, then fail with S0C1.],
     [#cmd("jesabend")], [none], [Fail with S0C1 with a JES handle open.],
     [#cmd("denyopen")], [#cmd("dsn") (#cmd("SYS1.SECURE.CNTL(PROFILES)"))],
       [Open a data set without a check, to provoke S913.],
@@ -174,7 +177,7 @@ is sent, so the router can send its error report (@ref-conv-fixed).
 
 #idx("fn", "help")
 The answer is a JSON object with the field #cmd("fn") (#cmd("help")) and the
-field #cmd("usage"), an array of 18 sentences. Each sentence shows the form of
+field #cmd("usage"), an array of 19 sentences. Each sentence shows the form of
 one request. The list does not contain #cmd("env"), #cmd("help") or #cmd("jesabend"). A value of #cmd("fn")
 that mvsMF does not know gives the same answer.
 
@@ -477,6 +480,21 @@ with an operation exception (S0C1). The recovery of mvsMF catches it. The
 client gets status 500 and the abend report of @ref-conv-fixed with the text
 #cmd("Internal server error (abend S0C1)"). The operator also sees MVSMF901E
 and, when the PSW is known, MVSMF913I and MVSMF914I (@apx-messages).
+
+=== abendbody <ref-test-abendbody>
+
+#idx("fn", "abendbody")
+#idx("abend", "after the response has begun")
+The function shows what the client sees when a handler abends after the
+response has begun, as a data set read can do in the middle of the body. It
+sends the status 200, the header #cmd("Content-Type: text/plain"), and five
+lines, #cmd("LINE 000") to #cmd("LINE 004"). It then writes MVSMF906W and fails
+with S0C1. The recovery of mvsMF catches the abend and writes MVSMF901E and
+MVSMF902W. No error report can follow a status that is already sent. mvsMF
+closes the connection in the middle of the body, without the terminating chunk
+of the chunked encoding and without keep-alive. The client sees a broken
+transfer and not a short reply that looks complete. With curl the request
+typically ends with the exit code 18 (partial file) after the five lines.
 
 === jesabend <ref-test-jesabend>
 

@@ -540,6 +540,14 @@ policy vacuum.
 
 ## Recently closed
 
+**PR open, #570 part 2** — an abend after the response had started ended as a
+complete-looking 200: `route_request()` only issued `MVSMF902W`, so `chunked`
+and `keepalive` stayed set (the failure of #421, on the abend path). It now
+calls `abort_response()` first. Measured on a throwaway container: the VBS data
+set of the issue, before 200 / 30 lines / curl exit 0, after curl exit 18.
+`curl-diag` covers it with `fn=abendbody`. Part 1 (the PUT into a spanned data
+set) stays open on libc370#757.
+
 **PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
 but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET
 with a clean `0\r\n\r\n` after a read error — the truncated 200 #362 exists to

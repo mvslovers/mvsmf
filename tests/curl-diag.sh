@@ -6,6 +6,7 @@
 #
 #   GET /zosmf/test?fn=abend      deliberate S0C1
 #   GET /zosmf/test?fn=jesabend   the same, with a JES spool handle open
+#   GET /zosmf/test?fn=abendbody  the same, after 200 and five body lines (#570)
 #
 # Until #343 these were gated on MVSMF_ABEND_TEST in the server environment
 # and this suite asserted the DISABLED path -- 400, no fault. That gate
@@ -190,6 +191,69 @@ else
 		"neither Transfer-Encoding nor Content-Length -- the client must \
 wait out the idle timeout to learn the body ended"
 fi
+
+# =========================================================================
+# 5. an abend after the response has started is a broken response (#570)
+#
+# fn=abendbody sends 200 and five lines, then faults. The router can no longer
+# send an error, so what the client sees must say so: the connection closes
+# without the terminating chunk and without keep-alive. Left alone, httpd's
+# httpdone() closed the chunked body with a clean "0\r\n\r\n" and the client
+# got a complete-looking 200 -- curl exit 0 on a truncated reply.
+#
+# Two requests, because curl decodes the chunking for one view and not the
+# other. Decoded, an unterminated chunked body is a transfer error. Raw, the
+# terminator is visible as bytes, and a second request on the same curl shows
+# whether the connection was kept.
+# =========================================================================
+echo ""
+echo "--- fn=abendbody: abend after the headers went out (issue #570) ---"
+OUT=$(mktemp "${MVSMF_CONN_DIR}/abendbody.XXXXXX")
+
+curl -s -m 20 -o "$OUT" -K "$MVSMF_CURLRC" "${TEST_URL}?fn=abendbody"
+RC=$?
+if [ "$RC" -eq 0 ]; then
+	fail "curl reports the truncated reply as an error" \
+		"curl exit 0: the client cannot tell this from a complete reply"
+elif [ "$RC" -eq 18 ] || [ "$RC" -eq 56 ]; then
+	pass "curl reports the truncated reply as an error (exit ${RC})"
+else
+	fail "curl reports the truncated reply as a transfer error" \
+		"expected exit 18 or 56, got ${RC}"
+fi
+
+if [ "$(grep -c '^LINE ' "$OUT")" -eq 5 ]; then
+	pass "the five lines sent before the abend arrived"
+else
+	fail "the five lines sent before the abend arrived" \
+		"got: $(tr '\n' '|' < "$OUT")"
+fi
+
+# Second URL on the same curl: a connection httpd keeps alive is reused for it
+# (num_connects 0), a closed one is opened again (1).
+CONNS=$(curl -s -m 20 --raw -o "$OUT" -o /dev/null -w '%{num_connects}\n' \
+	-K "$MVSMF_CURLRC" "${TEST_URL}?fn=abendbody" "${TEST_URL}?fn=version" |
+	tail -n 1)
+if [ "$CONNS" = 1 ]; then
+	pass "the connection is closed after the abend (no keep-alive)"
+else
+	fail "the connection is closed after the abend" \
+		"the next request reused it (num_connects=${CONNS}): keep-alive is still set"
+fi
+
+# "0\r\n\r\n" is the last five bytes of a cleanly closed chunked body
+if [ "$(tail -c 5 "$OUT" | od -An -c | tr -d ' ')" = '0\r\n\r\n' ]; then
+	fail "no terminating chunk after the abend" \
+		"the body ends in 0 CRLF CRLF: the client sees a complete reply"
+else
+	pass "no terminating chunk after the abend"
+fi
+rm -f "$OUT"
+
+echo ""
+echo "--- server still serving after the abend in the body ---"
+CODE2=$(get_fn version | tail -1)
+assert_http_status "200" "$CODE2" "server alive after fn=abendbody (fn=version)"
 
 # =========================================================================
 # summary

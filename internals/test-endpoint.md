@@ -90,6 +90,11 @@ authenticated, never the value. The one function that returned a credential
 was removed outright; a function that needs such a value to work belongs in
 the handler that uses it, not in a probe.
 
+`fn=abendbody` is the same fault after the response has started (200 and five
+lines, then S0C1), the branch of the router that cannot send an error any more
+(#570); it is deterministic where the data set read that first showed it
+depends on libc370#757.
+
 `tests/curl-diag.sh` now asserts what the gate used to promise: an abend is
 caught, the server keeps serving, and it costs no storage. It deliberately
 faults the worker several times.

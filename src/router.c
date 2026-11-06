@@ -199,6 +199,12 @@ int handle_request(Router *router, Session *session)
                 sendErrorResponse(session, 500, 6, 8, 99, msg, NULL, 0);
             }
         } else {
+            /* The status line is out, so no error can follow. The client must
+               at least see a broken response: left alone, httpdone() ends the
+               chunked body with a clean 0-chunk and keeps the connection, and
+               the truncation reads as a complete 200 (#570; #421 on the abend
+               path). */
+            abort_response(session);
             wtof(MSG_HEADERS_SENT);
         }
         return -1;

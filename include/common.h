@@ -331,7 +331,7 @@ int send_all(Session *session, const UCHAR *buf, int len) asm("CMN0014");
  * without a terminating chunk instead of ending a short body cleanly. Use it
  * wherever a streaming handler learns, too late to change the status, that it
  * cannot produce the rest of the body -- a failed send (send_all() calls this
- * itself) or a failed read (#362). The one outcome it exists to prevent is a
+ * itself), a failed read (#362) or an abend (the router's recovery, #570). The one outcome it exists to prevent is a
  * truncated reply the client cannot distinguish from a complete one.
  *
  * @param session Current session context

@@ -23,6 +23,14 @@ clears `chunked` when a send fails; the read-error callers in `dsapi.c` had
 nothing that did. The USS file GET has the same caller shape since #423
 (`src/ussread.c`, `internals/uss-handlers.md`).
 
+The third caller is the abend recovery in `router.c` (#570): an abend after
+`headers_sent` cannot be answered with an error, and left alone it ended the
+body with the same clean `0\r\n\r\n` (a VBS data set read that abended in
+`@@AREAD` reached the client as a 200, curl exit 0). The branch that issues
+`MVSMF902W` now calls `abort_response()` first. `/zosmf/test?fn=abendbody`
+(development builds) takes that branch on purpose; `tests/curl-diag.sh` asserts
+the curl exit, the missing terminator and the closed connection.
+
 The loop lives in its own TU only so `TSTSEND` (`test/host/tstsend.c`) drives
 the real one on the host; its four MVS/httpd services are injected through
 `SEND_OPS`. Until the Hercules X'75' fix (`mvslovers/hyperion` `1a599b0d`) a

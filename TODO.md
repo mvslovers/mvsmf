@@ -546,7 +546,9 @@ and `keepalive` stayed set (the failure of #421, on the abend path). It now
 calls `abort_response()` first. Measured on a throwaway container: the VBS data
 set of the issue, before 200 / 30 lines / curl exit 0, after curl exit 18.
 `curl-diag` covers it with `fn=abendbody`. Part 1 (the PUT into a spanned data
-set) stays open on libc370#757.
+set) stays open on libc370#757; its tests are in (`curl-datasets`: VBS 255/6233,
+VB 255/255; `curl-binary`: VB and VBS) and stay red until the pin moves past
+libc370 2.25.1.
 
 **PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
 but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET

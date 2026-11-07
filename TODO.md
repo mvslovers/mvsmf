@@ -540,8 +540,7 @@ policy vacuum.
 
 ## Recently closed
 
-**1.4.1 release mechanics (#570), prepared 2026-11-07**: Board decision on approval
-d1619374: 1.4.1 is cut from `main` with #570, #578 and #573, no release branch;
+**1.4.1 release mechanics (#570), prepared 2026-11-07**: Board decision: 1.4.1 is cut from `main` with #570, #578 and #573, no release branch;
 FMID `TZMF141` and `delete = ["TZMF140"]` explicit in `mbt.toml` (a patch needs
 both until mbt builds PTFs), no `LIST` on a stand (checked against the burned
 list in `smp.md`). CHANGELOG `[1.4.1]` dated 2026-11-07, #573 under Added. The

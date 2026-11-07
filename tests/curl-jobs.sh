@@ -2203,13 +2203,14 @@ test_cancel_running_job() {
 		return
 	fi
 
-	# the go step has started once it owns a spool file; a system without
-	# ASMFCG ends in a JCL error instead and never gets there
+	# the go step has started once it owns a spool file (the procedure step GO
+	# is the procstep of that file, the stepname is the job step, ASM); a
+	# system without ASMFCG ends in a JCL error instead and never gets there
 	local attempt=0 running=0 status
 	while [ $attempt -lt 60 ]; do
 		resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files")
 		split_response "$resp"
-		if echo "$BODY" | jq -e 'any(.[]?; .stepname == "GO")' >/dev/null 2>&1; then
+		if echo "$BODY" | jq -e 'any(.[]?; .procstep == "GO")' >/dev/null 2>&1; then
 			running=1
 			break
 		fi
@@ -2244,6 +2245,55 @@ test_cancel_running_job() {
 	split_response "$resp"
 	assert_http_status "200" "$HTTP_STATUS" "the output of the cancelled job is listed"
 	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "JESMSGLG")] | length')" '.' "1" "its job log is still on the spool"
+
+	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+}
+
+test_spool_files_proc_step() {
+	echo ""
+	echo "--- Spool Files: a step in a procedure (libc370#758) ---"
+
+	# stepname is the step of the JOB, procstep the step inside the procedure
+	# (z/OSMF; libc370 up to 2.28 returned the procedure step as stepname and
+	# the procedure name as procstep)
+	local jcl
+	jcl=$(printf '%s\n' \
+		"//QAPROC   JOB (1),'PROC STEP',CLASS=A,MSGCLASS=H" \
+		'//STEPONE  EXEC ASMFCG' \
+		'//ASM.SYSIN DD *' \
+		'TRIV     CSECT' \
+		'         USING TRIV,15' \
+		'         SR    15,15' \
+		'         BR    14' \
+		'         END' \
+		'/*')
+
+	local resp jn ji
+	resp=$(do_curl PUT -H "Content-Type: text/plain" -H "X-IBM-Intrdr-Mode: TEXT" \
+		--data-binary "$jcl" "${BASE_URL}/zosmf/restjobs/jobs")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "submit a job with a procedure step"
+	jn=$(echo "$BODY" | jq -r '.jobname // empty')
+	ji=$(echo "$BODY" | jq -r '.jobid // empty')
+	if [ -z "$jn" ] || [ -z "$ji" ]; then
+		skip "proc step names (no submitted job)"
+		return
+	fi
+
+	wait_for_output "$jn" "$ji" || true
+	resp=$(do_curl GET "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}/files")
+	split_response "$resp"
+	assert_http_status "200" "$HTTP_STATUS" "list the spool files of the procedure job"
+	if ! echo "$BODY" | jq -e 'any(.[]?; .ddname == "SYSLOUT")' >/dev/null 2>&1; then
+		do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
+		skip "proc step names (the job has no SYSLOUT: is ASMFCG available?)"
+		return
+	fi
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSLOUT")][0].stepname')" '.' "STEPONE" "GO step: stepname is the job step"
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSLOUT")][0].procstep')" '.' "GO" "GO step: procstep is the procedure step"
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSPRINT")][0].stepname')" '.' "STEPONE" "ASM step: stepname is the job step"
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "SYSPRINT")][0].procstep')" '.' "ASM" "ASM step: procstep is the procedure step"
+	assert_json_field "$(echo "$BODY" | jq '[.[] | select(.ddname == "JESMSGLG")][0].procstep')" '.' "null" "a JES2 data set has no procstep"
 
 	do_curl DELETE "${BASE_URL}/zosmf/restjobs/jobs/${jn}/${ji}" >/dev/null 2>&1 || true
 }
@@ -2408,6 +2458,9 @@ test_purge_job
 test_purge_not_found
 test_purge_held_output
 test_purge_started_task
+
+# Spool files of a step in a procedure (submits and removes a job of its own)
+test_spool_files_proc_step
 
 # Cancel tests (each submits and removes a job of its own)
 test_cancel_job

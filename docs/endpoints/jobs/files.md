@@ -34,6 +34,16 @@ On successful completion, this request returns HTTP status code 200 (OK) and a J
 ]
 ```
 
+## Step names
+
+`stepname` is the name of the step of the job; for a step that calls a
+procedure it is the name on the `EXEC` statement of the job. `procstep` is the
+name of the step inside the procedure, and `null` when the data set belongs to
+no procedure step. A data set that belongs to no step has `stepname` `JES2`.
+Up to mvsMF 1.4.0 the two fields were the other way round for a step in a
+procedure: `stepname` held the step inside the procedure and `procstep` the
+name of the procedure.
+
 ## Authorization
 
 A job of the caller's own userid is always readable. A job of another owner is

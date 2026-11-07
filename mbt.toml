@@ -33,10 +33,15 @@ kind = "application"
 # shrank HTTPD's free storage for good (mvslovers/libc370#546, #430).
 # 2.25.1: the level this project is built against after the 2.13.0 to
 # 2.25.1 review (mvslovers/mvsmf#442).
+# 2.29.1: a record written across a block of a spanned data set (VBS, or VB
+# with BLKSIZE < LRECL+4) keeps all its segments; up to 2.29.0 the tail was
+# lost and the data set unreadable (mvslovers/libc370#757, #770;
+# mvslovers/mvsmf#570). 2.29.0 also corrects the stepname and procstep of
+# a step in a procedure that jesjob() returns (mvslovers/libc370#758).
 # cc370: libc370 2.8.0 and later need cc370 >= 1.6.0, which finds the IBM
 # macros in maclib370; 1.6.3 is current.
 cc370 = "1.6.3"
-libc370 = "2.25.1"
+libc370 = "2.29.1"
 mbt = "3.0"
 
 [dependencies]

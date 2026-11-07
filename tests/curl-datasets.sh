@@ -3432,6 +3432,141 @@ fi
 
 curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${EXT_DSN}" 2>/dev/null || true
 
+# =========================================================================
+# Records that cross a block boundary: VBS, and VB with BLKSIZE < LRECL+4
+# (issue #570)
+#
+# libc370's fwrite() loses the tail of a record that has to be split over two
+# blocks and still reports success (libc370#757), so the PUT answers 204 and
+# the GET returns fewer lines -- or, from the damaged record on, nothing the
+# reader can follow. The OPEN exit makes a VB data set spanned when
+# LRECL+4 > BLKSIZE, which is why the second pair of rows is no VBS data set
+# on paper and behaves as one.
+#
+# Each case is a pair: the failing attributes, and a control that differs only
+# in that no record has to be split. The control is green on every library;
+# the failing case is red until libc370 carries the fix, and its failure
+# message says which of the two things broke (the line count or the bytes).
+# =========================================================================
+echo ""
+echo "--- Spanned and block-crossing records: round trip (issue #570) ---"
+
+SPAN_DSN="${MVSMF_USER}.CURL.SPAN"
+SPAN_BODY="${MVSMF_CONN_DIR}/span.body"
+SPAN_OUT="${MVSMF_CONN_DIR}/span.out"
+
+# $1 label, $2 create attributes (JSON), $3 file with the text to write
+span_roundtrip() {
+	local label="$1" attrs="$2" body="$3"
+	local want got put_code
+
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}" 2>/dev/null || true
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -K "$MVSMF_CURLRC" \
+		-H "Content-Type: application/json" \
+		-d "$attrs" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "201" "$HTTP_CODE" "${label}: create"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X PUT -K "$MVSMF_CURLRC" \
+		-H "Content-Type: text/plain" \
+		--data-binary @"$body" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "204" "$HTTP_CODE" "${label}: write"
+	put_code="$HTTP_CODE"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o "$SPAN_OUT" \
+		-K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "200" "$HTTP_CODE" "${label}: read"
+
+	want=$(wc -l < "$body" | tr -d ' ')
+	got=$(wc -l < "$SPAN_OUT" | tr -d ' ')
+	if [ "$got" = "$want" ]; then
+		pass "${label}: all ${want} lines read back"
+	else
+		fail "${label}: all ${want} lines read back" \
+			"read ${got} lines of ${want} -- the PUT answered ${put_code}"
+	fi
+
+	if cmp -s "$body" "$SPAN_OUT"; then
+		pass "${label}: the text round-trips byte for byte"
+	else
+		fail "${label}: the text round-trips byte for byte" \
+			"wrote $(wc -c < "$body" | tr -d ' ') bytes, read $(wc -c < "$SPAN_OUT" | tr -d ' '): $(cmp "$body" "$SPAN_OUT" 2>&1 | head -n 1)"
+	fi
+
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}" 2>/dev/null || true
+}
+
+# 100 lines of 200 bytes: 000xxx...x, 001xxx...x, each 3 digits and 197 x
+awk 'BEGIN { for (i = 0; i < 100; i++) { s = sprintf("%03d", i); while (length(s) < 200) s = s "x"; print s } }' \
+	> "$SPAN_BODY"
+if [ "$(wc -c < "$SPAN_BODY" | tr -d ' ')" != 20100 ]; then
+	fail "span fixture: 100 lines of 200 bytes" "the generated body is $(wc -c < "$SPAN_BODY" | tr -d ' ') bytes, not 20100"
+fi
+
+echo ""
+echo "--- VBS, LRECL 255, BLKSIZE 6233: 100 lines of 200 ---"
+span_roundtrip "VBS 255/6233" \
+	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":5,"secondary":5}' \
+	"$SPAN_BODY"
+
+echo ""
+echo "--- VB, LRECL 255, BLKSIZE 6233: the same lines, none split (control) ---"
+span_roundtrip "VB 255/6233" \
+	'{"dsorg":"PS","recfm":"VB","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":5,"secondary":5}' \
+	"$SPAN_BODY"
+
+# 79, 80, 81 and 10 bytes, told apart by letter, into one 255-byte block: the
+# 81-byte record is the one that does not fit the space left in the block
+{
+	awk 'BEGIN { s = ""; while (length(s) < 79) s = s "a"; print s }'
+	awk 'BEGIN { s = ""; while (length(s) < 80) s = s "b"; print s }'
+	awk 'BEGIN { s = ""; while (length(s) < 81) s = s "c"; print s }'
+	awk 'BEGIN { s = ""; while (length(s) < 10) s = s "d"; print s }'
+} > "$SPAN_BODY"
+
+echo ""
+echo "--- VB, LRECL 255, BLKSIZE 255: lines of 79, 80, 81, 10 ---"
+span_roundtrip "VB 255/255" \
+	'{"dsorg":"PS","recfm":"VB","lrecl":255,"blksize":255,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$SPAN_BODY"
+
+echo ""
+echo "--- VB, LRECL 255, BLKSIZE 259: the same lines, none split (control) ---"
+span_roundtrip "VB 255/259" \
+	'{"dsorg":"PS","recfm":"VB","lrecl":255,"blksize":259,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$SPAN_BODY"
+
+# Five short lines in a spanned data set: nothing to split, so this is green
+# on every library and shows that the failures above are the split and not VBS
+awk 'BEGIN { for (i = 1; i <= 5; i++) printf "VBS SHORT LINE %d\n", i }' > "$SPAN_BODY"
+
+echo ""
+echo "--- VBS, LRECL 255, BLKSIZE 6233: five short lines (control) ---"
+span_roundtrip "VBS short lines" \
+	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$SPAN_BODY"
+
+# One line of LRECL-4 = 251 bytes, the longest that RECFM=V takes: it fills the
+# record and splits nothing. Measured against libc370 2.25.1 it abends in the
+# access method (U0002, HTTP 500) -- no block boundary involved, so whether
+# libc370#757 covers it is open.
+awk 'BEGIN { s = ""; while (length(s) < 251) s = s "z"; print s }' > "$SPAN_BODY"
+
+echo ""
+echo "--- VBS, LRECL 255, BLKSIZE 6233: one line of 251 bytes, the longest record ---"
+span_roundtrip "VBS full record" \
+	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$SPAN_BODY"
+
+rm -f "$SPAN_BODY" "$SPAN_OUT"
+
 # --- Cleanup: delete PDS ---
 echo ""
 echo "--- Cleanup ---"

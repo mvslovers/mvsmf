@@ -32,6 +32,8 @@ TEST_PDS="${MVSMF_USER}.CURL.TESTBPDS"
 TEST_BLK="${MVSMF_USER}.CURL.TESTBBLK"
 TEST_VSEQ="${MVSMF_USER}.CURL.TESTBVB"
 TEST_VPDS="${MVSMF_USER}.CURL.TESTBVBP"
+TEST_VBIN="${MVSMF_USER}.CURL.TESTBVBB"
+TEST_VBSS="${MVSMF_USER}.CURL.TESTBVBS"
 
 # Temp file for downloads
 DOWNLOAD_FILE=$(mktemp)
@@ -89,6 +91,8 @@ cleanup_datasets() {
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_BLK}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VSEQ}" >/dev/null 2>&1 || true
 	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VBIN}" >/dev/null 2>&1 || true
+	curl -s -X DELETE -K "$MVSMF_CURLRC" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}" >/dev/null 2>&1 || true
 }
 
 # The start of a body, printable characters only, for a failure message.
@@ -409,11 +413,110 @@ assert_record_refused "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBMBR)" \
 	"VB member" "VBRECORD"
 
 # -----------------------------------------------------------------
+# Binary on RECFM=VB and VBS (issues #570, #244)
+#
+# Until now binary was only tried on FB. The upload is cut into LRECL-sized
+# pieces, so a body that is a whole number of LRECLs comes back as it went in
+# -- the contract is that, and nothing more: how a body that is not is padded
+# is a different question. The bodies below are 100 whole records and cross
+# block boundaries on purpose.
+#
+# VBS takes its own data set: a record of LRECL bytes written into a spanned
+# data set abends in libc370 (U0002, answered as HTTP 500) -- the same access
+# method code as libc370#757, and unchecked against its fix.
+# -----------------------------------------------------------------
+
+VB_BIN_BYTES=8400	# 100 records of the VB data set's LRECL 84 = 35 x binary80.bin
+VB_BIN_FILE=$(mktemp)
+VBS_BIN_FILE=$(mktemp)
+mvsmf_on_exit 'rm -f "$VB_BIN_FILE" "$VBS_BIN_FILE"'
+i=0
+while [ "$i" -lt $((VB_BIN_BYTES / 240)) ]; do
+	cat "$BINARY_FILE"
+	i=$((i + 1))
+done > "$VB_BIN_FILE"
+# 100 records of the VBS data set's LRECL 255, cut from the same pattern
+i=0
+while [ "$i" -lt 107 ]; do
+	cat "$BINARY_FILE"
+	i=$((i + 1))
+done | head -c 25500 > "$VBS_BIN_FILE"
+
+# $1 label, $2 URL, $3 file to upload
+binary_vb_roundtrip() {
+	local label="$1" url="$2" file="$3" want got
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+		-X PUT -K "$MVSMF_CURLRC" \
+		-H "Content-Type: application/octet-stream" \
+		-H "X-IBM-Data-Type: binary" \
+		--data-binary @"$file" \
+		"$url")
+	assert_http_status "204" "$HTTP_CODE" "${label}: upload binary"
+	if [ "$HTTP_CODE" != "204" ]; then
+		echo "        body: $(body_head "$DOWNLOAD_FILE")"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+		-K "$MVSMF_CURLRC" \
+		-H "X-IBM-Data-Type: binary" \
+		"$url")
+	assert_http_status "200" "$HTTP_CODE" "${label}: download binary"
+
+	want=$(wc -c < "$file" | tr -d ' ')
+	got=$(wc -c < "$DOWNLOAD_FILE" | tr -d ' ')
+	if cmp -s "$file" "$DOWNLOAD_FILE"; then
+		pass "${label}: binary round-trip matches (${want} bytes)"
+	else
+		fail "${label}: binary round-trip matches" \
+			"sizes: orig=${want} dl=${got}; $(cmp "$file" "$DOWNLOAD_FILE" 2>&1 | head -n 1)"
+	fi
+}
+
+echo ""
+echo "--- Binary round trip, RECFM=VB sequential, LRECL 84 (issue #570) ---"
+
+BODY='{"dsorg":"PS","recfm":"VB","lrecl":84,"blksize":3120,"alcunit":"TRK","primary":1,"secondary":1}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBIN}")
+assert_http_status "201" "$HTTP_CODE" "create VB sequential dataset for binary"
+binary_vb_roundtrip "VB sequential" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VBIN}" "$VB_BIN_FILE"
+
+echo ""
+echo "--- Binary round trip, RECFM=VB member, LRECL 84 (issue #570) ---"
+
+binary_vb_roundtrip "VB member" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBBIN)" "$VB_BIN_FILE"
+
+echo ""
+echo "--- Binary round trip, RECFM=VBS sequential, LRECL 255 (issue #570) ---"
+
+BODY='{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":5,"secondary":5}'
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X POST -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/json" \
+	-d "$BODY" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}")
+assert_http_status "201" "$HTTP_CODE" "create VBS sequential dataset for binary"
+binary_vb_roundtrip "VBS sequential" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}" "$VBS_BIN_FILE"
+
+# -----------------------------------------------------------------
 # Cleanup
 # -----------------------------------------------------------------
 
 echo ""
 echo "--- Cleanup ---"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBIN}")
+assert_http_status "204" "$HTTP_CODE" "cleanup: delete VB binary dataset"
+
+HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+	-X DELETE -K "$MVSMF_CURLRC" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}")
+assert_http_status "204" "$HTTP_CODE" "cleanup: delete VBS binary dataset"
 
 HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	-X DELETE -K "$MVSMF_CURLRC" \

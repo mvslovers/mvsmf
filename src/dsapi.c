@@ -27,6 +27,7 @@
 #include "volser.h"
 #include "httpcgi.h"
 #include "reclines.h"
+#include "ispfstat.h"
 
 // Record format flags
 #define FIXED     0x0001
@@ -2430,6 +2431,40 @@ error:
    list that does not answer what it asked. */
 #define MEMBER_PATTERN_SIZE	45
 
+/* One member with its ISPF statistics, in the fields and formats of z/OSMF's
+   X-IBM-Attributes: base (#573). The userid is raw EBCDIC and is escaped the
+   way the member name is. Returns -1 if a write failed. */
+__asm__("\n&FUNC    SETC 'member_stats'");
+static int
+write_member_stats(Session *session, const char *member, const ISPFSTATS *st,
+                   const unsigned char *etoa)
+{
+	char	user[MEMBER_ESC_SIZE];
+
+	jsonEscapeBytes(user, sizeof(user), st->user, st->userlen,
+		etoa, JSON_ESC_NONASCII);
+
+	if (http_printf(session->httpc,
+			"      \"member\": \"%s\",\n"
+			"      \"vers\": %u,\n"
+			"      \"mod\": %u,\n"
+			"      \"c4date\": \"%s\",\n"
+			"      \"m4date\": \"%s\",\n"
+			"      \"cnorc\": %u,\n"
+			"      \"inorc\": %u,\n"
+			"      \"mnorc\": %u,\n"
+			"      \"mtime\": \"%s\",\n"
+			"      \"msec\": \"%s\",\n"
+			"      \"user\": \"%s\",\n"
+			"      \"sclm\": \"%s\"\n",
+			member, st->vers, st->mod, st->c4date, st->m4date,
+			st->cnorc, st->inorc, st->mnorc, st->mtime, st->msec,
+			user, st->sclm ? "Y" : "N") < 0) {
+		return -1;
+	}
+	return 0;
+}
+
 /* Walk a PDS directory once, applying start= and pattern to every entry, and
 ** write the matches out as JSON objects on the way past.
 **
@@ -2446,7 +2481,7 @@ error:
 __asm__("\n&FUNC    SETC 'member_scan'");
 static int
 member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
-            const char *pattern_key, int have_pattern, unsigned page)
+            const char *pattern_key, int have_pattern, unsigned page, int base)
 {
 	char		blk[PDS_DIR_BLKSIZE];
 	unsigned char	etoa[256];
@@ -2487,6 +2522,7 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 			int	size;
 			size_t	nlen;
 			char	member[MEMBER_ESC_SIZE];
+			ISPFSTATS	stats;
 
 			if (memcmp(&blk[pos],
 			           "\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF", 8) == 0) {
@@ -2579,8 +2615,19 @@ member_scan(Session *session, FILE *fp, const char *start_key, int start_after,
 					if (http_printf(session->httpc, "   ,{\n") < 0) return -1;
 				}
 
-				// TODO: extract user data from the entry, if X-IBM-Attributes == base
-				if (http_printf(session->httpc, "      \"member\": \"%s\"\n", member) < 0) return -1;
+				/* base: the ISPF statistics from the entry's user data (#573).
+				   A member without them -- no user data, a load module, a
+				   field that is not ISPF's -- is the name alone, as in
+				   z/OSMF; nothing is made up for it.
+				   An entry whose user data runs past the used part of the block
+				   is damaged, and its bytes are not read. */
+				if (base && pos + size <= used &&
+				    ispf_stats_parse((const unsigned char *) &blk[pos],
+				                     (unsigned) size, &stats)) {
+					if (write_member_stats(session, member, &stats, etoa) < 0) return -1;
+				} else {
+					if (http_printf(session->httpc, "      \"member\": \"%s\"\n", member) < 0) return -1;
+				}
 				if (http_printf(session->httpc, "    }\n") < 0) return -1;
 			}
 
@@ -2767,7 +2814,8 @@ int memberListHandler(Session *session)
 	if ((rc = http_printf(session->httpc, "  \"items\": [\n")) < 0) goto quit;
 
 	scanned = member_scan(session, fp, skipping ? start_key : NULL,
-			start_after, pattern_key, have_pattern, maxitems);
+			start_after, pattern_key, have_pattern, maxitems,
+			ispf_wants_base(getHeaderParam(session, "X-IBM-Attributes")));
 	if (scanned < 0) {
 		rc = scanned;
 		goto quit;

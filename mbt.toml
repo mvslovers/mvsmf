@@ -251,6 +251,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTSPLN]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTISPF: #573 — the member list reports the ISPF statistics of a directory
+# entry with `X-IBM-Attributes: base`, and a member without them stays a bare
+# name. Portable C (`mbt test`); the TU #includes src/ispfstat.c so it drives
+# the real parser dsapi.c calls — do not list ispfstat.c here.
+[test.TSTISPF]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTJCARD: #365 — mvsMF injects USER=/PASSWORD= on every submit, and did so
 # unconditionally, so a caller who wrote USER= themselves got two operands and
 # IEF652I. The TU #includes src/jobcard.c so it drives the real decision

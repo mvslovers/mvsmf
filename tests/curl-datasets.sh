@@ -43,6 +43,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "${SCRIPT_DIR}/lib/conn.sh"
+. "${SCRIPT_DIR}/lib/ispfstats.sh"
 
 
 # Test dataset names
@@ -3566,6 +3567,160 @@ span_roundtrip "VBS full record" \
 	"$SPAN_BODY"
 
 rm -f "$SPAN_BODY" "$SPAN_OUT"
+
+# =========================================================================
+# ISPF statistics in the member list: X-IBM-Attributes: base (issue #573)
+# =========================================================================
+#
+# Zowe asks for the base attributes with `files list am --attributes` and
+# prints what comes back, so a list of bare names was all a user ever saw. The
+# statistics are in the user data of the directory entry. tests/jcl/ispfstats.jcl
+# stows five entries that cover the cases: two with statistics (one of them
+# SCLM, with counts above 255), the extended 40-byte form, another tool's 30
+# bytes, and no user data. The expected values are spelled out in that JCL.
+echo ""
+echo "--- List PDS Members (X-IBM-Attributes: base, issue #573) ---"
+
+ISPF_PDS="${MVSMF_USER}.CURL.ISPFSTAT"
+
+if ! ispf_fixture "$ISPF_PDS"; then
+	# the fixture is built by a job this suite submits, so its absence is red (#304)
+	fail "ispf stats: the fixture job" "$ISPF_FIXTURE_WHY"
+else
+	pass "ispf stats: the fixture job ended CC 0000"
+
+	ISPF_URL="${BASE_URL}/zosmf/restfiles/ds/${ISPF_PDS}/member"
+
+	BODY=$(curl -s -w '\n%{http_code}' -K "$MVSMF_CURLRC" \
+		-H 'X-IBM-Attributes: base' "$ISPF_URL")
+	HTTP_CODE=$(echo "$BODY" | tail -1)
+	CONTENT=$(echo "$BODY" | sed '$d')
+	assert_http_status "200" "$HTTP_CODE" "ispf stats: list with base"
+	assert_json_field "$CONTENT" '[.items[].member] | join(" ")' \
+		"EXTEND FOREIGN PLAIN SCLMMEM WITHST" "ispf stats: every member is listed"
+	assert_json_field "$CONTENT" '.returnedRows' "5" "ispf stats: returnedRows"
+
+	WANT='{"member":"WITHST","vers":1,"mod":5,"c4date":"2015/08/12","m4date":"2015/08/12","cnorc":22,"inorc":22,"mnorc":3,"mtime":"05:48","msec":"43","user":"IBMUSER","sclm":"N"}'
+	GOT=$(echo "$CONTENT" | jq -c '.items[] | select(.member == "WITHST")' 2>/dev/null)
+	if [ "$GOT" = "$WANT" ]; then
+		pass "ispf stats: WITHST carries its statistics, in z/OSMF's field order"
+	else
+		fail "ispf stats: WITHST carries its statistics, in z/OSMF's field order" \
+			"got: $GOT"
+	fi
+
+	WANT='{"member":"SCLMMEM","vers":12,"mod":34,"c4date":"2024/02/29","m4date":"1999/12/31","cnorc":1000,"inorc":65535,"mnorc":0,"mtime":"23:59","msec":"59","user":"MVSMF","sclm":"Y"}'
+	GOT=$(echo "$CONTENT" | jq -c '.items[] | select(.member == "SCLMMEM")' 2>/dev/null)
+	if [ "$GOT" = "$WANT" ]; then
+		pass "ispf stats: SCLMMEM (leap day, 1999, counts over 255, SCLM flag)"
+	else
+		fail "ispf stats: SCLMMEM (leap day, 1999, counts over 255, SCLM flag)" \
+			"got: $GOT"
+	fi
+
+	# the counts are numbers and msec is a string, as in the reference
+	if echo "$CONTENT" | jq -e '.items[] | select(.member == "WITHST") |
+		(.vers, .mod, .cnorc, .inorc, .mnorc | type == "number") and
+		(.msec, .mtime, .user, .sclm | type == "string")' 2>/dev/null |
+		grep -qv true; then
+		fail "ispf stats: counts are JSON numbers, msec and mtime strings"
+	else
+		pass "ispf stats: counts are JSON numbers, msec and mtime strings"
+	fi
+
+	# no statistics means the name alone: no fields invented, no error
+	for M in EXTEND FOREIGN PLAIN; do
+		GOT=$(echo "$CONTENT" | jq -c ".items[] | select(.member == \"${M}\")" 2>/dev/null)
+		if [ "$GOT" = "{\"member\":\"${M}\"}" ]; then
+			pass "ispf stats: ${M} has no statistics and is listed by name only"
+		else
+			fail "ispf stats: ${M} has no statistics and is listed by name only" \
+				"got: $GOT"
+		fi
+	done
+
+	# without the header the answer is what it was: names only
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" "$ISPF_URL")
+	if echo "$CONTENT" | jq -e '[.items[] | keys] | all(. == ["member"])' \
+		>/dev/null 2>&1; then
+		pass "ispf stats: no header, names only"
+	else
+		fail "ispf stats: no header, names only" "got: $(echo "$CONTENT" | tr -d '\n ')"
+	fi
+
+	# member is the other value of the header, and means names only too
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: member' "$ISPF_URL")
+	if echo "$CONTENT" | jq -e '[.items[] | keys] | all(. == ["member"])' \
+		>/dev/null 2>&1; then
+		pass "ispf stats: X-IBM-Attributes: member, names only"
+	else
+		fail "ispf stats: X-IBM-Attributes: member, names only" \
+			"got: $(echo "$CONTENT" | tr -d '\n ')"
+	fi
+
+	# the value is case-insensitive; ",total" is accepted and changes nothing
+	for V in BASE 'Base,total'; do
+		CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H "X-IBM-Attributes: ${V}" "$ISPF_URL")
+		if [ "$(echo "$CONTENT" | jq -r '.items[] | select(.member == "WITHST") | .user' 2>/dev/null)" = "IBMUSER" ]; then
+			pass "ispf stats: X-IBM-Attributes: ${V}"
+		else
+			fail "ispf stats: X-IBM-Attributes: ${V}" \
+				"got: $(echo "$CONTENT" | tr -d '\n ')"
+		fi
+	done
+
+	# an unknown word is not base
+	CONTENT=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: basement' "$ISPF_URL")
+	if echo "$CONTENT" | jq -e '[.items[] | keys] | all(. == ["member"])' \
+		>/dev/null 2>&1; then
+		pass "ispf stats: an unknown attribute word is not base"
+	else
+		fail "ispf stats: an unknown attribute word is not base" \
+			"got: $(echo "$CONTENT" | tr -d '\n ')"
+	fi
+
+	# paging and filtering behave as they do without the header
+	BODY=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: base' \
+		-H 'X-IBM-Max-Items: 4' "${ISPF_URL}?start=PLAIN")
+	assert_json_field "$BODY" '[.items[].member] | join(" ")' \
+		"PLAIN SCLMMEM WITHST" "ispf stats: start= with base"
+	assert_json_field "$BODY" '.items[] | select(.member == "SCLMMEM") | .user' \
+		"MVSMF" "ispf stats: start= with base keeps the statistics"
+	assert_json_field_absent "$BODY" 'has("moreRows")' "ispf stats: start= with base, no moreRows"
+
+	BODY=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: base' \
+		-H 'X-IBM-Max-Items: 2' "$ISPF_URL")
+	assert_json_field "$BODY" '[.items[].member] | join(" ")' \
+		"EXTEND FOREIGN" "ispf stats: max-items=2 with base"
+	assert_json_field "$BODY" '.moreRows' "true" "ispf stats: max-items=2 with base: moreRows"
+
+	BODY=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: base' \
+		-H 'X-IBM-Max-Items: 2' "${ISPF_URL}?start=SCLMMEM")
+	assert_json_field "$BODY" '[.items[] | .vers // "-"] | join(" ")' \
+		"12 1" "ispf stats: a page of two members with statistics"
+	assert_json_field_absent "$BODY" 'has("moreRows")' \
+		"ispf stats: a page that ends with the directory, no moreRows"
+
+	BODY=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: base' "${ISPF_URL}?pattern=W*")
+	assert_json_field "$BODY" '[.items[].member] | join(" ")' "WITHST" \
+		"ispf stats: pattern= with base"
+	assert_json_field "$BODY" '.items[0].cnorc' "22" \
+		"ispf stats: pattern= with base keeps the statistics"
+
+	# a member mvsMF wrote itself has no statistics: no ISPF stamped it
+	BODY=$(curl -s -K "$MVSMF_CURLRC" -H 'X-IBM-Attributes: base' \
+		"${BASE_URL}/zosmf/restfiles/ds/${TEST_PDS}/member")
+	if echo "$BODY" | jq -e '(.items | length) > 0 and
+		([.items[] | keys] | all(. == ["member"]))' >/dev/null 2>&1; then
+		pass "ispf stats: members written through mvsMF are listed by name only"
+	else
+		fail "ispf stats: members written through mvsMF are listed by name only" \
+			"got: $(echo "$BODY" | tr -d '\n ')"
+	fi
+
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${ISPF_PDS}" 2>/dev/null || true
+fi
 
 # --- Cleanup: delete PDS ---
 echo ""

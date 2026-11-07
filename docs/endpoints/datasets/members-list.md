@@ -36,6 +36,12 @@ otherwise it is answered 404 (or 400 for a malformed volume serial). See
 
 ## Request Headers
 - `X-IBM-Max-Items` (optional): Maximum number of members to return. Omitted or `0` returns all of them.
+- `X-IBM-Attributes` (optional): `base` adds the ISPF statistics of each member
+  to its item (see [ISPF statistics](#ispf-statistics)). `member`, no header,
+  or any other word returns the name alone, which is the default. The value is
+  not case sensitive, and `base,total` is accepted as `base`: the `total`
+  option is not implemented and does not change the answer. Zowe CLI sends
+  `base` for `zowe files list am --attributes`.
 
 ## Response
 HTTP status code 200 (OK), whether the listing is complete or was cut short by
@@ -61,6 +67,74 @@ The body is a JSON object:
 and is `true` when it does. A complete listing carries no such key, matching the
 reference (issue #279) — so read the field as a flag, not as a value to compare
 against `false`.
+
+## ISPF statistics
+
+With `X-IBM-Attributes: base` every member whose directory entry carries ISPF
+statistics is listed with them, in z/OSMF's fields and order:
+
+```json
+{
+    "items": [
+        {
+            "member": "WITHST",
+            "vers": 1,
+            "mod": 5,
+            "c4date": "2015/08/12",
+            "m4date": "2015/08/12",
+            "cnorc": 22,
+            "inorc": 22,
+            "mnorc": 3,
+            "mtime": "05:48",
+            "msec": "43",
+            "user": "IBMUSER",
+            "sclm": "N"
+        },
+        { "member": "PLAIN" }
+    ],
+    "returnedRows": 2,
+    "JSONversion": 1
+}
+```
+
+| Field | Meaning | Type |
+|---|---|---|
+| `vers`, `mod` | version and modification level | number |
+| `c4date` | creation date, `yyyy/mm/dd` | string |
+| `m4date` | date of the last change, `yyyy/mm/dd` | string |
+| `mtime`, `msec` | time of the last change, `hh:mm` and the seconds as two digits | string |
+| `cnorc` | current number of records | number |
+| `inorc` | initial number of records | number |
+| `mnorc` | number of modified records | number |
+| `user` | userid of the last change, without the blank padding | string |
+| `sclm` | `Y` when the member was last changed under SCLM, else `N` | string |
+
+The statistics are read from the user data of the directory entry, the 30
+bytes ISPF writes there. Nothing is looked up besides the directory, so the
+header costs no I/O beyond the directory walk the list does anyway.
+
+**A member without statistics is listed with its name only** — no fields are
+invented and the request is not an error. That is the case for
+
+- a member of a load library, whose user data is a linkage editor's, not ISPF's;
+- a member whose entry has no user data, or user data of another length, or
+  data that does not hold up as ISPF statistics (a field that is not a packed
+  number, a date that does not exist) — foreign tools stow their own bytes
+  there, and reporting them as a date would be wrong;
+- a member written through mvsMF itself (`PUT`), which stows no statistics;
+- a member with the **extended** statistics ISPF writes once a member has more
+  than 65535 records (a longer user data field, 40 bytes). Those are not
+  decoded; the member is listed by name.
+
+`X-IBM-Max-Items`, `start` and `pattern` work as they do without the header, and
+`returnedRows` and `moreRows` count members as before.
+
+Not measured against a real z/OSMF: what it answers for a member without
+statistics (the name alone is what is documented and what is implemented), and
+the exact reading of `sclm` and of the two record counts `cnorc` and `inorc`
+for a member that has been edited. The fields follow the ISPF layout and the
+IBM documentation; `inorc` is the initial and `cnorc` the current number of
+records.
 
 ## Large directories
 
@@ -147,7 +221,11 @@ curl -H 'X-IBM-Max-Items: 2' \
 ```
 
 ## Limitations
-- No member statistics (TTR, size, dates) are returned yet
+- The statistics are the ISPF ones, and only the 30-byte form: members with the
+  extended 40-byte statistics (more than 65535 records) are listed by name.
+  Load module attributes (size, AMODE, RMODE, ...) of a load library are not
+  returned.
+- `X-IBM-Attributes: base,total` does not return a `totalRows`.
 
 ## Authorization
 
@@ -175,6 +253,32 @@ zowe files list all-members "MIKE.TEST.JCL"
 # bounded
 curl -H 'X-IBM-Max-Items: 100' \
   http://mvs:1080/zosmf/restfiles/ds/SYS1.MACLIB/member
+
+# with the ISPF statistics
+curl -H 'X-IBM-Attributes: base' \
+  http://mvs:1080/zosmf/restfiles/ds/MIKE.TEST.JCL/member
+```
+
+```bash
+zowe files list all-members "MIKE.TEST.JCL" --attributes
+```
+
+```
+- 
+  member: WITHST
+  vers:   1
+  mod:    5
+  c4date: 2015/08/12
+  m4date: 2015/08/12
+  cnorc:  22
+  inorc:  22
+  mnorc:  3
+  mtime:  05:48
+  msec:   43
+  user:   IBMUSER
+  sclm:   N
+- 
+  member: PLAIN
 ```
 
 ### Success Response

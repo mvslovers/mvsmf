@@ -269,10 +269,12 @@ The fields come in this order:
     [#cmd("record-count")], [The number of records, a number.],
     [#cmd("class")], [The output class, one character.],
     [#cmd("jobname")], [The job name.],
-    [#cmd("stepname")], [The step name. #cmd("JES2") when the data set has
+    [#cmd("stepname")], [The name of the step of the job. For a step that calls
+      a procedure, this is the name on the #cmd("EXEC") statement of the job,
+      not the step inside the procedure. #cmd("JES2") when the data set has
       none.],
-    [#cmd("procstep")], [The procedure step name, or #cmd("null") when the data
-      set has none.],
+    [#cmd("procstep")], [The name of the step inside the procedure, or
+      #cmd("null") when the data set has none.],
   )
 ]
 

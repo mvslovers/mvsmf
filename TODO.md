@@ -546,11 +546,14 @@ and `keepalive` stayed set (the failure of #421, on the abend path). It now
 calls `abort_response()` first. Measured on a throwaway container: the VBS data
 set of the issue, before 200 / 30 lines / curl exit 0, after curl exit 18.
 `curl-diag` covers it with `fn=abendbody`. Part 1 (the PUT into a spanned data
-set) stays open on libc370#757; its tests are in (`curl-datasets`: VBS 255/6233,
-VB 255/255; `curl-binary`: VB and VBS) and stay red until the pin moves past
-libc370 2.25.1.
+set) is fixed by the pin on libc370 2.29.1 (libc370#757, #770): `curl-datasets`
+VBS 255/6233 and VB 255/255, 255/259, 255/6233 and `curl-binary` VB are green;
+the LRECL-8 limit of a spanned record that stayed behind is #578 below. The same
+pin moves the `stepname`/`procstep` of a step in a procedure (libc370#758); the
+#417 cancel test follows `procstep`, `curl-jobs` has a test for the pair, and
+`CHANGELOG.md` tells it.
 
-**PR open, #578** — a record of a spanned data set (VBS, or VB with BLKSIZE <
+**PR #579, merged 2026-11-07** — #578: a record of a spanned data set (VBS, or VB with BLKSIZE <
 LRECL+4) holds LRECL-8 data bytes, not LRECL-4: libc370's write abended U0002
 above that, and a 248..251 byte line on VBS 255/6233 left the data set empty.
 `reclimit.c` now gives the content maximum and the binary piece (LRECL-8 for a

@@ -121,13 +121,10 @@ minus 4. A line of 248 to 251 bytes on a VBS data set with LRECL 255 ended in
 #cmd("500") with the message #cmd("Internal server error (abend U0002)"), and
 the data set was empty afterwards.
 
-#note[*A defect* (mvsmf\#570, libc370\#757): a write into a data set of the
-record format VBS loses data when a record does not fit in the space left in
-the current block, and the answer is still #cmd("204"). A VB data set with a
-block size smaller than LRECL plus 4 has the same fault, because it is opened
-as spanned. A later read of such a data set fails (see the end of the next
-section). Until libc370 is fixed, do not write to a VBS data set, and give a VB
-data set a block size of at least LRECL plus 4.]
+#note[*Spanned data sets* (mvsmf\#570): a record that does not fit in the rest
+of a block is split over two blocks and read back whole. Before mvsMF 1.4.1 the
+tail of such a record was lost while the answer was still #cmd("204"), and a
+later read of the data set failed (see the end of the next section).]
 
 A member is written in the same way. The member is created if it does not
 exist, and replaced if it does. The library must exist.

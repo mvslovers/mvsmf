@@ -560,18 +560,15 @@ minus 4. A longer line made the write abend with the user abend U0002, the
 answer was #cmd("Internal server error (abend U0002)"), and the data set was
 left empty.
 
-#note[*A defect* (mvsmf\#570, libc370\#757): a write into a data set with the
-record format VBS loses data whenever a record does not fit in the space left
-in the current block. The same holds for VB with a block size smaller than LRECL
-plus 4, because the open makes such a data set spanned. libc370 writes the first
-part of the record, marks it as complete and drops the rest. The write reports
-success, so the answer is #cmd("204"). A later read of the data set ends in an abend of the libc370 read routine
-(user abend U1234, after the console line #cmd("MVSSUPA - @@AREAD - problem
-processing RECFM=V(bs) file")) at that record, and the client sees a failed
-transfer (@ref-ds-read). Until libc370 is fixed, do not write to a
-VBS data set, and give a VB data set a block size of at least LRECL plus 4. A
-VB data set with such a block size is not spanned and does not take this path.
-The same holds for a member.]
+#note[*Spanned data sets* (mvsmf\#570): a record that does not fit in the space
+left in the current block is split over two blocks and read back whole. 100
+lines written to a VBS data set with LRECL 255 and block size 6233, and to VB
+data sets with LRECL 255 and block sizes 255, 259 and 6233, came back intact.
+Before mvsMF 1.4.1 the tail of such a record was lost, the answer was still
+#cmd("204"), and a later read of the data set ended in an abend of the libc370
+read routine (user abend U1234) at that record, which the client sees as a
+failed transfer (@ref-ds-read). The measurements are on sequential data sets; a
+member is written by the same access method code.]
 
 mvsMF writes each record to the access method at once. If the data set runs out
 of space, the answer is #cmd("500") (reason 3) and the operator message is

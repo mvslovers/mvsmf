@@ -36,7 +36,7 @@ entry of its own.
     the value is still the same (@ug-uss-etag).],
   [FACILITY class], [A resource class of the security product. A route line
     with #cmd("RES=") checks a resource in it (@ug-security-console).],
-  [FMID], [The id of a function SYSMOD in SMP. mvsMF 1.4.0 is #cmd("TZMF140")
+  [FMID], [The id of a function SYSMOD in SMP. mvsMF 1.4.1 is #cmd("TZMF141")
     (@ug-install-package).],
   [hardcopy log], [The console messages that mvsMF reads from the _Master Trace
     Table_ on request (@ug-console-log).],

@@ -3,13 +3,13 @@
 = Installing mvsMF <ug-install>
 
 #idx("installation")#idx("SMP")
-mvsMF (mvsmf) is installed with SMP4 as the function SYSMOD #cmd("TZMF140"). The
+mvsMF (mvsmf) is installed with SMP4 as the function SYSMOD #cmd("TZMF141"). The
 SYSMOD puts one load module, #cmd("MVSMF"), into the library
 #cmd("MVSMF.LINKLIB"). You then add that library to the STEPLIB of HTTPD
 (httpd), add four route lines to the configuration of HTTPD, and restart
 HTTPD. This chapter takes you through these steps, shows how to check them, and
-describes the upgrade from mvsMF 1.3.0. The daily work is in @ug-ops and the
-removal in @ug-remove. The route lines and their options are listed in full in
+describes the upgrade from mvsMF 1.4.0 and from 1.3.0. The daily work is in
+@ug-ops and the removal in @ug-remove. The route lines and their options are listed in full in
 the _mvsMF Reference_, in “Configuring HTTPD for mvsMF”.
 
 == What You Need <ug-install-prereq>
@@ -17,7 +17,7 @@ the _mvsMF Reference_, in “Configuring HTTPD for mvsMF”.
 #idx("prerequisites")
 The installation needs these parts on the system:
 
-#tab(caption: [Prerequisites of mvsMF 1.4.0])[
+#tab(caption: [Prerequisites of mvsMF 1.4.1])[
   #table(columns: (1.4in, 1fr),
     [Part], [What mvsMF needs from it],
     [MVS 3.8j with SMP4], [The install job uses the SMP4 procedures #cmd("SMPREC")
@@ -45,7 +45,7 @@ The installation needs these parts on the system:
 
 #note[The floors of HTTPD and UFSD are prose. SMP4 cannot express a floor: a
 prerequisite (#cmd("REQ")) in a SYSMOD means one exact level. The SYSMOD
-#cmd("TZMF140") therefore names none, and the install job does not check
+#cmd("TZMF141") therefore names none, and the install job does not check
 either. crypto370 and the C library are linked into the load module of mvsMF.
 They need no installation of their own.]
 
@@ -90,21 +90,21 @@ What HTTPD 4.5.1 does at every start, and how to cure the state, is in
 
 == The Package <ug-install-package>
 
-#idx("package")#idx("TZMF140")#idx("FMID")
+#idx("package")#idx("TZMF141")#idx("FMID")
 The release of mvsMF is a package with these files. The names carry the version
 of the release.
 
 #tab(caption: [The files of the package])[
   #table(columns: (2.1in, 1fr),
     [File], [Content],
-    [#cmd("mvsmf-1.4.0-alloc.jcl")], [The job #cmd("MVSMFALC"): allocates the
+    [#cmd("mvsmf-1.4.1-alloc.jcl")], [The job #cmd("MVSMFALC"): allocates the
       libraries that SMP owns. You run it once.],
-    [#cmd("mvsmf-1.4.0-inst.jcl")], [The job #cmd("MVSMFINS"): receives, applies
-      and accepts #cmd("TZMF140"). The SYSMOD is part of the job as in-stream
+    [#cmd("mvsmf-1.4.1-inst.jcl")], [The job #cmd("MVSMFINS"): receives, applies
+      and accepts #cmd("TZMF141"). The SYSMOD is part of the job as in-stream
       text.],
-    [#cmd("mvsmf-1.4.0-load.xmit")], [The load module, to be uploaded as a
+    [#cmd("mvsmf-1.4.1-load.xmit")], [The load module, to be uploaded as a
       binary file.],
-    [#cmd("mvsmf-1.4.0-samplib.xmit")], [The sample library, to be uploaded as a
+    [#cmd("mvsmf-1.4.1-samplib.xmit")], [The sample library, to be uploaded as a
       binary file.],
     [A README], [The installation instructions in short form.],
   )
@@ -131,7 +131,7 @@ The install job puts these data sets on the system:
 == Allocating the Libraries <ug-install-alloc>
 
 #idx("allocation")#idx("MVSMFALC")
-Submit #cmd("mvsmf-1.4.0-alloc.jcl") once, before the first install. The job
+Submit #cmd("mvsmf-1.4.1-alloc.jcl") once, before the first install. The job
 allocates #cmd("MVSMF.LINKLIB") and #cmd("MVSMF.AMVSMFLD"), each with 5
 cylinders primary, 2 secondary and 20 directory blocks, record format U and
 block size 15040. The statements name the unit #cmd("SYSDA") and no volume. Edit
@@ -151,7 +151,7 @@ allocation of an existing name fails.
 with record format FB and logical record length 80. Any data set names are fine.
 Upload them with a method that does not change a byte of the content.
 
-*Edit the install job.* In #cmd("mvsmf-1.4.0-inst.jcl") replace the two names
+*Edit the install job.* In #cmd("mvsmf-1.4.1-inst.jcl") replace the two names
 that start with #cmd("CHANGE.ME") with the names of the uploaded data sets. These
 two are the only lines you change:
 
@@ -173,7 +173,7 @@ two are the only lines you change:
       data set that does not exist is not an error.],
     [#cmd("RECV1")], [Receives the load XMIT file into #cmd("MVSMF.MVSMFLOD").],
     [#cmd("RECV2")], [Receives the sample XMIT file into #cmd("MVSMF.SAMPLIB").],
-    [#cmd("RECV")], [Receives the SYSMOD #cmd("TZMF140") into the SMP inventory.
+    [#cmd("RECV")], [Receives the SYSMOD #cmd("TZMF141") into the SMP inventory.
       Runs only when #cmd("RECV2") ended with 0.],
     [#cmd("APPLYCHK")], [#cmd("APPLY") with #cmd("CHECK"): reports what would
       happen and changes nothing. Runs only when #cmd("RECV") ended with 0. The
@@ -198,19 +198,24 @@ an early step failed therefore runs fewer steps than the table lists.
   Copy the members you want to keep to a library of your own, and change the
   copies. SMP owns the module, and you own the copies of the samples.
 + The earlier level of the product. The SYSMOD says
-  #cmd("++VER(Z038) DELETE(TZMF130)"). SMP deletes the load module of #cmd("TZMF130")
-  from #cmd("MVSMF.LINKLIB") and copies the new one in. The SYSMOD #cmd("TZMF130")
+  #cmd("++VER(Z038) DELETE(TZMF140)"). SMP deletes the load module of #cmd("TZMF140")
+  from #cmd("MVSMF.LINKLIB") and copies the new one in. The SYSMOD #cmd("TZMF140")
   stays in the inventory as a deleted function (a tombstone) with the entry
-  #cmd("DELBY") naming #cmd("TZMF140"). @ug-install-upgrade describes the upgrade.
+  #cmd("DELBY") naming #cmd("TZMF141"). @ug-install-upgrade describes the upgrade.
+  The tombstone was measured with the release of 1.4.0, where #cmd("TZMF140")
+  deleted #cmd("TZMF130"). The statement of 1.4.1 comes from the build file of
+  the project. The package of 1.4.1 was not installed for this book.
 
 The function SYSMOD ids of mvsMF are #cmd("TZMF110"), #cmd("TZMF120"),
-#cmd("TZMF130") and #cmd("TZMF140"). The id is the letter T, the product letters
-ZMF, and the major and minor version and a zero. Each id is used once. The
-SYSMOD of 1.4.0 deletes only #cmd("TZMF130"). On a system that still holds
-#cmd("TZMF120"), that id keeps owning the module: the install of 1.4.0 prints
-#cmd("NOT SEL"), copies nothing and ends every step with the return code 0. Such
-a system has to be brought to 1.3.0 first. This edition does not describe that
-upgrade.
+#cmd("TZMF130"), #cmd("TZMF140") and #cmd("TZMF141"). The id is the letter T,
+the product letters ZMF, and the major and minor version and a last digit. The
+last digit is zero for a minor release. 1.4.1 is a patch release and has the id
+#cmd("TZMF141"), which the build file names. Each id is used once. The SYSMOD of
+1.4.1 deletes only #cmd("TZMF140"). On a system that still holds
+#cmd("TZMF130"), that id keeps owning the module. By the ownership rule of SMP4
+the install of 1.4.1 then prints #cmd("NOT SEL"), copies nothing and ends every
+step with the return code 0. Such a system has to be brought to 1.4.0 first.
+This follows from the rule. The step was not run.
 
 #note[*Ending with 0 is not the proof.* A return code says that the job ran. It
 does not say that the work happened. SMP installs an element only when the SYSMOD
@@ -241,13 +246,13 @@ Third, the inventory has the SYSMOD in both zones. Run a job like this one:
 //LIST    EXEC SMPAPP
 //SMPCNTL  DD *
  RESETRC .
- LIST CDS  SYSMOD(TZMF140) .
- LIST ACDS SYSMOD(TZMF140) .
+ LIST CDS  SYSMOD(TZMF141) .
+ LIST ACDS SYSMOD(TZMF141) .
 /*
 //
 ```
 
-Each zone shows the status of #cmd("TZMF140") as received, applied and accepted
+Each zone shows the status of #cmd("TZMF141") as received, applied and accepted
 (#cmd("REC APP ACC")). The module is installed. mvsMF is not yet running,
 because HTTPD does not know the library.
 
@@ -384,7 +389,8 @@ of HTTPD. Then send the request with your user ID and password:
 The answer is 200 and a JSON document. The header #cmd("Set-Cookie") sets the
 cookie #cmd("LtpaToken2"). The field #cmd("zosmf_full_version") has the version
 of mvsMF. #cmd("zos_version") says #cmd("MVS 3.8j"). The released module says
-#cmd("1.4.0"), as in the session. A version that ends in #cmd("-dev") belongs to
+#cmd("1.4.1"). The session above was recorded with the release of 1.4.0 and
+shows #cmd("1.4.0"). A version that ends in #cmd("-dev") belongs to
 a development build. The field is the way to see that the new module is the one
 that runs (@ug-ops-build). The check needs no profile.
 
@@ -397,11 +403,46 @@ access to #cmd("MVSMF.CONSOLE"), like the console services
 If the answers are not the ones above, the table in @ug-ops-trouble lists the
 causes by symptom.
 
-== Upgrading from mvsMF 1.3.0 <ug-install-upgrade>
+== Upgrading mvsMF <ug-install-upgrade>
 
-#idx("upgrade")#idx("JESSPOOL")#idx("TZMF130")
+#idx("upgrade")#idx("JESSPOOL")#idx("TZMF130")#idx("TZMF140")
+The SYSMOD of a release deletes the SYSMOD of the release just before it, and
+the library keeps its name. An upgrade is therefore the install of the new
+package. The SYSMOD of 1.4.1 deletes #cmd("TZMF140") only. A system at 1.3.0
+installs 1.4.0 first and then 1.4.1. This follows from the ownership rule of
+SMP4 (@ug-install-job). The step from 1.3.0 straight to 1.4.1 was not run.
+
+=== From mvsMF 1.4.0 <ug-install-upgrade-140>
+
+The package of 1.4.1 upgrades 1.4.0 in place: the SYSMOD #cmd("TZMF141") deletes
+#cmd("TZMF140"). It needs no new profile and no new route line. Do these steps
+in this order.
+
++ *Stop HTTPD.* Send #cmd("P HTTPD") and wait for #cmd("HTTPD099I"). Stopped, no
+  request reaches the library while SMP replaces the module.
++ *Do not run the allocation job* and do not scratch any data set. The libraries
+  exist, and the accepted copy of 1.4.0 is in them.
++ *Edit and submit* #cmd("mvsmf-1.4.1-inst.jcl") as in @ug-install-job. SMP
+  deletes the load module of #cmd("TZMF140") and copies in the new one. An APPLY
+  that deletes the predecessor can end with the return code 4 and the message
+  #cmd("HMA2461"), because the deleted function has no entry for a restore. The
+  step #cmd("ACCEPT") accepts a return code up to 4 for that reason. The step
+  from 1.4.0 to 1.4.1 was not run.
++ *Check* as in @ug-install-check. The list of #cmd("TZMF140") shows a function
+  that was deleted by #cmd("TZMF141"); the list of #cmd("TZMF141") shows
+  #cmd("REC APP ACC").
++ *Look at the STEPLIB.* It must still name #cmd("MVSMF.LINKLIB") before any
+  library that holds a copy of #cmd("MVSMF"). An upgrade where the STEPLIB names
+  another library ends with 0 in every step, and the old module keeps serving.
++ *Start HTTPD* and check the build as in @ug-install-verify. It answers
+  #cmd("1.4.1").
+
+=== From mvsMF 1.3.0 <ug-install-upgrade-130>
+
 The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
-#cmd("TZMF130"), and the library keeps its name. Do these steps in this order.
+#cmd("TZMF130"). The package of 1.4.0 is a release of its own, and its file
+names carry 1.4.0. Do these steps in this order, then continue with 1.4.1 as
+above.
 
 + *Check HTTPD.* HTTPD must be 4.2.0 or later, and 4.5.1 or later is advised
   (@ug-install-prereq, @ug-install-httpd-login).

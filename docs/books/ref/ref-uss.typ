@@ -11,7 +11,7 @@ Files in UFS") shows the tasks with sessions. Authentication and the general
 conventions of requests and error reports are in @ref-auth and @ref-conv. The
 data set services have their own chapter, @ref-ds.
 
-The text describes mvsMF 1.4.0. The file services need UFSD (mvsMF is built
+The text describes mvsMF 1.4.1. The file services need UFSD (mvsMF is built
 against the client library of UFSD 1.5.1, and the server to run is UFSD 1.5.2)
 and HTTPD 4.2.0 or later.
 

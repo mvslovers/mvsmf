@@ -98,7 +98,8 @@ JSON object with these fields, in this order:
     80 (443 for a request with the scheme https).],
   [#cmd("zosmf_version")], [Always #cmd("1").],
   [#cmd("zosmf_full_version")], [The version of mvsMF: #cmd("1.4.0") in the session
-    above. A development build ends in #cmd("-dev").],
+    above, which was recorded with the release of 1.4.0, and #cmd("1.4.1") in
+    the release of 1.4.1. A development build ends in #cmd("-dev").],
   [#cmd("plugins")], [Always an empty array.],
   [#cmd("zosmf_saf_realm")], [Always #cmd("SAFRealm").],
   [#cmd("api_version")], [Always #cmd("1").],
@@ -121,8 +122,9 @@ server is up has to send a credential, too.]
 #idx("build id")#idx("zosmf_full_version")
 The field #cmd("zosmf_full_version") of the response is the way to see which
 version is loaded. It has the version only, with no commit, and the request
-needs no profile besides the credential. A release answers #cmd("1.4.0"), as in
-the session above. A version that ends in #cmd("-dev") means that a development
+needs no profile besides the credential. A release answers its own version,
+#cmd("1.4.1") for this one. The session above was recorded with the release of
+1.4.0 and shows #cmd("1.4.0"). A version that ends in #cmd("-dev") means that a development
 build is installed. Give the version when you report a problem. The _mvsMF
 Reference_ describes the diagnostic endpoint that shows the commit of a
 development build, in "The Diagnostic Endpoint". A release does not have it.

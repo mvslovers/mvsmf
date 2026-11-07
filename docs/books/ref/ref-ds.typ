@@ -13,7 +13,7 @@ and the operator messages that these requests write are in @ref-ds-msgs. The
 _mvsMF User's Guide_ shows each task with a session.
 
 mvsMF is a clone of the z/OSMF data set service. This chapter describes what
-mvsMF 1.4.0 does.
+mvsMF 1.4.1 does.
 
 == Request Summary <ref-ds-sum>
 

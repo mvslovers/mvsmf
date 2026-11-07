@@ -26,7 +26,7 @@ inventory directly. They are the way back.
 
 == Freeing the Inventory <ug-remove-uclin>
 
-#idx("UCLIN", "removal")#idx("TZMF140")#idx("FMID", "spent ids")
+#idx("UCLIN", "removal")#idx("TZMF141")#idx("FMID", "spent ids")
 The module #cmd("MVSMF") is the only element of the product. Delete the
 element entries as well as the SYSMOD entries. SMP4 keys the ownership of an
 element on #cmd("MOD(MVSMF)"). If the SYSMOD id is free and the module still
@@ -40,7 +40,8 @@ Each of the two zones needs its own block. #cmd("CDS") is the target zone and
 #tab(caption: [The SYSMOD ids of mvsMF])[
   #table(columns: (1.2in, 1.2in, 1fr),
     [SYSMOD], [mvsMF release], [Note],
-    [#cmd("TZMF140")], [1.4.0], [The current release. It deletes #cmd("TZMF130").],
+    [#cmd("TZMF141")], [1.4.1], [The current release. It deletes #cmd("TZMF140").],
+    [#cmd("TZMF140")], [1.4.0], [Spent.],
     [#cmd("TZMF130")], [1.3.0], [Spent.],
     [#cmd("TZMF120")], [1.2.0], [Spent.],
     [#cmd("TZMF110")], [1.1.0], [Spent. The oldest release that SMP4 installed.],
@@ -53,7 +54,7 @@ entry of the type #cmd("FUNCTION") that says the next release deleted it. One
 such entry remains per upgrade. If the job names only the current release and
 its predecessor, older entries stay in the zone, and no message reports them.
 
-This job removes all four ids from both zones:
+This job removes all five ids from both zones:
 
 ```
 //MVSMFUCL JOB (SYS),'MVSMF UNINSTALL',
@@ -62,9 +63,10 @@ This job removes all four ids from both zones:
 //UCLIN   EXEC SMPAPP
 //SMPCNTL  DD *
  UCLIN CDS .
-  DEL SYSMOD(TZMF140) MOD(MVSMF) .
+  DEL SYSMOD(TZMF141) MOD(MVSMF) .
   DEL MOD(MVSMF) .
   DEL LMOD(MVSMF) .
+  DEL SYSMOD(TZMF141) .
   DEL SYSMOD(TZMF140) .
   DEL SYSMOD(TZMF130) .
   DEL SYSMOD(TZMF120) .
@@ -72,8 +74,9 @@ This job removes all four ids from both zones:
  ENDUCL .
  RESETRC .
  UCLIN ACDS .
-  DEL SYSMOD(TZMF140) MOD(MVSMF) .
+  DEL SYSMOD(TZMF141) MOD(MVSMF) .
   DEL MOD(MVSMF) .
+  DEL SYSMOD(TZMF141) .
   DEL SYSMOD(TZMF140) .
   DEL SYSMOD(TZMF130) .
   DEL SYSMOD(TZMF120) .
@@ -87,10 +90,22 @@ A #cmd("DEL") that finds its entry reports #cmd("HMA2550 UPDATE COMPLETE"). A
 #cmd("DEL") for an id that the system never held reports #cmd("HMA2532") and
 #cmd("HMA2560"), and the #cmd("UCLIN") block ends with return code 08. That is
 no fault: the id is free, and the statements after it still run. A system that
-has only ever held 1.4.0 has no #cmd("TZMF110"), so the job above ends with
-return code 08 there. This is its output:
+never held every release lacks some of the ids, and the job above ends with
+return code 08 there. This is the output of the job of 1.4.0 on a system that
+had only ever held 1.4.0. The job of 1.4.0 had four ids, and its first
+statement named #cmd("TZMF140"). The system had no #cmd("TZMF110"), so the job
+ended with return code 08. The job of this section, for 1.4.1, has the
+statements for #cmd("TZMF141") on top. It was not run:
 
 #screen(raw(read("../ex/ug-remove/uclin-release.txt"), block: true))
+
+*The first statement names the id that owns the module.* The job is written for
+a system at 1.4.1. On a system whose newest release is 1.4.0, the module belongs
+to #cmd("TZMF140"). Write #cmd("TZMF140") in the first #cmd("DEL") of both
+blocks instead of #cmd("TZMF141"). This follows from the ownership rule and
+from the failure of @ug-remove-dev, where the first statement named an id that
+did not own the module. It was not run. If you are not sure, ask SMP which id
+owns the module (@ug-remove-dev-detect).
 
 *Keep the #cmd("RESETRC") between the two blocks.* Without it, SMP ignores the
 whole #cmd("UCLIN ACDS") block after the return code 08 of the first one
@@ -110,6 +125,8 @@ zones:
 //LIST    EXEC SMPAPP
 //SMPCNTL  DD *
  RESETRC .
+ LIST CDS  SYSMOD(TZMF141) .
+ LIST ACDS SYSMOD(TZMF141) .
  LIST CDS  SYSMOD(TZMF140) .
  LIST ACDS SYSMOD(TZMF140) .
  LIST CDS  SYSMOD(TZMF130) .
@@ -142,7 +159,10 @@ throwaway id of its own is the same case with another name. Wherever this
 section says #cmd("TZMF150"), read your id.
 
 On a system that holds #cmd("TZMF150"), the first statement of the job fails in
-the target zone. #cmd("TZMF140") does not own the module:
+the target zone. The screen shows the job of 1.4.0, where the first statement
+named #cmd("TZMF140"), which does not own the module. The first statement of the
+job of @ug-remove-uclin names #cmd("TZMF141") and fails in the same way for the
+same reason. That was not run:
 
 #screen(raw(read("../ex/ug-remove/dev-fail.txt"), block: true))
 
@@ -151,7 +171,7 @@ The statements after it still run. #cmd("DEL MOD(MVSMF)") and
 #cmd("TZMF150") owns them, and #cmd("SYSMOD TZMF150") stays in the target zone
 with the status #cmd("REC APP ACC"). The id that owns the module is not freed.
 
-=== Detecting the Development Build
+=== Detecting the Development Build <ug-remove-dev-detect>
 
 Ask SMP which id owns the module:
 
@@ -168,8 +188,9 @@ Ask SMP which id owns the module:
 ```
 
 The releases of mvsMF that SMP installs are #cmd("TZMF110"), #cmd("TZMF120"),
-#cmd("TZMF130") and #cmd("TZMF140"). If #cmd("FMID") is one of them, the job of
-@ug-remove-uclin is the one to run. Any other #cmd("FMID") means that you are
+#cmd("TZMF130"), #cmd("TZMF140") and #cmd("TZMF141"). If #cmd("FMID") is one of
+them, the job of @ug-remove-uclin is the one to run, with the id that you found
+in the first #cmd("DEL") statement of both blocks. Any other #cmd("FMID") means that you are
 in this section. On a system that holds the development build the output reads:
 
 #screen(raw(read("../ex/ug-remove/dev-owner-before.txt"), block: true))
@@ -179,15 +200,18 @@ in this section. On a system that holds the development build the output reads:
 Run the job of @ug-remove-uclin with three changes:
 
 + The owner of the module is the development id. In both zones, the first
-  #cmd("DEL") statement names #cmd("TZMF150") instead of #cmd("TZMF140").
+  #cmd("DEL") statement names #cmd("TZMF150") instead of #cmd("TZMF141").
 + #cmd("DEL SYSMOD(TZMF150) .") is added in both zones, above the one for
-  #cmd("TZMF140").
+  #cmd("TZMF141").
 + #cmd("LIST CDS SYSMOD(TZMF150) .") and #cmd("LIST ACDS SYSMOD(TZMF150) .") are
-  added to the #cmd("LIST") step of @ug-remove-check. It has ten statements
-  then, and every one of them must show its id as not found.
+  added to the #cmd("LIST") step of @ug-remove-check. It has twelve statements
+  then, and every one of them must show its id as not found. The test systems
+  ran the job of 1.4.0, whose #cmd("LIST") step had ten statements with the
+  development id.
 
 Keep the #cmd("RESETRC") between the two #cmd("UCLIN") blocks. On a system that
-held 1.4.0 and then the development build, the job ends with return code 08.
+held 1.4.0 and then the development build, the job of 1.4.0 ended with return
+code 08.
 Both blocks run to the end. The 08 comes only from ids that the system never
 held: #cmd("TZMF110") on the TK5 system, and #cmd("TZMF120") as well on the
 MVS/CE system. Every other #cmd("DEL") reports #cmd("HMA2550"). This is the
@@ -196,12 +220,12 @@ target zone of the TK5 system:
 #screen(raw(read("../ex/ug-remove/dev-uclcds.txt"), block: true))
 
 The #cmd("UCLIN ACDS") block reports the same, without the statement for
-#cmd("LMOD"). Then read the ten #cmd("LIST") statements as in
-@ug-remove-check. These are the first two:
+#cmd("LMOD"). Then read the #cmd("LIST") statements as in
+@ug-remove-check. There were ten in the run. These are the first two:
 
 #screen(raw(read("../ex/ug-remove/dev-list-gone.txt"), block: true))
 
-All ten end with return code 04 and the id reported as not found, and so do
+All ten ended with return code 04 and the id reported as not found, and so did
 #cmd("LIST CDS MOD(MVSMF)"), #cmd("LIST ACDS MOD(MVSMF)") and
 #cmd("LIST CDS LMOD(MVSMF)").
 
@@ -213,6 +237,10 @@ the older releases. The target zone is clean, the distribution zone is not:
 #screen(raw(read("../ex/ug-remove/dev-noresetrc.txt"), block: true))
 
 === Installing the Release Afterwards
+
+This section was measured with the release of 1.4.0, whose SYSMOD is
+#cmd("TZMF140"). The lines below name that id. The package of 1.4.1 was not
+installed over a development build.
 
 If a release is to follow, do not undo the configuration and do not scratch the
 libraries (@ug-remove-config, @ug-remove-delete). The configuration stays, and
@@ -293,7 +321,14 @@ MVS/CE system).
 #cmd("TZMF110"). A second development build installed over the first. A
 development build under another throwaway id than #cmd("TZMF150"). The removal
 of the product after a development build, that is this section followed by
-@ug-remove-config and @ug-remove-delete. A production system.
+@ug-remove-config and @ug-remove-delete. A production system. The removal job
+for 1.4.1 (@ug-remove-uclin), with #cmd("TZMF141") as the owner and
+#cmd("TZMF140") as its tombstone, and the install of 1.4.1 over a development
+build. The upgrade of 1.4.0 to 1.4.1, the upgrade of 1.3.0 to 1.4.1 through
+1.4.0, and the #cmd("NOT SEL") that the install of 1.4.1 gives on a system that
+still holds #cmd("TZMF130") (@ug-install-upgrade, @ug-install-job). These steps
+follow from the ownership rule of SMP4 and from the build file; no system ran
+them.
 
 == Undoing the Configuration <ug-remove-config>
 

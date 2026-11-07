@@ -169,7 +169,7 @@ so use it between load runs and never during one.
 
 mvsMF before 1.3.0 lost a block of 128 bytes of the C startup in subpool 0 at the
 end of each request, so each request took a little storage from HTTPD for good.
-The library under mvsMF 1.3.0 and 1.4.0 frees the block.
+The library under mvsMF 1.3.0, 1.4.0 and 1.4.1 frees the block.
 
 == Replacing the Module <ug-ops-replace>
 

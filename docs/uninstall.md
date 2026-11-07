@@ -95,8 +95,8 @@ means it is free.** A hit prints `TYPE`, `STATUS` and the FMID it belongs to —
 the id is still taken.
 
 **Name every level that was ever installed on the system, not only the current
-one.** The block above lists `TZMF140`, `TZMF130`, `TZMF120` and `TZMF110`; add a pair for each
-further level if the system has seen more. A level that an upgrade already
+one.** The block above lists `TZMF141`, `TZMF140`, `TZMF130`, `TZMF120` and `TZMF110`; add a pair
+for each further level if the system has seen more. A level that an upgrade already
 deleted is left as a tombstone — `TYPE = FUNCTION / DELBY = …` — which `LIST`
 reports at **RC 00**, so it still reads as occupied and still has to go.
 

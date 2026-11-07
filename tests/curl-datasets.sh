@@ -3555,9 +3555,10 @@ span_roundtrip "VBS short lines" \
 	"$SPAN_BODY"
 
 # One line of LRECL-4 = 251 bytes, the longest that RECFM=V takes: it fills the
-# record and splits nothing. Measured against libc370 2.25.1 it abends in the
-# access method (U0002, HTTP 500) -- no block boundary involved, so whether
-# libc370#757 covers it is open.
+# record and splits nothing. A spanned data set takes at most LRECL-8 bytes in
+# a record, so this abends in the access method (U0002, HTTP 500) with libc370
+# 2.25.1 and 2.29.1 alike: no block boundary involved, and not the loss of
+# libc370#757. Measured on LRECL 255: 247 bytes are written, 248 are not.
 awk 'BEGIN { s = ""; while (length(s) < 251) s = s "z"; print s }' > "$SPAN_BODY"
 
 echo ""

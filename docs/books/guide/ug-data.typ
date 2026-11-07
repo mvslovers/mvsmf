@@ -111,13 +111,14 @@ writes the body and then answers #cmd("500") with the message
 #cmd("Record truncated to the record length of the data set"). Check the status
 of every write.
 
-#note[*A defect* (mvsmf\#570, libc370\#757): a write into a data set of the
-record format VBS loses data when a record does not fit in the space left in
-the current block, and the answer is still #cmd("204"). A VB data set with a
-block size smaller than LRECL plus 4 has the same fault, because it is opened
-as spanned. A later read of such a data set fails (see the end of the next
-section). Until libc370 is fixed, do not write to a VBS data set, and give a VB
-data set a block size of at least LRECL plus 4.]
+#note[*Spanned data sets.* A data set of the record format VBS, or a VB data
+set with a block size smaller than LRECL plus 4, is spanned. A record that does
+not fit in the rest of a block is split over two blocks and read back whole;
+before mvsMF 1.4.1 its tail was lost while the answer was still #cmd("204")
+(mvsmf\#570). A record of such a data set holds at most LRECL minus 8 bytes: on
+LRECL 255 a line of 247 bytes is written, a line of 248 bytes is answered
+#cmd("500") and leaves the data set empty. A binary upload fails the same way,
+because it cuts the body into pieces of LRECL bytes.]
 
 A member is written in the same way. The member is created if it does not
 exist, and replaced if it does. The library must exist.

@@ -84,17 +84,20 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
-- **A defect: spanned records lose data** (mvsmf#570, libc370#757). A write
-  into a data set with RECFM=VBS, or RECFM=VB with `BLKSIZE` smaller than
-  `LRECL`+4 (the open makes such a data set spanned), fails whenever a record
-  does not fit in the space left in the current block. libc370 writes the first
-  part of that record, marks it as complete, and drops the rest. The write is
-  reported as a success, so the answer is **204**, and the data set cannot be
-  read from that record on: a read ends in an abend of the libc370 read routine (user abend U1234, after the console line `MVSSUPA - @@AREAD - problem processing RECFM=V(bs) file`), which the client sees as a broken transfer (see
-  [a read that fails mid-body](get.md#a-read-that-fails-mid-body)). Until
-  libc370 is fixed, do not write to VBS data sets, and give a VB data set a
-  `BLKSIZE` of at least `LRECL`+4. A VB data set with such a block size is not
-  spanned and does not take this path.
+- **Spanned data sets** (RECFM=VBS, or RECFM=VB with `BLKSIZE` smaller than
+  `LRECL`+4, which the open makes spanned): a record that does not fit in the
+  space left in the current block is split over two blocks and read back whole.
+  Measured with 100 lines on a VBS data set with LRECL 255 and BLKSIZE 6233,
+  and on VB data sets with LRECL 255 and BLKSIZE 255, 259 and 6233: every line
+  came back. Before mvsMF 1.4.1 (libc370 2.25.1) the tail of such a record was
+  lost, the write was still answered **204**, and the data set could not be
+  read from that record on (mvsmf#570).
+- A record of a spanned data set holds at most `LRECL`-8 bytes (247 for LRECL
+  255), not `LRECL`-4: a longer line ends in an abend of the libc370 write
+  routine (user abend U0002), answered **500**, and leaves the data set empty.
+  Binary mode cuts the body into pieces of `LRECL` bytes, so it fails the same
+  way on a spanned data set. Measured on LRECL 255: a line of 247 bytes is
+  written, one of 248 is not.
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
 - A request that produces **no record at all** leaves the dataset exactly as it
   was — a dropped connection, a body that never arrives. The dataset is not

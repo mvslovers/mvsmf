@@ -422,8 +422,9 @@ assert_record_refused "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBMBR)" \
 # block boundaries on purpose.
 #
 # VBS takes its own data set: a record of LRECL bytes written into a spanned
-# data set abends in libc370 (U0002, answered as HTTP 500) -- the same access
-# method code as libc370#757, and unchecked against its fix.
+# data set abends in libc370 (U0002, answered as HTTP 500), because a spanned
+# record holds at most LRECL-8 bytes. Still so with libc370 2.29.1: it is a
+# limit of the access method, not the loss of libc370#757 that 2.29.1 fixes.
 # -----------------------------------------------------------------
 
 VB_BIN_BYTES=8400	# 100 records of the VB data set's LRECL 84 = 35 x binary80.bin

@@ -540,7 +540,18 @@ policy vacuum.
 
 ## Recently closed
 
-**PR open, #570 part 2** — an abend after the response had started ended as a
+**1.4.1 release mechanics (#570), prepared 2026-11-07**: Board decision on approval
+d1619374: 1.4.1 is cut from `main` with #570, #578 and #573, no release branch;
+FMID `TZMF141` and `delete = ["TZMF140"]` explicit in `mbt.toml` (a patch needs
+both until mbt builds PTFs), no `LIST` on a stand (checked against the burned
+list in `smp.md`). CHANGELOG `[1.4.1]` dated 2026-11-07, #573 under Added. The
+release PR merge and the tag `v1.4.1` are the Board's. **The next minor needs an
+explicit `delete = ["TZMF141", "TZMF140"]`** (the derived one would name only
+`TZMF140`; see `[smp]` in `mbt.toml`). Still naming `TZMF140` as the current
+release: `docs/uninstall.md` and the books `ug-install`, `ug-remove` (measured
+1.4.0 outputs), `ml08-0001`; they follow in a docs change.
+
+**PR #571, merged, #570 part 2** — an abend after the response had started ended as a
 complete-looking 200: `route_request()` only issued `MVSMF902W`, so `chunked`
 and `keepalive` stayed set (the failure of #421, on the abend path). It now
 calls `abort_response()` first. Measured on a throwaway container: the VBS data

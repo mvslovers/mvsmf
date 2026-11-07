@@ -3,7 +3,7 @@
 mvsMF is delivered as an **SMP Release 4** install package — the SMP that ships
 with MVS 3.8j, not SMP/E. `mbt package` builds it; a release attaches it.
 
-FMID **`TZMF140`** (mvsMF 1.4.0). Each release spends one id and **deletes its
+FMID **`TZMF141`** (mvsMF 1.4.1). Each release spends one id and **deletes its
 predecessor**, so an upgrade from the release just before needs nothing beyond
 the package. From any older level, see [Upgrading](#upgrading).
 
@@ -297,7 +297,7 @@ S HTTPD
 ```
 
 Then ask the server what it is actually running. On a **release** (the
-package from a GitHub release, version `1.4.0` and the like):
+package from a GitHub release, version `1.4.1` and the like):
 
 ```
 curl -u USER:PASS 'http://your.host:port/zosmf/info'
@@ -410,11 +410,11 @@ upgrade from the release just before is RECEIVE/APPLY/ACCEPT of the new package
 and nothing else. Do **not** run the uninstall job's `DELETE` step in between:
 it names the data sets the new install is about to use.
 
-**The SYSMOD deletes only the release just before it.** 1.4.0 (`TZMF140`)
-deletes `TZMF130`. On a system still at 1.2.0 (`TZMF120`), `TZMF120` keeps
-owning `MOD(MVSMF)`: the install is expected to print `NOT SEL` for it, copy
-nothing, and end every step RC 00. That follows from SMP's ownership rule; the
-step from 1.2.0 to 1.4.0 itself was not run. Install 1.3.0 first, then 1.4.0.
+**The SYSMOD deletes only the release just before it.** 1.4.1 (`TZMF141`)
+deletes `TZMF140`. On a system still at 1.3.0 (`TZMF130`), `TZMF130` keeps
+owning `MOD(MVSMF)`: by SMP's ownership rule the install is expected to print
+`NOT SEL` for it, copy nothing, and end every step RC 00. That step was not
+run. Install 1.4.0 first, then 1.4.1.
 Check which level owns the module before you start:
 
 ```

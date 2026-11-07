@@ -73,7 +73,10 @@ Two things cause this, and each leaves its own message on the operator console
 | Cause | Console |
 |---|---|
 | An uncorrectable I/O error on the read (bad track, wrong-length record) | `MVSMF106E` |
-| An abend of the handler during the read, for example a block of a spanned data set that the access method cannot make sense of (user abend U1234) | `MVSMF901E`, then `MVSMF902W` |
+| An abend of the handler during the read, for example a block of a spanned data set that libc370 cannot make sense of (user abend U1234, after the console line `MVSSUPA - @@AREAD - problem processing RECFM=V(bs) file`) | `MVSMF901E`, then `MVSMF902W` |
+
+An HTTP/1.0 client gets no chunk framing, so it cannot tell the cut-off from a
+complete body (see [Slow clients](../README.md#slow-clients)).
 
 Before mvsMF 1.4.1 an abend mid-body ended the chunked body with a clean final
 chunk and kept the connection: the client saw a complete-looking `200`

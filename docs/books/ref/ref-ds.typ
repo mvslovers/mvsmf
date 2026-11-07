@@ -360,8 +360,7 @@ An open that fails is explained by looking at the catalog:
 The response is #cmd("200"). The content type and the body depend on the data
 type (@ref-ds-type). When the read meets an I/O error after the status has gone
 out, mvsMF writes #cmd("MVSMF106E") and aborts the response. When the handler
-abends after the status has gone out, for example on a block that the access
-method cannot make sense of, mvsMF writes #cmd("MVSMF901E") and
+abends after the status has gone out, for example on a block that libc370 cannot make sense of, mvsMF writes #cmd("MVSMF901E") and
 #cmd("MVSMF902W") and aborts the response in the same way. To abort means that
 mvsMF closes the connection in the middle of the body, without the last chunk
 and without keep-alive. The client sees a failed transfer (curl exits with 18)
@@ -505,9 +504,10 @@ record format VBS loses data whenever a record does not fit in the space left
 in the current block. The same holds for VB with a block size smaller than LRECL
 plus 4, because the open makes such a data set spanned. libc370 writes the first
 part of the record, marks it as complete and drops the rest. The write reports
-success, so the answer is #cmd("204"). A later read of the data set ends in an
-abend of the access method (user abend U1234) at that record, and the client
-sees a failed transfer (@ref-ds-read). Until libc370 is fixed, do not write to a
+success, so the answer is #cmd("204"). A later read of the data set ends in an abend of the libc370 read routine
+(user abend U1234, after the console line #cmd("MVSSUPA - @@AREAD - problem
+processing RECFM=V(bs) file")) at that record, and the client sees a failed
+transfer (@ref-ds-read). Until libc370 is fixed, do not write to a
 VBS data set, and give a VB data set a block size of at least LRECL plus 4. A
 VB data set with such a block size is not spanned and does not take this path.
 The same holds for a member.]

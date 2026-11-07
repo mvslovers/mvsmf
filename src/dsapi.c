@@ -27,6 +27,7 @@
 #include "volser.h"
 #include "httpcgi.h"
 #include "reclines.h"
+#include "reclimit.h"
 #include "ispfstat.h"
 
 // Record format flags
@@ -1002,31 +1003,6 @@ ds_codepage(Session *session, int encoding)
 	                                      : httpx->xlate_cp037;
 }
 
-/* Usable content bytes in one record of this data set.
- *
- * RECFM=F spends the whole LRECL on content. RECFM=V spends four of it on the
- * RDW: libc370 sizes its write buffer at LRECL-4 (@@fpopen.c) and varflush()
- * writes an RDW of len+4, so a longer line was silently split into a second
- * record. RECFM=U has no LRECL and is bounded by the block size.
- *
- * eff_lrecl is the caller's LRECL, or BLKSIZE where RECFM=U leaves LRECL 0.
- */
-__asm__("\n&FUNC    SETC 'rec_content_max'");
-/* recfm rather than a FILE *: the write handlers now learn the DCB from a
-   read-mode open and do not have an output handle yet when they need this. */
-static size_t record_content_max(int recfm, size_t eff_lrecl, int is_undefined)
-{
-    if (is_undefined) {
-        return eff_lrecl;
-    }
-
-    if ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
-        return eff_lrecl > 4 ? eff_lrecl - 4 : 0;
-    }
-
-    return eff_lrecl;
-}
-
 /* Open the write target, but not before there is something to put in it.
  *
  * fopen(..., "w") truncates a sequential data set the moment it is called, and
@@ -1079,8 +1055,8 @@ static int open_write_target(Session *session, FILE **fp, const char *target,
  * a blank line ended up as a zero-length fwrite() and disappeared (#233).
  *
  * content_max: the usable content length of one record -- LRECL for RECFM=F,
- * LRECL-4 for RECFM=V (the RDW is not content), BLKSIZE for RECFM=U where
- * LRECL is 0. Clamping against fp->lrecl instead cut every record of a
+ * LRECL-4 for RECFM=V (the RDW is not content), LRECL-8 for a spanned RECFM=V
+ * (reclimit.h, #578), BLKSIZE for RECFM=U where LRECL is 0. Clamping against fp->lrecl instead cut every record of a
  * RECFM=U data set to zero length, because a text-mode write is selected by
  * the X-IBM-Data-Type header and does not care what RECFM the data set has.
  */
@@ -1990,6 +1966,7 @@ int datasetPutHandler(Session *session)
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
     size_t content_max = 0;
+    size_t piece_max = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
     RECLINE rl;
@@ -2107,8 +2084,9 @@ int datasetPutHandler(Session *session)
     /* For RECFM=U (undefined record format), lrecl is 0. Use blksize instead. */
     is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
-    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
-    if (eff_lrecl == 0 || content_max == 0) {
+    content_max = reclim_content_max(recfm, eff_lrecl, is_undefined);
+    piece_max = reclim_binary_piece(recfm, eff_lrecl, is_undefined);
+    if (eff_lrecl == 0 || content_max == 0 || piece_max == 0) {
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
     // NOTE: record_buffer is not tracked by session for ESTAE recovery.
@@ -2156,8 +2134,8 @@ int datasetPutHandler(Session *session)
                     if (record_pos > 0) {
                         if (!is_undefined) {
                             /* Pad to full LRECL for fixed-length binary records */
-                            memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
-                            record_pos = eff_lrecl;
+                            memset(record_buffer + record_pos, 0x00, piece_max - record_pos);
+                            record_pos = piece_max;
                         }
                         if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
@@ -2196,10 +2174,10 @@ int datasetPutHandler(Session *session)
             // Process chunk data
             size_t bytes_read = 0;
             if (data_type == DATA_TYPE_BINARY) {
-                /* Binary mode: read in bulk, split at eff_lrecl boundaries */
+                /* Binary mode: read in bulk, split at piece_max boundaries */
                 while (bytes_read < chunk_size) {
                     size_t to_read = chunk_size - bytes_read;
-                    size_t space = eff_lrecl - record_pos;
+                    size_t space = piece_max - record_pos;
                     int n;
                     if (to_read > space) to_read = space;
 
@@ -2212,7 +2190,7 @@ int datasetPutHandler(Session *session)
                     bytes_read += n;
                     record_pos += n;
 
-                    if (record_pos >= eff_lrecl) {
+                    if (record_pos >= piece_max) {
                         if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -2264,10 +2242,10 @@ int datasetPutHandler(Session *session)
         size_t bytes_remaining = content_length;
 
         if (data_type == DATA_TYPE_BINARY) {
-            /* Binary mode: read in bulk, split at eff_lrecl boundaries */
+            /* Binary mode: read in bulk, split at piece_max boundaries */
             while (bytes_remaining > 0) {
                 size_t to_read = bytes_remaining;
-                size_t space = eff_lrecl - record_pos;
+                size_t space = piece_max - record_pos;
                 int n;
                 if (to_read > space) to_read = space;
 
@@ -2280,7 +2258,7 @@ int datasetPutHandler(Session *session)
                 bytes_remaining -= n;
                 record_pos += n;
 
-                if (record_pos >= eff_lrecl) {
+                if (record_pos >= piece_max) {
                     if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -2293,8 +2271,8 @@ int datasetPutHandler(Session *session)
             /* Pad and write final incomplete binary record (skip for RECFM=U) */
             if (record_pos > 0) {
                 if (!is_undefined) {
-                    memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
-                    record_pos = eff_lrecl;
+                    memset(record_buffer + record_pos, 0x00, piece_max - record_pos);
+                    record_pos = piece_max;
                 }
                 if (write_record_open(session, &fp, dsname, mode_str, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
@@ -2967,6 +2945,7 @@ int memberPutHandler(Session *session)
     char *record_buffer = NULL;
     size_t eff_lrecl = 0;
     size_t content_max = 0;
+    size_t piece_max = 0;
     int is_undefined = 0;
     size_t record_pos = 0;
     RECLINE rl;
@@ -3119,10 +3098,11 @@ int memberPutHandler(Session *session)
 
     is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
-    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
+    content_max = reclim_content_max(recfm, eff_lrecl, is_undefined);
+    piece_max = reclim_binary_piece(recfm, eff_lrecl, is_undefined);
     /* fp is already open on the create path, so these two still have to close
        it; session_fclose() ignores a NULL, which is the existing-member case. */
-    if (eff_lrecl == 0 || content_max == 0) {
+    if (eff_lrecl == 0 || content_max == 0 || piece_max == 0) {
         session_fclose(session, fp);
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
@@ -3170,8 +3150,8 @@ int memberPutHandler(Session *session)
                 if (data_type == DATA_TYPE_BINARY) {
                     if (record_pos > 0) {
                         // Pad to full LRECL for fixed-length binary records
-                        memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
-                        record_pos = eff_lrecl;
+                        memset(record_buffer + record_pos, 0x00, piece_max - record_pos);
+                        record_pos = piece_max;
                         if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -3211,7 +3191,7 @@ int memberPutHandler(Session *session)
                 // Binary mode: read in bulk, split at LRECL boundaries
                 while (bytes_read < chunk_size) {
                     size_t to_read = chunk_size - bytes_read;
-                    size_t space = eff_lrecl - record_pos;
+                    size_t space = piece_max - record_pos;
                     int n;
                     if (to_read > space) to_read = space;
 
@@ -3224,7 +3204,7 @@ int memberPutHandler(Session *session)
                     bytes_read += n;
                     record_pos += n;
 
-                    if (record_pos >= eff_lrecl) {
+                    if (record_pos >= piece_max) {
                         if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                             free(record_buffer);
                             session_fclose(session, fp);
@@ -3277,7 +3257,7 @@ int memberPutHandler(Session *session)
             // Binary mode: read in bulk, split at LRECL boundaries
             while (bytes_remaining > 0) {
                 size_t to_read = bytes_remaining;
-                size_t space = eff_lrecl - record_pos;
+                size_t space = piece_max - record_pos;
                 int n;
                 if (to_read > space) to_read = space;
 
@@ -3290,7 +3270,7 @@ int memberPutHandler(Session *session)
                 bytes_remaining -= n;
                 record_pos += n;
 
-                if (record_pos >= eff_lrecl) {
+                if (record_pos >= piece_max) {
                     if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                         free(record_buffer);
                         session_fclose(session, fp);
@@ -3302,8 +3282,8 @@ int memberPutHandler(Session *session)
 
             // Pad and write final incomplete binary record
             if (record_pos > 0) {
-                memset(record_buffer + record_pos, 0x00, eff_lrecl - record_pos);
-                record_pos = eff_lrecl;
+                memset(record_buffer + record_pos, 0x00, piece_max - record_pos);
+                record_pos = piece_max;
                 if (write_record_open(session, &fp, dataset, member_mode, record_buffer, record_pos, &total_written, &line_count, data_type, cp, content_max) < 0) {
                     free(record_buffer);
                     session_fclose(session, fp);

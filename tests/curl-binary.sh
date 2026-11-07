@@ -421,9 +421,11 @@ assert_record_refused "${BASE_URL}/zosmf/restfiles/ds/${TEST_VPDS}(VBMBR)" \
 # is a different question. The bodies below are 100 whole records and cross
 # block boundaries on purpose.
 #
-# VBS takes its own data set: a record of LRECL bytes written into a spanned
-# data set abends in libc370 (U0002, answered as HTTP 500) -- the same access
-# method code as libc370#757, and unchecked against its fix.
+# VBS takes its own data set: a spanned record holds at most LRECL-8 bytes
+# (libc370's write routine abends U0002 above that, #578), so a VBS upload is
+# cut into pieces of LRECL-8 = 247 bytes and its body is 100 whole pieces. The
+# last short piece of a body that is not whole is padded with zeros to a full
+# piece, as on VB and FB.
 # -----------------------------------------------------------------
 
 VB_BIN_BYTES=8400	# 100 records of the VB data set's LRECL 84 = 35 x binary80.bin
@@ -435,12 +437,12 @@ while [ "$i" -lt $((VB_BIN_BYTES / 240)) ]; do
 	cat "$BINARY_FILE"
 	i=$((i + 1))
 done > "$VB_BIN_FILE"
-# 100 records of the VBS data set's LRECL 255, cut from the same pattern
+# 100 pieces of the VBS data set's LRECL-8 = 247, cut from the same pattern
 i=0
-while [ "$i" -lt 107 ]; do
+while [ "$i" -lt 104 ]; do
 	cat "$BINARY_FILE"
 	i=$((i + 1))
-done | head -c 25500 > "$VBS_BIN_FILE"
+done | head -c 24700 > "$VBS_BIN_FILE"
 
 # $1 label, $2 URL, $3 file to upload
 binary_vb_roundtrip() {
@@ -500,6 +502,37 @@ HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
 	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}")
 assert_http_status "201" "$HTTP_CODE" "create VBS sequential dataset for binary"
 binary_vb_roundtrip "VBS sequential" "${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}" "$VBS_BIN_FILE"
+
+# A body that is not a whole number of pieces: 250 bytes are one piece of 247
+# and a short one of 3, padded with zeros to 247. The upload is answered 204 --
+# no abend, no empty data set -- and the download is the 250 bytes followed by
+# 244 zeros (2 x 247 = 494).
+echo ""
+echo "--- Binary, RECFM=VBS: the last short piece is padded to a full piece (issue #578) ---"
+
+VBS_SHORT_FILE=$(mktemp)
+VBS_WANT_FILE=$(mktemp)
+mvsmf_on_exit 'rm -f "$VBS_SHORT_FILE" "$VBS_WANT_FILE"'
+head -c 250 "$VBS_BIN_FILE" > "$VBS_SHORT_FILE"
+{ cat "$VBS_SHORT_FILE"; head -c 244 /dev/zero; } > "$VBS_WANT_FILE"
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+	-X PUT -K "$MVSMF_CURLRC" \
+	-H "Content-Type: application/octet-stream" \
+	-H "X-IBM-Data-Type: binary" \
+	--data-binary @"$VBS_SHORT_FILE" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}")
+assert_http_status "204" "$HTTP_CODE" "VBS short body: upload binary"
+HTTP_CODE=$(curl -s -w '%{http_code}' -o "$DOWNLOAD_FILE" \
+	-K "$MVSMF_CURLRC" \
+	-H "X-IBM-Data-Type: binary" \
+	"${BASE_URL}/zosmf/restfiles/ds/${TEST_VBSS}")
+assert_http_status "200" "$HTTP_CODE" "VBS short body: download binary"
+if cmp -s "$VBS_WANT_FILE" "$DOWNLOAD_FILE"; then
+	pass "VBS short body: 250 bytes, then the last piece padded to 247 with zeros"
+else
+	fail "VBS short body: 250 bytes, then the last piece padded to 247 with zeros" \
+		"read $(wc -c < "$DOWNLOAD_FILE" | tr -d ' ') bytes, want 494: $(cmp "$VBS_WANT_FILE" "$DOWNLOAD_FILE" 2>&1 | head -n 1)"
+fi
 
 # -----------------------------------------------------------------
 # Cleanup

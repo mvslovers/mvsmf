@@ -522,9 +522,11 @@ first record leaves the part that was written.
       end is a record. A body that ends with a line end adds no empty record.
       The bytes are translated from ASCII to EBCDIC with the chosen table. A
       line that is longer than the record is cut: to LRECL for F, to LRECL minus
-      4 for V, to BLKSIZE for U.],
+      4 for V, to LRECL minus 8 for a spanned data set (see below), to BLKSIZE
+      for U.],
     [binary], [The bytes are cut into records of LRECL bytes, with no
-      translation. For V each record gets its four-byte record descriptor. A
+      translation. For V each record gets its four-byte record descriptor. On a
+      spanned data set (see below) the records hold LRECL minus 8 bytes. A
       last record that is not full is filled with X'00' to the full length. The
       write of a sequential data set does not fill a record of format U. The
       write of a member does.],
@@ -535,28 +537,38 @@ An empty body empties the data set or the member. A data set whose record
 length is 0 answers #cmd("500") (reason 3, #cmd("Dataset has zero record length")).
 When a line was cut, mvsMF writes the body and then answers #cmd("500")
 (reason 3, #cmd("Record truncated to the record length of the data set")).
+The body of that answer is #cmd("{\"rc\":8,\"category\":6,\"reason\":3,\"message\":\"Record truncated to the record length of the data set\"}").
 
-#note[*Spanned data sets.* A data set with the record format VBS, or VB with a
-block size smaller than LRECL plus 4, is spanned: a record that does not fit in
-the space left in the current block is split over two blocks and read back
-whole. 100 lines written to a VBS data set with LRECL 255 and block size 6233,
-and to VB data sets with LRECL 255 and block sizes 255, 259 and 6233, came back
-intact. Before mvsMF 1.4.1 the tail of such a record was lost, the answer was
-still #cmd("204"), and a later read of the data set abended at that record
-(mvsmf\#570). A record of a spanned data set holds at most LRECL minus 8 bytes,
-not LRECL minus 4 (the write routine of libc370 abends with U0002 above that). A
-longer text line is cut to that length like any overlong line: the body is
-written and the answer is #cmd("500") with the message
-#cmd("Record truncated to the record length of the data set") (reason 3). On
-LRECL 255 a line of 247 bytes is written whole, one of 248 or 251 bytes is cut
-to 247, and the records around it are kept. Before mvsMF 1.4.1 such a line ended
-in the abend, was answered #cmd("500") with
-#cmd("Internal server error (abend U0002)") (reason 99, @ref-ds-err) and left the
-data set empty (mvsmf\#578). Binary mode cuts the body into pieces of LRECL minus
-8 bytes on a spanned data set and pads the last short piece with zeros to a
-full piece. A VB data set with a block size of at least LRECL plus 4 is not
-spanned according to the libc370 source and keeps LRECL minus 4 (not
-measured). The measurements are on sequential data sets.]
+#idx("spanned records")#idx("RECFM=VBS")
+A data set is spanned when its record format is VBS, or when it is VB and the
+block size is smaller than LRECL plus 4: the open makes such a data set spanned.
+A record of a spanned data set holds at most LRECL minus 8 bytes of data. This
+is the limit for a text line and for a piece of binary data. On a VBS data set
+with LRECL 255 it is 247 bytes. Other variable data sets keep LRECL minus 4 for
+text, and fixed data sets keep LRECL.
+
+In binary mode mvsMF cuts the body into pieces of LRECL minus 8 bytes on a
+spanned data set, and fills the last piece with X'00' to the full length of a
+piece. A body of 250 bytes written to a VBS data set with LRECL 255 is two
+pieces of 247 bytes, so a binary read returns 494 bytes: the 250 bytes and 244
+bytes of X'00'.
+
+A text line of 248 to 251 bytes on a VBS data set with LRECL 255 is cut to 247
+bytes. The answer is the #cmd("500") above, the other records are kept, and the
+cut line is stored. *Change in mvsMF 1.4.1:* up to 1.4.0 the limit was LRECL
+minus 4. A longer line made the write abend with the user abend U0002, the
+answer was #cmd("Internal server error (abend U0002)"), and the data set was
+left empty.
+
+#note[*Spanned data sets* (mvsmf\#570): a record that does not fit in the space
+left in the current block is split over two blocks and read back whole. 100
+lines written to a VBS data set with LRECL 255 and block size 6233, and to VB
+data sets with LRECL 255 and block sizes 255, 259 and 6233, came back intact.
+Before mvsMF 1.4.1 the tail of such a record was lost, the answer was still
+#cmd("204"), and a later read of the data set ended in an abend of the libc370
+read routine (user abend U1234) at that record, which the client sees as a
+failed transfer (@ref-ds-read). The measurements are on sequential data sets; a
+member is written by the same access method code.]
 
 mvsMF writes each record to the access method at once. If the data set runs out
 of space, the answer is #cmd("500") (reason 3) and the operator message is

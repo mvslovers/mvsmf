@@ -109,19 +109,22 @@ empties the data set.
 A line that is longer than the record length of the data set is cut. mvsMF
 writes the body and then answers #cmd("500") with the message
 #cmd("Record truncated to the record length of the data set"). Check the status
-of every write.
+of every write. The record length that counts is smaller than LRECL for the
+variable formats: LRECL minus 4 for V and VB, and LRECL minus 8 for a spanned
+data set. A data set is spanned if it is VBS, or if it is VB with a block size
+smaller than LRECL plus 4. A VBS data set with LRECL 255 holds a line of 247
+bytes at most. The line that is too long is stored cut to that length, and the
+other records are kept.
 
-#note[*Spanned data sets.* A data set of the record format VBS, or a VB data
-set with a block size smaller than LRECL plus 4, is spanned. A record that does
-not fit in the rest of a block is split over two blocks and read back whole;
-before mvsMF 1.4.1 its tail was lost while the answer was still #cmd("204")
-(mvsmf\#570). A record of such a data set holds at most LRECL minus 8 bytes: on
-LRECL 255 a line of 247 bytes is written whole. A longer line is cut to that
-length like any overlong line: mvsMF writes the body and then answers #cmd("500")
-with #cmd("Record truncated to the record length of the data set"). Before
-mvsMF 1.4.1 such a line ended in an abend and left the data set empty
-(mvsmf\#578). A binary upload to such a data set is cut into pieces of LRECL
-minus 8 bytes, and the last short piece is padded with zeros to a full piece.]
+*Change in mvsMF 1.4.1:* up to 1.4.0 the limit of a spanned data set was LRECL
+minus 4. A line of 248 to 251 bytes on a VBS data set with LRECL 255 ended in
+#cmd("500") with the message #cmd("Internal server error (abend U0002)"), and
+the data set was empty afterwards.
+
+#note[*Spanned data sets* (mvsmf\#570): a record that does not fit in the rest
+of a block is split over two blocks and read back whole. Before mvsMF 1.4.1 the
+tail of such a record was lost while the answer was still #cmd("204"), and a
+later read of the data set failed (see the end of the next section).]
 
 A member is written in the same way. The member is created if it does not
 exist, and replaced if it does. The library must exist.
@@ -285,7 +288,11 @@ translation. This session writes six bytes into the data set
 
 #screen(raw(read("../ex/ug-data/d-put-bin.txt"), block: true))
 
-mvsMF cuts the bytes into records of the record length. The last record, which is
+mvsMF cuts the bytes into records of the record length. In a spanned data set
+(@ug-data-write) a record holds LRECL minus 8 bytes. A body of 250 bytes on a
+VBS data set with LRECL 255 is two records of 247 bytes, and a binary read
+returns 494 bytes. The
+last record, which is
 not full, is filled with X'00' to the full length, except in a sequential data
 set of record format U. A member is always filled. The six bytes are one record of 80 bytes. The read in binary
 mode returns the records one after another, as they are stored:

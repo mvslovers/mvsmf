@@ -67,15 +67,24 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 ## Text mode framing
 - A record ends at LF, CR or CRLF. The terminator is not part of the record.
-- A line of exactly LRECL characters is accepted. A longer line is **truncated
-  to LRECL** — the overflow is discarded, the record is written, the rest of the
-  body is written after it, and the request then answers 500 "Record truncated
+- On RECFM=F a line of exactly LRECL characters is accepted. A longer line is
+  **truncated to LRECL** — the overflow is discarded, the record is written, the
+  rest of the body is written after it, and the request then answers 500 "Record truncated
   to the record length of the data set". It is never silently split across two
   records. Until issue #233 the usable length was LRECL-2, so 80-column source
   could not be uploaded into an FB80 dataset at all.
 - For RECFM=V the usable line length is LRECL-4: the record descriptor word is
   not content. A longer line used to be split into a second record without
   notice, and is now truncated like any other.
+- On a **spanned** data set the usable line length is **LRECL-8**: RECFM=VBS, or
+  RECFM=VB with `BLKSIZE` smaller than `LRECL`+4 (the open makes such a data set
+  spanned). On VBS 255 that is 247 bytes. Up to mvsMF 1.4.0 the limit was
+  LRECL-4, and on VBS 255 a line of 248 to 251 bytes made the write abend (user
+  abend U0002, the answer `Internal server error (abend U0002)`) and left the data set empty.
+  Such a line is now truncated like any other over-long line: the answer is 500
+  `{"rc":8,"category":6,"reason":3,"message":"Record truncated to the record
+  length of the data set"}`, the line is stored cut to LRECL-8 (247 bytes) and
+  the other records are kept.
 - A blank line is written as a record of blanks — it used to disappear (#233).
 - A body whose last line carries no terminator still produces that record, and
   a body ending in a newline does not gain a trailing blank one.
@@ -92,20 +101,11 @@ On successful completion, this request returns HTTP status code 204 (No Content)
   came back. Before mvsMF 1.4.1 (libc370 2.25.1) the tail of such a record was
   lost, the write was still answered **204**, and the data set could not be
   read from that record on (mvsmf#570).
-- A record of a spanned data set holds at most `LRECL`-8 bytes (247 for LRECL
-  255), not `LRECL`-4: libc370's write routine abends (user abend U0002) above
-  that. A longer text line is therefore cut to `LRECL`-8 like any other
-  overlong line: the rest of the body is written, and the answer is **500**
-  with the message `Record truncated to the record length of the data set`
-  (reason 3). Binary mode cuts the body into pieces of `LRECL`-8 bytes on a
-  spanned data set, and pads the last short piece with binary zeros to a full
-  piece. Measured on LRECL 255 (VBS with BLKSIZE 6233, VB with BLKSIZE 255): a
-  line of 247 bytes is written whole, one of 248 or 251 is cut to 247 and the
-  records around it are kept. Before mvsMF 1.4.1 such a line ended in the abend,
-  answered **500** with `Internal server error (abend U0002)`, and left the data
-  set empty (mvsmf#578). RECFM=VB with `BLKSIZE` of at least `LRECL`+4 is not
-  spanned according to the libc370 source and keeps `LRECL`-4 (not measured).
-- Binary mode: the final incomplete record is padded with binary zeros to LRECL
+- Binary mode: the body is cut into pieces of LRECL bytes and the final
+  incomplete piece is padded with binary zeros to LRECL. On a spanned data set
+  (see above) a piece is **LRECL-8** bytes, the most a record holds, and the
+  padding goes to LRECL-8. Measured on VBS 255: a body of 250 bytes reads back
+  as 494 bytes, the 250 bytes and 244 zeros, two pieces of 247.
 - A request that produces **no record at all** leaves the dataset exactly as it
   was — a dropped connection, a body that never arrives. The dataset is not
   opened for output until there is a record to put in it (issue #246). An

@@ -3580,7 +3580,7 @@ span_roundtrip "VB 255/255 full record" \
 # short one after; the 248-byte one is the first byte past the limit.
 # $1 label, $2 create attributes (JSON), $3 length of the overlong line
 span_overlong() {
-	local label="$1" attrs="$2" len="$3" i want
+	local label="$1" attrs="$2" len="$3"
 
 	{
 		echo "BEFORE"

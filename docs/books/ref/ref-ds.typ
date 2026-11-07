@@ -123,6 +123,7 @@ request headers:
   #table(columns: (1.7in, 1fr),
     [Header], [Used by],
     [#cmd("X-IBM-Max-Items")], [The two lists (@ref-ds-list, @ref-ds-members).],
+    [#cmd("X-IBM-Attributes")], [The member list (@ref-ds-members).],
     [#cmd("X-IBM-Data-Type")], [Read and write (@ref-ds-type).],
     [#cmd("X-IBM-Return-Etag")], [Read and write (@ref-ds-etag).],
     [#cmd("If-None-Match")], [Read (@ref-ds-etag).],
@@ -133,7 +134,7 @@ request headers:
 ]
 
 mvsMF does not need #cmd("X-CSRF-ZOSMF-HEADER") and does not read it.
-#cmd("X-IBM-Attributes") is read by no request of this chapter.
+#cmd("X-IBM-Attributes") is read by the member list only.
 
 Every response carries #cmd("Cache-Control: no-store"), #cmd("Pragma: no-cache"),
 #cmd("X-Content-Type-Options: nosniff") and #cmd("Content-Language: en"). A
@@ -294,6 +295,12 @@ The request needs READ access to the library (@ref-ds-auth).
       characters give #cmd("400"), reason 9.],
     [#cmd("X-IBM-Max-Items")], [Header. The largest number of items to return.
       0, no value, or a value that is not a number means no limit.],
+    [#cmd("X-IBM-Attributes")], [Header. The value #cmd("base"), in any case,
+      alone or followed by a comma and more text (#cmd("base,total")), adds the
+      ISPF statistics of the member to its item. Any other value,
+      #cmd("member") included, and no header give the member name alone. The
+      option #cmd("total") is not implemented: the body has no
+      #cmd("totalRows").],
   )
 ]
 
@@ -302,7 +309,7 @@ mvsMF writes the list while it reads the directory, and it looks one matching
 member past the end of the page to know whether more follow. The body has the
 fields #cmd("items"), #cmd("returnedRows"), #cmd("moreRows") and
 #cmd("JSONversion") of @ref-ds-list-resp, with the same rules. Each item is an
-object with one field:
+object. Without the header it has one field:
 
 #tab(caption: [Item of the member list])[
   #table(columns: (1.35in, 1fr),
@@ -316,6 +323,36 @@ object with one field:
       not changed.],
   )
 ]
+
+With #cmd("X-IBM-Attributes: base") an item of a member that has ISPF
+statistics carries these fields as well, after #cmd("member"), in this order:
+
+#tab(caption: [ISPF statistics in an item of the member list])[
+  #table(columns: (1.35in, 1fr),
+    [Field], [Value],
+    [#cmd("vers"), #cmd("mod")], [Version and modification level, numbers.],
+    [#cmd("c4date"), #cmd("m4date")], [The creation date and the date of the
+      last change, as a string #cmd("yyyy/mm/dd").],
+    [#cmd("cnorc"), #cmd("inorc"), #cmd("mnorc")], [The current and the initial
+      number of records and the number of modified records, numbers.],
+    [#cmd("mtime"), #cmd("msec")], [The time of the last change, the strings
+      #cmd("hh:mm") and #cmd("ss").],
+    [#cmd("user")], [The userid of the last change, escaped like a member name.],
+    [#cmd("sclm")], [#cmd("\"Y\"") if the member was last edited under SCLM,
+      otherwise #cmd("\"N\"").],
+  )
+]
+
+The statistics are read from the user data of the directory entry. A member
+without them is listed with #cmd("member") alone, with the same status and no
+error: a member of a load library, a member whose user data another tool wrote,
+a member stowed without user data, and a member with the extended 40-byte
+statistics, which mvsMF does not decode. Each field is checked, so user data
+that only has the length of the statistics is not reported as statistics. The
+list, its order and the paging (@ref-ds-members) do not depend on the header.
+
+*Change from mvsMF 1.4.0:* the header was ignored and every item had the member
+name alone.
 
 mvsMF checks in this order: the length of the names, READ access, the length of
 the pattern, and the data set. A data set that is not cataloged answers

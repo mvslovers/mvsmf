@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 
 . "${SCRIPT_DIR}/lib/conn.sh"
+. "${SCRIPT_DIR}/lib/ispfstats.sh"
 
 MVS_USER="$MVSMF_USER"
 
@@ -808,6 +809,99 @@ done
 run_zowe files delete ds "$COPY_DST" -f >/dev/null 2>&1 || true
 run_zowe files delete ds "${TEST_PDS}(COPYMBR)" -f >/dev/null 2>&1 || true
 rm -f /tmp/zowe_copy_src.txt
+
+# --- ISPF statistics in the member list: --attributes (issue #573) ---
+#
+# `files list am --attributes` sends X-IBM-Attributes: base and prints whatever
+# the items carry, so the statistics reach the user only if the server sends
+# them. The fixture is the one the curl suite uses (tests/jcl/ispfstats.jcl),
+# built by a job: IEBUPDTE and mvsMF's own PUT stow no ISPF statistics.
+echo ""
+echo "--- List PDS Members (--attributes, issue #573) ---"
+
+ISPF_PDS="${MVS_USER}.ZOWE.ISPFSTAT"
+
+if ! ispf_fixture "$ISPF_PDS"; then
+	# the fixture is built by a job this suite submits, so its absence is red (#304)
+	fail "ispf stats: the fixture job" "$ISPF_FIXTURE_WHY"
+else
+	pass "ispf stats: the fixture job ended CC 0000"
+
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$ISPF_PDS" --attributes) || RC=$?
+	assert_rc 0 "$RC" "ispf stats: list am --attributes"
+
+	WANT='{"member":"WITHST","vers":1,"mod":5,"c4date":"2015/08/12","m4date":"2015/08/12","cnorc":22,"inorc":22,"mnorc":3,"mtime":"05:48","msec":"43","user":"IBMUSER","sclm":"N"}'
+	GOT=$(echo "$OUTPUT" | jq -c '.data.apiResponse.items[] | select(.member == "WITHST")' 2>/dev/null)
+	if [ "$GOT" = "$WANT" ]; then
+		pass "ispf stats: WITHST carries its statistics through Zowe"
+	else
+		fail "ispf stats: WITHST carries its statistics through Zowe" "got: $GOT"
+	fi
+
+	WANT='{"member":"SCLMMEM","vers":12,"mod":34,"c4date":"2024/02/29","m4date":"1999/12/31","cnorc":1000,"inorc":65535,"mnorc":0,"mtime":"23:59","msec":"59","user":"MVSMF","sclm":"Y"}'
+	GOT=$(echo "$OUTPUT" | jq -c '.data.apiResponse.items[] | select(.member == "SCLMMEM")' 2>/dev/null)
+	if [ "$GOT" = "$WANT" ]; then
+		pass "ispf stats: SCLMMEM (SCLM, counts over 255) through Zowe"
+	else
+		fail "ispf stats: SCLMMEM (SCLM, counts over 255) through Zowe" "got: $GOT"
+	fi
+
+	# no statistics: the name alone, which is what Zowe then prints
+	for M in EXTEND FOREIGN PLAIN; do
+		GOT=$(echo "$OUTPUT" | jq -c ".data.apiResponse.items[] | select(.member == \"${M}\")" 2>/dev/null)
+		if [ "$GOT" = "{\"member\":\"${M}\"}" ]; then
+			pass "ispf stats: ${M} has no statistics and is listed by name only"
+		else
+			fail "ispf stats: ${M} has no statistics and is listed by name only" "got: $GOT"
+		fi
+	done
+
+	# what a user sees on the terminal
+	RC=0
+	OUTPUT=$(run_zowe files list am "$ISPF_PDS" --attributes) || RC=$?
+	assert_rc 0 "$RC" "ispf stats: list am --attributes, plain output"
+	if echo "$OUTPUT" | grep -q 'c4date: 2015/08/12' &&
+	   echo "$OUTPUT" | grep -q 'user:   IBMUSER' &&
+	   echo "$OUTPUT" | grep -q 'sclm:   Y'; then
+		pass "ispf stats: Zowe prints the statistics"
+	else
+		fail "ispf stats: Zowe prints the statistics" "got: $OUTPUT"
+	fi
+
+	# without --attributes the list is what it was
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$ISPF_PDS") || RC=$?
+	assert_rc 0 "$RC" "ispf stats: list am without --attributes"
+	if echo "$OUTPUT" | jq -e '.data.apiResponse.items | length == 5 and
+		([.[] | keys] | all(. == ["member"]))' >/dev/null 2>&1; then
+		pass "ispf stats: without --attributes the items carry the name only"
+	else
+		fail "ispf stats: without --attributes the items carry the name only" \
+			"got: $(echo "$OUTPUT" | jq -c '.data.apiResponse.items' 2>/dev/null)"
+	fi
+
+	# --attributes with --max and --pattern
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$ISPF_PDS" --attributes --max 4) || RC=$?
+	assert_rc 0 "$RC" "ispf stats: --attributes --max 4"
+	assert_json_field "$OUTPUT" '.data.apiResponse.returnedRows' "4" \
+		"ispf stats: --max 4 returns four members"
+	assert_json_field "$OUTPUT" '.data.apiResponse.moreRows' "true" \
+		"ispf stats: --max 4 of five: moreRows"
+	assert_json_field "$OUTPUT" '.data.apiResponse.items[3].user' "MVSMF" \
+		"ispf stats: the fourth member of the page carries its statistics"
+
+	RC=0
+	OUTPUT=$(run_zowe_json files list am "$ISPF_PDS" --attributes --pattern 'W*') || RC=$?
+	assert_rc 0 "$RC" "ispf stats: --attributes --pattern W*"
+	assert_json_field "$OUTPUT" '.data.apiResponse.items[0].user' "IBMUSER" \
+		"ispf stats: --pattern keeps the statistics"
+	assert_json_field "$OUTPUT" '.data.apiResponse.returnedRows' "1" \
+		"ispf stats: --pattern W* returns one member"
+
+	run_zowe files delete ds "$ISPF_PDS" -f >/dev/null 2>&1 || true
+fi
 
 # --- Cleanup: delete PDS ---
 echo ""

@@ -238,7 +238,7 @@ The address of the member list is the name of the PDS followed by
 #screen(raw(read("../ex/ug-data/d-list-mbr.txt"), block: true))
 
 The answer has the same form as the list of data sets. Each item has one field,
-#cmd("member"). The members come in the order of the directory, which is the
+#cmd("member"), unless the request asks for the ISPF statistics (below). The members come in the order of the directory, which is the
 EBCDIC order of the names. The parameter #cmd("pattern") selects names. A
 #cmd("*") stands for any run of characters and a #cmd("%") for one character.
 With #cmd("X-IBM-Max-Items") the list pages as above:
@@ -248,6 +248,19 @@ With #cmd("X-IBM-Max-Items") the list pages as above:
 The next page begins with the name in #cmd("start"):
 
 #screen(raw(read("../ex/ug-data/d-list-mbr-next.txt"), block: true))
+
+The request header #cmd("X-IBM-Attributes: base") adds the ISPF statistics of
+each member to its item: the version and modification level, the dates of
+creation and last change, the record counts, the time and the userid of the
+last change, and whether SCLM made it. Zowe CLI sends the header for
+#cmd("zowe files list all-members") with #cmd("--attributes"). A member that has
+no ISPF statistics is listed with its name alone. That is the case for a member
+of a load library, for a member that mvsMF wrote, and for a member whose
+statistics are in the extended form of 40 bytes, which mvsMF does not decode.
+The fields are in the _mvsMF Reference_.
+
+*Change from mvsMF 1.4.0:* version 1.4.0 ignored the header and listed every
+member by name.
 
 The member list needs READ access to the library. A data set that is not a PDS
 gives the status #cmd("400"), and a name that is not cataloged gives

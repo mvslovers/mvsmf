@@ -129,6 +129,14 @@ curl -s -u $USER:$PASS "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS/member"
 zowe files list all-members "IBMUSER.TEST.PDS"
 ```
 
+With the ISPF statistics of each member (version, dates, record counts, userid):
+```bash
+curl -s -H 'X-IBM-Attributes: base' -u $USER:$PASS "$BASE/zosmf/restfiles/ds/IBMUSER.TEST.PDS/member"
+```
+```bash
+zowe files list all-members "IBMUSER.TEST.PDS" --attributes
+```
+
 ### Read a member
 `GET /zosmf/restfiles/ds/{dataset-name}({member-name})`
 

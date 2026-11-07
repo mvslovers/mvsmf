@@ -39,9 +39,10 @@ otherwise it is answered 404 (or 400 for a malformed volume serial). See
 - `X-IBM-Attributes` (optional): `base` adds the ISPF statistics of each member
   to its item (see [ISPF statistics](#ispf-statistics)). `member`, no header,
   or any other word returns the name alone, which is the default. The value is
-  not case sensitive, and `base,total` is accepted as `base`: the `total`
-  option is not implemented and does not change the answer. Zowe CLI sends
-  `base` for `zowe files list am --attributes`.
+  not case sensitive. `base` may be followed by a comma and more text, as in
+  `base,total`: that is accepted as `base`, and the `total` option is not
+  implemented and does not change the answer. Zowe CLI sends `base` for
+  `zowe files list all-members --attributes`.
 
 ## Response
 HTTP status code 200 (OK), whether the listing is complete or was cut short by
@@ -49,7 +50,9 @@ HTTP status code 200 (OK), whether the listing is complete or was cut short by
 That is what real z/OSMF does; it emits no 206 on the files service at all
 (issue #274).
 
-The body is a JSON object:
+The body is a JSON object. Without `X-IBM-Attributes: base` every item
+carries the member name alone (with the header, see
+[ISPF statistics](#ispf-statistics)):
 
 ```json
 {
@@ -71,7 +74,8 @@ against `false`.
 ## ISPF statistics
 
 With `X-IBM-Attributes: base` every member whose directory entry carries ISPF
-statistics is listed with them, in z/OSMF's fields and order:
+statistics is listed with them. The fields and their order are those the
+z/OSMF documentation lists, after `member`:
 
 ```json
 {
@@ -122,9 +126,9 @@ invented and the request is not an error. That is the case for
   number, a date that does not exist) — foreign tools stow their own bytes
   there, and reporting them as a date would be wrong;
 - a member written through mvsMF itself (`PUT`), which stows no statistics;
-- a member with the **extended** statistics ISPF writes once a member has more
-  than 65535 records (a longer user data field, 40 bytes). Those are not
-  decoded; the member is listed by name.
+- a member with the **extended** statistics, which ISPF writes in a longer
+  user data field of 40 bytes. Only the 30-byte form is decoded; the member is
+  listed by name.
 
 `X-IBM-Max-Items`, `start` and `pattern` work as they do without the header, and
 `returnedRows` and `moreRows` count members as before.
@@ -222,7 +226,7 @@ curl -H 'X-IBM-Max-Items: 2' \
 
 ## Limitations
 - The statistics are the ISPF ones, and only the 30-byte form: members with the
-  extended 40-byte statistics (more than 65535 records) are listed by name.
+  extended 40-byte statistics are listed by name.
   Load module attributes (size, AMODE, RMODE, ...) of a load library are not
   returned.
 - `X-IBM-Attributes: base,total` does not return a `totalRows`.
@@ -261,24 +265,6 @@ curl -H 'X-IBM-Attributes: base' \
 
 ```bash
 zowe files list all-members "MIKE.TEST.JCL" --attributes
-```
-
-```
-- 
-  member: WITHST
-  vers:   1
-  mod:    5
-  c4date: 2015/08/12
-  m4date: 2015/08/12
-  cnorc:  22
-  inorc:  22
-  mnorc:  3
-  mtime:  05:48
-  msec:   43
-  user:   IBMUSER
-  sclm:   N
-- 
-  member: PLAIN
 ```
 
 ### Success Response

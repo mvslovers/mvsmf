@@ -295,10 +295,12 @@ The request needs READ access to the library (@ref-ds-auth).
       characters give #cmd("400"), reason 9.],
     [#cmd("X-IBM-Max-Items")], [Header. The largest number of items to return.
       0, no value, or a value that is not a number means no limit.],
-    [#cmd("X-IBM-Attributes")], [Header. The value #cmd("base"), in any case and
-      with or without a #cmd(",total") suffix, adds the ISPF statistics of the
-      member to its item. Any other value, #cmd("member") included, and no
-      header give the member name alone.],
+    [#cmd("X-IBM-Attributes")], [Header. The value #cmd("base"), in any case,
+      alone or followed by a comma and more text (#cmd("base,total")), adds the
+      ISPF statistics of the member to its item. Any other value,
+      #cmd("member") included, and no header give the member name alone. The
+      option #cmd("total") is not implemented: the body has no
+      #cmd("totalRows").],
   )
 ]
 
@@ -307,7 +309,7 @@ mvsMF writes the list while it reads the directory, and it looks one matching
 member past the end of the page to know whether more follow. The body has the
 fields #cmd("items"), #cmd("returnedRows"), #cmd("moreRows") and
 #cmd("JSONversion") of @ref-ds-list-resp, with the same rules. Each item is an
-object with one field:
+object. Without the header it has one field:
 
 #tab(caption: [Item of the member list])[
   #table(columns: (1.35in, 1fr),

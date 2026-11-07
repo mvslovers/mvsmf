@@ -3554,20 +3554,101 @@ span_roundtrip "VBS short lines" \
 	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
 	"$SPAN_BODY"
 
-# One line of LRECL-4 = 251 bytes, the longest that RECFM=V takes: it fills the
-# record and splits nothing. A spanned data set takes at most LRECL-8 bytes in
-# a record, so this abends in the access method (U0002, HTTP 500) with libc370
-# 2.25.1 and 2.29.1 alike: no block boundary involved, and not the loss of
-# libc370#757. Measured on LRECL 255: 247 bytes are written, 248 are not.
-awk 'BEGIN { s = ""; while (length(s) < 251) s = s "z"; print s }' > "$SPAN_BODY"
+# One line of LRECL-8 = 247 bytes, the longest record a spanned data set takes:
+# libc370's write routine (@@awrite.asm, WRITEVAT) abends U0002 for a record
+# whose length plus RDW plus four more exceeds LRECL (#578). RECFM=V without
+# spanning takes LRECL-4; this is the limit of the spanned ones, and it holds
+# with libc370 2.25.1 and 2.29.1 alike.
+awk 'BEGIN { s = ""; while (length(s) < 247) s = s "z"; print s }' > "$SPAN_BODY"
 
 echo ""
-echo "--- VBS, LRECL 255, BLKSIZE 6233: one line of 251 bytes, the longest record ---"
+echo "--- VBS, LRECL 255, BLKSIZE 6233: one line of 247 bytes, the longest record ---"
 span_roundtrip "VBS full record" \
 	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
 	"$SPAN_BODY"
 
-rm -f "$SPAN_BODY" "$SPAN_OUT"
+echo ""
+echo "--- VB, LRECL 255, BLKSIZE 255: one line of 247 bytes, spanned by the OPEN exit ---"
+span_roundtrip "VB 255/255 full record" \
+	'{"dsorg":"PS","recfm":"VB","lrecl":255,"blksize":255,"alcunit":"TRK","primary":1,"secondary":1}' \
+	"$SPAN_BODY"
+
+# A line longer than a spanned record holds is an overlong line like any other
+# (#243): cut to the record, the rest of the body written, the PUT answers 500
+# "Record truncated". It used to abend U0002 in the access method and leave the
+# data set empty (#578). Three lines: a short one before, the overlong one, a
+# short one after; the 248-byte one is the first byte past the limit.
+# $1 label, $2 create attributes (JSON), $3 length of the overlong line
+span_overlong() {
+	local label="$1" attrs="$2" len="$3"
+
+	{
+		echo "BEFORE"
+		awk -v n="$len" 'BEGIN { s = ""; while (length(s) < n) s = s "y"; print s }'
+		echo "AFTER"
+	} > "$SPAN_BODY"
+	{
+		echo "BEFORE"
+		awk 'BEGIN { s = ""; while (length(s) < 247) s = s "y"; print s }'
+		echo "AFTER"
+	} > "$SPAN_OUT.want"
+
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}" 2>/dev/null || true
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o /dev/null \
+		-X POST -K "$MVSMF_CURLRC" \
+		-H "Content-Type: application/json" \
+		-d "$attrs" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "201" "$HTTP_CODE" "${label}: create"
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o "$SPAN_OUT" \
+		-X PUT -K "$MVSMF_CURLRC" \
+		-H "Content-Type: text/plain" \
+		--data-binary @"$SPAN_BODY" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "500" "$HTTP_CODE" "${label}: write answers 500, not an abend"
+	if grep -q "Record truncated to the record length of the data set" "$SPAN_OUT"; then
+		pass "${label}: the message says the record was truncated"
+	else
+		fail "${label}: the message says the record was truncated" "body: $(body_head "$SPAN_OUT")"
+	fi
+
+	HTTP_CODE=$(curl -s -w '%{http_code}' -o "$SPAN_OUT" \
+		-K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}")
+	assert_http_status "200" "$HTTP_CODE" "${label}: read"
+	if cmp -s "$SPAN_OUT.want" "$SPAN_OUT"; then
+		pass "${label}: BEFORE, the line cut to 247 bytes, AFTER -- the data set is not empty"
+	else
+		fail "${label}: BEFORE, the line cut to 247 bytes, AFTER -- the data set is not empty" \
+			"read $(wc -c < "$SPAN_OUT" | tr -d ' ') bytes, want $(wc -c < "$SPAN_OUT.want" | tr -d ' '): $(cmp "$SPAN_OUT.want" "$SPAN_OUT" 2>&1 | head -n 1)"
+	fi
+
+	curl -s -o /dev/null -X DELETE -K "$MVSMF_CURLRC" \
+		"${BASE_URL}/zosmf/restfiles/ds/${SPAN_DSN}" 2>/dev/null || true
+}
+
+echo ""
+echo "--- VBS, LRECL 255, BLKSIZE 6233: a line of 248 bytes is cut, the data set keeps its records ---"
+span_overlong "VBS overlong line" \
+	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
+	248
+
+echo ""
+echo "--- VBS, LRECL 255, BLKSIZE 6233: a line of 251 bytes, the old limit ---"
+span_overlong "VBS 251-byte line" \
+	'{"dsorg":"PS","recfm":"VBS","lrecl":255,"blksize":6233,"alcunit":"TRK","primary":1,"secondary":1}' \
+	251
+
+echo ""
+echo "--- VB, LRECL 255, BLKSIZE 255: a line of 248 bytes, spanned by the OPEN exit ---"
+span_overlong "VB 255/255 overlong line" \
+	'{"dsorg":"PS","recfm":"VB","lrecl":255,"blksize":255,"alcunit":"TRK","primary":1,"secondary":1}' \
+	248
+
+rm -f "$SPAN_BODY" "$SPAN_OUT" "$SPAN_OUT.want"
 
 # =========================================================================
 # ISPF statistics in the member list: X-IBM-Attributes: base (issue #573)

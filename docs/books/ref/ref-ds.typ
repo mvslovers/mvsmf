@@ -544,14 +544,19 @@ and to VB data sets with LRECL 255 and block sizes 255, 259 and 6233, came back
 intact. Before mvsMF 1.4.1 the tail of such a record was lost, the answer was
 still #cmd("204"), and a later read of the data set abended at that record
 (mvsmf\#570). A record of a spanned data set holds at most LRECL minus 8 bytes,
-not LRECL minus 4: on LRECL 255 a line of 247 bytes is written, one of 248 ends
-in a user abend U0002 and is answered #cmd("500") with the message
-#cmd("Internal server error (abend U0002)") (reason 99, @ref-ds-err). A body of
-that one line leaves the data set empty. Binary mode cuts the body into pieces of
-LRECL bytes and fails the same way on a spanned data set. To avoid the limit, give a VB data
-set a block size of at least LRECL plus 4: according to the libc370 source such
-a data set is not spanned and takes LRECL minus 4 (not measured); a VBS data
-set always has the limit. The measurements are on sequential data sets.]
+not LRECL minus 4 (the write routine of libc370 abends with U0002 above that). A
+longer text line is cut to that length like any overlong line: the body is
+written and the answer is #cmd("500") with the message
+#cmd("Record truncated to the record length of the data set") (reason 3). On
+LRECL 255 a line of 247 bytes is written whole, one of 248 or 251 bytes is cut
+to 247, and the records around it are kept. Before mvsMF 1.4.1 such a line ended
+in the abend, was answered #cmd("500") with
+#cmd("Internal server error (abend U0002)") (reason 99, @ref-ds-err) and left the
+data set empty (mvsmf\#578). Binary mode cuts the body into pieces of LRECL minus
+8 bytes on a spanned data set and pads the last short piece with zeros to a
+full piece. A VB data set with a block size of at least LRECL plus 4 is not
+spanned according to the libc370 source and keeps LRECL minus 4 (not
+measured). The measurements are on sequential data sets.]
 
 mvsMF writes each record to the access method at once. If the data set runs out
 of space, the answer is #cmd("500") (reason 3) and the operator message is

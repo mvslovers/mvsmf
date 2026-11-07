@@ -547,11 +547,20 @@ calls `abort_response()` first. Measured on a throwaway container: the VBS data
 set of the issue, before 200 / 30 lines / curl exit 0, after curl exit 18.
 `curl-diag` covers it with `fn=abendbody`. Part 1 (the PUT into a spanned data
 set) is fixed by the pin on libc370 2.29.1 (libc370#757, #770): `curl-datasets`
-VBS 255/6233 and VB 255/255, 255/259, 255/6233 and `curl-binary` VB are green.
-Still red, with libc370 2.25.1 and 2.29.1 alike: a spanned record holds at most
-LRECL-8 bytes (U0002 beyond), so `curl-datasets` "VBS full record" (a line of
-LRECL-4) and `curl-binary` VBS (pieces of LRECL) fail; `record_content_max()`
-still assumes LRECL-4 for every RECFM=V.
+VBS 255/6233 and VB 255/255, 255/259, 255/6233 and `curl-binary` VB are green;
+the LRECL-8 limit of a spanned record that stayed behind is #578 below. The same
+pin moves the `stepname`/`procstep` of a step in a procedure (libc370#758); the
+#417 cancel test follows `procstep`, `curl-jobs` has a test for the pair, and
+`CHANGELOG.md` tells it.
+
+**PR #579, merged 2026-11-07** — #578: a record of a spanned data set (VBS, or VB with BLKSIZE <
+LRECL+4) holds LRECL-8 data bytes, not LRECL-4: libc370's write abended U0002
+above that, and a 248..251 byte line on VBS 255/6233 left the data set empty.
+`reclimit.c` now gives the content maximum and the binary piece (LRECL-8 for a
+spanned data set, the last short piece padded to a full piece as on FB/VB); an
+overlong line is the usual 500 "Record truncated…" and the earlier records stay.
+Host test `tstrlim.c`; `curl-datasets` and `curl-binary` carry the VBS 247/248
+cases. Plain VB (binary piece LRECL) is unchanged.
 
 **PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
 but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET

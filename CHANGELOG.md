@@ -45,14 +45,16 @@ and for a response that looked complete after a read had failed. Built against
   body was ended cleanly and the connection kept: the client saw a complete
   `200` with a short body. The connection is now dropped without the final
   chunk, so the client sees a failed transfer (curl exit 18).
-
-### Known issues
-
-- **A record of a spanned data set holds at most LRECL minus 8 bytes**, not
-  LRECL minus 4. On a VBS data set with LRECL 255, a line of 247 bytes is
-  written; a line of 248 bytes ends in abend U0002 and is answered `500`, and a
-  binary upload, which cuts the body into pieces of LRECL bytes, fails the same
-  way. Keep lines and binary records of such a data set to LRECL minus 8.
+- **A record of a spanned data set holds at most LRECL minus 8 bytes** (#578),
+  not LRECL minus 4. A longer line, or a binary piece of LRECL bytes, ended in
+  abend U0002 and was answered `500` with the data set left empty. On a VBS
+  data set with LRECL 255 and block size 6233, a line of 247 bytes is the
+  longest record. A longer text line is now cut to that, like any overlong line:
+  the rest of the body is written and the answer is `500` with the message
+  `Record truncated to the record length of the data set`. A binary upload to a
+  spanned data set is cut into pieces of LRECL minus 8 bytes (247 on LRECL 255),
+  and the last short piece is padded with zeros to a full piece, as on other
+  record formats. Plain VB and the other record formats are unchanged.
 
 ## [1.4.0] - 2026-10-27
 

@@ -123,13 +123,16 @@ Details that matter in practice:
   write was still answered **204**, mvsmf#570). The measurements are on
   sequential data sets (see [put.md](put.md#limitations)); a member is written
   by the same access method code.
-- A record of a spanned data set holds at most `LRECL`-8 bytes, not `LRECL`-4: a
-  longer line ends in an abend of the libc370 write routine (user abend U0002),
-  answered **500** with the message `Internal server error (abend U0002)`
-  (reason 99). Binary mode cuts the body into pieces of `LRECL` bytes, so it
-  fails the same way. A VB library with a `BLKSIZE` of at least `LRECL`+4 is
-  not spanned according to the libc370 source and takes `LRECL`-4 (not
-  measured); a VBS library always has the limit.
+- A record of a spanned data set holds at most `LRECL`-8 bytes, not `LRECL`-4:
+  libc370's write routine abends (user abend U0002) above that. A longer text
+  line is cut to `LRECL`-8 like any other overlong line, the rest of the body is
+  written, and the answer is **500** with the message `Record truncated to the
+  record length of the data set` (reason 3). Binary mode cuts the body into
+  pieces of `LRECL`-8 bytes on a spanned library and pads the last short piece
+  with binary zeros to a full piece. Before mvsMF 1.4.1 such a line ended in the
+  abend and a **500** `Internal server error (abend U0002)` (mvsmf#578). A VB
+  library with a `BLKSIZE` of at least `LRECL`+4 is not spanned according to the
+  libc370 source and keeps `LRECL`-4 (not measured).
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
 - A request that produces **no record at all** leaves the member exactly as it
   was — a dropped connection, a body that never arrives. The member is not

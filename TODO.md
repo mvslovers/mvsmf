@@ -546,9 +546,12 @@ and `keepalive` stayed set (the failure of #421, on the abend path). It now
 calls `abort_response()` first. Measured on a throwaway container: the VBS data
 set of the issue, before 200 / 30 lines / curl exit 0, after curl exit 18.
 `curl-diag` covers it with `fn=abendbody`. Part 1 (the PUT into a spanned data
-set) stays open on libc370#757; its tests are in (`curl-datasets`: VBS 255/6233,
-VB 255/255; `curl-binary`: VB and VBS) and stay red until the pin moves past
-libc370 2.25.1.
+set) is fixed by the pin on libc370 2.29.1 (libc370#757, #770): `curl-datasets`
+VBS 255/6233 and VB 255/255, 255/259, 255/6233 and `curl-binary` VB are green.
+Still red, with libc370 2.25.1 and 2.29.1 alike: a spanned record holds at most
+LRECL-8 bytes (U0002 beyond), so `curl-datasets` "VBS full record" (a line of
+LRECL-4) and `curl-binary` VBS (pieces of LRECL) fail; `record_content_max()`
+still assumes LRECL-4 for every RECFM=V.
 
 **PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
 but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET

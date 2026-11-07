@@ -2,7 +2,7 @@ schema = 3
 
 [project]
 name = "mvsmf"
-version = "1.4.0"
+version = "1.4.1"
 kind = "application"
 
 [toolchain]
@@ -360,6 +360,8 @@ readme = "docs/installation.md"
 # builds PTFs -- mbt refuses to spend the minor's id a second time -- and the
 # next minor after it an explicit `delete` naming the patch's id.
 prefix = "TZMF"  # FMID and delete follow from the version
+fmid = "TZMF141"                # 1.4.1 is a patch: its own id until mbt builds PTFs
+delete = ["TZMF140"]            # the level this one replaces
 
 # EMPTY ON PURPOSE, and httpd is not an oversight. mvsMF is a CGI: it does not
 # run without httpd. But SMP's REQ() takes exact SYSMOD ids and has no range

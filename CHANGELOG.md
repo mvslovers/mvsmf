@@ -9,11 +9,13 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
-## [1.4.1] - unreleased
+## [1.4.1] - 2026-11-07
 
-A fix release for data loss when writing to a data set with spanned records,
-and for a response that looked complete after a read had failed. Built against
-**libc370 2.29.1**, up from 2.25.1.
+A release that stops data loss when writing to a data set with spanned records
+and a response that looked complete after a read had failed, and that adds ISPF
+statistics to the member list. FMID `TZMF141`, and its SYSMOD deletes
+`TZMF140`, so an upgrade from 1.4.0 needs nothing beyond the package. Built
+against **libc370 2.29.1**, up from 2.25.1.
 
 ### Read this first
 
@@ -29,6 +31,17 @@ and for a response that looked complete after a read had failed. Built against
   |---|---|---|
   | 1.4.0 | `GO` | `ASMFCG` |
   | 1.4.1 | `STEPONE` | `GO` |
+
+### Added
+
+- **ISPF statistics in the member list** (#573). `GET
+  /zosmf/restfiles/ds/{dsn}/member` with `X-IBM-Attributes: base` returns, for
+  each member whose directory entry carries ISPF statistics, the version and
+  modification level, the creation and change dates and the time, the record
+  counts, the userid of the last change and the SCLM flag, in the fields and
+  formats of z/OSMF. This is what `zowe files list all-members --attributes`
+  asks for. A member without such statistics is listed by name only, as before;
+  without the header the answer is unchanged.
 
 ### Fixed
 

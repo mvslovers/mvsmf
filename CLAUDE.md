@@ -431,5 +431,7 @@ All handlers live in `consapi.c`; data source is the Master Trace Table. Details
 ## SMP4 FMID
 
 `[smp] prefix = "TZMF"` in `mbt.toml`; mbt 3 derives the id and the delete from
-the version (1.4.0 is `TZMF140`, deleting `TZMF130`). Rules, spent ids and
+the version (1.4.0 is `TZMF140`, deleting `TZMF130`). 1.4.1 is a patch and
+sets `fmid = "TZMF141"` and `delete = ["TZMF140"]` explicitly; the next minor
+needs `delete = ["TZMF141", "TZMF140"]`. Rules, spent ids and
 mvsMF's install history: `~/repos/mvs/.workspace/context/smp.md`.

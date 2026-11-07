@@ -324,7 +324,11 @@ of the product after a development build, that is this section followed by
 @ug-remove-config and @ug-remove-delete. A production system. The removal job
 for 1.4.1 (@ug-remove-uclin), with #cmd("TZMF141") as the owner and
 #cmd("TZMF140") as its tombstone, and the install of 1.4.1 over a development
-build.
+build. The upgrade of 1.4.0 to 1.4.1, the upgrade of 1.3.0 to 1.4.1 through
+1.4.0, and the #cmd("NOT SEL") that the install of 1.4.1 gives on a system that
+still holds #cmd("TZMF130") (@ug-install-upgrade, @ug-install-job). These steps
+follow from the ownership rule of SMP4 and from the build file; no system ran
+them.
 
 == Undoing the Configuration <ug-remove-config>
 

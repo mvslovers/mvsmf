@@ -179,6 +179,15 @@ Fixed in PR #482 (merged): both fields carry `JESJOB.sysid`
 Fixed in the PR for #326: `abendmsg.c`, `hostparse.c`, `jclines.c`, `reclines.c` and
 `spoolln.c` are in the Key Source Files list, each written from the source and its callers.
 
+**Docs, outdated for 1.4.1 (not ranked, MVS-1774 / PR #582).** 1.4.1 pins
+libc370 2.29.1; three places in the books still describe 1.4.0 and were left
+out of that PR: `docs/books/guide/ug-intro.typ` (the table "Products that
+mvsMF 1.4.0 is built with" and its lead-in, to be checked against `mbt.toml`),
+`docs/books/guide/ug-install.typ` (JES2 section, "mvsMF 1.4.0 is linked with
+libc370 2.25.1") and `docs/books/ref/ref-httpd.typ` (JES2 section, "libc370
+2.25.1 in mvsMF 1.4.0"). Each is rewritten with the 2.29.1 level of the
+release, after a check that the sentence around it still holds for it.
+
 ---
 
 ## Tier 3 — correctness, needs care

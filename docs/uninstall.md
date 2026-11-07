@@ -207,8 +207,8 @@ HMA2050    RESETRC PROCESSING COMPLETED - HIGHEST RETURN CODE IS 00
  UCLIN ACDS .
 ```
 
-The `UCLIN ACDS` block reports the same. All ten `LIST` statements then end
-with RC 04 and the id reported as not found, and so do `LIST CDS MOD(MVSMF) .`,
+The `UCLIN ACDS` block reports the same. In that run all ten `LIST` statements ended
+with RC 04 and the id reported as not found, and so did `LIST CDS MOD(MVSMF) .`,
 `LIST ACDS MOD(MVSMF) .` and `LIST CDS LMOD(MVSMF) .`.
 
 **Without the `RESETRC` between the blocks the section fails.** The `UCLIN ACDS`

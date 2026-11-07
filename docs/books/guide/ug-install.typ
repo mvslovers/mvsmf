@@ -17,7 +17,7 @@ the _mvsMF Reference_, in “Configuring HTTPD for mvsMF”.
 #idx("prerequisites")
 The installation needs these parts on the system:
 
-#tab(caption: [Prerequisites of mvsMF 1.4.0])[
+#tab(caption: [Prerequisites of mvsMF 1.4.1])[
   #table(columns: (1.4in, 1fr),
     [Part], [What mvsMF needs from it],
     [MVS 3.8j with SMP4], [The install job uses the SMP4 procedures #cmd("SMPREC")

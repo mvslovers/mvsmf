@@ -9,6 +9,51 @@ statically linked C runtime, so the libc370 version named in an entry below is
 the one *this* module was built against. Relinking the server does not change
 it, and `HTTPD005I` reports the server's, not mvsMF's.
 
+## [1.4.1] - unreleased
+
+A fix release for data loss when writing to a data set with spanned records,
+and for a response that looked complete after a read had failed. Built against
+**libc370 2.29.1**, up from 2.25.1.
+
+### Read this first
+
+- **The `stepname` and `procstep` of a job's spool files changed meaning for a
+  step in a procedure** (`GET /zosmf/restjobs/jobs/{jobname}/{jobid}/files`),
+  with libc370 2.29.0. They now follow z/OSMF: `stepname` is the name of the
+  step of the job, `procstep` the name of the step inside the procedure. A
+  client that matched the step inside a procedure on `stepname` must match it
+  on `procstep` now. Spool files that belong to no step are unchanged
+  (`stepname` is `JES2`, `procstep` is `null`).
+
+  | Job `//STEPONE EXEC ASMFCG`, file `SYSLOUT` | `stepname` | `procstep` |
+  |---|---|---|
+  | 1.4.0 | `GO` | `ASMFCG` |
+  | 1.4.1 | `STEPONE` | `GO` |
+
+### Fixed
+
+- **A write to a spanned data set no longer loses data** (#570). A data set
+  with RECFM=VBS, or RECFM=VB with a block size smaller than LRECL plus 4, is
+  spanned. When a record did not fit in the space left in a block, the tail of
+  the record was lost, the write was still answered `204`, and the data set
+  could not be read from that record on. Measured with 100 lines on a VBS data
+  set with LRECL 255 and block size 6233: 30 lines could be read back before,
+  100 now. A VB data set with LRECL 255 and block size 255 gave 2 of 4 lines
+  before and is intact now (libc370 2.29.1).
+- **A read that fails after the response has started now breaks the transfer**
+  (#570). When a handler abended after the status line had gone out, the chunked
+  body was ended cleanly and the connection kept: the client saw a complete
+  `200` with a short body. The connection is now dropped without the final
+  chunk, so the client sees a failed transfer (curl exit 18).
+
+### Known issues
+
+- **A record of a spanned data set holds at most LRECL minus 8 bytes**, not
+  LRECL minus 4. On a VBS data set with LRECL 255, a line of 247 bytes is
+  written; a line of 248 bytes ends in abend U0002 and is answered `500`, and a
+  binary upload, which cuts the body into pieces of LRECL bytes, fails the same
+  way. Keep lines and binary records of such a data set to LRECL minus 8.
+
 ## [1.4.0] - 2026-10-27
 
 The release that lets a site decide who may see, read and purge which job, and

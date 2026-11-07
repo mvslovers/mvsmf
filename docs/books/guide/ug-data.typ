@@ -111,6 +111,14 @@ writes the body and then answers #cmd("500") with the message
 #cmd("Record truncated to the record length of the data set"). Check the status
 of every write.
 
+#note[*A defect* (mvsmf\#570, libc370\#757): a write into a data set of the
+record format VBS loses data when a record does not fit in the space left in
+the current block, and the answer is still #cmd("204"). A VB data set with a
+block size smaller than LRECL plus 4 has the same fault, because it is opened
+as spanned. A later read of such a data set fails (see the end of the next
+section). Until libc370 is fixed, do not write to a VBS data set, and give a VB
+data set a block size of at least LRECL plus 4.]
+
 A member is written in the same way. The member is created if it does not
 exist, and replaced if it does. The library must exist.
 
@@ -141,6 +149,24 @@ write is. A name that is not cataloged answers #cmd("404") with the message
 #cmd("Dataset not found"), and a member that is not in the library answers
 #cmd("404") with #cmd("PDS member not found"). The sections on deleting show
 both.
+
+=== A Read That Fails Part-Way <ug-data-readfail>
+
+#idx("read", "failure")#idx("MVSMF106E")#idx("MVSMF902W")#idx("curl", "exit 18")
+mvsMF sends the status line and the headers before it reads the first record.
+When the read fails after that, by an I/O error on the volume or by an abend,
+the status cannot change any more. mvsMF closes the connection in the middle of
+the body, without the last chunk. The client sees a failed transfer and never a
+#cmd("200") that ends cleanly and looks complete. curl exits with 18 and the
+message #cmd("transfer closed with outstanding read data remaining"). There is
+no error report, because the body has begun already.
+
+The records that mvsMF sent before the failure have been received, and a client
+that writes the body to a file keeps them. Do not use that file. The operator
+gets #cmd("MVSMF106E") for an I/O error, and #cmd("MVSMF901E") followed by
+#cmd("MVSMF902W") for an abend. A client that does not check for the last
+chunk, for example an HTTP/1.0 client, cannot tell the failed read from a
+complete one.
 
 == Listing Data Sets and Members <ug-data-list>
 

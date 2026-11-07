@@ -363,8 +363,11 @@ text: B37 gives #cmd("(abend SB37: out of space on the volume)"), D37 gives
 #cmd("(abend SD37: primary extent full, no secondary allocation)") and E37 gives
 #cmd("(abend SE37: extent limit reached)"). The abend is also written to the
 operator console (@apx-messages). If the abend happens after mvsMF has begun
-the response, no error report can follow. The client then sees a body that ends
-early.
+the response, no error report can follow. mvsMF then closes the connection in
+the middle of the body, without the last chunk, and the client sees a failed
+transfer (curl exits with 18). Before 1.4.1 the body ended with a clean last
+chunk and the client saw a complete-looking #cmd("200"). The console gets
+#cmd("MVSMF902W") after the #cmd("MVSMF901E").
 
 === Category numbers <ref-conv-categories>
 

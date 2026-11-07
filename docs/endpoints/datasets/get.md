@@ -55,6 +55,33 @@ On successful completion, this request returns HTTP status code 200 (OK) with th
     - The dataset exists but cannot be opened (I/O error)
     - Memory allocation failed
 
+## A read that fails mid-body
+
+The status line and headers are sent before the first record is read, so a
+read that fails part-way cannot be answered with an error status any more. This
+holds for a data set and for a member. mvsMF breaks the response instead: it
+closes the connection in the middle of the body, without the final chunk and
+without keep-alive. The client sees a **failed transfer**, never a `200` that
+ends cleanly and looks complete. curl exits with 18 (`transfer closed with
+outstanding read data remaining`). The records that were read before the
+failure have been sent; do not use a partial download. There is no error report,
+because the body has begun already.
+
+Two things cause this, and each leaves its own message on the operator console
+([messages](../../messages.md)):
+
+| Cause | Console |
+|---|---|
+| An uncorrectable I/O error on the read (bad track, wrong-length record) | `MVSMF106E` |
+| An abend of the handler during the read, for example a block of a spanned data set that libc370 cannot make sense of (user abend U1234, after the console line `MVSSUPA - @@AREAD - problem processing RECFM=V(bs) file`) | `MVSMF901E`, then `MVSMF902W` |
+
+An HTTP/1.0 client gets no chunk framing, so it cannot tell the cut-off from a
+complete body (see [Slow clients](../README.md#slow-clients)).
+
+Before mvsMF 1.4.1 an abend mid-body ended the chunked body with a clean final
+chunk and kept the connection: the client saw a complete-looking `200`
+(mvsmf#570). The I/O error was already reported as a broken transfer.
+
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
 - Binary/record mode for FB datasets uses DSCB-based record count calculation to determine exact end-of-data

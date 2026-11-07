@@ -84,6 +84,18 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 
 ## Limitations
 - Only sequential (PS) datasets are supported; PDS datasets return HTTP 400
+- **A defect: spanned records lose data** (mvsmf#570, libc370#757). A write
+  into a data set with RECFM=VBS, or RECFM=VB with `BLKSIZE` smaller than
+  `LRECL`+4 (the open makes such a data set spanned), fails whenever a record
+  does not fit in the space left in the current block. libc370 writes the first
+  part of that record, marks it as complete, and drops the rest. The write is
+  reported as a success, so the answer is **204**, and the data set cannot be
+  read from that record on: a read ends in an abend of the access method (user
+  abend U1234), which the client sees as a broken transfer (see
+  [a read that fails mid-body](get.md#a-read-that-fails-mid-body)). Until
+  libc370 is fixed, do not write to VBS data sets, and give a VB data set a
+  `BLKSIZE` of at least `LRECL`+4. A VB data set with such a block size is not
+  spanned and does not take this path.
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
 - A request that produces **no record at all** leaves the dataset exactly as it
   was — a dropped connection, a body that never arrives. The dataset is not

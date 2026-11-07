@@ -250,6 +250,12 @@ derived from the code of HTTPD and mvsMF. The status is what the client gets.
     [503, #cmd("failed with Snnn ABEND") or #cmd("failed with Unnnn ABEND")], [An
       abend that mvsMF did not handle. Look at the messages #cmd("MVSMF901E") and
       #cmd("MVSMF913I") before it.],
+    [200, but the body ends early and curl exits with 18, together with
+      #cmd("MVSMF106E") or #cmd("MVSMF901E") and #cmd("MVSMF902W") on the
+      console], [The read of a data set, a member or a file failed after the
+      response had begun. mvsMF closed the connection on purpose, so that the
+      client sees a failed transfer. Do not use the partial body. Find the cause
+      with the console messages, and read again (@ug-data-readfail).],
     [503, #cmd("returned rc n")], [The module ended with a negative return code of
       its own. The code is the number in the message.],
     [A request for a path under #cmd("/zosmf/") is answered like a static file

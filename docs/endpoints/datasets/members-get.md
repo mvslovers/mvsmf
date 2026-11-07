@@ -133,6 +133,14 @@ now told apart by a catalog lookup and a filtered directory read.
 - Binary/record mode: no DSCB-based record count limit (reads until fread returns 0). This works correctly for PDS members but may include padding for the last block.
 - A client that stops reading for about 10 seconds is cut off without the closing chunk and without a console message: see [Slow clients](../README.md#slow-clients)
 
+## A read that fails mid-body
+
+A read that fails after the status line went out, by an I/O error or an abend,
+breaks the response instead of ending it cleanly. The client sees a failed
+transfer (curl exit 18). The rules, the console messages and what to do are the
+same as for a data set: see [a read that fails
+mid-body](get.md#a-read-that-fails-mid-body).
+
 ## Authorization
 
 Requires **READ** on the library in class `DATASET` (issue #228). The check runs

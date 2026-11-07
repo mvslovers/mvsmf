@@ -558,6 +558,15 @@ The tag `v1.4.1` and the release page are the Board's. **The next minor needs
 an explicit `delete = ["TZMF141", "TZMF140"]`** (the derived one would name
 only `TZMF140`; see `[smp]` in `mbt.toml`).
 
+**Three-job install in the docs (#586), in its PR**: the 1.4.1 package has
+three jobs (allocation, install, accept). `docs/installation.md`,
+`docs/uninstall.md` and the user's guide (ML08-0001) describe them, with the
+measurements of the TK5 container run; the reference (ML08-0002) was checked and
+needs no change. Not measured, and said so in the texts: the accept job's GUARD
+when the SYSMOD is not applied, the GUARD after a `NOT SEL` APPLY, and the
+accept job's timing against `S HTTPD`. The README of the shipped 1.4.1 package
+still describes one job; the release page covers that.
+
 **PR #571, merged, #570 part 2** — an abend after the response had started ended as a
 complete-looking 200: `route_request()` only issued `MVSMF902W`, so `chunked`
 and `keepalive` stayed set (the failure of #421, on the abend path). It now

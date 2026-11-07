@@ -30,12 +30,16 @@ prose, where it can be written as a floor.
 
 ## 1. Receive and install
 
-The package contains the usual pair of jobs. Run them in order:
+The package contains three jobs. Run them in this order:
 
-| Job | What it does |
-|---|---|
-| `MVSMFALC` | Allocates the target and distribution libraries |
-| `MVSMFINS` | RECEIVE, APPLY CHECK, APPLY, ACCEPT |
+| Job | File | What it does |
+|---|---|---|
+| `MVSMFALC` | `mvsmf-1.4.1-alloc.jcl` | Allocates the target and distribution libraries. Run it once, for the first install; not for an upgrade |
+| `MVSMFINS` | `mvsmf-1.4.1-inst.jcl` | Steps `DELOLD`, `RECV1`, `RECV2`, `RECV` (RECEIVE), `APPLYCHK` (APPLY CHECK) and `APPLY`. It **ends after the APPLY**: the function is applied, not accepted |
+| `MVSMFACC` | `mvsmf-1.4.1-accept.jcl` | Steps `GUARD`, `ACCEPT` and `CLEANUP`. Submit it when you have tried the product |
+
+The package holds six files: these three jobs, the load module and the sample
+library as XMIT files, and this guide as `README.md`.
 
 **On MVS/CE the install job needs one more change.** Both `RECEIVE` commands in
 it (steps `RECV1` and `RECV2`) need a `VOLUME()` operand naming the volume to
@@ -50,8 +54,49 @@ allocate on — `PUB000` on a stock MVS/CE:
 The job's own comment says the `CHANGE.ME` lines are the only ones to change;
 on MVS/CE that is not so. On TK5 the job runs as shipped.
 
-**Verify the install by listing the members of `MVSMF.LINKLIB`, never by the
-condition codes.** SMP keys element ownership on `MOD(name)`, and a SYSMOD that
+**The install job stops after the APPLY, on purpose.** ACCEPT is the point
+without a way back: SMP refuses RESTORE and REJECT for an accepted FMID. The
+header of the accept job says that until the ACCEPT a RESTORE can still take the
+function out again (a RESTORE has not been run on this package). So the install
+job does not make that decision for you. Try the product first, then submit
+`MVSMFACC`.
+
+What the two jobs leave behind, measured on a TK5 test container with the
+published package of 1.4.1, as an upgrade from 1.4.0:
+
+| | After `MVSMFINS` | After `MVSMFACC` |
+|---|---|---|
+| Job end | CC 0004: steps `DELOLD`, `RECV1`, `RECV2`, `RECV`, `APPLYCHK` end RC 00, `APPLY` ends RC 04 (`HMA2461`, see [Upgrading](#upgrading)) | CC 0000: steps `GUARD`, `ACCEPT`, `CLEANUP` end RC 00 |
+| `TZMF141` in the target zone (CDS) | `REC APP` | `REC APP ACC` |
+| `TZMF141` in the distribution zone (ACDS) | not found | `REC APP ACC RGN` |
+| `TZMF140` | CDS: tombstone (`DELBY = TZMF141`). ACDS: still `REC APP ACC RGN` | tombstone (`DELBY = TZMF141`) in both zones; no `RGN` in the ACDS |
+| `MVSMF.LINKLIB` | the new `MVSMF` | the new `MVSMF` |
+| `MVSMF.AMVSMFLD` | still the module of 1.4.0 | the new `MVSMF`, the same as in `MVSMF.LINKLIB` |
+| `MVSMF.MVSMFLOD` (staging library) | present | scratched |
+
+**The accept job.** Nothing in it needs editing. `GUARD` runs
+`LIST CDS SYSMOD(TZMF141)`; only when it ends RC 00 does `ACCEPT` run, and
+`CLEANUP` scratches `MVSMF.MVSMFLOD` only when `GUARD` and `ACCEPT` both ended RC
+00. The gate is the entry of `TZMF141` in the target zone, not the return code of
+the install job: after an upgrade from 1.4.0 the install job ends CC 0004, and the
+accept job still runs through. The header of the accept job says to submit it
+after an install job whose APPLY CHECK and APPLY ended RC 0, or RC 4 for `HMA2461`
+(a predecessor in delete) or `HMA4441` alone, and not after RC 8 or 12. The
+`ACCEPT` step prints `HMA2380 COPY SUCCESSFUL … LIBRARY=AMVSMFLD`
+for `MVSMF`.
+
+**Submitting the accept job a second time** ends the job with `JCL ERROR`:
+`IEF212I … MVSMFLOD - DATA SET NOT FOUND`, because the first run scratched the
+staging library. `GUARD` ends RC 00 and no step after it runs, so the second
+run changes nothing.
+
+**Not measured:** the accept job on a system where `TZMF141` is not applied (the
+header says the job ends RC 8 in the step `NOTAPPL` and nothing is accepted); the
+accept job after an APPLY that printed `NOT SEL`; and whether the accept job may
+run while HTTPD is up (in the test HTTPD was restarted after both jobs).
+
+**Verify the install by listing the members of `MVSMF.LINKLIB` (and, after the
+accept job, of `MVSMF.AMVSMFLD`), never by the condition codes.** SMP keys element ownership on `MOD(name)`, and a SYSMOD that
 does not own an element skips it: the element summary prints
 
 ```
@@ -60,16 +105,33 @@ TYPE   NAME      STATUS
 MOD    MVSMF     NOT SEL
 ```
 
-nothing is copied, and every other line still says success — RECEIVE, APPLY
-CHECK, APPLY and ACCEPT all RC 00, `HMA2270 … SUCCESSFULLY COMPLETED`, and
-`STATUS = REC APP ACC` in both zones. The message that separates a real install
-from that one is:
+nothing is copied, and every other line still says success. In the one-job
+packages up to 1.4.0, whose install job also ran the ACCEPT, that meant RECEIVE,
+APPLY CHECK, APPLY and ACCEPT all RC 00, `HMA2270 … SUCCESSFULLY COMPLETED`, and
+`STATUS = REC APP ACC` in both zones. The package of 1.4.1 splits the work in two
+jobs (the ACCEPT is in `MVSMFACC`), and the `NOT SEL` case has not been run with
+it. The message that separates a real install from that one is:
 
 ```
 HMA2380 COPY SUCCESSFUL - MOD=MVSMF - LMOD=MVSMF - LIBRARY=…
 ```
 
-If that line is not in the job log, nothing was copied.
+If that line is not in the job log, nothing was copied. The line for
+`LIBRARY=LINKLIB` is in the `APPLY` step of `MVSMFINS`; the one for
+`LIBRARY=AMVSMFLD` is in the `ACCEPT` step of `MVSMFACC`.
+
+After the accept job, check three more things: `MVSMF.AMVSMFLD` holds the member
+`MVSMF`, `MVSMF.MVSMFLOD` is gone, and
+
+```
+//LIST    EXEC SMPAPP
+//SMPCNTL  DD  *
+ LIST CDS  SYSMOD(TZMF141) .
+ LIST ACDS SYSMOD(TZMF141) .
+/*
+```
+
+shows `TZMF141` as `REC APP ACC` in both zones.
 
 ## 2. Authorization — usually nothing to do
 
@@ -406,8 +468,8 @@ first. HTTPD's own documentation (the *HTTPD User's Guide*, chapter
 ## Upgrading
 
 From 1.2.0 onwards each release's SYSMOD **deletes its predecessor**, so an
-upgrade from the release just before is RECEIVE/APPLY/ACCEPT of the new package
-and nothing else. Do **not** run the uninstall job's `DELETE` step in between:
+upgrade from the release just before is the install job and then the accept job of
+the new package, and nothing else. Do **not** run the uninstall job's `DELETE` step in between:
 it names the data sets the new install is about to use.
 
 **The SYSMOD deletes only the release just before it.** 1.4.1 (`TZMF141`)
@@ -428,12 +490,18 @@ Check which level owns the module before you start:
 `TZMF140` is the level this package replaces. An id that is not found means a
 fresh install (or a hand-copied MVSMF, see below).
 
-**Expected return codes of an upgrade from 1.4.0.** RECEIVE and APPLY CHECK end
-RC 00. The APPLY ends **RC 04**, on `HMA2461 ... NOT FOUND ON SMPSCDS LIBRARY`
-for the deleted `TZMF140`: a deleted SYSMOD has no backup entry. That is
-expected (measured on the step from 1.3.0 to 1.4.0, which deleted `TZMF130`;
-the step to 1.4.1 works the same way), and the install job conditions the ACCEPT to run through it. A fresh
-install ends RC 00 throughout.
+**Expected return codes of an upgrade from 1.4.0.** In the install job
+`MVSMFINS`, `DELOLD`, `RECV1`, `RECV2`, `RECV` (RECEIVE) and `APPLYCHK` (APPLY
+CHECK) end RC 00. The `APPLY` ends **RC 04**, on `HMA2461 ... NOT FOUND ON
+SMPSCDS LIBRARY` for the deleted `TZMF140`: a deleted SYSMOD has no backup entry.
+The job ends CC 0004. That is expected, measured on a TK5 test container with the
+published packages on both steps (1.3.0 to 1.4.0, which deleted `TZMF130`, and
+1.4.0 to 1.4.1). The accept job `MVSMFACC` then ends CC 0000: `GUARD`, `ACCEPT`
+and `CLEANUP` all RC 00. It does not look at the return code of the `APPLY`; its
+`GUARD` looks for `TZMF141` in the target zone. (The package of 1.4.0 was one job:
+its install job ran the ACCEPT in the same run, after the `APPLY` ended RC 04.) A
+fresh install ends RC 00 throughout; it has not been run with the 1.4.1
+package.
 
 **Stop HTTPD before the install job and start it afterwards:**
 
@@ -441,6 +509,7 @@ install ends RC 00 throughout.
 P HTTPD
 (run the install job)
 S HTTPD
+(try the product, then run the accept job)
 ```
 
 The APPLY replaces `MVSMF` in `MVSMF.LINKLIB`, which a running HTTPD holds in
@@ -486,8 +555,9 @@ no class table and has not been tested with job profiles. Without a profile,
 every user sees only their own jobs, as the prerequisites say.
 
 `RESTORE` and `REJECT` are not the way to make room for a new level. Both are
-refused once the FMID has been accepted, which the install job does in the same
-run as the APPLY.
+refused once the FMID has been accepted, and the accept job does that, not the
+install job. After the install job alone `TZMF141` is applied and not accepted
+(see section 1), and the accept job is the point without a way back.
 
 ## Coming from a hand-copied MVSMF
 

@@ -8,7 +8,7 @@ SMP4, takes the two changes of the installation out of the configuration of
 HTTPD (httpd), and scratches the data sets. The chapter is for a product that
 goes away. It is not the way to upgrade.
 
-#note[An upgrade is the RECEIVE, APPLY and ACCEPT of the new package
+#note[An upgrade is the install job and the accept job of the new package
 (@ug-install-upgrade). The SYSMOD of a release deletes the SYSMOD of its
 predecessor. If you run the data set deletion of this chapter in between, you
 scratch the libraries the new install writes to.]
@@ -20,9 +20,14 @@ build of 1.5.0-dev). Go to @ug-remove-dev first.]
 == Why UCLIN <ug-remove-why>
 
 #idx("UCLIN")#idx("REJECT")
-The install job accepts the SYSMOD in the same run as the APPLY. After the
-ACCEPT, #cmd("REJECT") no longer works. The #cmd("UCLIN") statements edit the
-inventory directly. They are the way back.
+#cmd("RESTORE") and #cmd("REJECT") no longer work once the SYSMOD is accepted. The
+accept job #cmd("MVSMFACC") accepts it, so that a later #cmd("RESTORE") has a
+previous level to go back to (@ug-install-accept). The install job
+#cmd("MVSMFINS") ends after the #cmd("APPLY") and does not. After the accept job
+the #cmd("UCLIN") statements, which edit the inventory directly, are the way
+back. Before it, the function is applied and not accepted: the header of the
+accept job says that a #cmd("RESTORE") can still take it out. That was not run on
+this package. @ug-remove-applied tells what the inventory holds in that state.
 
 == Freeing the Inventory <ug-remove-uclin>
 
@@ -111,6 +116,32 @@ owns the module (@ug-remove-dev-detect).
 whole #cmd("UCLIN ACDS") block after the return code 08 of the first one
 (#cmd("HMA2293 ** CONTROL STATEMENT IGNORED DUE TO PREVIOUS ERROR"), return code
 12), and the distribution zone keeps its entries. The job gives no other sign.
+
+=== Applied but Not Accepted <ug-remove-applied>
+
+If the install job ran and the accept job did not, the two zones differ. This is
+what a TK5 test system held after #cmd("MVSMFINS") of 1.4.1, as an upgrade from
+1.4.0:
+
+- The target zone has #cmd("TZMF141") with the status #cmd("REC APP"), and
+  #cmd("TZMF140") as a deleted function (#cmd("DELBY = TZMF141")).
+- The distribution zone does not have #cmd("TZMF141"): a #cmd("LIST") reports it
+  as not found. #cmd("TZMF140") is still there with the status
+  #cmd("REC APP ACC RGN"), and it owns #cmd("MOD(MVSMF)").
+- #cmd("MVSMF.MVSMFLOD") still exists, and #cmd("MVSMF.AMVSMFLD") still holds the
+  module of 1.4.0.
+
+The job of @ug-remove-uclin is written for the accepted state, where
+#cmd("TZMF141") owns the module in both zones. In the state above the
+distribution zone names #cmd("TZMF140") as the owner. Write #cmd("TZMF140") in the
+first #cmd("DEL") of the #cmd("UCLIN ACDS") block, and keep #cmd("TZMF141") in
+the first #cmd("DEL") of the #cmd("UCLIN CDS") block. This follows from the
+ownership rule. The #cmd("UCLIN") job was not run on a system in this state. The
+statement #cmd("DEL SYSMOD(TZMF141)") in the #cmd("UCLIN ACDS") block then names
+an id that the zone does not hold: it reports #cmd("HMA2532") and the block ends
+with return code 08, which is no fault, as above. #cmd("MVSMF.MVSMFLOD") is in
+the list of @ug-remove-delete. The #cmd("LIST") step of @ug-remove-check does not
+change.
 
 == Checking the Inventory <ug-remove-check>
 
@@ -251,14 +282,17 @@ release is installed, #cmd("MVSMF.LINKLIB") still holds the module of the
 development build.
 
 The install of 1.4.0 over the cleaned system, with the install job and without
-#cmd("MVSMFALC"), ends with return code 00. #cmd("APPLY") and #cmd("ACCEPT")
-complete, and #cmd("HMA2380") reports the copy into both libraries. The apply
-prints:
+#cmd("MVSMFALC"), ends with return code 00. The package of 1.4.0 is one job: its
+install job runs #cmd("APPLY") and #cmd("ACCEPT"), and #cmd("HMA2380") reports the
+copy into both libraries. In the package of 1.4.1 the #cmd("APPLY") of the install
+job #cmd("MVSMFINS") prints the line for #cmd("LIBRARY=LINKLIB"), and the
+#cmd("ACCEPT") of the accept job #cmd("MVSMFACC") prints the line for
+#cmd("LIBRARY=AMVSMFLD"). The apply of 1.4.0 prints:
 
 #screen(raw(read("../ex/ug-remove/dev-install-apply.txt"), block: true))
 
-The accept prints the same line with #cmd("LIBRARY=AMVSMFLD"). Then check the
-result as in @ug-install-check, in both zones. #cmd("MVSMF.LINKLIB") and
+The accept of 1.4.0 prints the same line with #cmd("LIBRARY=AMVSMFLD"). Then check
+the result as in @ug-install-check, in both zones. #cmd("MVSMF.LINKLIB") and
 #cmd("MVSMF.AMVSMFLD") each hold the member #cmd("MVSMF"), and
 #cmd("MVSMF.SAMPLIB") holds #cmd("MVSMFPRM") and #cmd("MVSMFSTC"). The two
 #cmd("LIST") statements show the release as the owner of the module and not
@@ -288,8 +322,11 @@ the new #cmd("MVSMF") into #cmd("MVSMF.LINKLIB"). Then the #cmd("ACCEPT") fails:
 
 The target zone says #cmd("FMID = TZMF140"), while the distribution zone still
 says #cmd("FMID = TZMF150"), and #cmd("MVSMF.AMVSMFLD") got no #cmd("HMA2380")
-line. After every install, check the return code of the #cmd("ACCEPT") and the
-#cmd("HMA2380") line for #cmd("AMVSMFLD"), not only those of the #cmd("APPLY").
+line. That was measured with the install job of 1.4.0, where the #cmd("ACCEPT")
+was a step of the job. In 1.4.1 the #cmd("ACCEPT") is a step of the accept job,
+and this case was not run with it. After every accept job, check the return code
+of the #cmd("ACCEPT") and the #cmd("HMA2380") line for #cmd("AMVSMFLD"), not only
+those of the #cmd("APPLY") of the install job.
 
 === The Running Build and the Development Library
 
@@ -324,11 +361,12 @@ of the product after a development build, that is this section followed by
 @ug-remove-config and @ug-remove-delete. A production system. The removal job
 for 1.4.1 (@ug-remove-uclin), with #cmd("TZMF141") as the owner and
 #cmd("TZMF140") as its tombstone, and the install of 1.4.1 over a development
-build. The upgrade of 1.4.0 to 1.4.1, the upgrade of 1.3.0 to 1.4.1 through
-1.4.0, and the #cmd("NOT SEL") that the install of 1.4.1 gives on a system that
-still holds #cmd("TZMF130") (@ug-install-upgrade, @ug-install-job). These steps
-follow from the ownership rule of SMP4 and from the build file; no system ran
-them.
+build. The #cmd("NOT SEL") that the install of 1.4.1 gives on a system that
+still holds #cmd("TZMF130") (@ug-install-upgrade, @ug-install-job). This step
+follows from the ownership rule of SMP4 and from the build file; no system ran
+it. The upgrade from 1.3.0 through 1.4.0 to 1.4.1, and from 1.4.0 to 1.4.1, was
+run with the published packages on a TK5 test system, with the install job and
+the accept job of 1.4.1 (@ug-install-accept).
 
 == Undoing the Configuration <ug-remove-config>
 
@@ -373,8 +411,9 @@ the names that the allocation job of the package used (@ug-install-alloc).
 //
 ```
 
-The install job scratches #cmd("MVSMF.MVSMFLOD") in its last step, so the data
-set is there only after an install that stopped early. The statement
+The accept job scratches #cmd("MVSMF.MVSMFLOD") in its last step, so the data
+set is there after an install job that no accept job followed, and after an
+install that stopped early. The statement
 #cmd("SET MAXCC = 0") keeps the job from failing for a data set that does not
 exist. Because of it, the return code does not tell you whether a data set
 went away. Read the messages of IDCAMS, and list the catalog for the level

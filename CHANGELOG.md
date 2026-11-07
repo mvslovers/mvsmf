@@ -19,6 +19,19 @@ against **libc370 2.29.1**, up from 2.25.1.
 
 ### Read this first
 
+- **Run httpd 4.5.1 or later, in particular on a system with RAKF 1.2.x.**
+  mvsMF has no login of its own: the user ID, the password and the token are
+  resolved by httpd, and every request runs under the identity httpd hands over.
+  On a system with RAKF 1.2.x (before RAKF 2.0.0; it is the RAKF of the TK5
+  image) whose user or profile tables are missing or invalid, an httpd before
+  4.5.1 accepts every login, with any user ID and any password. This was
+  measured on TK5; TK4- was not measured. From 4.5.1 httpd checks, at login,
+  that the answer of the security system belongs to the user who logged in, and
+  makes one test logon at every start. If you run an httpd before 4.5.1 on RAKF
+  1.2.x, update httpd before you install mvsMF. The installation guide has the
+  details and the cure: [A security system that accepts any user
+  ID](docs/installation.md#a-security-system-that-accepts-any-user-id).
+
 - **The `stepname` and `procstep` of a job's spool files changed meaning for a
   step in a procedure** (`GET /zosmf/restjobs/jobs/{jobname}/{jobid}/files`),
   with libc370 2.29.0. They now follow z/OSMF: `stepname` is the name of the
@@ -39,9 +52,9 @@ against **libc370 2.29.1**, up from 2.25.1.
   each member whose directory entry carries ISPF statistics, the version and
   modification level, the creation and change dates and the time, the record
   counts, the userid of the last change and the SCLM flag, in the fields and
-  formats of z/OSMF. This is what `zowe files list all-members --attributes`
-  asks for. A member without such statistics is listed by name only, as before;
-  without the header the answer is unchanged.
+  the order the z/OSMF documentation lists. This is what `zowe files list
+  all-members --attributes` asks for. A member without such statistics is listed
+  by name only, as before; without the header the answer is unchanged.
 
 ### Fixed
 

@@ -131,6 +131,13 @@ rent = false          # mbtcheck.h keeps file-static counters
 [test.TSTRECL]
 rent = false          # mbtcheck.h keeps file-static counters
 
+# TSTRLIM: #578 — a record of a spanned data set holds LRECL-8 bytes, not
+# LRECL-4; more abends U0002 in libc370's write routine and leaves the data set
+# empty. Portable C (`mbt test`); the TU #includes src/reclimit.c so it drives
+# the real functions dsapi.c calls — do not list reclimit.c here.
+[test.TSTRLIM]
+rent = false          # mbtcheck.h keeps file-static counters
+
 # TSTBLKT: #439 — blocks per track from the format-4 DSCB, byte devices and the
 # 3380's cell arithmetic. Portable C (`mbt test`); the TU #includes
 # src/blkptrk.c so it drives the real function dsapi.c calls — do not list

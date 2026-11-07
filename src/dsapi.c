@@ -27,6 +27,7 @@
 #include "volser.h"
 #include "httpcgi.h"
 #include "reclines.h"
+#include "reclimit.h"
 #include "ispfstat.h"
 
 // Record format flags
@@ -1002,31 +1003,6 @@ ds_codepage(Session *session, int encoding)
 	                                      : httpx->xlate_cp037;
 }
 
-/* Usable content bytes in one record of this data set.
- *
- * RECFM=F spends the whole LRECL on content. RECFM=V spends four of it on the
- * RDW: libc370 sizes its write buffer at LRECL-4 (@@fpopen.c) and varflush()
- * writes an RDW of len+4, so a longer line was silently split into a second
- * record. RECFM=U has no LRECL and is bounded by the block size.
- *
- * eff_lrecl is the caller's LRECL, or BLKSIZE where RECFM=U leaves LRECL 0.
- */
-__asm__("\n&FUNC    SETC 'rec_content_max'");
-/* recfm rather than a FILE *: the write handlers now learn the DCB from a
-   read-mode open and do not have an output handle yet when they need this. */
-static size_t record_content_max(int recfm, size_t eff_lrecl, int is_undefined)
-{
-    if (is_undefined) {
-        return eff_lrecl;
-    }
-
-    if ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_V) {
-        return eff_lrecl > 4 ? eff_lrecl - 4 : 0;
-    }
-
-    return eff_lrecl;
-}
-
 /* Open the write target, but not before there is something to put in it.
  *
  * fopen(..., "w") truncates a sequential data set the moment it is called, and
@@ -1079,10 +1055,11 @@ static int open_write_target(Session *session, FILE **fp, const char *target,
  * a blank line ended up as a zero-length fwrite() and disappeared (#233).
  *
  * content_max: the usable content length of one record -- LRECL for RECFM=F,
- * LRECL-4 for RECFM=V (the RDW is not content), BLKSIZE for RECFM=U where
- * LRECL is 0. Clamping against fp->lrecl instead cut every record of a
- * RECFM=U data set to zero length, because a text-mode write is selected by
- * the X-IBM-Data-Type header and does not care what RECFM the data set has.
+ * LRECL-4 for RECFM=V (the RDW is not content), LRECL-8 for a spanned RECFM=V
+ * (reclimit.h, #578), BLKSIZE for RECFM=U where LRECL is 0. Clamping against
+ * fp->lrecl instead cut every record of a RECFM=U data set to zero length,
+ * because a text-mode write is selected by the X-IBM-Data-Type header and does
+ * not care what RECFM the data set has.
  */
 /* Hand the buffered record to the access method, and take the answer.
  *
@@ -2107,7 +2084,8 @@ int datasetPutHandler(Session *session)
     /* For RECFM=U (undefined record format), lrecl is 0. Use blksize instead. */
     is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
-    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
+    content_max = reclim_content_max(recfm, eff_lrecl, is_undefined);
+    eff_lrecl = reclim_binary_piece(recfm, eff_lrecl, is_undefined); /* binary piece from here on */
     if (eff_lrecl == 0 || content_max == 0) {
         return handle_error(session, ERR_IO, "Dataset has zero record length");
     }
@@ -3119,7 +3097,8 @@ int memberPutHandler(Session *session)
 
     is_undefined = ((recfm & _FILE_RECFM_TYPE) == _FILE_RECFM_U);
     eff_lrecl = is_undefined ? (size_t)blksize : (size_t)lrecl;
-    content_max = record_content_max(recfm, eff_lrecl, is_undefined);
+    content_max = reclim_content_max(recfm, eff_lrecl, is_undefined);
+    eff_lrecl = reclim_binary_piece(recfm, eff_lrecl, is_undefined); /* binary piece from here on */
     /* fp is already open on the create path, so these two still have to close
        it; session_fclose() ignores a NULL, which is the existing-member case. */
     if (eff_lrecl == 0 || content_max == 0) {

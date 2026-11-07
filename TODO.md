@@ -550,6 +550,15 @@ set) stays open on libc370#757; its tests are in (`curl-datasets`: VBS 255/6233,
 VB 255/255; `curl-binary`: VB and VBS) and stay red until the pin moves past
 libc370 2.25.1.
 
+**PR open, #578** — a record of a spanned data set (VBS, or VB with BLKSIZE <
+LRECL+4) holds LRECL-8 data bytes, not LRECL-4: libc370's write abended U0002
+above that, and a 248..251 byte line on VBS 255/6233 left the data set empty.
+`reclimit.c` now gives the content maximum and the binary piece (LRECL-8 for a
+spanned data set, the last short piece padded to a full piece as on FB/VB); an
+overlong line is the usual 500 "Record truncated…" and the earlier records stay.
+Host test `tstrlim.c`; `curl-datasets` and `curl-binary` carry the VBS 247/248
+cases. Plain VB (binary piece LRECL) is unchanged.
+
 **PR #422, merged 2026-10-13** — #421: `abort_response()` cleared `keepalive`
 but not `httpc->chunked`, so httpd's `httpdone()` closed a chunked data set GET
 with a clean `0\r\n\r\n` after a read error — the truncated 200 #362 exists to

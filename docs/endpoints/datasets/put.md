@@ -96,14 +96,15 @@ On successful completion, this request returns HTTP status code 204 (No Content)
 - **Spanned data sets** (RECFM=VBS, or RECFM=VB with `BLKSIZE` smaller than
   `LRECL`+4, which the open makes spanned): a record that does not fit in the
   space left in the current block is split over two blocks and read back whole.
-  Measured with 100 lines on a VBS data set with LRECL 255 and BLKSIZE 6233,
-  and on VB data sets with LRECL 255 and BLKSIZE 255, 259 and 6233: every line
-  came back. Before mvsMF 1.4.1 (libc370 2.25.1) the tail of such a record was
+  Measured with 100 lines of 200 bytes on a VBS data set and on a VB data set,
+  both LRECL 255 and BLKSIZE 6233, and with four lines of 79, 80, 81 and 10
+  bytes on VB data sets with LRECL 255 and BLKSIZE 255 (the 81-byte record is
+  the one that is split) and 259: every line came back. Before mvsMF 1.4.1 (libc370 2.25.1) the tail of such a record was
   lost, the write was still answered **204**, and the data set could not be
   read from that record on (mvsmf#570).
 - Binary mode: the body is cut into pieces of LRECL bytes and the final
   incomplete piece is padded with binary zeros to LRECL. On a spanned data set
-  (see above) a piece is **LRECL-8** bytes, the most a record holds, and the
+  (see "Text mode framing" above) a piece is **LRECL-8** bytes, the most a record holds, and the
   padding goes to LRECL-8. Measured on VBS 255: a body of 250 bytes reads back
   as 494 bytes, the 250 bytes and 244 zeros, two pieces of 247.
 - A request that produces **no record at all** leaves the dataset exactly as it

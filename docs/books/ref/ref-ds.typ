@@ -562,9 +562,10 @@ left empty.
 
 #note[*Spanned data sets* (mvsmf\#570): a record that does not fit in the space
 left in the current block is split over two blocks and read back whole. 100
-lines written to a VBS data set with LRECL 255 and block size 6233, and to VB
-data sets with LRECL 255 and block sizes 255, 259 and 6233, came back intact.
-Before mvsMF 1.4.1 the tail of such a record was lost, the answer was still
+lines of 200 bytes written to a VBS data set and to a VB data set, both with
+LRECL 255 and block size 6233, and four lines of 79, 80, 81 and 10 bytes written
+to VB data sets with LRECL 255 and block sizes 255 (the 81-byte record is the one
+that is split) and 259, came back intact. Before mvsMF 1.4.1 the tail of such a record was lost, the answer was still
 #cmd("204"), and a later read of the data set ended in an abend of the libc370
 read routine (user abend U1234) at that record, which the client sees as a
 failed transfer (@ref-ds-read). The measurements are on sequential data sets; a

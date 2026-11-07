@@ -135,7 +135,7 @@ Details that matter in practice:
   code.
 - Binary mode: the body is cut into pieces of LRECL bytes and the final
   incomplete piece is padded with binary zeros to LRECL. On a spanned data set
-  (see above) a piece is **LRECL-8** bytes, the most a record holds, and the
+  (see "Text mode framing" above) a piece is **LRECL-8** bytes, the most a record holds, and the
   padding goes to LRECL-8. Measured on VBS 255: a body of 250 bytes reads back
   as 494 bytes, the 250 bytes and 244 zeros, two pieces of 247.
 - A request that produces **no record at all** leaves the member exactly as it

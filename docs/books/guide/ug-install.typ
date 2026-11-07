@@ -99,9 +99,12 @@ of the release.
     [File], [Content],
     [#cmd("mvsmf-1.4.1-alloc.jcl")], [The job #cmd("MVSMFALC"): allocates the
       libraries that SMP owns. You run it once.],
-    [#cmd("mvsmf-1.4.1-inst.jcl")], [The job #cmd("MVSMFINS"): receives, applies
-      and accepts #cmd("TZMF141"). The SYSMOD is part of the job as in-stream
-      text.],
+    [#cmd("mvsmf-1.4.1-inst.jcl")], [The job #cmd("MVSMFINS"): receives and
+      applies #cmd("TZMF141"). It ends after the apply. The SYSMOD is part of the
+      job as in-stream text.],
+    [#cmd("mvsmf-1.4.1-accept.jcl")], [The job #cmd("MVSMFACC"): accepts
+      #cmd("TZMF141") and scratches the staging library. You run it when you have
+      tried the product (@ug-install-accept).],
     [#cmd("mvsmf-1.4.1-load.xmit")], [The load module, to be uploaded as a
       binary file.],
     [#cmd("mvsmf-1.4.1-samplib.xmit")], [The sample library, to be uploaded as a
@@ -110,7 +113,7 @@ of the release.
   )
 ]
 
-The install job puts these data sets on the system:
+The install job and the accept job put these data sets on the system:
 
 #tab(caption: [The data sets of mvsMF])[
   #table(columns: (1.6in, 1fr),
@@ -120,7 +123,7 @@ The install job puts these data sets on the system:
     [#cmd("MVSMF.AMVSMFLD")], [The distribution library. SMP keeps the accepted
       copy of the module here.],
     [#cmd("MVSMF.MVSMFLOD")], [A staging library that the load XMIT file is
-      received into. The last step of the install job scratches it.],
+      received into. The step #cmd("CLEANUP") of the accept job scratches it.],
     [#cmd("MVSMF.SAMPLIB")], [The sample library. It holds the members
       #cmd("MVSMFPRM") (the route lines, @ug-install-routes) and
       #cmd("MVSMFSTC") (the STEPLIB, @ug-install-steplib). It is a plain
@@ -146,7 +149,7 @@ allocation of an existing name fails.
 
 == Installing with SMP <ug-install-job>
 
-#idx("RECEIVE")#idx("APPLY")#idx("ACCEPT")#idx("MVSMFINS")
+#idx("RECEIVE")#idx("APPLY")#idx("MVSMFINS")
 *Upload the XMIT files.* Upload the two XMIT files to the system as binary files
 with record format FB and logical record length 80. Any data set names are fine.
 Upload them with a method that does not change a byte of the content.
@@ -178,11 +181,8 @@ two are the only lines you change:
     [#cmd("APPLYCHK")], [#cmd("APPLY") with #cmd("CHECK"): reports what would
       happen and changes nothing. Runs only when #cmd("RECV") ended with 0. The
       next step runs only when this one ends with 0.],
-    [#cmd("APPLY")], [Copies the module #cmd("MVSMF") into #cmd("MVSMF.LINKLIB").],
-    [#cmd("ACCEPT")], [Copies the module into #cmd("MVSMF.AMVSMFLD") and accepts
-      the SYSMOD. Runs when #cmd("APPLY") ended with 4 or less.],
-    [#cmd("CLEANUP")], [Scratches #cmd("MVSMF.MVSMFLOD"). Runs only when
-      #cmd("ACCEPT") ended with 0.],
+    [#cmd("APPLY")], [Copies the module #cmd("MVSMF") into #cmd("MVSMF.LINKLIB").
+      Runs only when #cmd("RECV") and #cmd("APPLYCHK") ended with 0.],
   )
 ]
 
@@ -190,9 +190,15 @@ Each step from #cmd("RECV") on carries a condition on the return code of an
 earlier step. If the condition is not met, the step does not run. A job where
 an early step failed therefore runs fewer steps than the table lists.
 
+The install job ends after the #cmd("APPLY"). The function #cmd("TZMF141") is
+applied and not accepted. The staging library #cmd("MVSMF.MVSMFLOD") stays on
+the system until the accept job scratches it. The accept job is described in
+@ug-install-accept.
+
 *What the install deletes.* Three things go away:
 
-+ The staging library #cmd("MVSMF.MVSMFLOD") (step #cmd("CLEANUP")).
++ The staging library #cmd("MVSMF.MVSMFLOD") (step #cmd("CLEANUP") of the accept
+  job; the install job scratches it too, in step #cmd("DELOLD") of the next run).
 + The sample library #cmd("MVSMF.SAMPLIB") from an earlier install, before it is
   received again (step #cmd("DELOLD")). A member you changed there is lost.
   Copy the members you want to keep to a library of your own, and change the
@@ -202,9 +208,9 @@ an early step failed therefore runs fewer steps than the table lists.
   from #cmd("MVSMF.LINKLIB") and copies the new one in. The SYSMOD #cmd("TZMF140")
   stays in the inventory as a deleted function (a tombstone) with the entry
   #cmd("DELBY") naming #cmd("TZMF141"). @ug-install-upgrade describes the upgrade.
-  The tombstone was measured with the release of 1.4.0, where #cmd("TZMF140")
-  deleted #cmd("TZMF130"). The statement of 1.4.1 comes from the build file of
-  the project. The package of 1.4.1 was not installed for this book.
+  The tombstone was measured with the published package of 1.4.1 on a TK5 test
+  system that held 1.4.0: the target zone had it after the install job, and
+  both zones after the accept job.
 
 The function SYSMOD ids of mvsMF are #cmd("TZMF110"), #cmd("TZMF120"),
 #cmd("TZMF130"), #cmd("TZMF140") and #cmd("TZMF141"). The id is the letter T,
@@ -226,9 +232,10 @@ of the job still ends with 0. Check the install as the next section shows.]
 == Checking the Install <ug-install-check>
 
 #idx("verification")#idx("HMA2380")
-Check three things after the job. First, the output of the step #cmd("APPLY")
-contains the message #cmd("HMA2380 COPY SUCCESSFUL") for the module #cmd("MVSMF").
-A job where the module was #cmd("NOT SEL") has no such message.
+Check three things after the install job. First, the output of the step
+#cmd("APPLY") contains the message #cmd("HMA2380 COPY SUCCESSFUL") for the module
+#cmd("MVSMF"), with #cmd("LIBRARY=LINKLIB"). A job where the module was
+#cmd("NOT SEL") has no such message.
 
 Second, the target library has the member. Use TSO:
 
@@ -252,9 +259,12 @@ Third, the inventory has the SYSMOD in both zones. Run a job like this one:
 //
 ```
 
-Each zone shows the status of #cmd("TZMF141") as received, applied and accepted
-(#cmd("REC APP ACC")). The module is installed. mvsMF is not yet running,
-because HTTPD does not know the library.
+The target zone shows the status of #cmd("TZMF141") as received and applied
+(#cmd("REC APP")). The distribution zone does not hold #cmd("TZMF141") yet: the
+#cmd("LIST ACDS") reports it as not found. That is the state after the install
+job, measured on a TK5 test system. The function is applied and not accepted. The
+module is installed. mvsMF is not yet running, because HTTPD does not know the
+library. @ug-install-accept shows the check after the accept job.
 
 == Putting the Library in the STEPLIB <ug-install-steplib>
 
@@ -403,12 +413,86 @@ access to #cmd("MVSMF.CONSOLE"), like the console services
 If the answers are not the ones above, the table in @ug-ops-trouble lists the
 causes by symptom.
 
+== Accepting the SYSMOD <ug-install-accept>
+
+#idx("ACCEPT")#idx("MVSMFACC")#idx("accept job")
+The install job does not accept the SYSMOD. ACCEPT is the point without a way
+back: SMP4 refuses #cmd("RESTORE") and #cmd("REJECT") for an accepted function
+(@ug-remove-why). The header of the accept job says that until the ACCEPT a
+#cmd("RESTORE") can still take the function out again. A #cmd("RESTORE") was not
+run on this package. The decision is yours, so the accept job is a job of its
+own. Submit #cmd("mvsmf-1.4.1-accept.jcl") when you have tried the product:
+start HTTPD (@ug-install-verify) and check that it works as you expect.
+
+The job needs no edit. It runs these steps:
+
+#tab(caption: [The steps of the accept job])[
+  #table(columns: (1.0in, 1fr),
+    [Step], [Work],
+    [#cmd("GUARD")], [Runs #cmd("LIST CDS SYSMOD(TZMF141)"). It ends with 0 when
+      the target zone holds the function.],
+    [#cmd("ACCEPT")], [Copies the module into #cmd("MVSMF.AMVSMFLD") and accepts
+      the SYSMOD. Runs only when #cmd("GUARD") ended with 0.],
+    [#cmd("CLEANUP")], [Scratches #cmd("MVSMF.MVSMFLOD"). Runs only when
+      #cmd("GUARD") and #cmd("ACCEPT") ended with 0.],
+  )
+]
+
+The gate is the entry of #cmd("TZMF141") in the target zone, not the return code
+of the install job. After the upgrade from 1.4.0 the install job ends with
+condition code 4, because the #cmd("APPLY") ends with return code 4 and
+#cmd("HMA2461") (@ug-install-upgrade-140). The #cmd("GUARD") ends with 0, and the
+accept job runs through. The header of the job says to submit it after an install
+job whose #cmd("APPLY CHECK") and #cmd("APPLY") ended with 0, or with 4 for
+#cmd("HMA2461") or #cmd("HMA4441") alone, and not after 8 or 12.
+
+On a TK5 test system, an upgrade from 1.4.0 with the published package of 1.4.1
+ended in this state:
+
+#tab(caption: [The system after each job of the upgrade to 1.4.1])[
+  #table(columns: (1.5in, 1fr, 1fr),
+    [], [After #cmd("MVSMFINS")], [After #cmd("MVSMFACC")],
+    [Job end], [Condition code 4. The steps before #cmd("APPLY") ended with 0,
+      #cmd("APPLY") with 4.], [Condition code 0. #cmd("GUARD"), #cmd("ACCEPT") and
+      #cmd("CLEANUP") ended with 0.],
+    [#cmd("TZMF141"), target zone], [#cmd("REC APP")], [#cmd("REC APP ACC")],
+    [#cmd("TZMF141"), distribution zone], [Not found],
+      [#cmd("REC APP ACC RGN")],
+    [#cmd("TZMF140")], [Target zone: deleted (#cmd("DELBY = TZMF141")).
+      Distribution zone: still #cmd("REC APP ACC RGN").],
+      [Deleted (#cmd("DELBY = TZMF141")) in both zones, without #cmd("RGN") in the
+      distribution zone.],
+    [#cmd("MVSMF.LINKLIB")], [The new #cmd("MVSMF").], [The new #cmd("MVSMF").],
+    [#cmd("MVSMF.AMVSMFLD")], [Still the module of 1.4.0.], [The new
+      #cmd("MVSMF"), the same as in #cmd("MVSMF.LINKLIB").],
+    [#cmd("MVSMF.MVSMFLOD")], [Present.], [Scratched.],
+  )
+]
+
+After the accept job, check the same things as after the install job
+(@ug-install-check), and one more. The #cmd("ACCEPT") step prints
+#cmd("HMA2380 COPY SUCCESSFUL") for #cmd("MVSMF") with
+#cmd("LIBRARY=AMVSMFLD"). Both libraries hold the member #cmd("MVSMF"). The two
+#cmd("LIST") statements of @ug-install-check show #cmd("TZMF141") as
+#cmd("REC APP ACC") in both zones, and #cmd("MVSMF.MVSMFLOD") is gone.
+
+*A second run of the accept job* ends with #cmd("JCL ERROR"). The message is
+#cmd("IEF212I") and names #cmd("MVSMFLOD") as a data set that was not found,
+because the first run scratched the staging library. The #cmd("GUARD") ends with
+0, and no step after it runs. The second run changes nothing.
+
+*What was not measured.* The accept job on a system where #cmd("TZMF141") is not
+applied: its header says that the job ends with return code 8 in the step
+#cmd("NOTAPPL"), and that nothing is accepted. The accept job after an apply that
+printed #cmd("NOT SEL"). Whether the accept job may run while HTTPD is up: in the
+test, HTTPD was restarted after both jobs.
+
 == Upgrading mvsMF <ug-install-upgrade>
 
 #idx("upgrade")#idx("JESSPOOL")#idx("TZMF130")#idx("TZMF140")
 The SYSMOD of a release deletes the SYSMOD of the release just before it, and
-the library keeps its name. An upgrade is therefore the install of the new
-package. The SYSMOD of 1.4.1 deletes #cmd("TZMF140") only. A system at 1.3.0
+the library keeps its name. An upgrade is therefore the install job and the
+accept job of the new package. The SYSMOD of 1.4.1 deletes #cmd("TZMF140") only. A system at 1.3.0
 installs 1.4.0 first and then 1.4.1. This follows from the ownership rule of
 SMP4 (@ug-install-job). The step from 1.3.0 straight to 1.4.1 was not run.
 
@@ -424,25 +508,31 @@ in this order.
   exist, and the accepted copy of 1.4.0 is in them.
 + *Edit and submit* #cmd("mvsmf-1.4.1-inst.jcl") as in @ug-install-job. SMP
   deletes the load module of #cmd("TZMF140") and copies in the new one. An APPLY
-  that deletes the predecessor can end with the return code 4 and the message
+  that deletes the predecessor ends with the return code 4 and the message
   #cmd("HMA2461"), because the deleted function has no entry for a restore. The
-  step #cmd("ACCEPT") accepts a return code up to 4 for that reason. The step
-  from 1.4.0 to 1.4.1 was not run.
+  install job then ends with condition code 4. This was measured on a TK5 test
+  system with the published package, from 1.4.0 to 1.4.1. The accept job does
+  not look at that return code, and its #cmd("GUARD") lets it run
+  (@ug-install-accept).
 + *Check* as in @ug-install-check. The list of #cmd("TZMF140") shows a function
   that was deleted by #cmd("TZMF141"); the list of #cmd("TZMF141") shows
-  #cmd("REC APP ACC").
+  #cmd("REC APP") in the target zone. The function is applied and not accepted.
 + *Look at the STEPLIB.* It must still name #cmd("MVSMF.LINKLIB") before any
   library that holds a copy of #cmd("MVSMF"). An upgrade where the STEPLIB names
   another library ends with 0 in every step, and the old module keeps serving.
 + *Start HTTPD* and check the build as in @ug-install-verify. It answers
-  #cmd("1.4.1").
+  #cmd("1.4.1"). Try the product.
++ *Submit* #cmd("mvsmf-1.4.1-accept.jcl") (@ug-install-accept). The list of
+  #cmd("TZMF141") then shows #cmd("REC APP ACC") in both zones, and
+  #cmd("MVSMF.MVSMFLOD") is gone.
 
 === From mvsMF 1.3.0 <ug-install-upgrade-130>
 
 The package of 1.4.0 upgrades 1.3.0 in place: the SYSMOD #cmd("TZMF140") deletes
 #cmd("TZMF130"). The package of 1.4.0 is a release of its own, and its file
-names carry 1.4.0. Do these steps in this order, then continue with 1.4.1 as
-above.
+names carry 1.4.0. It is a package of one install job: that job runs the
+#cmd("ACCEPT") in the same run as the #cmd("APPLY"), and it has no accept job.
+Do these steps in this order, then continue with 1.4.1 as above.
 
 + *Check HTTPD.* HTTPD must be 4.2.0 or later, and 4.5.1 or later is advised
   (@ug-install-prereq, @ug-install-httpd-login).

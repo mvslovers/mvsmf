@@ -5,14 +5,19 @@ data sets, then the two configuration changes the install made.
 
 **This is for *removing* the product. It is not the way to upgrade.** From
 1.2.0 onwards each release's SYSMOD deletes its predecessor, so an upgrade is
-just RECEIVE/APPLY/ACCEPT of the new package — and running the `DELETE` step
-below in between scratches the data sets the new install is about to use.
+just the install job and the accept job of the new package — and running the
+`DELETE` step below in between scratches the data sets the new install is about
+to use.
 
 ## Why UCLIN and not RESTORE/REJECT
 
-Both are refused once the FMID has been accepted, and the install job accepts
-it in the same run as the APPLY (`accept_fmid = true`, so a later PTF can be
-RESTOREd). `UCLIN` edits the inventory directly and is the only way back.
+Both are refused once the FMID has been accepted. The accept job `MVSMFACC`
+accepts it, so that a later RESTORE has a previous level to go back to; the
+install job `MVSMFINS` ends after the APPLY and does not. After the accept job
+`UCLIN` edits the inventory directly and is the only way back. Before it, the
+function is applied and not accepted: the header of the accept job says a RESTORE
+can still take it out (not run on this package), and the next section tells what
+the inventory holds and what to change in the `UCLIN` job.
 
 ## 1. Free the inventory entries
 
@@ -104,6 +109,28 @@ reports at **RC 00**, so it still reads as occupied and still has to go.
 SMP-installed, so there is nothing below `TZMF110`.
 
 `LMOD` exists only in the CDS; there is nothing to delete for it in the ACDS.
+
+### Applied, not accepted
+
+If the install job ran and the accept job did not, the two zones differ. Measured
+on a TK5 test container after `MVSMFINS` of 1.4.1 as an upgrade from 1.4.0:
+
+- the target zone (CDS) has `TZMF141` with `STATUS = REC APP`, and `TZMF140` as a
+  tombstone (`DELBY = TZMF141`);
+- the distribution zone (ACDS) does not have `TZMF141` (`LIST` reports it as not
+  found), and `TZMF140` is still there with `STATUS = REC APP ACC RGN`, owning
+  `MOD(MVSMF)`;
+- `MVSMF.MVSMFLOD` still exists; `MVSMF.AMVSMFLD` still holds the module of
+  1.4.0.
+
+The job above is written for the accepted state, where the id that owns the
+module is `TZMF141` in both zones. In the applied-only state the ACDS names
+`TZMF140` as the owner, so write `TZMF140` in the first `DEL` of the ACDS block
+and keep `TZMF141` in the first `DEL` of the CDS block. That follows from the
+ownership rule above; the `UCLIN` job was not run on a system in this state. The
+`DEL SYSMOD(TZMF141)` in the ACDS block then names an id that zone does not hold
+(`HMA2532`, RC 08, no fault, see above). `MVSMF.MVSMFLOD` is in the list of
+section 3. The `LIST` step is unchanged.
 
 ### A development build with a later FMID
 
@@ -218,7 +245,7 @@ zone is clean, the distribution zone is not.
 
 If a release is to follow, leave out sections 2 and 3 below: the configuration
 stays, and the install job of the release package copies into the libraries that
-exist. If the product is to go away, continue with sections 2 and 3 as for a
+exist (the accept job follows it). If the product is to go away, continue with sections 2 and 3 as for a
 release; that path has not been run after a development build.
 **Do not run the allocation job `MVSMFALC`**; it allocates the libraries `NEW`
 and fails on libraries that exist. `UCLIN` has not touched the libraries: until
@@ -228,10 +255,12 @@ for the `HMA2380` line (see [installation.md](installation.md)), and check that
 `LIST CDS MOD(MVSMF) .` shows the `FMID` of the release and not `TZMF150`.
 
 The release install over the cleaned system (1.4.0, install job without
-`MVSMFALC`) ended with RC 00. `APPLY` and `ACCEPT` completed, and `HMA2380`
-reported the copy into both libraries. The package of 1.4.1 was not installed
-over a development build; its SYSMOD is `TZMF141`, where the lines below name
-`TZMF140`:
+`MVSMFALC`) ended with RC 00. The package of 1.4.0 was one job: its install job
+ran `APPLY` and `ACCEPT`, and `HMA2380` reported the copy into both libraries. In
+the package of 1.4.1 the `APPLY` of the install job `MVSMFINS` prints the line for
+`LIBRARY=LINKLIB` and the `ACCEPT` of the accept job `MVSMFACC` prints the line
+for `LIBRARY=AMVSMFLD`. The package of 1.4.1 was not installed over a development
+build; its SYSMOD is `TZMF141`, where the lines below name `TZMF140`:
 
 ```
 HMA2380    COPY SUCCESSFUL - MOD=MVSMF - LMOD=MVSMF - LIBRARY=LINKLIB - SYSMOD=TZMF140 - RETURN CODE=00
@@ -262,9 +291,11 @@ loud is easy to read; the one below is not.
 ends with `APPLY` at RC 00 and the new `MVSMF` in `MVSMF.LINKLIB`, and then
 `ACCEPT` fails with `HMA3792 ** SYSMOD TZMF140 SELECTED FOR ACCEPT IS DELETED`,
 RC 12. The target zone then says `FMID = TZMF140`, while the distribution zone
-still says `FMID = TZMF150`, and `MVSMF.AMVSMFLD` got no `HMA2380` line.
-After every install, check the `ACCEPT` return code and the `HMA2380` line
-for `AMVSMFLD` too, not only the `APPLY`.
+still says `FMID = TZMF150`, and `MVSMF.AMVSMFLD` got no `HMA2380` line. That
+was measured with the install job of 1.4.0, where the `ACCEPT` was a step of the
+job. In 1.4.1 the `ACCEPT` is a step of the accept job, and this case was not run
+with it. After every accept job, check the `ACCEPT` return code and the `HMA2380`
+line for `AMVSMFLD` too, not only the `APPLY` of the install job.
 
 On the TK5 system, `GET /zosmf/info` reports `zosmf_full_version` as
 `1.5.0-dev` while the development build is in place and as `1.4.0` after the

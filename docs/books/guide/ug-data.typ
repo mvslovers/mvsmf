@@ -117,8 +117,12 @@ not fit in the rest of a block is split over two blocks and read back whole;
 before mvsMF 1.4.1 its tail was lost while the answer was still #cmd("204")
 (mvsmf\#570). A record of such a data set holds at most LRECL minus 8 bytes: on
 LRECL 255 a line of 247 bytes is written, a line of 248 bytes is answered
-#cmd("500") and leaves the data set empty. A binary upload fails the same way,
-because it cuts the body into pieces of LRECL bytes.]
+#cmd("500") (#cmd("Internal server error (abend U0002)")), and a body of that
+one line leaves the data set empty. A binary upload fails the same way, because
+it cuts the body into pieces of LRECL bytes. To avoid the limit, give a VB data
+set a block size of at least LRECL plus 4: according to the libc370 source it is
+then not spanned and takes LRECL minus 4 (not measured). A VBS data set always
+has the limit.]
 
 A member is written in the same way. The member is created if it does not
 exist, and replaced if it does. The library must exist.

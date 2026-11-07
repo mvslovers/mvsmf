@@ -94,10 +94,15 @@ On successful completion, this request returns HTTP status code 204 (No Content)
   read from that record on (mvsmf#570).
 - A record of a spanned data set holds at most `LRECL`-8 bytes (247 for LRECL
   255), not `LRECL`-4: a longer line ends in an abend of the libc370 write
-  routine (user abend U0002), answered **500**, and leaves the data set empty.
+  routine (user abend U0002), answered **500** with the message `Internal
+  server error (abend U0002)` (reason 99). A body of that one line leaves the
+  data set empty; what an earlier record of the same body does is not measured.
   Binary mode cuts the body into pieces of `LRECL` bytes, so it fails the same
   way on a spanned data set. Measured on LRECL 255: a line of 247 bytes is
   written, one of 248 is not.
+- To avoid the `LRECL`-8 limit, give a VB data set a `BLKSIZE` of at least
+  `LRECL`+4: according to the libc370 source it is then not spanned and takes
+  `LRECL`-4 (not measured). A VBS data set always has the limit.
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
 - A request that produces **no record at all** leaves the dataset exactly as it
   was — a dropped connection, a body that never arrives. The dataset is not

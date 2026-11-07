@@ -125,8 +125,11 @@ Details that matter in practice:
   by the same access method code.
 - A record of a spanned data set holds at most `LRECL`-8 bytes, not `LRECL`-4: a
   longer line ends in an abend of the libc370 write routine (user abend U0002),
-  answered **500**. Binary mode cuts the body into pieces of `LRECL` bytes, so
-  it fails the same way.
+  answered **500** with the message `Internal server error (abend U0002)`
+  (reason 99). Binary mode cuts the body into pieces of `LRECL` bytes, so it
+  fails the same way. A VB library with a `BLKSIZE` of at least `LRECL`+4 is
+  not spanned according to the libc370 source and takes `LRECL`-4 (not
+  measured); a VBS library always has the limit.
 - Binary mode: the final incomplete record is padded with binary zeros to LRECL
 - A request that produces **no record at all** leaves the member exactly as it
   was — a dropped connection, a body that never arrives. The member is not

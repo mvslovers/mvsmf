@@ -50,7 +50,7 @@ change): `internals/codepage.md`.
 | pick or change an HTTP status, touch the 401 challenge, measure on `zxp` | `internals/zosmf-conformance.md` |
 | touch `send_all()`, `sendall.c` or `abort_response()` | `internals/sending.md` |
 | use or extend `/zosmf/test` (`fn=textsum`, `fn=storage`, a new `fn=`) | `internals/test-endpoint.md`, `internals/storage-probe.md` |
-| cut a release or touch `[smp]` | `~/repos/mvs/.workspace/context/smp.md` (mvsMF's FMID row is there) |
+| cut a release or touch `[smp]` | `internals/releasing.md` (the package the acceptance runs on), then `~/repos/mvs/.workspace/context/smp.md` (mvsMF's FMID row is there) |
 | debug the running HTTPD/mvsMF live | `~/repos/mvs/.workspace/context/httpd-debug.md` |
 
 ## Development Workflow
